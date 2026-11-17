@@ -1,4 +1,6 @@
 import {handleCrmRequest} from './crm-routes.mjs';
+import {handleConversationRequest} from './conversation-routes.mjs';
+import {simulatorHtml,simulatorCss,simulatorJs} from './simulator-ui.mjs';
 import {checkSlug,checkName,checkStorageMode,normalizeIndianPhone,resolveCrmDb,sha256hex,parseJsonBody,SOURCES} from './core.mjs';
 import {html,css,js} from './app-assets.mjs';
 import {COOKIE,validEmail,validPassword,makePassword,checkPassword,randomSecret,cookieFor,readCookie,mutationOriginAllowed,getSession,newSession,requireMembership,userSummary} from './human-auth.mjs';
@@ -156,6 +158,9 @@ async function addAgent(req,env,user){
 export async function handleHumanRequest(req,env){
   const u=new URL(req.url),path=u.pathname,method=req.method;
   if(path==='/app'&&method==='GET')return new Response(html,{headers:{...headers,'Content-Type':'text/html;charset=utf-8','Content-Security-Policy':"default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'"}});
+  if(path==='/app/simulator'&&method==='GET')return new Response(simulatorHtml,{headers:{...headers,'Content-Type':'text/html;charset=utf-8','Content-Security-Policy':"default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'"}});
+  if(path==='/app/assets/simulator.js'&&method==='GET')return new Response(simulatorJs,{headers:{...headers,'Content-Type':'text/javascript;charset=utf-8'}});
+  if(path==='/app/assets/simulator.css'&&method==='GET')return new Response(simulatorCss,{headers:{...headers,'Content-Type':'text/css;charset=utf-8'}});
   if(path==='/app/assets/app.js'&&method==='GET')return new Response(js,{headers:{...headers,'Content-Type':'text/javascript;charset=utf-8'}});
   if(path==='/app/assets/style.css'&&method==='GET')return new Response(css,{headers:{...headers,'Content-Type':'text/css;charset=utf-8'}});
   if(!path.startsWith('/v1/human/'))return null;
@@ -171,6 +176,8 @@ export async function handleHumanRequest(req,env){
     if(!user)return fail('sign in required',401);
     const crmResponse=await handleCrmRequest(req,env,user);
     if(crmResponse)return crmResponse;
+    const simulationResponse=await handleConversationRequest(req,env,user);
+    if(simulationResponse)return simulationResponse;
     if(path==='/v1/human/me'&&method==='GET')return response(await userSummary(env.CONTROL_DB,user));
     if(path==='/v1/human/tenants'){
       if(user.globalRole!=='super_admin')return fail('forbidden',403);

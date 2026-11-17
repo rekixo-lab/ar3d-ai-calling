@@ -24,6 +24,7 @@ npx wrangler d1 execute ar3d-calling-control-staging --remote --config wrangler.
 npx wrangler d1 execute ar3d-calling-control-staging --remote --config wrangler.staging.jsonc --file migrations/control/0002_human_access.sql
 npx wrangler d1 execute ar3d-calling-shared-crm-staging --remote --config wrangler.staging.jsonc --file migrations/crm/0001_init.sql
 npx wrangler d1 execute ar3d-calling-shared-crm-staging --remote --config wrangler.staging.jsonc --file migrations/crm/0002_lead_workflow.sql
+npx wrangler d1 execute ar3d-calling-shared-crm-staging --remote --config wrangler.staging.jsonc --file migrations/crm/0003_conversation_simulator.sql
 ```
 
 5. Review security caveats in `docs/ARCHITECTURE.md`. Add a one-time 32+ character random bootstrap token via Wrangler secret (never commit it). Keep the token out of browser JS and URL logs. Do not reuse a real admin password for the token:
@@ -48,3 +49,12 @@ npm run smoke:staging -- https://ar3d-ai-calling-staging.<account>.workers.dev
 **Important limitations:** No live calling, no provider, no phone numbers, no payment processing, no automated invitation email, no real call recordings. Excel `.xlsx` (first visible worksheet, up to 200 lead rows, maximum 1 MB) and CSV UTF-8 (160 KB) are supported. Formula cells, encrypted/macro workbooks, external links, excessive rows and oversized ZIP payloads are rejected; export to values-only CSV if an unsupported workbook is encountered. Cloudflare Workers runtime compatibility of `DecompressionStream('deflate-raw')` must be confirmed in staging before allowing client data. Do not upload real client leads to staging without a documented data-processing basis, retention policy, and explicit authorization.
 
 **Security gates before production:** harden account-based and IP-level login rate limits; add audit review, backup/restore, consent evidence/opt-out management, DND processing, encryption/access control for PII and recordings, privacy retention/deletion, per-tenant quotas, per-tenant provisioning reconciliation, database migration rollback/backups, telecom/DPDP legal review, and provider onboarding. Public GitHub never contains tokens or customer data.
+
+
+## Phase 5 text simulator staging notes
+
+- Run CRM migration `0003_conversation_simulator.sql` after `0002_lead_workflow.sql` on **each new AI Calling shared or dedicated CRM database**. Never apply to AR3D Platform / Engine D1.
+- Browser demo URL after an approved staging deployment: `/app/simulator`. Sign in at `/app`, create a draft agent with at least one question, then open **Test AI Conversation**.
+- Simulator stores synthetic text turns and raw answers only. It never initiates calls, records voice, schedules visits, or grants consent. Do not use actual lead PII for these tests.
+- Sessions expire at 24 hours; a production retention job is still required. For a manual cleanup on **the new AR3D AI Calling CRM D1 only**, an approved operator may run: `DELETE FROM conversation_simulations WHERE julianday(expires_at) <= julianday('now');` after reviewing retention and backup policy.
+- This simulator is not a replacement for an LLM, STT/TTS, telephony provider, opt-out synchronization, or compliance checks.
