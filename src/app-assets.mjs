@@ -21,5 +21,103 @@ function dashboard(){root.replaceChildren();const aside=div('sidebar',node('div'
 async function superAdmin(main){const panel=div('card',title('Subscription Clients'));main.append(panel);const list=div('');panel.append(list);async function refresh(){try{const d=await api('/v1/human/tenants');list.replaceChildren(table(['Client','Plan','Storage','Status','Members'],d.tenants.map(t=>[t.display_name,t.plan_code,t.storage_mode,t.status,t.member_count])))}catch(e){asError(e)}}await refresh();const name=input('name','text','Builder company'),slug=input('slug','text','builder-company');const plan=node('select',{class:'field',name:'plan'},['starter','growth','enterprise'].map(p=>node('option',{value:p,text:p})));const mode=node('select',{class:'field'},['shared','dedicated'].map(p=>node('option',{value:p,text:p})));const f=node('form',{class:'formrow'},[lab('Company',name),lab('Slug',slug),lab('Subscription plan',plan),lab('Storage',mode),node('button',{class:'btn',type:'submit',text:'Add client'})]);f.addEventListener('submit',async e=>{e.preventDefault();try{const d=await api('/v1/human/tenants','POST',{displayName:name.value,slug:slug.value,plan:plan.value,storageMode:mode.value});notice('Client created: '+d.slug);f.reset();await refresh();await inviteSection(main)}catch(err){asError(err)}});panel.append(title('Create client','h3'),f);await inviteSection(main)}
 async function inviteSection(main){const previous=document.getElementById('invite-card');if(previous)previous.remove();const card=div('card');card.id='invite-card';card.append(title('Invite client admin','h2'),node('p',{class:'muted',text:'Invitation link shown once. Share privately with the intended client.'}));const select=node('select',{class:'field'},[node('option',{value:'',text:'Choose company'})]);const tenants=await api('/v1/human/tenants');tenants.tenants.forEach(t=>select.append(node('option',{value:t.id,text:t.display_name})));const email=input('email','email','client@builder.com');const role=node('select',{class:'field'},['client_admin','viewer'].map(x=>node('option',{value:x,text:x})));const f=node('form',{class:'formrow'},[lab('Company',select),lab('Client email',email),lab('Role',role),node('button',{type:'submit',class:'btn',text:'Create invitation'})]);f.addEventListener('submit',async e=>{e.preventDefault();try{const d=await api('/v1/human/invitations','POST',{tenantId:select.value,email:email.value,role:role.value});const share=node('input',{class:'field',value:d.inviteUrl,readonly:'readonly',style:'width:100%'});card.append(div('banner',node('p',{text:'Share this one-time link securely:'}),share));notice('Invitation generated for '+email.value)}catch(err){asError(err)}});card.append(f);main.append(card)}
 async function clientPanel(main){const panel=div('card',title('Personal CRM & AI Agent'));main.append(panel);const select=node('select',{class:'field'},state.me.tenants.map(t=>node('option',{value:t.id,text:t.name+' — '+t.plan})));const content=div('');panel.append(lab('Your company',select),content);select.addEventListener('change',()=>renderClient(select.value,content));await renderClient(select.value,content)}
-async function renderClient(id,content){content.replaceChildren(node('p',{class:'muted',text:'Loading client dashboard…'}));try{const d=await api('/v1/human/overview?tenantId='+encodeURIComponent(id));content.replaceChildren();const cards=div('cards',...[['Leads',d.metrics.leads],['Draft AI Agents',d.metrics.agents],['Calls',d.metrics.calls],['Site Visits',d.metrics.siteVisits]].map(([name,val])=>div('card metric',node('span',{class:'muted',text:name}),node('strong',{text:String(val)}))));content.append(cards);content.append(node('p',{class:'note',text:'Calling is not enabled. Imported and manually added leads remain consent/DND unknown until verified.'}));const leadCard=div('card',title('Leads','h3'),table(['Name','Mobile','Source','Consent'],d.leads.map(l=>[l.name,l.mobile,l.sourceType,l.consentStatus])));content.append(leadCard);const name=input('name','text','Customer name'),mobile=input('mobile','tel','9876543210');const leadForm=node('form',{class:'formrow'},[lab('Name',name),lab('Mobile',mobile),node('button',{class:'btn',type:'submit',text:'Add lead'})]);leadForm.addEventListener('submit',async e=>{e.preventDefault();try{await api('/v1/human/leads','POST',{tenantId:id,name:name.value,mobile:mobile.value});notice('Lead saved without calling consent');await renderClient(id,content)}catch(err){asError(err)}});if(d.role==='client_admin')leadCard.append(leadForm);const agentCard=div('card',title('AI Agents','h3'),table(['Name','Language','Status'],d.agents.map(a=>[a.displayName,a.languageMode,a.status])));content.append(agentCard);if(d.role==='client_admin'){const agentName=input('displayName','text','Sales Agent'),language=node('select',{class:'field'},['hi-en','hi','en'].map(x=>node('option',{value:x,text:x}))),q=node('textarea',{class:'field',placeholder:'One question per line',rows:4});const agentForm=node('form',{class:'stack'},[lab('AI Agent Name',agentName),lab('Language',language),lab('Questions (one per line)',q),node('button',{class:'btn',type:'submit',text:'Save draft AI Agent'})]);agentForm.addEventListener('submit',async e=>{e.preventDefault();try{await api('/v1/human/agents','POST',{tenantId:id,displayName:agentName.value,languageMode:language.value,questions:q.value.split('\n').map(s=>s.trim()).filter(Boolean)});notice('Draft AI Agent saved');await renderClient(id,content)}catch(err){asError(err)}});agentCard.append(agentForm)}}catch(e){content.replaceChildren();asError(e)}}
+async function renderClient(id,content){content.replaceChildren(node('p',{class:'muted',text:'Loading client dashboard…'}));try{const d=await api('/v1/human/overview?tenantId='+encodeURIComponent(id));content.replaceChildren();const cards=div('cards',...[['Leads',d.metrics.leads],['Draft AI Agents',d.metrics.agents],['Calls',d.metrics.calls],['Site Visits',d.metrics.siteVisits]].map(([name,val])=>div('card metric',node('span',{class:'muted',text:name}),node('strong',{text:String(val)}))));content.append(cards);content.append(node('p',{class:'note',text:'Calling is not enabled. Imported and manually added leads remain consent/DND unknown until verified.'}));const leadCard=div('card',title('Leads','h3'),table(['Name','Mobile','Source','Consent'],d.leads.map(l=>[l.name,l.mobile,l.sourceType,l.consentStatus])));content.append(leadCard);const name=input('name','text','Customer name'),mobile=input('mobile','tel','9876543210');const leadForm=node('form',{class:'formrow'},[lab('Name',name),lab('Mobile',mobile),node('button',{class:'btn',type:'submit',text:'Add lead'})]);leadForm.addEventListener('submit',async e=>{e.preventDefault();try{await api('/v1/human/leads','POST',{tenantId:id,name:name.value,mobile:mobile.value});notice('Lead saved without calling consent');await renderClient(id,content)}catch(err){asError(err)}});if(d.role==='client_admin')leadCard.append(leadForm);const agentCard=div('card',title('AI Agents','h3'),table(['Name','Language','Status'],d.agents.map(a=>[a.displayName,a.languageMode,a.status])));content.append(agentCard);if(d.role==='client_admin'){const agentName=input('displayName','text','Sales Agent'),language=node('select',{class:'field'},['hi-en','hi','en'].map(x=>node('option',{value:x,text:x}))),q=node('textarea',{class:'field',placeholder:'One question per line',rows:4});const agentForm=node('form',{class:'stack'},[lab('AI Agent Name',agentName),lab('Language',language),lab('Questions (one per line)',q),node('button',{class:'btn',type:'submit',text:'Save draft AI Agent'})]);agentForm.addEventListener('submit',async e=>{e.preventDefault();try{await api('/v1/human/agents','POST',{tenantId:id,displayName:agentName.value,languageMode:language.value,questions:q.value.split('\n').map(s=>s.trim()).filter(Boolean)});notice('Draft AI Agent saved');await renderClient(id,content)}catch(err){asError(err)}});agentCard.append(agentForm)}await crmWorkflow(id,content,d.role)}catch(e){content.replaceChildren();asError(e)}}
+// CRM Phase 3 widgets: CSV Preview/Import, statuses, notes and requested site visits.
+async function crmWorkflow(tenantId,content,role){
+  const editable=role==='client_admin';
+  const workflow=div('card',title('Lead Workflow & Excel CSV Import','h3'));
+  workflow.append(node('p',{class:'note',text:'Excel से CSV UTF-8 export करके upload करें. Import से call consent नहीं मिलता; हर lead का consent/DND unknown रहता है.'}));
+  content.append(workflow);
+  if(editable){
+    const picker=node('input',{class:'field',type:'file',accept:'.csv,text/csv'}),previewBox=div(''),csvBox=div('formrow',lab('Choose CSV from Excel',picker));
+    let csvText=null;
+    const previewBtn=btn('Validate & Preview',async()=>{
+      try{
+        const file=picker.files?.[0];
+        if(!file||!file.name.toLowerCase().endsWith('.csv')||file.size>160000)throw Error('Choose a .csv file under 160 KB');
+        csvText=await file.text();
+        const result=await api('/v1/human/import/preview','POST',{tenantId,csv:csvText});
+        previewBox.replaceChildren(node('p',{class:'success',text:result.rows+' valid rows. Existing numbers will be skipped.'}),
+          table(['Name','Mobile','Location','Max budget'],result.preview.map(r=>[r.name,r.mobile,r.location,r.budgetMaxInr])));
+        commitBtn.disabled=false;
+      }catch(e){csvText=null;commitBtn.disabled=true;previewBox.replaceChildren();asError(e)}
+    });
+    const commitBtn=btn('Import to CRM',async()=>{
+      if(csvText===null)return;
+      commitBtn.disabled=true;
+      try{const result=await api('/v1/human/import/commit','POST',{tenantId,csv:csvText});
+        notice('Import finished: '+result.inserted+' new, '+result.skipped+' duplicates. No calls placed.');
+        await renderClient(tenantId,content);
+      }catch(e){asError(e);commitBtn.disabled=false}
+    });commitBtn.disabled=true;
+    picker.addEventListener('change',()=>{csvText=null;commitBtn.disabled=true;previewBox.replaceChildren()});
+    csvBox.append(previewBtn,commitBtn);workflow.append(csvBox,previewBox);
+  }
+  const search=input('search','search','Name, number or location');search.required=false;
+  const filter=node('select',{class:'field'},['','new','contacted','interested','followup','not_interested','converted']
+    .map(s=>node('option',{value:s,text:s||'All statuses'})));
+  const searchBtn=btn('Search',()=>refresh().catch(asError),true);
+  const tableArea=div(''),details=div(''),visitArea=div('');
+  workflow.append(div('formrow',lab('Search leads',search),lab('Interest status',filter),searchBtn),tableArea,details);
+  const schedule=div('card',title('Site Visits','h3'));workflow.append(schedule,visitArea);
+  async function visitList(){
+    const result=await api('/v1/human/visits?tenantId='+encodeURIComponent(tenantId));
+    visitArea.replaceChildren(table(['Lead','Scheduled','Status','Note'],result.visits.map(v=>[
+      v.leadName,new Date(v.scheduledAt).toLocaleString(),v.status,v.note
+    ])));
+  }
+  function selectLead(lead){
+    details.replaceChildren(title('Lead: '+(lead.name||lead.mobile),'h3'),node('p',{class:'muted',text:'Consent: '+lead.consentStatus+' · DND: '+lead.dndStatus}));
+    const editStatus=node('select',{class:'field'},['new','contacted','interested','followup','not_interested','converted']
+      .map(s=>node('option',{value:s,text:s})));
+    editStatus.value=lead.interestStatus;
+    const loc=input('location','text','Preferred location');loc.required=false;loc.value=lead.preferredLocation||'';
+    const min=input('min','number','Budget minimum INR'),max=input('max','number','Budget maximum INR');
+    min.required=false;max.required=false;
+    min.min='0';max.min='0';min.value=lead.budgetMinInr??'';max.value=lead.budgetMaxInr??'';
+    const follow=input('follow','datetime-local');follow.required=false;
+    if(lead.followupAt){const d=new Date(lead.followupAt); const localDate=new Date(d.getTime()-d.getTimezoneOffset()*60000);follow.value=localDate.toISOString().slice(0,16)}
+    const form=node('form',{class:'formrow'},[lab('Status',editStatus),lab('Location',loc),lab('Min budget',min),lab('Max budget',max),lab('Follow-up',follow)]);
+    if(editable){form.append(node('button',{class:'btn',type:'submit',text:'Update lead'}));
+      form.addEventListener('submit',async e=>{e.preventDefault();try{
+        await api('/v1/human/leads/'+lead.id,'PATCH',{tenantId,interestStatus:editStatus.value,preferredLocation:loc.value,
+          budgetMinInr:min.value===''?null:Number(min.value),budgetMaxInr:max.value===''?null:Number(max.value),
+          followupAt:follow.value?new Date(follow.value).toISOString():null});
+        notice('Lead updated');await refresh();
+      }catch(err){asError(err)}})}else{form.querySelectorAll('input,select').forEach(el=>el.disabled=true)}
+    details.append(form);
+    const notesArea=div('');details.append(title('Private Notes','h3'),notesArea);
+    const fetchNotes=async()=>{const notes=await api('/v1/human/notes?tenantId='+encodeURIComponent(tenantId)+'&leadId='+lead.id);
+      notesArea.replaceChildren(table(['Note','Added'],notes.notes.map(n=>[n.text,new Date(n.createdAt).toLocaleString()])))};
+    fetchNotes().catch(asError);
+    if(editable){
+      const note=input('note','text','Short private note');note.required=true;
+      const f=node('form',{class:'formrow'},[lab('New Note',note),node('button',{class:'btn',type:'submit',text:'Save note'})]);
+      f.addEventListener('submit',async e=>{e.preventDefault();try{
+        await api('/v1/human/notes','POST',{tenantId,leadId:lead.id,text:note.value});note.value='';await fetchNotes();notice('Note saved')
+      }catch(err){asError(err)}});details.append(f);
+      const at=input('visit','datetime-local');const visitNote=input('note','text','Location / meeting point');visitNote.required=false;
+      const vf=node('form',{class:'formrow'},[lab('Site visit date/time',at),lab('Visit note',visitNote),node('button',{type:'submit',class:'btn',text:'Request visit'})]);
+      vf.addEventListener('submit',async e=>{e.preventDefault();try{
+        if(!at.value)throw Error('Choose a visit date/time');
+        await api('/v1/human/visits','POST',{tenantId,leadId:lead.id,scheduledAt:new Date(at.value).toISOString(),note:visitNote.value});
+        notice('Site visit request saved');await visitList();
+      }catch(err){asError(err)}});details.append(vf)
+    }
+  }
+  async function refresh(){
+    const params=new URLSearchParams({tenantId,limit:'50',status:filter.value,q:search.value.trim()});
+    const result=await api('/v1/human/leads?'+params.toString());
+    const tbl=node('table',{class:'table'});const head=node('tr');
+    ['Name','Mobile','Location','Budget','Status','Action'].forEach(t=>head.append(node('th',{text:t})));
+    tbl.append(node('thead',{},head));const body=node('tbody');
+    for(const lead of result.leads){const row=node('tr');
+      [lead.name,lead.mobile,lead.preferredLocation,lead.budgetMaxInr,lead.interestStatus].forEach(t=>row.append(node('td',{text:String(t??'—')})));
+      row.append(node('td',{},btn('Details',()=>selectLead(lead),true)));body.append(row)}
+    tbl.append(body);tableArea.replaceChildren(node('p',{class:'muted',text:result.total+' matching leads (first '+result.leads.length+' shown)'}),div('tablewrap',tbl));
+    details.replaceChildren();
+  }
+  await Promise.all([refresh(),visitList()]);
+}
+
 load();`;

@@ -1,3 +1,4 @@
+import {handleCrmRequest} from './crm-routes.mjs';
 import {checkSlug,checkName,checkStorageMode,normalizeIndianPhone,resolveCrmDb,sha256hex,parseJsonBody,SOURCES} from './core.mjs';
 import {html,css,js} from './app-assets.mjs';
 import {COOKIE,validEmail,validPassword,makePassword,checkPassword,randomSecret,cookieFor,readCookie,mutationOriginAllowed,getSession,newSession,requireMembership,userSummary} from './human-auth.mjs';
@@ -160,7 +161,7 @@ export async function handleHumanRequest(req,env){
   if(!path.startsWith('/v1/human/'))return null;
   if(!env.CONTROL_DB)return fail('control database unavailable',503);
   // Only initial machine-to-machine bootstrap may omit Origin and use a server secret.
-  if(method==='POST'&&path!=='/v1/human/bootstrap'&&!mutationOriginAllowed(req))return fail('same-origin request required',403);
+  if(['POST','PUT','PATCH','DELETE'].includes(method)&&path!=='/v1/human/bootstrap'&&!mutationOriginAllowed(req))return fail('same-origin request required',403);
   try{
     if(path==='/v1/human/bootstrap'&&method==='POST')return bootstrap(req,env);
     if(path==='/v1/human/login'&&method==='POST')return login(req,env);
@@ -168,6 +169,8 @@ export async function handleHumanRequest(req,env){
     if(path==='/v1/human/logout'&&method==='POST')return logout(req,env);
     const user=await getSession(req,env.CONTROL_DB);
     if(!user)return fail('sign in required',401);
+    const crmResponse=await handleCrmRequest(req,env,user);
+    if(crmResponse)return crmResponse;
     if(path==='/v1/human/me'&&method==='GET')return response(await userSummary(env.CONTROL_DB,user));
     if(path==='/v1/human/tenants'){
       if(user.globalRole!=='super_admin')return fail('forbidden',403);
