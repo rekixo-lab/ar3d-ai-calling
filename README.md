@@ -57,3 +57,22 @@ npm test
 - M4: verified AR3D Platform/Engine knowledge integration, billing and production rollout.
 
 Full design: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+
+## Phase 2: human Super Admin and Client Dashboard (development)
+
+A browser UI is now available at **`/app`**, with private JSON endpoints at `/v1/human/*`. It adds human password login, server-side hashed/salted PBKDF2 credentials, secure HttpOnly sessions, user memberships, one-time tenant invites, client lead/agent management and a separate Super Admin client onboarding overview. Backend API keys remain exclusively for server integrations and must **never** be placed in the browser. No live calls are possible.
+
+**New migration:** apply `migrations/control/0002_human_access.sql` to the **AR3D AI Calling control D1 only** (after `0001_init.sql`). CRM migrations are unchanged.
+
+**First Super Admin (staging only, manual bootstrap):** after `ADMIN_BOOTSTRAP_TOKEN` has been set as a Worker secret and both new D1 databases provisioned, invoke the one-time POST endpoint with an HTTPS server-to-server request:
+
+```sh
+curl -X POST https://YOUR-AR3D-CALLING-HOST/v1/human/bootstrap \
+  -H "Authorization: Bearer $ADMIN_BOOTSTRAP_TOKEN" \
+  -H 'Content-Type: application/json' \
+  --data '{"email":"owner@example.com","password":"REPLACE_WITH_A_UNIQUE_STRONG_PASSWORD"}'
+```
+
+The secret is never sent to the browser. Replace the example password; use a password manager and secure out-of-band handoff. One-time bootstrap is guarded by a transactionally unique claim. Sign in at `/app`, add a company, and create a one-time invitation. Send the invitation URL privately to the client; the client sets their own password and can then manage only their tenant. All new leads remain `consent=unknown,dnd=unknown`. Dedicated D1 tenants remain unavailable until Cloudflare binds their database separately.
+
+**Production caveats:** This Phase 2 is a staging-grade initial prototype, not production-ready identity or paid calling. Add managed email verification, MFA for Super Admin, Cloudflare WAF and distributed rate limiting, verified invite delivery, password recovery and session management, operational audit events, PII encryption and deletion, subscription enforcement, D1 provisioning and R2 retention policies. Calling requires telecom onboarding, KYC/DLT where applicable, lead consent/DND checks, AI disclosure and correct recording notices. There is no billing, live AI voice, dialing, automatic number provisioning or deployed Cloudflare service in this phase.

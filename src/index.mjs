@@ -1,3 +1,4 @@
+import {handleHumanRequest} from './human-routes.mjs';
 import {
   checkSlug,checkName,checkStorageMode,normalizeIndianPhone,
   resolveCrmDb,newApiKey,sha256hex,parseJsonBody,SOURCES
@@ -110,6 +111,8 @@ export default {
   async fetch(req,env){
     const path=new URL(req.url).pathname;
     if(path==='/health'&&isGet(req))return json({service:'AR3D AI Calling',status:'foundation'});
+    const humanResponse=await handleHumanRequest(req,env);
+    if(humanResponse)return humanResponse;
     if(!env.CONTROL_DB)return fail('control DB missing',503);
     if(!allowedOrigin(req))return fail('cross-origin request not allowed',403);
     try{
