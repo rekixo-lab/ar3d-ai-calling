@@ -22,35 +22,45 @@ async function superAdmin(main){const panel=div('card',title('Subscription Clien
 async function inviteSection(main){const previous=document.getElementById('invite-card');if(previous)previous.remove();const card=div('card');card.id='invite-card';card.append(title('Invite client admin','h2'),node('p',{class:'muted',text:'Invitation link shown once. Share privately with the intended client.'}));const select=node('select',{class:'field'},[node('option',{value:'',text:'Choose company'})]);const tenants=await api('/v1/human/tenants');tenants.tenants.forEach(t=>select.append(node('option',{value:t.id,text:t.display_name})));const email=input('email','email','client@builder.com');const role=node('select',{class:'field'},['client_admin','viewer'].map(x=>node('option',{value:x,text:x})));const f=node('form',{class:'formrow'},[lab('Company',select),lab('Client email',email),lab('Role',role),node('button',{type:'submit',class:'btn',text:'Create invitation'})]);f.addEventListener('submit',async e=>{e.preventDefault();try{const d=await api('/v1/human/invitations','POST',{tenantId:select.value,email:email.value,role:role.value});const share=node('input',{class:'field',value:d.inviteUrl,readonly:'readonly',style:'width:100%'});card.append(div('banner',node('p',{text:'Share this one-time link securely:'}),share));notice('Invitation generated for '+email.value)}catch(err){asError(err)}});card.append(f);main.append(card)}
 async function clientPanel(main){const panel=div('card',title('Personal CRM & AI Agent'));main.append(panel);const select=node('select',{class:'field'},state.me.tenants.map(t=>node('option',{value:t.id,text:t.name+' — '+t.plan})));const content=div('');panel.append(lab('Your company',select),content);select.addEventListener('change',()=>renderClient(select.value,content));await renderClient(select.value,content)}
 async function renderClient(id,content){content.replaceChildren(node('p',{class:'muted',text:'Loading client dashboard…'}));try{const d=await api('/v1/human/overview?tenantId='+encodeURIComponent(id));content.replaceChildren();const cards=div('cards',...[['Leads',d.metrics.leads],['Draft AI Agents',d.metrics.agents],['Calls',d.metrics.calls],['Site Visits',d.metrics.siteVisits]].map(([name,val])=>div('card metric',node('span',{class:'muted',text:name}),node('strong',{text:String(val)}))));content.append(cards);content.append(node('p',{class:'note',text:'Calling is not enabled. Imported and manually added leads remain consent/DND unknown until verified.'}));const leadCard=div('card',title('Leads','h3'),table(['Name','Mobile','Source','Consent'],d.leads.map(l=>[l.name,l.mobile,l.sourceType,l.consentStatus])));content.append(leadCard);const name=input('name','text','Customer name'),mobile=input('mobile','tel','9876543210');const leadForm=node('form',{class:'formrow'},[lab('Name',name),lab('Mobile',mobile),node('button',{class:'btn',type:'submit',text:'Add lead'})]);leadForm.addEventListener('submit',async e=>{e.preventDefault();try{await api('/v1/human/leads','POST',{tenantId:id,name:name.value,mobile:mobile.value});notice('Lead saved without calling consent');await renderClient(id,content)}catch(err){asError(err)}});if(d.role==='client_admin')leadCard.append(leadForm);const agentCard=div('card',title('AI Agents','h3'),table(['Name','Language','Status'],d.agents.map(a=>[a.displayName,a.languageMode,a.status])));content.append(agentCard);if(d.role==='client_admin'){const agentName=input('displayName','text','Sales Agent'),language=node('select',{class:'field'},['hi-en','hi','en'].map(x=>node('option',{value:x,text:x}))),q=node('textarea',{class:'field',placeholder:'One question per line',rows:4});const agentForm=node('form',{class:'stack'},[lab('AI Agent Name',agentName),lab('Language',language),lab('Questions (one per line)',q),node('button',{class:'btn',type:'submit',text:'Save draft AI Agent'})]);agentForm.addEventListener('submit',async e=>{e.preventDefault();try{await api('/v1/human/agents','POST',{tenantId:id,displayName:agentName.value,languageMode:language.value,questions:q.value.split('\n').map(s=>s.trim()).filter(Boolean)});notice('Draft AI Agent saved');await renderClient(id,content)}catch(err){asError(err)}});agentCard.append(agentForm)}await crmWorkflow(id,content,d.role)}catch(e){content.replaceChildren();asError(e)}}
-// CRM Phase 3 widgets: CSV Preview/Import, statuses, notes and requested site visits.
+// CRM workflows: CSV/XLSX Preview/Import, statuses, notes and requested site visits.
 async function crmWorkflow(tenantId,content,role){
   const editable=role==='client_admin';
-  const workflow=div('card',title('Lead Workflow & Excel CSV Import','h3'));
-  workflow.append(node('p',{class:'note',text:'Excel से CSV UTF-8 export करके upload करें. Import से call consent नहीं मिलता; हर lead का consent/DND unknown रहता है.'}));
+  const workflow=div('card',title('Lead Workflow & Excel Import','h3'));
+  workflow.append(node('p',{class:'note',text:'Excel .xlsx या CSV UTF-8 अपलोड करें (अधिकतम 200 leads)। Import से calling consent नहीं मिलता; consent/DND unknown रहेगा।'}));
   content.append(workflow);
   if(editable){
-    const picker=node('input',{class:'field',type:'file',accept:'.csv,text/csv'}),previewBox=div(''),csvBox=div('formrow',lab('Choose CSV from Excel',picker));
-    let csvText=null;
+    const picker=node('input',{class:'field',type:'file',accept:'.csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}),previewBox=div(''),csvBox=div('formrow',lab('Excel .xlsx or CSV file',picker));
+    let importData=null;
+    async function makeImportPayload(file){
+      const lower=file.name.toLowerCase();
+      if(lower.endsWith('.csv')){
+        if(file.size>160000)throw Error('Choose a CSV file under 160 KB');
+        return {tenantId,csv:await file.text(),format:'csv'};
+      }
+      if(!lower.endsWith('.xlsx')||file.size>1048576)throw Error('Choose an .xlsx under 1 MB or .csv under 160 KB');
+      const bytes=new Uint8Array(await file.arrayBuffer());
+      let raw='';for(let i=0;i<bytes.length;i+=16384)raw+=String.fromCharCode(...bytes.subarray(i,i+16384));
+      return {tenantId,format:'xlsx',xlsxBase64:btoa(raw)};
+    }
     const previewBtn=btn('Validate & Preview',async()=>{
       try{
-        const file=picker.files?.[0];
-        if(!file||!file.name.toLowerCase().endsWith('.csv')||file.size>160000)throw Error('Choose a .csv file under 160 KB');
-        csvText=await file.text();
-        const result=await api('/v1/human/import/preview','POST',{tenantId,csv:csvText});
+        const file=picker.files?.[0];if(!file)throw Error('Choose an Excel or CSV file');
+        importData=await makeImportPayload(file);
+        const result=await api('/v1/human/import/preview','POST',importData);
         previewBox.replaceChildren(node('p',{class:'success',text:result.rows+' valid rows. Existing numbers will be skipped.'}),
           table(['Name','Mobile','Location','Max budget'],result.preview.map(r=>[r.name,r.mobile,r.location,r.budgetMaxInr])));
         commitBtn.disabled=false;
-      }catch(e){csvText=null;commitBtn.disabled=true;previewBox.replaceChildren();asError(e)}
+      }catch(e){importData=null;commitBtn.disabled=true;previewBox.replaceChildren();asError(e)}
     });
     const commitBtn=btn('Import to CRM',async()=>{
-      if(csvText===null)return;
+      if(importData===null)return;
       commitBtn.disabled=true;
-      try{const result=await api('/v1/human/import/commit','POST',{tenantId,csv:csvText});
+      try{const result=await api('/v1/human/import/commit','POST',importData);
         notice('Import finished: '+result.inserted+' new, '+result.skipped+' duplicates. No calls placed.');
         await renderClient(tenantId,content);
       }catch(e){asError(e);commitBtn.disabled=false}
     });commitBtn.disabled=true;
-    picker.addEventListener('change',()=>{csvText=null;commitBtn.disabled=true;previewBox.replaceChildren()});
+    picker.addEventListener('change',()=>{importData=null;commitBtn.disabled=true;previewBox.replaceChildren()});
     csvBox.append(previewBtn,commitBtn);workflow.append(csvBox,previewBox);
   }
   const search=input('search','search','Name, number or location');search.required=false;
