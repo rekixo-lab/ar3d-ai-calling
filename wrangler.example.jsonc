@@ -1,0 +1,14 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "ar3d-ai-calling",
+  "main": "./src/index.mjs",
+  "compatibility_date": "2026-11-17",
+  "workers_dev": false,
+  "d1_databases": [
+    {"binding":"CONTROL_DB","database_name":"ar3d-calling-control","database_id":"REPLACE_WITH_CONTROL_DATABASE_ID"},
+    {"binding":"CRM_DB","database_name":"ar3d-calling-shared-crm","database_id":"REPLACE_WITH_SHARED_CRM_DATABASE_ID"}
+  ],
+  "r2_buckets": [
+    {"binding":"RECORDINGS","bucket_name":"ar3d-calling-recordings"}
+  ]
+}
