@@ -3,6 +3,7 @@
 import {requireMembership} from './human-auth.mjs';
 import {resolveCrmDb,parseJsonBody} from './core.mjs';
 import {MAX_CSV_BYTES,parseLeadCsv} from './csv-import.mjs';
+import {MAX_XLSX_BYTES,parseLeadXlsxBase64} from './xlsx-import.mjs';
 
 const headers={'Cache-Control':'no-store','X-Content-Type-Options':'nosniff','Referrer-Policy':'no-referrer'};
 const json=(o,status=200)=>Response.json(o,{status,headers});
@@ -10,7 +11,22 @@ const fail=(msg,status=400)=>json({error:msg},status);
 const now=()=>new Date().toISOString();
 const idOk=s=>typeof s==='string'&&/^[0-9a-f-]{36}$/i.test(s);
 const statuses=['new','contacted','interested','followup','not_interested','converted'];
-async function payload(req,max=16384){return parseJsonBody(await req.text(),max)}
+async function payload(req,max=16384){
+  // Bound HTTP body *before* JSON parsing, including chunked uploads.
+  if(Number(req.headers.get('content-length'))>max)return Promise.reject(Error('request body too large'));
+  if(!req.body)return parseJsonBody('',max);
+  const reader=req.body.getReader();const dec=new TextDecoder('utf-8',{fatal:true});
+  let text='',bytes=0;
+  try{
+    while(true){const {done,value}=await reader.read();if(done)break;
+      bytes+=value.byteLength;
+      if(bytes>max){await reader.cancel();throw Error('request body too large')}
+      text+=dec.decode(value,{stream:true});
+    }
+    text+=dec.decode();
+  }finally{reader.releaseLock()}
+  return parseJsonBody(text,max);
+}
 function dateTime(value,label='Date'){
   if(value===null||value==='')return null;
   if(typeof value!=='string'||!/^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}(?::[0-9]{2}(?:\.\d{1,3})?)?(?:Z|[+-][0-9]{2}:[0-9]{2})$/.test(value)||!Number.isFinite(Date.parse(value)))
@@ -34,11 +50,14 @@ export async function handleCrmRequest(req,env,user){
   try{
     if(importMatch&&method==='POST'){
       // Limit applies to JSON envelope and CSV. Reject before parsing the file.
-      const d=await payload(req,MAX_CSV_BYTES+4096);
+      const d=await payload(req,Math.ceil(MAX_XLSX_BYTES/3)*4+4096);
       const access=await resolve(env,user,d.tenantId,true);
       if(!access)return fail('forbidden',403);
-      if(typeof d.csv!=='string')return fail('CSV text required');
-      const rows=parseLeadCsv(d.csv),{db,tid}=access;
+      const isXlsx=d.format==='xlsx';
+      if(d.format!==undefined&&!['csv','xlsx'].includes(d.format))return fail('Unsupported import format');
+      if(isXlsx&&typeof d.xlsxBase64!=='string')return fail('XLSX file data required');
+      if(!isXlsx&&typeof d.csv!=='string')return fail('CSV text required');
+      const rows=isXlsx?await parseLeadXlsxBase64(d.xlsxBase64):parseLeadCsv(d.csv),{db,tid}=access;
       if(path.endsWith('/preview'))return json({valid:true,rows:rows.length,preview:rows.slice(0,10),
         notice:'Import is NOT calling consent. Existing mobile numbers will be skipped, never overwritten.'});
       const stamp=now(),statements=rows.map(row=>db.prepare(`INSERT INTO leads
@@ -50,7 +69,7 @@ export async function handleCrmRequest(req,env,user){
           row.budgetMaxInr,JSON.stringify(row.requirement?{raw:row.requirement}:{}),stamp,stamp));
       // D1.batch is transactional: either the entire file succeeds or none is committed.
       statements.push(db.prepare(`INSERT INTO crm_audit_events(tenant_id,id,actor,action,target_id,created_at)
-        VALUES(?,?,'human:'+?,'leads.csv_import',?,?)`).bind(tid,crypto.randomUUID(),user.id,String(rows.length),stamp));
+        VALUES(?,?,'human:'||?,?,?)`).bind(tid,crypto.randomUUID(),user.id,isXlsx?'leads.xlsx_import':'leads.csv_import',String(rows.length),stamp));
       const result=await db.batch(statements);
       const inserted=result.slice(0,rows.length).reduce((total,r)=>total+Number(r.meta?.changes||0),0);
       return json({processed:rows.length,inserted,skipped:rows.length-inserted,
@@ -103,7 +122,7 @@ export async function handleCrmRequest(req,env,user){
         access.db.prepare(`UPDATE leads SET interest_status=?,preferred_location=?,budget_min_inr=?,
           budget_max_inr=?,followup_at=?,updated_at=? WHERE tenant_id=? AND id=?`).bind(status,location?.trim()||null,min,max,followup,timestamp,access.tid,leadMatch[1]),
         access.db.prepare(`INSERT INTO crm_audit_events(tenant_id,id,actor,action,target_id,created_at)
-          VALUES(?,?,'human:'+?,'lead.updated',?,?)`).bind(access.tid,crypto.randomUUID(),user.id,leadMatch[1],timestamp)
+          VALUES(?,?,'human:'||?,'lead.updated',?,?)`).bind(access.tid,crypto.randomUUID(),user.id,leadMatch[1],timestamp)
       ]);
       return json({ok:true});
     }
@@ -153,14 +172,14 @@ export async function handleCrmRequest(req,env,user){
         access.db.prepare(`INSERT INTO site_visits(tenant_id,id,lead_id,scheduled_at,status,note,created_at)
           VALUES(?,?,?,?,'requested',?,?)`).bind(access.tid,id,d.leadId,at,note,timestamp),
         access.db.prepare(`INSERT INTO crm_audit_events(tenant_id,id,actor,action,target_id,created_at)
-          VALUES(?,?,'human:'+?,'visit.requested',?,?)`).bind(access.tid,crypto.randomUUID(),user.id,id,timestamp)
+          VALUES(?,?,'human:'||?,'visit.requested',?,?)`).bind(access.tid,crypto.randomUUID(),user.id,id,timestamp)
       ]);
       return json({id,status:'requested',scheduledAt:at},201);
     }
     return fail('method not allowed',405);
   }catch(e){
     const msg=String(e?.message||'');
-    if(/invalid|CSV|budget|quote|column|header|too many|too large|too long|file|row|content|update|no updates|Missing|Malformed|text|required|Date/i.test(msg))return fail(msg,400);
+    if(/invalid|CSV|XLSX|budget|quote|column|header|too many|too large|too long|file|row|content|update|no updates|Missing|Malformed|text|required|Date/i.test(msg))return fail(msg,400);
     if(/not provisioned|not configured|missing or invalid/i.test(msg))return fail('database not provisioned',503);
     console.error('AR3D CRM request failed',e);return fail('internal server error',500);
   }

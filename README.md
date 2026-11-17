@@ -14,7 +14,7 @@
 
 ## What is intentionally NOT built yet
 
-Human Super Admin / Client Admin UI or login, Excel/XLSX uploader, phone number provisioning, live AI conversation, voice WebSocket, outbound calling, subscription charging, 140-series numbers, KYC/DLT, consent verification, real-call recordings and on-site visit scheduling automation. Provider service approval is required before real calling. Do not deploy as a production CRM without completing security work in `docs/ARCHITECTURE.md`.
+Phone number provisioning, live AI conversation, voice WebSocket, outbound calling, subscription charging, 140-series numbers, KYC/DLT, consent verification, real-call recordings and automated site visit execution. Provider service approval is required before real calling. Do not deploy as a production CRM without completing security work in `docs/ARCHITECTURE.md`.
 
 ## Two existing GitHub repositories reviewed
 
@@ -78,12 +78,21 @@ The secret is never sent to the browser. Replace the example password; use a pas
 **Production caveats:** This Phase 2 is a staging-grade initial prototype, not production-ready identity or paid calling. Add managed email verification, MFA for Super Admin, Cloudflare WAF and distributed rate limiting, verified invite delivery, password recovery and session management, operational audit events, PII encryption and deletion, subscription enforcement, D1 provisioning and R2 retention policies. Calling requires telecom onboarding, KYC/DLT where applicable, lead consent/DND checks, AI disclosure and correct recording notices. There is no billing, live AI voice, dialing, automatic number provisioning or deployed Cloudflare service in this phase.
 
 
-## Phase 3 — Lead Workflow / Excel CSV Import (code added, staging not yet deployed)
+## Phase 3 — Lead Workflow / CSV Import (historical milestone)
 
-- Browser UI can preview and import up to 200 rows / 160 KB from Excel **CSV UTF-8** export (native `.xlsx` remains future work).
+- Phase 3 introduced CSV UTF-8 imports (up to 200 rows / 160 KB); Phase 4 adds native `.xlsx`.
 - Strict RFC4180 quoting, mobile normalization, budget validation, duplicate-in-file rejection; pre-existing CRM numbers are skipped, not overwritten.
 - Every imported lead has `consent_status=unknown` and `dnd_status=unknown`. Import neither places calls nor authorizes them.
 - Client role permissions: `client_admin` can update lead interest/location/budgets/followups, keep notes and request site visits; `viewer` is read-only.
 - No cross-tenant reads/edits. New migration `migrations/crm/0002_lead_workflow.sql` must be applied to both shared CRM and every dedicated CRM database.
 - Staging-only Cloudflare setup instructions and safe-config validator: [docs/STAGING.md](docs/STAGING.md). This repo does **not** automatically deploy.
-- Strict limits: 200 CSV customer rows, 160 KB file, 50 leads displayed per CRM search, 100 max API page size. Additional pagination UX, larger imports and binary XLSX support remain future work.
+- Strict limits: 200 CSV customer rows, 160 KB file, 50 leads displayed per CRM search, 100 max API page size. Additional pagination UX and larger batch imports remain future work.
+
+
+## Phase 4: native XLSX lead import and staged deployment gate
+
+- `/app` accepts `.xlsx` (up to 1 MiB; first visible worksheet, max 200 leads) or CSV UTF-8 (160 KB). Both require validation/preview before commit.
+- XLSX import uses bounded ZIP/DEFLATE parsing without additional npm dependencies; rejects formulas, macros, external links, encrypted files, invalid headers, duplicate phones and oversized files. No user data leaves the CRM Worker for parsing.
+- New imports still set consent/DND to `unknown`; they never start calls and never overwrite existing leads.
+- `.github/workflows/deploy-staging.yml` is a **manual-only** staging deployment gate. It requires protected GitHub Environment secrets and pre-provisioned Cloudflare resources/migrations; it is never automatic.
+- `docs/STAGING.md` describes manual Cloudflare setup. Existing AR3D Platform and Engine production resources must remain untouched.
