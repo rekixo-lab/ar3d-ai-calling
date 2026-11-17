@@ -1,6 +1,6 @@
 # AR3D AI Calling
 
-**Phase 1 starter only** — independent multi-tenant CRM and AI-agent configuration API for AR3D clients. Product branding is **AR3D AI Calling**. This is NOT a working outbound AI calling system yet.
+**Development foundation (Phases 1–5)** — independent multi-tenant CRM, personal admin dashboard, lead imports and deterministic text conversation simulator for AR3D clients. Product branding is **AR3D AI Calling**. **No real outbound calls or live generative AI voice conversations are implemented.**
 
 ## What works in this starter
 
@@ -96,3 +96,13 @@ The secret is never sent to the browser. Replace the example password; use a pas
 - New imports still set consent/DND to `unknown`; they never start calls and never overwrite existing leads.
 - `.github/workflows/deploy-staging.yml` is a **manual-only** staging deployment gate. It requires protected GitHub Environment secrets and pre-provisioned Cloudflare resources/migrations; it is never automatic.
 - `docs/STAGING.md` describes manual Cloudflare setup. Existing AR3D Platform and Engine production resources must remain untouched.
+
+
+## Phase 5 — safe, text-only AI conversation simulator
+
+- The **Test AI Conversation** navigation link opens `/app/simulator` for signed-in clients. Each client can select their own draft agent and try an entirely synthetic customer dialogue. It uses that agent's stored question list.
+- `GET /v1/human/simulations/agents?tenantId=...` lists only the signed-in user's tenant agents. `POST /v1/human/simulations` starts a demo; `GET /v1/human/simulations/:id?tenantId=...` reads it and `POST /v1/human/simulations/:id/turn` advances it with `expectedRevision` for concurrency safety. All POSTs require same-origin human sessions, tenant write membership, and bounded request bodies.
+- The offline logic supports **repeat, skip, opt-out, and question-by-question raw-answer storage**. Unknown prices and availability are never invented. It does **not** answer arbitrary questions using an LLM, infer facts from speech, capture real audio, change consent/DND records, or schedule actual site visits.
+- New database migration `migrations/crm/0003_conversation_simulator.sql` applies only to the new AR3D AI Calling CRM D1 environments (shared and separately provisioned dedicated DBs).
+- Demo state expires after 24 hours. Production deployment must additionally schedule deletion of expired rows and apply a data retention/privacy policy. Always use fictional customer details during testing.
+- Run `npm test` locally; CI uses the same command. Calling-provider onboarding, realtime audio transport, verified project knowledge, compliance and Cloudflare deployment remain separate, pending work.
