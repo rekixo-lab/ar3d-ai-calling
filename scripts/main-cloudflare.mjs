@@ -19,7 +19,7 @@ export const REQUIRED_TABLES = Object.freeze({
   ]),
   CRM_DB: Object.freeze([
     'leads','agents','calls','site_visits','crm_audit_events',
-    'lead_notes','conversation_simulations','lead_opt_out_events',
+    'lead_notes','conversation_simulations','lead_opt_out_events','lead_consent_evidence',
   ]),
 });
 export const REQUIRED_COLUMNS = Object.freeze({

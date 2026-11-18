@@ -1,4 +1,5 @@
 import {handleCrmRequest} from './crm-routes.mjs';
+import {handleConsentRequest} from './consent-routes.mjs';
 import {reserveLoginAttempt} from './login-guard.mjs';
 import {challengeAfterPassword,finishMfaLogin,handleMfaSettings} from './mfa.mjs';
 import {handleConversationRequest} from './conversation-routes.mjs';
@@ -193,6 +194,8 @@ export async function handleHumanRequest(req,env){
     if(!user)return fail('sign in required',401);
     if(path==='/v1/human/mfa'||path==='/v1/human/mfa/setup'||path==='/v1/human/mfa/enable'||path==='/v1/human/mfa/recovery/regenerate')
       return handleMfaSettings(req,env,user,method==='POST'?await payload(req):null);
+    const consentResponse=await handleConsentRequest(req,env,user);
+    if(consentResponse)return consentResponse;
     const crmResponse=await handleCrmRequest(req,env,user);
     if(crmResponse)return crmResponse;
     const simulationResponse=await handleConversationRequest(req,env,user);

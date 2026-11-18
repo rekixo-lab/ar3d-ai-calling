@@ -221,6 +221,39 @@ async function crmWorkflow(tenantId,content,role){
         [title('Opt-out history','h3'),table(['Source','Reason','At'],result.events.map(ev=>
           [ev.source,ev.reason||'—',new Date(ev.createdAt).toLocaleString()]))]:[])))
       .catch(asError);
+
+    const evidenceCard=div('card',title('Consent evidence / अनुमति का रिकॉर्ड','h3'),
+      node('p',{class:'note',text:'Evidence references are PENDING REVIEW only. No consent is granted and no DND check has been made.'}));
+    const evidenceHistory=div('');evidenceCard.append(evidenceHistory);details.append(evidenceCard);
+    const evidenceUrl='/v1/human/leads/'+lead.id+'/consent-evidence';
+    const reloadEvidence=async()=>{const out=await api(evidenceUrl+'?tenantId='+encodeURIComponent(tenantId));
+      evidenceHistory.replaceChildren(table(['Source','Purpose','Reference','Review'],
+        out.items.map(item=>[item.source,item.purpose,item.reference,item.reviewStatus])))};
+    reloadEvidence().catch(asError);
+    if(editable&&!blocked){
+      const evidenceSource=node('select',{class:'field'},
+        ['website_form','signed_form','in_person','other'].map(value=>node('option',{value,text:value})));
+      const evidencePurpose=node('select',{class:'field'},
+        ['property_information','site_visit'].map(value=>node('option',{value,text:value})));
+      const evidenceRef=input('reference','text','Internal evidence reference (no personal details)');
+      evidenceRef.maxLength=160;
+      const evidenceAt=input('capturedAt','datetime-local');evidenceAt.required=true;
+      const f=node('form',{class:'stack'},[lab('Evidence origin',evidenceSource),lab('Purpose',evidencePurpose),
+        lab('Reference ID (4-160 chars)',evidenceRef),lab('Evidence captured date/time',evidenceAt),
+        node('button',{class:'btn',type:'submit',text:'Save pending evidence'})]);
+      f.addEventListener('submit',async e=>{e.preventDefault();try{
+        if(!evidenceAt.value)throw Error('Choose capture date/time');
+        await api(evidenceUrl,'POST',{tenantId,source:evidenceSource.value,purpose:evidencePurpose.value,
+          reference:evidenceRef.value,capturedAt:new Date(evidenceAt.value).toISOString()});
+        notice('Evidence reference saved as pending; calling is still blocked.');
+        evidenceRef.value='';await reloadEvidence();
+      }catch(err){asError(err)}});
+      evidenceCard.insertBefore(f,evidenceHistory);
+    }
+    const readiness=div('card',title('Calling readiness','h3'));details.append(readiness);
+    api('/v1/human/leads/'+lead.id+'/call-readiness?tenantId='+encodeURIComponent(tenantId))
+      .then(result=>readiness.append(node('p',{class:'err',text:'BLOCKED — '+result.reasons.join('; ')})))
+      .catch(asError);
     const notesArea=div('');details.append(title('Private Notes','h3'),notesArea);
     const fetchNotes=async()=>{const notes=await api('/v1/human/notes?tenantId='+encodeURIComponent(tenantId)+'&leadId='+lead.id);
       notesArea.replaceChildren(table(['Note','Added'],notes.notes.map(n=>[n.text,new Date(n.createdAt).toLocaleString()])))};
