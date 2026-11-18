@@ -1,4 +1,5 @@
 import {handleCrmRequest} from './crm-routes.mjs';
+import {handleDataPortabilityRequest} from './data-portability-routes.mjs';
 import {handleAgentSettingsRequest} from './agent-settings-routes.mjs';
 import {handleAuditRequest} from './audit-routes.mjs';
 import {handleVisitStatusRequest} from './visit-status-routes.mjs';
@@ -211,6 +212,8 @@ export async function handleHumanRequest(req,env){
     if(agentResponse)return agentResponse;
     const auditResponse=await handleAuditRequest(req,env,user);
     if(auditResponse)return auditResponse;
+    const dataResponse=await handleDataPortabilityRequest(req,env,user);
+    if(dataResponse)return dataResponse;
     const crmResponse=await handleCrmRequest(req,env,user);
     if(crmResponse)return crmResponse;
     const simulationResponse=await handleConversationRequest(req,env,user);

@@ -39,3 +39,8 @@ Before production deploy, the main-only preflight checks Control/CRM D1 names an
 ### If a backend integration key is compromised
 
 Use the separately configured `ADMIN_API_TOKEN` only from a trusted backend to list key metadata via `GET /v1/admin/tenants/:tenantId/keys` and revoke the affected ID with `DELETE /v1/admin/tenants/:tenantId/keys/:keyId`. After a key is revoked, the existing `tenantAuth` access path will reject it. The list endpoint intentionally does not return or reissue plaintext keys. Rotate exposed credentials and audit access separately. The machine token is optional; if not configured, these endpoints remain disabled.
+
+
+### Privacy and usage reporting foundation
+
+Clients can securely export paginated lead JSON through the Client Admin dashboard. It contains mobile numbers and other personal information; export/download only to trusted devices and handle according to applicable policy. Exports are audited in CRM D1. API and UI provide read-only record counts, **not** telecom minutes, charges or invoices. Before launching paid SaaS, implement real provider usage event verification, privacy retention/deletion, backups, payment/reconciliation and plan agreement; the code does not assert these are complete.
