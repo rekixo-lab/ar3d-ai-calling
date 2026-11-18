@@ -1,4 +1,5 @@
 import {handleCrmRequest} from './crm-routes.mjs';
+import {reserveLoginAttempt} from './login-guard.mjs';
 import {handleConversationRequest} from './conversation-routes.mjs';
 import {simulatorHtml,simulatorCss,simulatorJs} from './simulator-ui.mjs';
 import {checkSlug,checkName,checkStorageMode,normalizeIndianPhone,resolveCrmDb,sha256hex,parseJsonBody,SOURCES} from './core.mjs';
@@ -42,7 +43,7 @@ async function login(req,env){
   const row=await db.prepare("SELECT * FROM human_users WHERE email=? AND status='active' LIMIT 1").bind(email).first();
   const valid=await checkPassword(password,row);
   if(!valid){
-    // Email-scoped lockout is only a starter; production requires edge IP/account limits too.
+    // Account-scoped lockout supplements the independent verified-IP budget.
     const windowStart=Number(limit?.window_start||0),fresh=timestamp-windowStart>15*60*1000;
     const fails=fresh?1:Number(limit?.failed_count||0)+1;
     await db.prepare(`INSERT INTO human_login_limits(email_hash,failed_count,window_start,blocked_until)
@@ -169,7 +170,11 @@ export async function handleHumanRequest(req,env){
   if(['POST','PUT','PATCH','DELETE'].includes(method)&&path!=='/v1/human/bootstrap'&&!mutationOriginAllowed(req))return fail('same-origin request required',403);
   try{
     if(path==='/v1/human/bootstrap'&&method==='POST')return bootstrap(req,env);
-    if(path==='/v1/human/login'&&method==='POST')return login(req,env);
+    if(path==='/v1/human/login'&&method==='POST'){
+      const gate=await reserveLoginAttempt(req,env);
+      if(!gate.allowed)return fail(gate.error,gate.status);
+      return login(req,env);
+    }
     if(path==='/v1/human/accept-invite'&&method==='POST')return acceptInvitation(req,env);
     if(path==='/v1/human/logout'&&method==='POST')return logout(req,env);
     const user=await getSession(req,env.CONTROL_DB);
