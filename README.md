@@ -157,3 +157,11 @@ The secret is never sent to the browser. Replace the example password; use a pas
 - `GET /v1/human/simulations/:id/voice-preview?tenantId=...` returns safe text segments only for a signed-in member of the owning tenant. The simulator UI includes a **Preview next spoken turn** button.
 - `POST /v1/human/simulations/:id/speech-turn` (human-client-admin only) takes `{tenantId,expectedRevision,recognition:{source:"typed_demo",transcript:"...",confidence:0.95}}`. It treats the submitted transcript as a **synthetic** STT result, returns "repeat requested" without a write for silence/low confidence, and otherwise advances only the existing tenant-scoped demo state with revision checks. Provider claims are rejected.
 - The existing opt-out rule ends the **demo** without touching CRM consent/DND or placing any calls. No schema migration is required in this phase. This is groundwork for a future verified, compliant realtime voice adapter—not a functioning voice AI integration.
+
+
+## Phase 12 — safe campaign and AR3D metadata planning
+
+- The human CRM supports tenant-scoped draft campaigns, candidate lead references and non-executable readiness reports. There is no activation or dialing API. Campaign status is constrained to draft, and the v6 CRM database migration prevents inserting actual call records.
+- Signed-in client admins may register AR3D Platform or Engine project metadata in the isolated control D1. Such links remain pending and do not fetch other projects, verify ownership or provide property facts.
+- Optional backend-only machine admin endpoints now need a separate ADMIN_API_TOKEN, never the one-time human ADMIN_BOOTSTRAP_TOKEN. If unset, machine-admin routes return unauthorized.
+- For manual Cloudflare/telecom/provider/payment requirements, see docs/MANUAL-ACTIONS.md.

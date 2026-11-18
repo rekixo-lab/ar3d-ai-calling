@@ -1,4 +1,6 @@
 import {handleCrmRequest} from './crm-routes.mjs';
+import {handleCampaignRequest} from './campaign-routes.mjs';
+import {handleProjectLinkRequest} from './project-link-routes.mjs';
 import {handleConsentRequest} from './consent-routes.mjs';
 import {reserveLoginAttempt} from './login-guard.mjs';
 import {challengeAfterPassword,finishMfaLogin,handleMfaSettings} from './mfa.mjs';
@@ -196,6 +198,10 @@ export async function handleHumanRequest(req,env){
       return handleMfaSettings(req,env,user,method==='POST'?await payload(req):null);
     const consentResponse=await handleConsentRequest(req,env,user);
     if(consentResponse)return consentResponse;
+    const projectResponse=await handleProjectLinkRequest(req,env,user);
+    if(projectResponse)return projectResponse;
+    const campaignResponse=await handleCampaignRequest(req,env,user);
+    if(campaignResponse)return campaignResponse;
     const crmResponse=await handleCrmRequest(req,env,user);
     if(crmResponse)return crmResponse;
     const simulationResponse=await handleConversationRequest(req,env,user);

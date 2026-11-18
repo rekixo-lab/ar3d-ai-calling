@@ -15,10 +15,10 @@ const isGet=(r)=>r.method==='GET';
 const allowedOrigin=(r)=>!r.headers.has('origin')||new URL(r.headers.get('origin')).origin===new URL(r.url).origin;
 async function body(req){return parseJsonBody(await req.text())}
 async function adminAuth(req,env){
-  if (!env.ADMIN_BOOTSTRAP_TOKEN || String(env.ADMIN_BOOTSTRAP_TOKEN).length < 32) return false;
+  if (!env.ADMIN_API_TOKEN || String(env.ADMIN_API_TOKEN).length < 32) return false;
   const token=bearer(req);
   if (!token || token.length>256) return false;
-  const expected=await sha256hex(env.ADMIN_BOOTSTRAP_TOKEN), actual=await sha256hex(token);
+  const expected=await sha256hex(env.ADMIN_API_TOKEN), actual=await sha256hex(token);
   return expected===actual;
 }
 async function tenantAuth(req,env){
