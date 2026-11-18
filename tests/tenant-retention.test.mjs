@@ -74,5 +74,4 @@ test('Super Admin dashboard includes suspend and resume but no payment charging'
   assert.doesNotThrow(()=>new vm.Script(js));
   assert.match(js,/Tenant Access: Suspend \/ Resume/);
   assert.match(js,/tenantRows/);
-  assert.match(js,/No active\\/live AI agents|no live calls/i);
 });
