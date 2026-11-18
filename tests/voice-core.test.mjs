@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import worker from '../src/index.mjs';
+import vm from 'node:vm';
+import {simulatorHtml,simulatorJs} from '../src/simulator-ui.mjs';
 import {beginSimulation} from '../src/conversation-core.mjs';
 import {makeSpeechPlan,processTypedTranscript} from '../src/voice-core.mjs';
 const tenantId='22222222-2222-4222-8222-222222222222';
@@ -135,4 +137,11 @@ test('speech-turn disallows viewer, no-origin, forged tenant and provider claims
   const fake=await worker.fetch(req('/v1/human/simulations/'+s.id+'/speech-turn','POST',
     {...data,recognition:{source:'provider',transcript:'hello',confidence:0.9}}),own.env);
   assert.equal(fake.status,400);
+});
+
+test('simulator speech-preview UI is syntactically valid and labeled text-only',()=>{
+  assert.doesNotThrow(()=>new vm.Script(simulatorJs));
+  assert.match(simulatorHtml,/id="preview-speech"/);
+  assert.match(simulatorHtml,/No microphone or audio is generated/);
+  assert.match(simulatorJs,/voice-preview\?tenantId=/);
 });
