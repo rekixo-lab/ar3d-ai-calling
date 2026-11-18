@@ -29,3 +29,8 @@ The build may be deployed to a main Worker for synthetic tests; it is **not prod
 
 
 **New migration:** CRM D1 schema v7, `migrations/crm/0007_agent_safety.sql`, is required after v6. It is automatic only on brand-new empty CRM initialization. Existing independently created D1 needs a backup and reviewed incremental application. Do not activate real AI agents/calls by dropping safety triggers.
+
+
+### Recheck: guarded resource identity
+
+Before production deploy, the main-only preflight checks Control/CRM D1 names and IDs, migrated columns and critical SQL triggers, plus the dedicated private R2 bucket metadata. The Cloudflare API token therefore requires **R2 bucket read** permission as well as required D1 access. Treat any missing trigger or unexpected bucket as a stop condition. Do not disable `trg_no_call_launch`, opt-out/consent triggers or agent-activation triggers. Apply missing migrations only after verified backup and review.

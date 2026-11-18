@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  REQUIRED_TABLES, getCredentials, makeMainConfig, checkTables, checkColumns, inspectCloudflare,
+  REQUIRED_TABLES, REQUIRED_SAFETY_TRIGGERS, getCredentials, makeMainConfig, checkTables, checkColumns, checkSafetyTriggers, inspectCloudflare,
 } from '../scripts/main-cloudflare.mjs';
 
 const env = {
@@ -53,22 +53,33 @@ test('ready requires every required migration table', () => {
   assert.throws(() => checkColumns(['tenant_id','consent_status'],'CRM_DB','leads'), /missing columns/);
 });
 
-function cloudflareMock({ controlTables=[],crmTables=[],controlName='ar3d-calling-control',crmName='ar3d-calling-shared-crm',leadColumns=['tenant_id','consent_status','dnd_status','interest_status','followup_at'] }={}) {
+const mockTriggers=Object.entries(REQUIRED_SAFETY_TRIGGERS).map(([name,parts])=>
+  ({name,sql:'CREATE TRIGGER '+name+' '+parts.join(' ')+' BEGIN SELECT RAISE(ABORT, "deny"); END'}));
+function cloudflareMock({ controlTables=[],crmTables=[],controlName='ar3d-calling-control',crmName='ar3d-calling-shared-crm',leadColumns=['tenant_id','consent_status','dnd_status','interest_status','followup_at'],bucketName='ar3d-calling-recordings',triggers=mockTriggers }={}) {
   return async (url,opts) => {
     const control=url.includes(env.CONTROL_DB_ID);
     const tableNames=control?controlTables:crmTables;
     let result;
-    if(!url.endsWith('/query')) result = { name: control ? controlName : crmName };
+    if(url.includes('/r2/buckets/')) result={name:bucketName};
+    else if(!url.endsWith('/query')) result = { name: control ? controlName : crmName };
     else {
       const sql=JSON.parse(opts.body).sql;
       let rows;
-      if(sql.includes('sqlite_master')) rows=tableNames.map(name=>({name}));
+      if(sql.includes("type='trigger'")) rows=triggers;
+      else if(sql.includes('sqlite_master')) rows=tableNames.map(name=>({name}));
       else if(sql.includes('PRAGMA')) {
         if(sql.includes('leads')) rows=leadColumns.map(name=>({name}));
         else if(sql.includes('conversation_simulations')) rows=['tenant_id','state_json','expires_at'].map(name=>({name}));
         else if(sql.includes('tenants')) rows=['id','plan_code','storage_mode'].map(name=>({name}));
         else if(sql.includes('human_users')) rows=['id','global_role','password_hash'].map(name=>({name}));
         else if(sql.includes('human_mfa_settings')) rows=['user_id','recovery_generation_id','enabled_at'].map(name=>({name}));
+        else if(sql.includes('human_mfa_recovery_codes')) rows=['user_id','code_hash','used_at'].map(name=>({name}));
+        else if(sql.includes('human_ip_login_limits')) rows=['ip_hash','attempt_count','blocked_until'].map(name=>({name}));
+        else if(sql.includes('lead_opt_out_events')) rows=['tenant_id','lead_id','source','created_at'].map(name=>({name}));
+        else if(sql.includes('lead_consent_evidence')) rows=['tenant_id','lead_id','review_status','submitted_by'].map(name=>({name}));
+        else if(sql.includes('call_campaign_drafts')) rows=['tenant_id','status','language_mode'].map(name=>({name}));
+        else if(sql.includes('call_campaign_candidates')) rows=['tenant_id','campaign_id','lead_id'].map(name=>({name}));
+        else if(sql.includes('agents')) rows=['tenant_id','status','questions_json'].map(name=>({name}));
         else rows=['token_hash','expires_at'].map(name=>({name}));
       } else throw Error('Unexpected SQL');
       result = [{ success:true,results:rows }];
@@ -92,4 +103,25 @@ test('ready passes complete schema with expected lead columns', async () => {
 });
 test('ready blocks missing lead workflow columns', async () => {
   await assert.rejects(inspectCloudflare({credentials:getCredentials(env),mode:'ready',template,apiFetch:cloudflareMock({controlTables:REQUIRED_TABLES.CONTROL_DB,crmTables:REQUIRED_TABLES.CRM_DB,leadColumns:['tenant_id','consent_status']})}),/missing columns/);
+});
+
+
+test('CRM trigger signature validation rejects missing or replaced calling safety triggers', () => {
+  assert.doesNotThrow(()=>checkSafetyTriggers(mockTriggers));
+  assert.throws(()=>checkSafetyTriggers(mockTriggers.filter(x=>x.name!=='trg_no_call_launch')),/trg_no_call_launch/);
+  assert.throws(()=>checkSafetyTriggers(mockTriggers.map(x=>x.name==='trg_no_call_launch'?
+    {...x,sql:'CREATE TRIGGER trg_no_call_launch BEFORE INSERT ON calls BEGIN SELECT 1; END'}:x)),/trg_no_call_launch/);
+});
+test('main deploy preflight refuses an incorrectly named or missing R2 bucket', async () => {
+  await assert.rejects(inspectCloudflare({credentials:getCredentials(env),mode:'preflight',template,
+    apiFetch:cloudflareMock({bucketName:'some-other-AR3D-bucket'})}),/R2 bucket/);
+});
+test('ready schema refuses absent CRM safety triggers even when all tables exist', async () => {
+  await assert.rejects(inspectCloudflare({credentials:getCredentials(env),mode:'ready',template,
+    apiFetch:cloudflareMock({controlTables:REQUIRED_TABLES.CONTROL_DB,
+      crmTables:REQUIRED_TABLES.CRM_DB,triggers:mockTriggers.slice(1)})}),/safety trigger/);
+});
+test('ready schema checks post-migration safety columns, not just original tables', async () => {
+  assert.throws(()=>checkColumns(['tenant_id','status'],'CRM_DB','call_campaign_drafts'),/missing columns/);
+  assert.throws(()=>checkColumns(['user_id'],'CONTROL_DB','human_mfa_recovery_codes'),/missing columns/);
 });

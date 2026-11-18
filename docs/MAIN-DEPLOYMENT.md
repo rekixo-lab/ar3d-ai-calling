@@ -94,3 +94,10 @@ New empty CRM D1 initialization includes 0006_campaign_drafts.sql. If the databa
 ## Agent safety (CRM schema v7)
 
 `0007_agent_safety.sql` blocks any new or updated agent from entering `active` status until provider onboarding, verified customer consent/DND, and real calling safety reviews exist. A pending/call-disabled CRM can create or pause draft AI agents and edit their questions. If the main CRM D1 already exists, back up and inspect it before applying the *incremental* v7 migration. Do not rerun one-time initialization.
+
+
+## Deep production preflight checks
+
+The main-only Cloudflare preflight now verifies BOTH exact D1 resource identities, all required migrated tables and additional key columns, the **six fail-closed CRM triggers** (opt-out reversal, consent/DND denial, call-launch block, and agent activation blocks), and the existence of the separate private `ar3d-calling-recordings` R2 bucket in the selected account. A same-name trigger with an obviously wrong event or missing abort statement is rejected. These are read-only preflight checks: they never create/delete D1 databases, R2 buckets, or existing AR3D resources. 
+
+The GitHub `production` Cloudflare API token must have scoped D1 read/write permissions for explicit initialize and R2 bucket metadata **read** permissions. If any check fails, the script fails closed; inspect the actual migrations and backup state rather than bypassing a safety trigger. A green preflight is not a substitute for restoring a database backup in a controlled rehearsal, verifying provider compliance, or checking all production security settings. <https://developers.cloudflare.com/api/resources/r2/subresources/buckets/methods/get/>
