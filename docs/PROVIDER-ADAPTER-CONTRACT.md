@@ -17,3 +17,6 @@ This module is **a private internal normalization contract**, not a specificatio
 - \`planCallStatusTransition\`: pure state-machine validation. It writes no call records and sends no requests.
 
 A production provider adapter and secure transport remain entirely unimplemented. This is testable groundwork to reduce future integration mistakes, not live functionality.
+
+
+The optional browser SpeechRecognition/SpeechSynthesis playground in `/app/simulator` is NOT a server-side or telecom provider adapter. Audio processing may be handled by the browser vendor and is outside this project's Worker. Do not treat browser speech tests as evidence of Hindi-language production performance or compliance.
