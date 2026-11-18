@@ -108,3 +108,10 @@ The GitHub `production` Cloudflare API token must have scoped D1 read/write perm
 Control D1 `0006_tenant_lifecycle.sql` adds prior-status tracking and SQL protection for tenant suspension/resumption. The new empty Control D1 initialize applies it after v5; an existing populated Control D1 requires backup and isolated incremental v6 migration. The guarded preflight now checks the new tenant column. Client access is denied by existing `t.status IN ('trial','active')` gates while suspended; resumed dedicated tenants additionally require actual provisioned Worker D1 binding. Human-session Super Admin operations record a reason and actor in Control D1 audit.
 
 A pure `retentionPlan()` and gated `executeRetention()` helper are provided, but **no cron schedule is installed** and no cleanup occurs automatically. Execute only when signed-off retention rules, backups and Data Protection obligations have been reviewed and a secure scheduled entry point intentionally added. This helper excludes leads, consent evidence, opt-out records, recordings and audit history.
+
+
+## Control schema v7: Quarantined provider inbox
+
+New **empty** Control D1 initialization now applies `0007_provider_inbox.sql` after v6. Existing Control D1 must be backed up and updated incrementally. The main preflight checks that the new table and required columns are present. No inbound HTTP webhook or dialing endpoint is exposed. The inbox accepts only synthetic internal-test signed events and records idempotent quarantined metadata. Real external provider authentication and replay persistence must be separately reviewed and implemented.
+
+The private recording encryption helper is intentionally disabled unless the isolated Worker receives server-only `RECORDING_STORAGE_ENABLED=true` and `RECORDING_ENCRYPTION_KEY`. **Do not enable these or upload real customer recordings until company policy, verified consent/recording notice, authenticated access, lifecycle deletion and legal review are complete.** There is no browser upload route. The helper's presence does not prove a working telecom recorder.

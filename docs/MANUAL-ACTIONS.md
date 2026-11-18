@@ -49,3 +49,8 @@ Clients can securely export paginated lead JSON through the Client Admin dashboa
 ### Tenant suspension and retention
 
 The Super Admin Dashboard can suspend or resume a client company with an audit reason. This is access administration, **not billing**. For existing Control D1 databases, back up before applying `migrations/control/0006_tenant_lifecycle.sql` incrementally; for brand-new empty D1 it is included in one-time initialize. Retention helpers have no cron trigger or HTTP route; enabling scheduled cleanup and deleting real customer records must wait for an approved privacy, retention and backup policy.
+
+
+### Optional encrypted storage / inbox foundations
+
+Control v7 introduces a **quarantine-only** event inbox. The private R2 recording helper is disabled and never exposed through HTTP; do not set `RECORDING_STORAGE_ENABLED=true` until verified caller number, consent, recording notice, scoped access, secure retention expiration/deletion and operator approval are available. `RECORDING_ENCRYPTION_KEY` must be a strong independent server secret and never logged or put into GitHub source. Encryption key rotation and disaster recovery remain unimplemented. Genuine provider webhook signing is vendor-specific and still must be built after selecting a provider.

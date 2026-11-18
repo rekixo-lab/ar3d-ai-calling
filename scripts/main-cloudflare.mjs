@@ -15,7 +15,7 @@ export const REQUIRED_TABLES = Object.freeze({
   CONTROL_DB: Object.freeze([
     'tenants','tenant_keys','project_links','tenant_numbers','tenant_audit_events',
     'human_users','tenant_memberships','human_sessions','human_invitations',
-    'human_login_limits','human_bootstrap_claim','human_ip_login_limits','human_mfa_settings','human_mfa_challenges','human_mfa_recovery_codes',
+    'human_login_limits','human_bootstrap_claim','human_ip_login_limits','human_mfa_settings','human_mfa_challenges','human_mfa_recovery_codes','provider_event_inbox',
   ]),
   CRM_DB: Object.freeze([
     'leads','agents','calls','site_visits','crm_audit_events',
@@ -29,6 +29,7 @@ export const REQUIRED_COLUMNS = Object.freeze({
     human_sessions: Object.freeze(['token_hash','expires_at']),
     human_mfa_settings: Object.freeze(['user_id','recovery_generation_id','enabled_at']),
     human_mfa_recovery_codes: Object.freeze(['user_id','code_hash','used_at']),
+    provider_event_inbox: Object.freeze(['tenant_id','provider','event_id','status']),
     human_ip_login_limits: Object.freeze(['ip_hash','attempt_count','blocked_until']),
   }),
   CRM_DB: Object.freeze({
