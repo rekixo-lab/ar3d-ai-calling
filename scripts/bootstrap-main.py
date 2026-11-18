@@ -1,0 +1,92 @@
+#!/usr/bin/env python3
+"""Interactive one-time Super Admin bootstrap. Never exposes secrets in argv.
+
+Only for the isolated ar3d-ai-calling.<subdomain>.workers.dev host.
+Runs from the operator's own trusted terminal after explicit Cloudflare deploy.
+No third-party libraries; no credentials are written to disk or printed.
+"""
+import getpass
+import json
+import re
+import ssl
+import sys
+import urllib.error
+import urllib.parse
+import urllib.request
+
+
+def validate_host(raw: str) -> str:
+    parsed = urllib.parse.urlparse(raw)
+    if (parsed.scheme != "https" or parsed.username or parsed.password or
+        parsed.port is not None or parsed.path not in ("", "/") or
+        parsed.params or parsed.query or parsed.fragment or
+        not re.fullmatch(r"ar3d-ai-calling\.[a-z0-9-]+\.workers\.dev", parsed.hostname or "")):
+        raise ValueError("Use only the isolated HTTPS ar3d-ai-calling.<subdomain>.workers.dev URL")
+    return "https://" + parsed.hostname
+
+
+def build_request(host: str, email: str, password: str, token: str):
+    url = validate_host(host)
+    if not isinstance(token, str) or len(token) < 32:
+        raise ValueError("Bootstrap token must be 32+ characters")
+    if not isinstance(password, str) or not 12 <= len(password) <= 128:
+        raise ValueError("Super Admin password must be 12-128 characters")
+    email = email.strip().lower()
+    if len(email) > 254 or not re.fullmatch(r"[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+", email):
+        raise ValueError("Enter a valid email address")
+    payload = json.dumps({"email": email, "password": password}, ensure_ascii=False).encode("utf-8")
+    return urllib.request.Request(
+        url + "/v1/human/bootstrap",
+        data=payload,
+        headers={"Authorization": "Bearer " + token, "Content-Type": "application/json"},
+        method="POST",
+    )
+
+
+def bootstrap(host: str, email: str, password: str, token: str, opener=None) -> int:
+    request = build_request(host, email, password, token)
+    if opener is None:
+        opener = urllib.request.urlopen
+    try:
+        with opener(request, timeout=20, context=ssl.create_default_context()) as reply:
+            if reply.status != 201:
+                print("Bootstrap was not confirmed (unexpected HTTP status).")
+                return 1
+    except urllib.error.HTTPError as exc:
+        if exc.code == 409:
+            print("Super Admin already exists. Do NOT repeat bootstrap.")
+        elif exc.code in (401, 403):
+            print("Bootstrap unauthorized. Check the Worker-only ADMIN_BOOTSTRAP_TOKEN.")
+        else:
+            print("Bootstrap failed with HTTP status " + str(exc.code) + ".")
+        return 1
+    except (urllib.error.URLError, TimeoutError, OSError):
+        print("Connection failed. Verify the isolated Worker URL and TLS/network access.")
+        return 1
+    print("Super Admin created. Sign in at " + validate_host(host) + "/app")
+    print("IMPORTANT: Remove ADMIN_BOOTSTRAP_TOKEN from the Worker now.")
+    return 0
+
+
+def main(argv=None) -> int:
+    argv = sys.argv[1:] if argv is None else argv
+    if len(argv) != 1:
+        print("Usage: python3 scripts/bootstrap-main.py https://ar3d-ai-calling.<subdomain>.workers.dev")
+        return 2
+    try:
+        host = validate_host(argv[0])
+        email = input("Super Admin email: ")
+        token = getpass.getpass("One-time Worker bootstrap token (hidden): ")
+        password = getpass.getpass("New Super Admin password (hidden): ")
+        again = getpass.getpass("Confirm password (hidden): ")
+        if password != again:
+            print("Passwords do not match; no request sent.")
+            return 2
+        return bootstrap(host, email, password, token)
+    except (ValueError, EOFError, KeyboardInterrupt) as exc:
+        print("Bootstrap cancelled or invalid input. No credentials displayed.")
+        return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main())
