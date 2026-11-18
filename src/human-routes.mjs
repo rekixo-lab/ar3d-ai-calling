@@ -1,4 +1,5 @@
 import {handleCrmRequest} from './crm-routes.mjs';
+import {handleTenantLifecycleRequest} from './tenant-lifecycle-routes.mjs';
 import {handleDataPortabilityRequest} from './data-portability-routes.mjs';
 import {handleAgentSettingsRequest} from './agent-settings-routes.mjs';
 import {handleAuditRequest} from './audit-routes.mjs';
@@ -219,6 +220,8 @@ export async function handleHumanRequest(req,env){
     const simulationResponse=await handleConversationRequest(req,env,user);
     if(simulationResponse)return simulationResponse;
     if(path==='/v1/human/me'&&method==='GET')return response(await userSummary(env.CONTROL_DB,user));
+    const lifecycle=await handleTenantLifecycleRequest(req,env,user);
+    if(lifecycle)return lifecycle;
     if(path==='/v1/human/tenants'){
       if(user.globalRole!=='super_admin')return fail('forbidden',403);
       if(method==='GET')return listTenants(env.CONTROL_DB);

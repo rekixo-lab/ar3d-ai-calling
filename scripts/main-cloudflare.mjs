@@ -24,7 +24,7 @@ export const REQUIRED_TABLES = Object.freeze({
 });
 export const REQUIRED_COLUMNS = Object.freeze({
   CONTROL_DB: Object.freeze({
-    tenants: Object.freeze(['id','plan_code','storage_mode']),
+    tenants: Object.freeze(['id','plan_code','storage_mode','suspended_from_status']),
     human_users: Object.freeze(['id','global_role','password_hash']),
     human_sessions: Object.freeze(['token_hash','expires_at']),
     human_mfa_settings: Object.freeze(['user_id','recovery_generation_id','enabled_at']),
