@@ -134,12 +134,12 @@ export default {
     try{
       if(path==='/v1/admin/tenants'&&isPost(req)){
         if(!await adminAuth(req,env))return fail('unauthorized',401);
-        return createTenant(req,env);
+        return await createTenant(req,env);
       }
       const match=path.match(/^\/v1\/admin\/tenants\/([a-f0-9-]{36})\/keys$/);
       if(match&&isPost(req)){
         if(!await adminAuth(req,env))return fail('unauthorized',401);
-        return createKey(req,env,match[1]);
+        return await createKey(req,env,match[1]);
       }
       if(!path.startsWith('/v1/'))return fail('not found',404);
       const tenant=await tenantAuth(req,env);
@@ -149,10 +149,10 @@ export default {
         storageMode:tenant.storage_mode},role:tenant.role});
       if(path==='/v1/leads'&&isPost(req)){
         if(tenant.role!=='client_admin')return fail('insufficient permission',403);
-        return addLead(req,env,tenant);
+        return await addLead(req,env,tenant);
       }
       if(path==='/v1/leads'&&isGet(req))return getLeads(req,env,tenant);
-      if(path==='/v1/agents'&&isPost(req))return addAgent(req,env,tenant);
+      if(path==='/v1/agents'&&isPost(req))return await addAgent(req,env,tenant);
       if(path==='/v1/agents'&&isGet(req))return getAgents(req,env,tenant);
       return fail('not found',404);
     }catch(e){
