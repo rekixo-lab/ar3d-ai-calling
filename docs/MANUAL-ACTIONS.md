@@ -34,3 +34,8 @@ The build may be deployed to a main Worker for synthetic tests; it is **not prod
 ### Recheck: guarded resource identity
 
 Before production deploy, the main-only preflight checks Control/CRM D1 names and IDs, migrated columns and critical SQL triggers, plus the dedicated private R2 bucket metadata. The Cloudflare API token therefore requires **R2 bucket read** permission as well as required D1 access. Treat any missing trigger or unexpected bucket as a stop condition. Do not disable `trg_no_call_launch`, opt-out/consent triggers or agent-activation triggers. Apply missing migrations only after verified backup and review.
+
+
+### If a backend integration key is compromised
+
+Use the separately configured `ADMIN_API_TOKEN` only from a trusted backend to list key metadata via `GET /v1/admin/tenants/:tenantId/keys` and revoke the affected ID with `DELETE /v1/admin/tenants/:tenantId/keys/:keyId`. After a key is revoked, the existing `tenantAuth` access path will reject it. The list endpoint intentionally does not return or reissue plaintext keys. Rotate exposed credentials and audit access separately. The machine token is optional; if not configured, these endpoints remain disabled.

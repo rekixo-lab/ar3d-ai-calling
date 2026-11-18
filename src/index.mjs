@@ -77,6 +77,36 @@ async function createKey(req,env,tenantId){
   // Backend integration ONLY: do not put this token in a browser/mobile client.
   return json({id,tenantId,name,role,apiKey:key,notice:'shown only once; store server-side'},201);
 }
+
+async function listTenantKeys(env,tenantId){
+  const tenant=await env.CONTROL_DB.prepare('SELECT id FROM tenants WHERE id=? LIMIT 1')
+    .bind(tenantId).first();
+  if(!tenant)return fail('tenant not found',404);
+  const keys=await env.CONTROL_DB.prepare(`SELECT id,name,role,active,
+    created_at AS createdAt,revoked_at AS revokedAt
+    FROM tenant_keys WHERE tenant_id=? ORDER BY created_at DESC,id DESC LIMIT 100`)
+    .bind(tenantId).all();
+  // Never return token_hash, password material or a plaintext API key.
+  return json({keys:keys.results});
+}
+async function revokeTenantKey(env,tenantId,keyId){
+  const nowValue=now();
+  // Both D1 statements are atomic. Only a currently-active key can be
+  // revoked and logged; a subsequent revoke request is an idempotent no-op.
+  const rows=await env.CONTROL_DB.batch([
+    env.CONTROL_DB.prepare(`INSERT INTO tenant_audit_events
+      (id,tenant_id,actor,action,target_id,created_at)
+      SELECT ?,?, 'machine_admin','tenant_key.revoked',id,?
+      FROM tenant_keys WHERE tenant_id=? AND id=? AND active=1`)
+      .bind(crypto.randomUUID(),tenantId,nowValue,tenantId,keyId),
+    env.CONTROL_DB.prepare('UPDATE tenant_keys SET active=0,revoked_at=? WHERE tenant_id=? AND id=? AND active=1')
+      .bind(nowValue,tenantId,keyId)
+  ]);
+  const revoked=Number(rows[1]?.meta?.changes||0)===1;
+  return json({revoked,notice:revoked?
+    'API key revoked. All subsequent token-authenticated requests are denied.':
+    'API key not active or not found in this tenant.'});
+}
 async function addLead(req,env,tenant){
   const data=await body(req), mobile=normalizeIndianPhone(data.mobile),name=String(data.name||'').trim();
   if(name.length>120)return fail('lead name too long');
@@ -137,9 +167,14 @@ export default {
         return await createTenant(req,env);
       }
       const match=path.match(/^\/v1\/admin\/tenants\/([a-f0-9-]{36})\/keys$/);
-      if(match&&isPost(req)){
+      if(match&&(isPost(req)||isGet(req))){
         if(!await adminAuth(req,env))return fail('unauthorized',401);
-        return await createKey(req,env,match[1]);
+        return isGet(req)?await listTenantKeys(env,match[1]):await createKey(req,env,match[1]);
+      }
+      const keyMatch=path.match(/^\/v1\/admin\/tenants\/([a-f0-9-]{36})\/keys\/([a-f0-9-]{36})$/);
+      if(keyMatch&&req.method==='DELETE'){
+        if(!await adminAuth(req,env))return fail('unauthorized',401);
+        return await revokeTenantKey(env,keyMatch[1],keyMatch[2]);
       }
       if(!path.startsWith('/v1/'))return fail('not found',404);
       const tenant=await tenantAuth(req,env);
