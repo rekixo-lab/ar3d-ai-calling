@@ -142,7 +142,7 @@ async function planningPanels(tenantId,content,role){
       node('button',{class:'btn',type:'submit',text:'Create draft'})]);
     form.addEventListener('submit',async e=>{e.preventDefault();try{
       await api('/v1/human/campaigns','POST',{tenantId,name:name.value,languageMode:language.value,purpose:purpose.value});
-      name.value='';await refreshCampaigns();notice('Draft saved. Calls are still disabled.');
+      name.value='';await loadPicks();await refreshCandidateList();notice('Draft saved. Calls are still disabled.');
     }catch(err){asError(err)}});
     campaignCard.append(form);
     const campaignPick=node('select',{class:'field'});
@@ -156,11 +156,33 @@ async function planningPanels(tenantId,content,role){
         .map(l=>node('option',{value:l.id,text:l.name+' · '+l.mobile})));
     };
     await loadPicks();
+    const currentCandidate=node('select',{class:'field'});
+    const removeCandidate=btn('Remove from draft',async()=>{
+      if(!campaignPick.value||!currentCandidate.value)return;
+      try{
+        const result=await api('/v1/human/campaigns/'+campaignPick.value+'/candidates/'+currentCandidate.value+
+          '?tenantId='+encodeURIComponent(tenantId),'DELETE');
+        notice(result.removed?'Candidate removed from draft; no call started.':'Candidate was already absent.');
+        await refreshCandidateList();
+      }catch(err){asError(err)}
+    },true);
+    const refreshCandidateList=async()=>{
+      currentCandidate.replaceChildren();
+      if(!campaignPick.value){removeCandidate.disabled=true;return}
+      const d=await api('/v1/human/campaigns/'+campaignPick.value+'/candidates?tenantId='+encodeURIComponent(tenantId));
+      currentCandidate.replaceChildren(...d.candidates.map(c=>
+        node('option',{value:c.leadId,text:c.name+' — '+c.consentStatus+'/'+c.dndStatus})));
+      removeCandidate.disabled=d.candidates.length===0;
+    };
+    campaignPick.addEventListener('change',()=>refreshCandidateList().catch(asError));
+    const candidateActions=div('formrow',lab('Candidates in selected draft',currentCandidate),removeCandidate);
+    campaignCard.append(candidateActions);
+    await refreshCandidateList();
     pickForm.addEventListener('submit',async e=>{e.preventDefault();try{
       if(!campaignPick.value||!candidatePick.value)throw Error('Create a draft and a lead first');
       const result=await api('/v1/human/campaigns/'+campaignPick.value+'/candidates','POST',
         {tenantId,leadIds:[candidatePick.value]});
-      notice('Candidate references added: '+result.inserted+'. No call started.');
+      notice('Candidate references added: '+result.inserted+'. No call started.');await refreshCandidateList();
     }catch(err){asError(err)}});
     campaignCard.append(pickForm);
   }

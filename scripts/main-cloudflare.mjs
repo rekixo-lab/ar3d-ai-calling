@@ -28,10 +28,17 @@ export const REQUIRED_COLUMNS = Object.freeze({
     human_users: Object.freeze(['id','global_role','password_hash']),
     human_sessions: Object.freeze(['token_hash','expires_at']),
     human_mfa_settings: Object.freeze(['user_id','recovery_generation_id','enabled_at']),
+    human_mfa_recovery_codes: Object.freeze(['user_id','code_hash','used_at']),
+    human_ip_login_limits: Object.freeze(['ip_hash','attempt_count','blocked_until']),
   }),
   CRM_DB: Object.freeze({
     leads: Object.freeze(['tenant_id','consent_status','dnd_status','interest_status','followup_at']),
     conversation_simulations: Object.freeze(['tenant_id','state_json','expires_at']),
+    lead_opt_out_events: Object.freeze(['tenant_id','lead_id','source','created_at']),
+    lead_consent_evidence: Object.freeze(['tenant_id','lead_id','review_status','submitted_by']),
+    call_campaign_drafts: Object.freeze(['tenant_id','status','language_mode']),
+    call_campaign_candidates: Object.freeze(['tenant_id','campaign_id','lead_id']),
+    agents: Object.freeze(['tenant_id','status','questions_json']),
   }),
 });
 const accountPattern = /^[a-f0-9]{32}$/i;
@@ -74,6 +81,31 @@ export function makeMainConfig(template, credentials) {
       database_id: row.binding === 'CONTROL_DB' ? credentials.control : credentials.crm,
     })),
   };
+}
+
+
+/**
+ * Check the safety-critical CRM triggers, not merely tables with expected
+ * names. An incomplete migration must never be treated as deploy-ready.
+ * This is not a substitute for manual data integrity and security review.
+ */
+export const REQUIRED_SAFETY_TRIGGERS = Object.freeze({
+  trg_prevent_lead_opt_out_reversal: ['before update','on leads','lead_opt_out_events','raise(abort'],
+  trg_block_unverified_consent_update: ['before update','on leads','raise(abort'],
+  trg_block_unverified_consent_insert: ['before insert on leads','raise(abort'],
+  trg_no_call_launch: ['before insert on calls','raise(abort'],
+  trg_agents_block_active_insert: ['before insert on agents','raise(abort'],
+  trg_agents_block_active_update: ['before update of status on agents','raise(abort'],
+});
+export function checkSafetyTriggers(records) {
+  if (!Array.isArray(records)) throw Error('Invalid CRM trigger inspection result.');
+  const triggers = new Map(records.map(row => [row?.name, String(row?.sql || '')
+    .toLowerCase().replace(/\s+/g, ' ').trim()]));
+  for (const [name, signatures] of Object.entries(REQUIRED_SAFETY_TRIGGERS)) {
+    const sql = triggers.get(name);
+    if (!sql || signatures.some(signature => !sql.includes(signature)))
+      throw Error('CRM safety trigger missing or invalid: ' + name + '. Deployment refused.');
+  }
 }
 
 export function checkTables(tables, binding, mode) {
@@ -132,12 +164,22 @@ export async function inspectCloudflare({ credentials, mode, apiFetch = fetch, t
     const state = checkTables(names, binding, mode);
     modes[binding] = state;
     if (state === 'ready') {
+      if (binding === 'CRM_DB') {
+        const triggers = await query(id, "SELECT name,sql FROM sqlite_master WHERE type='trigger' AND name LIKE 'trg_%'");
+        checkSafetyTriggers(triggers);
+      }
       for (const table of Object.keys(REQUIRED_COLUMNS[binding])) {
         const columns = await query(id, 'PRAGMA table_info(' + table + ')');
         checkColumns(columns.map(x => x.name), binding, table);
       }
     }
   }
+  // The separate private R2 bucket must exist in the same account. This is
+  // read-only verification, never a bucket create/delete operation.
+  const bucketResult = await call('https://api.cloudflare.com/client/v4/accounts/' +
+    credentials.account + '/r2/buckets/ar3d-calling-recordings');
+  if (bucketResult?.name !== 'ar3d-calling-recordings')
+    throw Error('Main R2 bucket is missing or belongs to an unexpected resource.');
   // Preflight rejects a mixed state. This stops accidental double-initialize.
   if (mode === 'preflight' && modes.CONTROL_DB !== modes.CRM_DB)
     throw Error('D1 databases have mixed initialized/empty states; manual reconciliation required.');

@@ -16,12 +16,14 @@ async function body(req){
   return parseJsonBody(s,10000);
 }
 export async function handleCampaignRequest(req,env,user){
-  const url=new URL(req.url),path=url.pathname,method=req.method,match=path.match(route);
+  const url=new URL(req.url),path=url.pathname,method=req.method;
+  const removal=path.match(/^\/v1\/human\/campaigns\/([a-f0-9-]{36})\/candidates\/([a-f0-9-]{36})$/i);
+  const match=path.match(route)||removal;
   if(path!=='/v1/human/campaigns'&&!match)return null;
   try{
     const d=method==='POST'?await body(req):null;
     const tenantId=method==='POST'?d.tenantId:url.searchParams.get('tenantId');
-    const tenant=await requireMembership(env.CONTROL_DB,user,tenantId,method==='POST');
+    const tenant=await requireMembership(env.CONTROL_DB,user,tenantId,method==='POST'||method==='DELETE');
     if(!tenant)return fail('forbidden',403);
     const db=resolveCrmDb(env,tenant),tid=tenant.tenant_id;
     if(path==='/v1/human/campaigns'&&method==='GET'){
@@ -44,6 +46,16 @@ export async function handleCampaignRequest(req,env,user){
     const campaignId=match[1];
     const record=await db.prepare("SELECT id,name,language_mode AS languageMode,purpose,status FROM call_campaign_drafts WHERE tenant_id=? AND id=? LIMIT 1").bind(tid,campaignId).first();
     if(!record)return fail('campaign not found',404);
+    if(method==='DELETE'&&removal){
+      const at=new Date().toISOString();
+      const result=await db.batch([
+        db.prepare("INSERT INTO crm_audit_events(tenant_id,id,actor,action,target_id,created_at) SELECT ?,?,'human:'||?,'campaign.candidate_removed',lead_id,? FROM call_campaign_candidates WHERE tenant_id=? AND campaign_id=? AND lead_id=?")
+          .bind(tid,crypto.randomUUID(),user.id,at,tid,campaignId,removal[2]),
+        db.prepare('DELETE FROM call_campaign_candidates WHERE tenant_id=? AND campaign_id=? AND lead_id=?')
+          .bind(tid,campaignId,removal[2])
+      ]);
+      return json({removed:Number(result[1]?.meta?.changes||0)>0,dialingEnabled:false});
+    }
     if(method==='GET'&&!match[2])return json({campaign:record,dialingEnabled:false});
     if(method==='GET'&&match[2]==='candidates'){
       const rows=await db.prepare("SELECT cc.lead_id AS leadId,l.name,l.consent_status AS consentStatus,l.dnd_status AS dndStatus FROM call_campaign_candidates cc JOIN leads l ON l.tenant_id=cc.tenant_id AND l.id=cc.lead_id WHERE cc.tenant_id=? AND cc.campaign_id=? ORDER BY cc.created_at DESC LIMIT 100").bind(tid,campaignId).all();

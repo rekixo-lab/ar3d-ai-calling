@@ -170,3 +170,8 @@ The secret is never sent to the browser. Replace the example password; use a pas
 ## Site visit status updates
 
 Client admins can transition an owned visit from `requested` to `confirmed`/`cancelled`, and from `confirmed` to `completed`/`cancelled` through `PATCH /v1/human/visits/:id` with `{tenantId,status}`. The CRM UI provides controls and every transition creates a tenant-scoped audit event. No calendar booking, call or customer notification is performed. No SQL migration is required.
+
+
+### Draft campaign candidate removal
+
+Client admins can remove an incorrect lead candidate from their own non-executable draft with `DELETE /v1/human/campaigns/:id/candidates/:leadId?tenantId=...`. The Dashboard lists candidates for the selected draft with a remove control. Removal writes a tenant-scoped audit event only for an existing candidate; it **never** updates the underlying lead, Consent/DND fields, or initiates calls. A viewer cannot remove candidates. No new SQL migration is required.
