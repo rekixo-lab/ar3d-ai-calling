@@ -1,6 +1,6 @@
-# AR3D AI Calling — Main Cloudflare Setup (No Staging)
+# AR3D AI Calling — Main Cloudflare Setup
 
-**Status:** AR3D AI Calling is a development-grade CRM and text conversation simulator, **not a production-ready voice calling service**. The main Worker can be deployed without a separate staging environment, but use synthetic/demo data only until identity, privacy, retention, opt-out, and compliance protections are hardened. This setup does **not** make real phone calls.
+**Status:** AR3D AI Calling is a development-grade CRM and text conversation simulator, **not a production-ready voice calling service**. The main Worker can be deployed at its own isolated workers.dev address, but use synthetic/demo data only until identity, privacy, retention, opt-out, and compliance protections are hardened. This setup does **not** make real phone calls.
 
 This repository is public. Never commit or paste Cloudflare tokens, business IDs, database UUIDs, admin passwords, real leads, recordings, or customer data to GitHub issues, README files, or chat. GitHub Environment secrets are encrypted and not exposed in source.
 
@@ -47,4 +47,3 @@ The first human Super Admin still needs one manual credential setup. Set `ADMIN_
 
 Complete MFA/email verification for admins, rate limiting, data protection, consent/DND audit evidence, retention/deletion, tenancy limits, disaster recovery, and Indian telecom provider onboarding. Lead imports do **not** authorize outbound calls. Paid subscriptions, telephony, AI voice streaming, dedicated D1 provisioning, billing and recordings are not live yet.
 
-[Original staging notes (not required for this main-only approach)](STAGING.md).
