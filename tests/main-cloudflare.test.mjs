@@ -74,6 +74,7 @@ function cloudflareMock({ controlTables=[],crmTables=[],controlName='ar3d-callin
         else if(sql.includes('human_users')) rows=['id','global_role','password_hash'].map(name=>({name}));
         else if(sql.includes('human_mfa_settings')) rows=['user_id','recovery_generation_id','enabled_at'].map(name=>({name}));
         else if(sql.includes('human_mfa_recovery_codes')) rows=['user_id','code_hash','used_at'].map(name=>({name}));
+        else if(sql.includes('provider_event_inbox')) rows=['tenant_id','provider','event_id','status'].map(name=>({name}));
         else if(sql.includes('human_ip_login_limits')) rows=['ip_hash','attempt_count','blocked_until'].map(name=>({name}));
         else if(sql.includes('lead_opt_out_events')) rows=['tenant_id','lead_id','source','created_at'].map(name=>({name}));
         else if(sql.includes('lead_consent_evidence')) rows=['tenant_id','lead_id','review_status','submitted_by'].map(name=>({name}));
@@ -128,4 +129,8 @@ test('ready schema checks post-migration safety columns, not just original table
 
 test('ready deployment blocks missing tenant suspension state tracking', () => {
   assert.throws(()=>checkColumns(['id','plan_code','storage_mode'],'CONTROL_DB','tenants'),/missing columns/);
+});
+
+test('preflight refuses incomplete provider event inbox schema',()=>{
+  assert.throws(()=>checkColumns(['tenant_id','provider'],'CONTROL_DB','provider_event_inbox'),/missing columns/);
 });
