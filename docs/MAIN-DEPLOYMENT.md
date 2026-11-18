@@ -1,70 +1,50 @@
-# AR3D AI Calling — Main Cloudflare setup (no staging)
+# AR3D AI Calling — Main Cloudflare Setup (No Staging)
 
-The main infrastructure has separate names from the existing AR3D Platform and AR3D Engine services. The new workflow **never** changes Platform/Engine Workers or databases and **never** runs database migrations automatically.
+**Status:** AR3D AI Calling is a development-grade CRM and text conversation simulator, **not a production-ready voice calling service**. The main Worker can be deployed without a separate staging environment, but use synthetic/demo data only until identity, privacy, retention, opt-out, and compliance protections are hardened. This setup does **not** make real phone calls.
 
-**Current software is an early multi-tenant CRM / text simulator, NOT production-ready calling software.** The deployment below is for an isolated main Worker with synthetic demo data only. Do not import real clients' leads, phone numbers or recordings until security, consent, retention, privacy, and calling compliance requirements are completed.
+This repository is public. Never commit or paste Cloudflare tokens, business IDs, database UUIDs, admin passwords, real leads, recordings, or customer data to GitHub issues, README files, or chat. GitHub Environment secrets are encrypted and not exposed in source.
 
-## 1. Main resources (Cloudflare)
+## Existing Cloudflare resources (already created by the operator)
 
-Create or verify these exact names in one Cloudflare account:
+Check that they exist in the **same** Cloudflare account:
 
-- D1: `ar3d-calling-control`
-- D1: `ar3d-calling-shared-crm`
-- R2 private bucket: `ar3d-calling-recordings`
+- D1 database: `ar3d-calling-control`
+- D1 database: `ar3d-calling-shared-crm`
+- Private R2 bucket: `ar3d-calling-recordings`
 
-Never use the existing `tiyansh-production`, `rekixo-3d-production`, or their R2 buckets.
+**Never** select the existing AR3D Platform D1 (`tiyansh-production`) or AR3D Engine D1 (`rekixo-3d-production`) or either project's R2 bucket. Do not change any live AR3D Workers, routes or domains. The new Worker is `ar3d-ai-calling`, published only to its own `workers.dev` URL.
 
-## 2. GitHub production environment
+## One-time GitHub setup — 4 environment secrets
 
-1. In [GitHub Environments](https://github.com/rekixo-lab/ar3d-ai-calling/settings/environments), create `production` (lowercase).
-2. Restrict environment deployments to branch `main`. If available, require a human deployment reviewer.
-3. Add four **Environment secrets** in this environment:
+1. Open [AR3D AI Calling → Settings → Environments](https://github.com/rekixo-lab/ar3d-ai-calling/settings/environments).
+2. Create or open environment `production` (lowercase). Restrict deployments to `main`; enable required reviewers if your GitHub plan supports them.
+3. Under **Environment secrets**, add these 4 names:
 
-| Secret name | Value |
+| Name | Value |
 | --- | --- |
-| `CLOUDFLARE_API_TOKEN` | Scoped Cloudflare token with permission to deploy this Worker and read the main D1 databases. Never paste in source, an issue, or chat. |
-| `CLOUDFLARE_ACCOUNT_ID` | Cloudflare account ID: **32 hexadecimal characters** (not a D1 UUID). |
-| `AR3D_MAIN_CONTROL_DB_ID` | UUID of D1 `ar3d-calling-control`. |
-| `AR3D_MAIN_CRM_DB_ID` | UUID of D1 `ar3d-calling-shared-crm`. |
+| `CLOUDFLARE_API_TOKEN` | New Cloudflare API token scoped to this account with Workers Scripts Edit and D1 Write permissions; grant only the required resources. Use Cloudflare's **API Tokens**, not the Global API Key. |
+| `CLOUDFLARE_ACCOUNT_ID` | 32-character hexadecimal Cloudflare account ID. |
+| `AR3D_MAIN_CONTROL_DB_ID` | D1 UUID shown on the `ar3d-calling-control` database details page. |
+| `AR3D_MAIN_CRM_DB_ID` | Different D1 UUID from `ar3d-calling-shared-crm`. |
 
-Never store the admin password or bootstrap token in GitHub source. Use a least-privilege Cloudflare API token; do not use the Global API Key.
+An API token used to initialize databases needs **D1 Write** (D1 Read is not enough). Revoke the token after setup if it is no longer needed; rotate tokens if exposed. Do not send any secret values to ChatGPT.
 
-## 3. Initialize the two newly-created main D1 databases (one time)
+## Three GitHub Actions operations — no local terminal or manual SQL copy
 
-Only for these **brand-new, empty** D1 databases. Check exact names before every operation. Apply SQL files in **this order**. Use the Cloudflare D1 SQL Console by pasting the corresponding migration, or an authorized local Wrangler session:
+Go to [Actions](https://github.com/rekixo-lab/ar3d-ai-calling/actions) and choose **AR3D AI Calling - main Cloudflare setup (manual)**. Use branch `main`, type `AR3D_MAIN_ONLY`, then run the following choices in order:
 
-Control database:
-1. `migrations/control/0001_init.sql`
-2. `migrations/control/0002_human_access.sql`
+1. **`preflight`** — read-only Cloudflare API checks. Validates account format, distinct database IDs, the **exact D1 database names**, and whether both schemas are both empty or both complete. No deployment, SQL changes, or existing AR3D changes.
+2. **`initialize`** — **one-time only, for newly created empty AR3D Calling D1 databases**. Repeats the exact name and empty checks, runs the Control migrations `0001` → `0002` and CRM migrations `0001` → `0002` → `0003` using Wrangler `--remote --yes`, and verifies all expected tables and key columns. Will refuse to run on an already initialized or partially migrated database. Do not use it to update a running database.
+3. **`deploy`** — checks that all required tables and columns exist, then deploys only the `ar3d-ai-calling` Worker with its two new D1 bindings and new R2 bucket. It does not modify the existing AR3D Platform/Engine Workers, routes, or databases.
 
-Shared CRM database:
-1. `migrations/crm/0001_init.sql`
-2. `migrations/crm/0002_lead_workflow.sql`
-3. `migrations/crm/0003_conversation_simulator.sql`
+The same workflow is **manual-only**; there is no auto deploy on push. If any run fails, inspect the error. **Do not repeat `initialize` after a partial failure; reconcile the migration state deliberately before proceeding.** The workflow does not create databases or buckets; those must already exist. If GitHub Secrets are missing, it fails without changing Cloudflare.
 
-Example for local Wrangler after `npx wrangler login`, with `wrangler.jsonc` populated from `wrangler.example.jsonc` using the two **main** D1 IDs (this config is Git-ignored):
+## After deploy: bootstrap Super Admin securely
 
-```sh
-npx wrangler d1 execute ar3d-calling-control --remote --config wrangler.jsonc --file migrations/control/0001_init.sql
-npx wrangler d1 execute ar3d-calling-control --remote --config wrangler.jsonc --file migrations/control/0002_human_access.sql
-npx wrangler d1 execute ar3d-calling-shared-crm --remote --config wrangler.jsonc --file migrations/crm/0001_init.sql
-npx wrangler d1 execute ar3d-calling-shared-crm --remote --config wrangler.jsonc --file migrations/crm/0002_lead_workflow.sql
-npx wrangler d1 execute ar3d-calling-shared-crm --remote --config wrangler.jsonc --file migrations/crm/0003_conversation_simulator.sql
-```
+The first human Super Admin still needs one manual credential setup. Set `ADMIN_BOOTSTRAP_TOKEN` to a random 32+ character Worker secret on **the new** `ar3d-ai-calling` Worker only; create the first Super Admin from a secure machine using `/v1/human/bootstrap` as documented in [README](../README.md). Once the `/app` admin sign-in succeeds, **remove** the Worker bootstrap secret immediately and invalidate any one-time credential copies. Never place bootstrap tokens in query strings, browser JavaScript, or GitHub workflow logs.
 
-**Never re-run additive ALTER TABLE migrations on already-initialized data.** The deploy workflow verifies key tables, but does not mutate schema.
+## Before real clients and live calls
 
-## 4. Verify and deploy manually from GitHub
+Complete MFA/email verification for admins, rate limiting, data protection, consent/DND audit evidence, retention/deletion, tenancy limits, disaster recovery, and Indian telecom provider onboarding. Lead imports do **not** authorize outbound calls. Paid subscriptions, telephony, AI voice streaming, dedicated D1 provisioning, billing and recordings are not live yet.
 
-1. In [Actions](https://github.com/rekixo-lab/ar3d-ai-calling/actions), choose `AR3D AI Calling - main Cloudflare deploy (manual)`.
-2. Select branch `main`.
-3. Set `confirm` to `AR3D_MAIN_ONLY`.
-4. Select `operation=verify` first. This runs tests and verifies exact D1 names/IDs and migrated tables. No deployment.
-5. If verification passes and you explicitly authorize deployment, repeat with `operation=deploy`.
-6. Workflow uses `ar3d-ai-calling` as the **main** Worker name and enables its isolated `workers.dev` URL (not existing AR3D domains).
-
-## 5. First login and safety
-
-After deploy, set a one-time `ADMIN_BOOTSTRAP_TOKEN` secret (32+ unpredictable characters) **directly on the new Worker in Cloudflare**. Bootstrap the first Super Admin from a trusted HTTPS server-to-server request (see README). Verify that login succeeds at `/app`. Remove the bootstrap secret from Cloudflare after bootstrap to disable machine-bootstrap credentials.
-
-A deployment is **not** evidence that AI voice calling, subscriptions, real phone numbers, or privacy/compliance work are completed. Until these are complete, use synthetic records only and do not open the service to paying clients.
+[Original staging notes (not required for this main-only approach)](STAGING.md).
