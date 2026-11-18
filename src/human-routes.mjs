@@ -1,4 +1,5 @@
 import {handleCrmRequest} from './crm-routes.mjs';
+import {handleVisitStatusRequest} from './visit-status-routes.mjs';
 import {handleCampaignRequest} from './campaign-routes.mjs';
 import {handleProjectLinkRequest} from './project-link-routes.mjs';
 import {handleConsentRequest} from './consent-routes.mjs';
@@ -202,6 +203,8 @@ export async function handleHumanRequest(req,env){
     if(projectResponse)return projectResponse;
     const campaignResponse=await handleCampaignRequest(req,env,user);
     if(campaignResponse)return campaignResponse;
+    const visitResponse=await handleVisitStatusRequest(req,env,user);
+    if(visitResponse)return visitResponse;
     const crmResponse=await handleCrmRequest(req,env,user);
     if(crmResponse)return crmResponse;
     const simulationResponse=await handleConversationRequest(req,env,user);

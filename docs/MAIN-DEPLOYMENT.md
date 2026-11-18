@@ -34,7 +34,7 @@ An API token used to initialize databases needs **D1 Write** (D1 Read is not eno
 Go to [Actions](https://github.com/rekixo-lab/ar3d-ai-calling/actions) and choose **AR3D AI Calling - main Cloudflare setup (manual)**. Use branch `main`, type `AR3D_MAIN_ONLY`, then run the following choices in order:
 
 1. **`preflight`** — read-only Cloudflare API checks. Validates account format, distinct database IDs, the **exact D1 database names**, and whether both schemas are both empty or both complete. No deployment, SQL changes, or existing AR3D changes.
-2. **`initialize`** — **one-time only, for newly created empty AR3D Calling D1 databases**. Repeats the exact name and empty checks, runs the Control migrations `0001` → `0002` → `0003` → `0004` → `0005` and CRM migrations `0001` → `0002` → `0003` → `0004` → `0005` → `0006` using Wrangler `--remote --yes`, and verifies all expected tables and key columns. Will refuse to run on an already initialized or partially migrated database. Do not use it to update a running database.
+2. **`initialize`** — **one-time only, for newly created empty AR3D Calling D1 databases**. Repeats the exact name and empty checks, runs the Control migrations `0001` → `0002` → `0003` → `0004` → `0005` and CRM migrations `0001` → `0002` → `0003` → `0004` → `0005` → `0006` → `0007` using Wrangler `--remote --yes`, and verifies all expected tables and key columns. Will refuse to run on an already initialized or partially migrated database. Do not use it to update a running database.
 3. **`deploy`** — checks that all required tables and columns exist, then deploys only the `ar3d-ai-calling` Worker with its two new D1 bindings and new R2 bucket. It does not modify the existing AR3D Platform/Engine Workers, routes, or databases.
 
 The same workflow is **manual-only**; there is no auto deploy on push. If any run fails, inspect the error. **Do not repeat `initialize` after a partial failure; reconcile the migration state deliberately before proceeding.** The workflow does not create databases or buckets; those must already exist. If GitHub Secrets are missing, it fails without changing Cloudflare.
@@ -89,3 +89,8 @@ The `/app/simulator` preview displays locale-tagged text segments for future Hin
 ## Campaign draft migration (CRM v6)
 
 New empty CRM D1 initialization includes 0006_campaign_drafts.sql. If the database is already initialized, back it up first and apply only the reviewed incremental v6 migration. Campaigns are DRAFT ONLY, cannot dial, and a database trigger forbids inserting call rows. The project link registry uses existing control D1 project_links with pending status, without access to AR3D Platform/Engine. Machine-admin API endpoints now require an independent optional ADMIN_API_TOKEN Worker secret; ADMIN_BOOTSTRAP_TOKEN is only for first Super Admin bootstrap. See docs/MANUAL-ACTIONS.md.
+
+
+## Agent safety (CRM schema v7)
+
+`0007_agent_safety.sql` blocks any new or updated agent from entering `active` status until provider onboarding, verified customer consent/DND, and real calling safety reviews exist. A pending/call-disabled CRM can create or pause draft AI agents and edit their questions. If the main CRM D1 already exists, back up and inspect it before applying the *incremental* v7 migration. Do not rerun one-time initialization.

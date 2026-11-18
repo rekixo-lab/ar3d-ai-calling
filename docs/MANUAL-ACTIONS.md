@@ -26,3 +26,6 @@ Do the following only when at your own secure computer. This checklist is not pr
 Real provider webhook adapter and signature verification; call initiation and phone-number inventory; realtime media transport; production STT/TTS/LLM prompts and human fallback; provider DND sync; consent verification; calls/transcripts/recordings handling and retention; usage metering, customer billing and payment processing; per-plan limits; AR3D knowledge verification; secure data deletion and full disaster recovery. All of these require additional implementation and/or provider access.
 
 The build may be deployed to a main Worker for synthetic tests; it is **not production-ready for live calls or customer PII**.
+
+
+**New migration:** CRM D1 schema v7, `migrations/crm/0007_agent_safety.sql`, is required after v6. It is automatic only on brand-new empty CRM initialization. Existing independently created D1 needs a backup and reviewed incremental application. Do not activate real AI agents/calls by dropping safety triggers.

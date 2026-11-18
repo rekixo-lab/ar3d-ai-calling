@@ -13,7 +13,23 @@ const bearer=(req)=>(req.headers.get('authorization')||'').match(/^Bearer (.+)$/
 const isPost=(r)=>r.method==='POST';
 const isGet=(r)=>r.method==='GET';
 const allowedOrigin=(r)=>!r.headers.has('origin')||new URL(r.headers.get('origin')).origin===new URL(r.url).origin;
-async function body(req){return parseJsonBody(await req.text())}
+async function body(req){
+  const max=16384;
+  if(Number(req.headers.get('content-length'))>max)throw Error('request body too large');
+  const reader=req.body?.getReader();
+  if(!reader)throw Error('request body required');
+  const dec=new TextDecoder('utf-8',{fatal:true});let size=0,text='';
+  try{
+    while(true){
+      const {done,value}=await reader.read();if(done)break;
+      size+=value.byteLength;
+      if(size>max){await reader.cancel();throw Error('request body too large')}
+      text+=dec.decode(value,{stream:true});
+    }
+    text+=dec.decode();
+  }finally{reader.releaseLock()}
+  return parseJsonBody(text,max);
+}
 async function adminAuth(req,env){
   if (!env.ADMIN_API_TOKEN || String(env.ADMIN_API_TOKEN).length < 32) return false;
   const token=bearer(req);
