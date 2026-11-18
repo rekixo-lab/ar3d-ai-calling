@@ -45,7 +45,8 @@ export async function handleCrmRequest(req,env,user){
   if(!path.startsWith('/v1/human/'))return null;
   const importMatch=path==='/v1/human/import/preview'||path==='/v1/human/import/commit';
   const leadMatch=path.match(/^\/v1\/human\/leads\/([0-9a-f-]{36})$/i);
-  if(!importMatch&&!leadMatch&&!['/v1/human/leads','/v1/human/visits','/v1/human/notes'].includes(path))return null;
+  const optOutMatch=path.match(/^\/v1\/human\/leads\/([0-9a-f-]{36})\/opt-out$/i);
+  if(!importMatch&&!leadMatch&&!optOutMatch&&!['/v1/human/leads','/v1/human/visits','/v1/human/notes'].includes(path))return null;
   if(!env.CONTROL_DB)return fail('control database unavailable',503);
   try{
     if(importMatch&&method==='POST'){
@@ -98,6 +99,56 @@ export async function handleCrmRequest(req,env,user){
         access.db.prepare('SELECT COUNT(*) AS total FROM leads '+sql).bind(...where).first()
       ]);
       return json({leads:list.results,total:Number(count?.total||0),limit,offset});
+    }
+
+    // The only exposed contact-preference mutation is a one-way opt-out.
+    // Never turn this into consent-granting, dialing, or bulk-import behavior.
+    if(optOutMatch&&method==='POST'){
+      const d=await payload(req),access=await resolve(env,user,d.tenantId,true);
+      if(!access)return fail('forbidden',403);
+      if(Object.keys(d).some(k=>!['tenantId','source','reason'].includes(k)))return fail('invalid opt-out field');
+      const source=d.source||'admin_action';
+      if(!['customer_request','admin_action','other'].includes(source))return fail('invalid opt-out source');
+      const reason=d.reason===undefined||d.reason===null?'':d.reason;
+      if(typeof reason!=='string'||reason.length>500||/[\u0000-\u001f]/u.test(reason))
+        return fail('invalid opt-out reason');
+      const lead=await access.db.prepare('SELECT id,consent_status,dnd_status FROM leads WHERE tenant_id=? AND id=?')
+        .bind(access.tid,optOutMatch[1]).first();
+      if(!lead)return fail('lead not found',404);
+      if(lead.consent_status==='denied'&&lead.dnd_status==='blocked')
+        return json({ok:true,alreadyBlocked:true,consentStatus:'denied',dndStatus:'blocked'});
+      const at=now(),eventId=crypto.randomUUID(),auditId=crypto.randomUUID();
+      // D1.batch is transactional. Record the source and audit BEFORE the status
+      // change; both inserts are conditional on the previous unblocked state.
+      // The DB trigger prevents reverting a lead with an opt-out event.
+      const result=await access.db.batch([
+        access.db.prepare(`INSERT INTO lead_opt_out_events
+          (tenant_id,id,lead_id,source,reason,actor,created_at)
+          SELECT tenant_id,?,id,?,?,?,? FROM leads
+          WHERE tenant_id=? AND id=? AND (consent_status!='denied' OR dnd_status!='blocked')`)
+          .bind(eventId,source,reason.trim()||null,user.id,at,access.tid,optOutMatch[1]),
+        access.db.prepare(`INSERT INTO crm_audit_events
+          (tenant_id,id,actor,action,target_id,created_at)
+          SELECT tenant_id,?,'human:'||?,'lead.opted_out',id,?
+          FROM leads WHERE tenant_id=? AND id=?
+          AND (consent_status!='denied' OR dnd_status!='blocked')`)
+          .bind(auditId,user.id,at,access.tid,optOutMatch[1]),
+        access.db.prepare(`UPDATE leads SET consent_status='denied',dnd_status='blocked',updated_at=?
+          WHERE tenant_id=? AND id=?
+          AND (consent_status!='denied' OR dnd_status!='blocked')`)
+          .bind(at,access.tid,optOutMatch[1])
+      ]);
+      const changed=Number(result[2]?.meta?.changes||0);
+      return json({ok:true,alreadyBlocked:changed===0,consentStatus:'denied',dndStatus:'blocked'});
+    }
+    if(optOutMatch&&method==='GET'){
+      const access=await resolve(env,user,u.searchParams.get('tenantId'));
+      if(!access)return fail('forbidden',403);
+      const events=await access.db.prepare(`SELECT e.id,e.source,e.reason,e.created_at AS createdAt
+        FROM lead_opt_out_events e JOIN leads l ON l.tenant_id=e.tenant_id AND l.id=e.lead_id
+        WHERE e.tenant_id=? AND e.lead_id=? ORDER BY e.created_at DESC LIMIT 50`)
+        .bind(access.tid,optOutMatch[1]).all();
+      return json({events:events.results});
     }
     if(leadMatch&&method==='PATCH'){
       const d=await payload(req),access=await resolve(env,user,d.tenantId,true);
