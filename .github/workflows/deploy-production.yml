@@ -73,6 +73,7 @@ jobs:
           npx --yes wrangler@4 d1 execute ar3d-calling-shared-crm --remote --yes --config wrangler.jsonc --file migrations/crm/0003_conversation_simulator.sql
           npx --yes wrangler@4 d1 execute ar3d-calling-shared-crm --remote --yes --config wrangler.jsonc --file migrations/crm/0004_lead_opt_out.sql
           npx --yes wrangler@4 d1 execute ar3d-calling-shared-crm --remote --yes --config wrangler.jsonc --file migrations/crm/0005_consent_evidence.sql
+          npx --yes wrangler@4 d1 execute ar3d-calling-shared-crm --remote --yes --config wrangler.jsonc --file migrations/crm/0006_campaign_drafts.sql
       - name: Verify post-initialization schema before proceeding
         if: inputs.operation == 'initialize'
         run: node scripts/main-cloudflare.mjs ready
