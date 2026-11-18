@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import worker from '../src/index.mjs';
-import {base32,totpAt,verifyTotp,encryptSecret,decryptSecret,challengeAfterPassword,handleMfaSettings} from '../src/mfa.mjs';
+import {base32,totpAt,verifyTotp,encryptSecret,decryptSecret,challengeAfterPassword,handleMfaSettings,finishMfaLogin} from '../src/mfa.mjs';
 import {makePassword} from '../src/human-auth.mjs';
 const enc=new TextEncoder(),env={MFA_ENCRYPTION_KEY:'test only MFA encryption key with sufficient entropy to be used in mocked calls'};
 test('RFC6238 SHA1 known vector is 287082 at second 59; replay denied',async()=>{
@@ -73,4 +73,64 @@ test('MFA login cannot be verified without same-origin request and trusted IP',a
       CONTROL_DB:{prepare(){throw Error('not queried')}},LOGIN_RATE_LIMIT_SECRET:'long enough secret to pass configuration 123456'
     });
   assert.equal(r2.status,503);
+});
+
+test('valid TOTP finishes an MFA challenge and creates an HttpOnly session only once',async()=>{
+  const secret=new TextEncoder().encode('12345678901234567890');
+  const stored=await encryptSecret(secret,env);
+  const code=await totpAt(secret,Math.floor(Date.now()/30000));
+  const log=[];
+  let attempted=false;
+  const db={
+    prepare(sql){log.push(sql);return {bind(...params){return {
+      async first(){
+        if(sql.includes('INSERT INTO human_ip_login_limits'))return {attempt_count:1,blocked_until:0};
+        if(sql.includes('FROM human_mfa_challenges'))return {
+          user_id:'admin1',attempts:0,secret_ciphertext:stored.secret_ciphertext,
+          secret_iv:stored.secret_iv,last_used_step:-1
+        };
+        return null;
+      },
+      async run(){return {meta:{changes:1}}}
+    }}}},
+    async batch(){return attempted?[{meta:{changes:0}},{meta:{changes:0}}]:
+      (attempted=true,[{meta:{changes:1}},{meta:{changes:1}}])}
+  };
+  const request=new Request('https://example.test/v1/human/login/mfa',{method:'POST',
+    headers:{origin:'https://example.test','cf-connecting-ip':'203.0.113.12'}});
+  const data={challenge:'a'.repeat(64),code};
+  const runtime={CONTROL_DB:db,LOGIN_RATE_LIMIT_SECRET:'IP guard secret of sufficient length for verification 123',
+    MFA_ENCRYPTION_KEY:env.MFA_ENCRYPTION_KEY};
+  const res=await finishMfaLogin(request,runtime,data);
+  assert.equal(res.status,200);
+  assert.match(res.headers.get('set-cookie'),/HttpOnly; Secure; SameSite=Strict/);
+  assert.ok(log.some(x=>x.includes('INSERT INTO human_sessions')));
+  const twice=await finishMfaLogin(request,runtime,data);
+  assert.equal(twice.status,409);
+  assert.equal(twice.headers.get('set-cookie'),null);
+});
+test('wrong MFA code increments challenge attempts and does not mint a session',async()=>{
+  const secret=new TextEncoder().encode('12345678901234567890');
+  const stored=await encryptSecret(secret,env);
+  const expected=await totpAt(secret,Math.floor(Date.now()/30000));
+  const wrong=expected==='000000'?'999999':'000000';
+  const statements=[];
+  const db={prepare(sql){statements.push(sql);return {bind(){return {
+    async first(){
+      if(sql.includes('human_ip_login_limits'))return {attempt_count:1,blocked_until:0};
+      if(sql.includes('FROM human_mfa_challenges'))return {user_id:'u',secret_ciphertext:stored.secret_ciphertext,
+        secret_iv:stored.secret_iv,last_used_step:-1,attempts:0};
+      return null;
+    },
+    async run(){return {meta:{changes:1}}}
+  }}}}};
+  const request=new Request('https://example.test/v1/human/login/mfa',{method:'POST',headers:{
+    'cf-connecting-ip':'203.0.113.13'
+  }});
+  const res=await finishMfaLogin(request,{CONTROL_DB:db,
+    LOGIN_RATE_LIMIT_SECRET:'IP guard secret of sufficient length for verification 123',
+    MFA_ENCRYPTION_KEY:env.MFA_ENCRYPTION_KEY},{challenge:'a'.repeat(64),code:wrong});
+  assert.equal(res.status,401);
+  assert.ok(statements.some(s=>s.includes('SET attempts=attempts+1')));
+  assert.ok(!statements.some(s=>s.includes('INSERT INTO human_sessions')));
 });
