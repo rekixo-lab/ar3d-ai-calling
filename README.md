@@ -149,3 +149,11 @@ The secret is never sent to the browser. Replace the example password; use a pas
 - The read-only `/v1/human/leads/:id/call-readiness?tenantId=...` API always returns `eligible:false` until verified provider integrations, caller-number approval and lawful calling-hours checks exist.
 - CRM migration `migrations/crm/0005_consent_evidence.sql` stores evidence references and database triggers that block direct SQL updates/inserts setting `consent_status='granted'` or `dnd_status='allowed'` before independent verification is implemented. This trigger must only be changed with a reviewed future compliance integration.
 - Run the existing main-only manual initialization on **new empty** D1 databases. Already initialized CRM D1 requires an operator-approved incremental migration with a backup; never rerun `initialize`.
+
+
+## Phase 11 — Bilingual speech plan and typed-STT simulation (NO real voice)
+
+- New provider-independent `src/voice-core.mjs` converts the last simulated agent message into bounded Hindi/English text segments with `hi-IN` or `en-IN` locale hints. No TTS audio, speech-to-text, phone call, microphone, voice cloning, or external AI service is connected.
+- `GET /v1/human/simulations/:id/voice-preview?tenantId=...` returns safe text segments only for a signed-in member of the owning tenant. The simulator UI includes a **Preview next spoken turn** button.
+- `POST /v1/human/simulations/:id/speech-turn` (human-client-admin only) takes `{tenantId,expectedRevision,recognition:{source:"typed_demo",transcript:"...",confidence:0.95}}`. It treats the submitted transcript as a **synthetic** STT result, returns "repeat requested" without a write for silence/low confidence, and otherwise advances only the existing tenant-scoped demo state with revision checks. Provider claims are rejected.
+- The existing opt-out rule ends the **demo** without touching CRM consent/DND or placing any calls. No schema migration is required in this phase. This is groundwork for a future verified, compliant realtime voice adapter—not a functioning voice AI integration.
