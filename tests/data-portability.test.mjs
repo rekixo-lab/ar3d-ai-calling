@@ -23,10 +23,10 @@ function fixture(role='client_admin'){
   }}}}};
   const CRM_DB={prepare(sql){return {bind(...params){log.push({db:'crm',sql,params});return {
     async first(){
+      if(sql.includes('AS leadCount'))return {leadCount:3,agentCount:2,draftCampaignCount:1,visitCount:1,syntheticDemoCount:4};
       if(sql.includes('FROM call_campaign_drafts WHERE'))return {id:campaign,status:'draft',name:'Demo'};
       if(sql.includes('COUNT(*) AS total FROM call_campaign_candidates'))return {total:125};
       if(sql.includes('COUNT(*) AS total FROM leads'))return {total:3};
-      if(sql.includes('AS leadCount'))return {leadCount:3,agentCount:2,draftCampaignCount:1,visitCount:1,syntheticDemoCount:4};
       return null;
     },
     async all(){
