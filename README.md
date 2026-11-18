@@ -124,3 +124,11 @@ The secret is never sent to the browser. Replace the example password; use a pas
 - A separate per-IP login budget (60 attempts per 15 minutes, 429 lockout) complements the existing per-email failure lockout. The budget includes both successful and unsuccessful login attempts; clients sharing one public IP may be affected.
 - **Deployment requirement:** set \`LOGIN_RATE_LIMIT_SECRET\` as a Worker secret (32+ random characters) on \`ar3d-ai-calling\` before first human login. If the secret or trusted client-IP header is missing, login fails closed (503).
 - New Control migration: \`migrations/control/0003_ip_login_limits.sql\`. Included in one-time initialization for **new empty databases**; existing databases require reviewed incremental migration after backup. More production controls (MFA, WAF, password recovery, retention) are still outstanding.
+
+## Phase 8 — optional Super Admin Authenticator MFA
+
+- Encrypted TOTP setup for `super_admin` in the Human Dashboard, with 6-digit 30-second Authenticator Codes. The setup secret is displayed only during pending enrollment and stored AES-GCM encrypted in Control D1.
+- After MFA is enabled, password login returns a 5-minute challenge instead of a session; `POST /v1/human/login/mfa` completes it after TOTP verification (max 5 attempts, non-replayable step). Other sessions are revoked on activation.
+- **Required Worker secret:** `MFA_ENCRYPTION_KEY` (32+ randomly generated characters), never commit/share it. Missing key rejects MFA access. Back up the key securely; rotating/loss prevents decryption.
+- **Recovery codes/recovery workflow are not yet implemented.** Enrollment is optional; do not enable this on a sole administrator until an independently verified recovery plan is in place.
+- Migration: `migrations/control/0004_super_admin_mfa.sql` (new Control D1 only, after 0003). Existing initialized databases require reviewed incremental migration.

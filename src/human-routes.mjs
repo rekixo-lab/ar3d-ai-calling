@@ -1,5 +1,6 @@
 import {handleCrmRequest} from './crm-routes.mjs';
 import {reserveLoginAttempt} from './login-guard.mjs';
+import {challengeAfterPassword,finishMfaLogin,handleMfaSettings} from './mfa.mjs';
 import {handleConversationRequest} from './conversation-routes.mjs';
 import {simulatorHtml,simulatorCss,simulatorJs} from './simulator-ui.mjs';
 import {checkSlug,checkName,checkStorageMode,normalizeIndianPhone,resolveCrmDb,sha256hex,parseJsonBody,SOURCES} from './core.mjs';
@@ -53,6 +54,8 @@ async function login(req,env){
     return fail('invalid credentials',401);
   }
   await db.prepare('DELETE FROM human_login_limits WHERE email_hash=?').bind(key).run();
+  const mfa=await db.prepare('SELECT enabled_at FROM human_mfa_settings WHERE user_id=? AND enabled_at IS NOT NULL').bind(row.id).first();
+  if(mfa?.enabled_at)return challengeAfterPassword(db,row,env);
   const token=await newSession(db,row.id);
   return response({ok:true},200,{'Set-Cookie':cookieFor(token)});
 }
@@ -176,9 +179,12 @@ export async function handleHumanRequest(req,env){
       return login(req,env);
     }
     if(path==='/v1/human/accept-invite'&&method==='POST')return acceptInvitation(req,env);
+    if(path==='/v1/human/login/mfa'&&method==='POST')return finishMfaLogin(req,env,await payload(req));
     if(path==='/v1/human/logout'&&method==='POST')return logout(req,env);
     const user=await getSession(req,env.CONTROL_DB);
     if(!user)return fail('sign in required',401);
+    if(path==='/v1/human/mfa'||path==='/v1/human/mfa/setup'||path==='/v1/human/mfa/enable')
+      return handleMfaSettings(req,env,user,method==='POST'?await payload(req):null);
     const crmResponse=await handleCrmRequest(req,env,user);
     if(crmResponse)return crmResponse;
     const simulationResponse=await handleConversationRequest(req,env,user);
