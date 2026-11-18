@@ -116,3 +116,11 @@ The secret is never sent to the browser. Replace the example password; use a pas
 - Database migration: `migrations/crm/0004_lead_opt_out.sql`. Run on NEW CRM databases after `0003` or use an approved incremental migration process for an existing database (see [Main Deployment](docs/MAIN-DEPLOYMENT.md)). The database trigger prevents reversing a recorded opt-out through ordinary SQL updates.
 - Already-imported blocked numbers remain blocked if the same Excel/CSV number is uploaded again; imports do not overwrite existing lead records.
 - Still missing: provider-driven opt-out webhooks, DND API integration, cross-tenant/legal suppression design, and privacy retention/deletion policy. Do not mistake manual CRM suppression for compliance clearance.
+
+
+## Phase 7 — secure login IP budget (main only)
+
+- Human login requires a secret-backed HMAC of the verified Cloudflare \`CF-Connecting-IP\`, stored in Control D1 \`human_ip_login_limits\` (no raw address). Request headers such as \`X-Forwarded-For\` are ignored.
+- A separate per-IP login budget (60 attempts per 15 minutes, 429 lockout) complements the existing per-email failure lockout. The budget includes both successful and unsuccessful login attempts; clients sharing one public IP may be affected.
+- **Deployment requirement:** set \`LOGIN_RATE_LIMIT_SECRET\` as a Worker secret (32+ random characters) on \`ar3d-ai-calling\` before first human login. If the secret or trusted client-IP header is missing, login fails closed (503).
+- New Control migration: \`migrations/control/0003_ip_login_limits.sql\`. Included in one-time initialization for **new empty databases**; existing databases require reviewed incremental migration after backup. More production controls (MFA, WAF, password recovery, retention) are still outstanding.
