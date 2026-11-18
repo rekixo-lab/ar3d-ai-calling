@@ -140,3 +140,12 @@ The secret is never sent to the browser. Replace the example password; use a pas
 - A logged-in Super Admin can **replace all backup codes** by re-entering their current password and a fresh authenticator code. An active session alone cannot rotate codes.
 - Accepting a client invitation with an existing MFA-enabled account now requires the MFA challenge rather than silently creating a password-only session. Invitation acceptance uses IP attempt limits.
 - Control D1 migration `0005_mfa_recovery.sql` is included for new empty databases. Existing databases must be backed up and upgraded incrementally. Full managed admin account recovery remains out of scope; do not lose both your authenticator and unused recovery codes.
+
+
+## Phase 10 — consent evidence intake and call-readiness guard
+
+- Authenticated `client_admin` users can submit a tenant-scoped evidence **reference** with purpose, source, capture time and pending-review status. Viewer members can read their own tenant's evidence.
+- Records are **not independently verified** and never change `leads.consent_status` or `leads.dnd_status`. No telecom provider lookup, calling number, or dialing functionality is enabled.
+- The read-only `/v1/human/leads/:id/call-readiness?tenantId=...` API always returns `eligible:false` until verified provider integrations, caller-number approval and lawful calling-hours checks exist.
+- CRM migration `migrations/crm/0005_consent_evidence.sql` stores evidence references and database triggers that block direct SQL updates/inserts setting `consent_status='granted'` or `dnd_status='allowed'` before independent verification is implemented. This trigger must only be changed with a reviewed future compliance integration.
+- Run the existing main-only manual initialization on **new empty** D1 databases. Already initialized CRM D1 requires an operator-approved incremental migration with a backup; never rerun `initialize`.
