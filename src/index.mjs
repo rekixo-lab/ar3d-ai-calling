@@ -13,7 +13,23 @@ const bearer=(req)=>(req.headers.get('authorization')||'').match(/^Bearer (.+)$/
 const isPost=(r)=>r.method==='POST';
 const isGet=(r)=>r.method==='GET';
 const allowedOrigin=(r)=>!r.headers.has('origin')||new URL(r.headers.get('origin')).origin===new URL(r.url).origin;
-async function body(req){return parseJsonBody(await req.text())}
+async function body(req){
+  const max=16384;
+  if(Number(req.headers.get('content-length'))>max)throw Error('request body too large');
+  const reader=req.body?.getReader();
+  if(!reader)throw Error('request body required');
+  const dec=new TextDecoder('utf-8',{fatal:true});let size=0,text='';
+  try{
+    while(true){
+      const {done,value}=await reader.read();if(done)break;
+      size+=value.byteLength;
+      if(size>max){await reader.cancel();throw Error('request body too large')}
+      text+=dec.decode(value,{stream:true});
+    }
+    text+=dec.decode();
+  }finally{reader.releaseLock()}
+  return parseJsonBody(text,max);
+}
 async function adminAuth(req,env){
   if (!env.ADMIN_API_TOKEN || String(env.ADMIN_API_TOKEN).length < 32) return false;
   const token=bearer(req);
@@ -118,12 +134,12 @@ export default {
     try{
       if(path==='/v1/admin/tenants'&&isPost(req)){
         if(!await adminAuth(req,env))return fail('unauthorized',401);
-        return createTenant(req,env);
+        return await createTenant(req,env);
       }
       const match=path.match(/^\/v1\/admin\/tenants\/([a-f0-9-]{36})\/keys$/);
       if(match&&isPost(req)){
         if(!await adminAuth(req,env))return fail('unauthorized',401);
-        return createKey(req,env,match[1]);
+        return await createKey(req,env,match[1]);
       }
       if(!path.startsWith('/v1/'))return fail('not found',404);
       const tenant=await tenantAuth(req,env);
@@ -133,10 +149,10 @@ export default {
         storageMode:tenant.storage_mode},role:tenant.role});
       if(path==='/v1/leads'&&isPost(req)){
         if(tenant.role!=='client_admin')return fail('insufficient permission',403);
-        return addLead(req,env,tenant);
+        return await addLead(req,env,tenant);
       }
       if(path==='/v1/leads'&&isGet(req))return getLeads(req,env,tenant);
-      if(path==='/v1/agents'&&isPost(req))return addAgent(req,env,tenant);
+      if(path==='/v1/agents'&&isPost(req))return await addAgent(req,env,tenant);
       if(path==='/v1/agents'&&isGet(req))return getAgents(req,env,tenant);
       return fail('not found',404);
     }catch(e){

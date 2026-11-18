@@ -165,3 +165,8 @@ The secret is never sent to the browser. Replace the example password; use a pas
 - Signed-in client admins may register AR3D Platform or Engine project metadata in the isolated control D1. Such links remain pending and do not fetch other projects, verify ownership or provide property facts.
 - Optional backend-only machine admin endpoints now need a separate ADMIN_API_TOKEN, never the one-time human ADMIN_BOOTSTRAP_TOKEN. If unset, machine-admin routes return unauthorized.
 - For manual Cloudflare/telecom/provider/payment requirements, see docs/MANUAL-ACTIONS.md.
+
+
+## Site visit status updates
+
+Client admins can transition an owned visit from `requested` to `confirmed`/`cancelled`, and from `confirmed` to `completed`/`cancelled` through `PATCH /v1/human/visits/:id` with `{tenantId,status}`. The CRM UI provides controls and every transition creates a tenant-scoped audit event. No calendar booking, call or customer notification is performed. No SQL migration is required.

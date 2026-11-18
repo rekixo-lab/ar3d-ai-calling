@@ -118,7 +118,7 @@ async function mfaPanel(main){
 async function superAdmin(main){const panel=div('card',title('Subscription Clients'));main.append(panel);const list=div('');panel.append(list);async function refresh(){try{const d=await api('/v1/human/tenants');list.replaceChildren(table(['Client','Plan','Storage','Status','Members'],d.tenants.map(t=>[t.display_name,t.plan_code,t.storage_mode,t.status,t.member_count])))}catch(e){asError(e)}}await refresh();const name=input('name','text','Builder company'),slug=input('slug','text','builder-company');const plan=node('select',{class:'field',name:'plan'},['starter','growth','enterprise'].map(p=>node('option',{value:p,text:p})));const mode=node('select',{class:'field'},['shared','dedicated'].map(p=>node('option',{value:p,text:p})));const f=node('form',{class:'formrow'},[lab('Company',name),lab('Slug',slug),lab('Subscription plan',plan),lab('Storage',mode),node('button',{class:'btn',type:'submit',text:'Add client'})]);f.addEventListener('submit',async e=>{e.preventDefault();try{const d=await api('/v1/human/tenants','POST',{displayName:name.value,slug:slug.value,plan:plan.value,storageMode:mode.value});notice('Client created: '+d.slug);f.reset();await refresh();await inviteSection(main)}catch(err){asError(err)}});panel.append(title('Create client','h3'),f);await inviteSection(main)}
 async function inviteSection(main){const previous=document.getElementById('invite-card');if(previous)previous.remove();const card=div('card');card.id='invite-card';card.append(title('Invite client admin','h2'),node('p',{class:'muted',text:'Invitation link shown once. Share privately with the intended client.'}));const select=node('select',{class:'field'},[node('option',{value:'',text:'Choose company'})]);const tenants=await api('/v1/human/tenants');tenants.tenants.forEach(t=>select.append(node('option',{value:t.id,text:t.display_name})));const email=input('email','email','client@builder.com');const role=node('select',{class:'field'},['client_admin','viewer'].map(x=>node('option',{value:x,text:x})));const f=node('form',{class:'formrow'},[lab('Company',select),lab('Client email',email),lab('Role',role),node('button',{type:'submit',class:'btn',text:'Create invitation'})]);f.addEventListener('submit',async e=>{e.preventDefault();try{const d=await api('/v1/human/invitations','POST',{tenantId:select.value,email:email.value,role:role.value});const share=node('input',{class:'field',value:d.inviteUrl,readonly:'readonly',style:'width:100%'});card.append(div('banner',node('p',{text:'Share this one-time link securely:'}),share));notice('Invitation generated for '+email.value)}catch(err){asError(err)}});card.append(f);main.append(card)}
 async function clientPanel(main){const panel=div('card',title('Personal CRM & AI Agent'));main.append(panel);const select=node('select',{class:'field'},state.me.tenants.map(t=>node('option',{value:t.id,text:t.name+' — '+t.plan})));const content=div('');panel.append(lab('Your company',select),content);select.addEventListener('change',()=>renderClient(select.value,content));await renderClient(select.value,content)}
-async function renderClient(id,content){content.replaceChildren(node('p',{class:'muted',text:'Loading client dashboard…'}));try{const d=await api('/v1/human/overview?tenantId='+encodeURIComponent(id));content.replaceChildren();const cards=div('cards',...[['Leads',d.metrics.leads],['Draft AI Agents',d.metrics.agents],['Calls',d.metrics.calls],['Site Visits',d.metrics.siteVisits]].map(([name,val])=>div('card metric',node('span',{class:'muted',text:name}),node('strong',{text:String(val)}))));content.append(cards);content.append(node('p',{class:'note',text:'Calling is not enabled. Imported and manually added leads remain consent/DND unknown until verified.'}));const leadCard=div('card',title('Leads','h3'),table(['Name','Mobile','Source','Consent'],d.leads.map(l=>[l.name,l.mobile,l.sourceType,l.consentStatus])));content.append(leadCard);const name=input('name','text','Customer name'),mobile=input('mobile','tel','9876543210');const leadForm=node('form',{class:'formrow'},[lab('Name',name),lab('Mobile',mobile),node('button',{class:'btn',type:'submit',text:'Add lead'})]);leadForm.addEventListener('submit',async e=>{e.preventDefault();try{await api('/v1/human/leads','POST',{tenantId:id,name:name.value,mobile:mobile.value});notice('Lead saved without calling consent');await renderClient(id,content)}catch(err){asError(err)}});if(d.role==='client_admin')leadCard.append(leadForm);const agentCard=div('card',title('AI Agents','h3'),table(['Name','Language','Status'],d.agents.map(a=>[a.displayName,a.languageMode,a.status])));content.append(agentCard);if(d.role==='client_admin'){const agentName=input('displayName','text','Sales Agent'),language=node('select',{class:'field'},['hi-en','hi','en'].map(x=>node('option',{value:x,text:x}))),q=node('textarea',{class:'field',placeholder:'One question per line',rows:4});const agentForm=node('form',{class:'stack'},[lab('AI Agent Name',agentName),lab('Language',language),lab('Questions (one per line)',q),node('button',{class:'btn',type:'submit',text:'Save draft AI Agent'})]);agentForm.addEventListener('submit',async e=>{e.preventDefault();try{await api('/v1/human/agents','POST',{tenantId:id,displayName:agentName.value,languageMode:language.value,questions:q.value.split('\n').map(s=>s.trim()).filter(Boolean)});notice('Draft AI Agent saved');await renderClient(id,content)}catch(err){asError(err)}});agentCard.append(agentForm)}await crmWorkflow(id,content,d.role);await planningPanels(id,content,d.role)}catch(e){content.replaceChildren();asError(e)}}
+async function renderClient(id,content){content.replaceChildren(node('p',{class:'muted',text:'Loading client dashboard…'}));try{const d=await api('/v1/human/overview?tenantId='+encodeURIComponent(id));content.replaceChildren();const cards=div('cards',...[['Leads',d.metrics.leads],['Draft AI Agents',d.metrics.agents],['Calls',d.metrics.calls],['Site Visits',d.metrics.siteVisits]].map(([name,val])=>div('card metric',node('span',{class:'muted',text:name}),node('strong',{text:String(val)}))));content.append(cards);content.append(node('p',{class:'note',text:'Calling is not enabled. Imported and manually added leads remain consent/DND unknown until verified.'}));const leadCard=div('card',title('Leads','h3'),table(['Name','Mobile','Source','Consent'],d.leads.map(l=>[l.name,l.mobile,l.sourceType,l.consentStatus])));content.append(leadCard);const name=input('name','text','Customer name'),mobile=input('mobile','tel','9876543210');const leadForm=node('form',{class:'formrow'},[lab('Name',name),lab('Mobile',mobile),node('button',{class:'btn',type:'submit',text:'Add lead'})]);leadForm.addEventListener('submit',async e=>{e.preventDefault();try{await api('/v1/human/leads','POST',{tenantId:id,name:name.value,mobile:mobile.value});notice('Lead saved without calling consent');await renderClient(id,content)}catch(err){asError(err)}});if(d.role==='client_admin')leadCard.append(leadForm);const agentCard=div('card',title('AI Agents','h3'),table(['Name','Language','Status'],d.agents.map(a=>[a.displayName,a.languageMode,a.status])));content.append(agentCard);if(d.role==='client_admin'){const agentName=input('displayName','text','Sales Agent'),language=node('select',{class:'field'},['hi-en','hi','en'].map(x=>node('option',{value:x,text:x}))),q=node('textarea',{class:'field',placeholder:'One question per line',rows:4});const agentForm=node('form',{class:'stack'},[lab('AI Agent Name',agentName),lab('Language',language),lab('Questions (one per line)',q),node('button',{class:'btn',type:'submit',text:'Save draft AI Agent'})]);agentForm.addEventListener('submit',async e=>{e.preventDefault();try{await api('/v1/human/agents','POST',{tenantId:id,displayName:agentName.value,languageMode:language.value,questions:q.value.split('\n').map(s=>s.trim()).filter(Boolean)});notice('Draft AI Agent saved');await renderClient(id,content)}catch(err){asError(err)}});agentCard.append(agentForm);await agentEditor(id,agentCard)}await crmWorkflow(id,content,d.role);await planningPanels(id,content,d.role);if(d.role==='client_admin')await auditPanel(id,content)}catch(e){content.replaceChildren();asError(e)}}
 
 async function planningPanels(tenantId,content,role){
   const editable=role==='client_admin';
@@ -187,6 +187,53 @@ async function planningPanels(tenantId,content,role){
     projectCard.append(form);
   }
 }
+
+async function agentEditor(tenantId,card){
+  const result=await api('/v1/human/agents?tenantId='+encodeURIComponent(tenantId));
+  if(!result.agents.length)return;
+  const select=node('select',{class:'field'},result.agents.map(a=>node('option',{value:a.id,text:a.displayName+' ('+a.status+')'})));
+  const name=input('editAgentName','text','Agent display name');name.maxLength=120;
+  const language=node('select',{class:'field'},['hi-en','hi','en'].map(s=>node('option',{value:s,text:s})));
+  const status=node('select',{class:'field'},['draft','paused'].map(s=>node('option',{value:s,text:s})));
+  const questions=node('textarea',{class:'field',placeholder:'One question per line',rows:5});
+  const form=node('form',{class:'stack'},[lab('Agent',select),lab('Name',name),lab('Language',language),
+    lab('Status',status),lab('Questions (1–25)',questions),
+    node('button',{class:'btn secondary',type:'submit',text:'Save agent changes'})]);
+  function loadSelected(){
+    const a=result.agents.find(x=>x.id===select.value);if(!a)return;
+    name.value=a.displayName;language.value=a.languageMode;
+    status.value=a.status==='paused'?'paused':'draft';questions.value=a.questions.join('\n');
+    form.querySelector('button[type=submit]').disabled=a.status==='active';
+  }
+  select.addEventListener('change',loadSelected);loadSelected();
+  form.addEventListener('submit',async e=>{e.preventDefault();try{
+    const q=questions.value.split('\n').map(x=>x.trim()).filter(Boolean);
+    await api('/v1/human/agents/'+select.value,'PATCH',{tenantId,displayName:name.value,
+      languageMode:language.value,questions:q,status:status.value});
+    notice('Agent saved as a non-calling draft/paused agent.');
+    const a=result.agents.find(x=>x.id===select.value);
+    if(a){a.displayName=name.value;a.languageMode=language.value;a.questions=q;a.status=status.value}
+  }catch(err){asError(err)}});
+  card.append(title('Edit or pause an AI Agent','h3'),
+    node('p',{class:'note',text:'No active/live AI agents are permitted yet.'}),form);
+}
+async function auditPanel(tenantId,content){
+  const card=div('card',title('CRM Audit History','h3'),
+    node('p',{class:'note',text:'Read-only company actions; no customer transcripts.'}));
+  content.append(card);
+  const area=div('');card.append(area);let offset=0;
+  async function loadHistory(){
+    const q=new URLSearchParams({tenantId,limit:'25',offset:String(offset)});
+    const result=await api('/v1/human/audit?'+q);
+    const prev=btn('← Previous',()=>{offset=Math.max(0,offset-25);loadHistory().catch(asError)},true);
+    const next=btn('Next →',()=>{offset+=25;loadHistory().catch(asError)},true);
+    prev.disabled=offset===0;next.disabled=offset+result.events.length>=result.total;
+    area.replaceChildren(table(['Action','Actor','Date'],result.events.map(a=>
+      [a.action,a.actor,new Date(a.createdAt).toLocaleString()])),
+      div('formrow',prev,node('span',{class:'muted',text:result.total+' events · page '+(Math.floor(offset/25)+1)}),next));
+  }
+  await loadHistory();
+}
 // CRM workflows: CSV/XLSX Preview/Import, statuses, notes and requested site visits.
 async function crmWorkflow(tenantId,content,role){
   const editable=role==='client_admin';
@@ -231,7 +278,8 @@ async function crmWorkflow(tenantId,content,role){
   const search=input('search','search','Name, number or location');search.required=false;
   const filter=node('select',{class:'field'},['','new','contacted','interested','followup','not_interested','converted']
     .map(s=>node('option',{value:s,text:s||'All statuses'})));
-  const searchBtn=btn('Search',()=>refresh().catch(asError),true);
+  let offset=0;
+  const searchBtn=btn('Search',()=>{offset=0;refresh().catch(asError)},true);
   const tableArea=div(''),details=div(''),visitArea=div('');
   workflow.append(div('formrow',lab('Search leads',search),lab('Interest status',filter),searchBtn),tableArea,details);
   const schedule=div('card',title('Site Visits','h3'));workflow.append(schedule,visitArea);
@@ -240,6 +288,27 @@ async function crmWorkflow(tenantId,content,role){
     visitArea.replaceChildren(table(['Lead','Scheduled','Status','Note'],result.visits.map(v=>[
       v.leadName,new Date(v.scheduledAt).toLocaleString(),v.status,v.note
     ])));
+    if(editable){
+      const pending=result.visits.filter(v=>['requested','confirmed'].includes(v.status));
+      if(pending.length){
+        const selected=node('select',{class:'field'},pending.map(v=>
+          node('option',{value:v.id,text:v.leadName+' — '+new Date(v.scheduledAt).toLocaleString()})));
+        const statusSelect=node('select',{class:'field'});
+        function statusOptions(){
+          const v=pending.find(x=>x.id===selected.value);
+          const allowed=v?.status==='requested'?['confirmed','cancelled']:['completed','cancelled'];
+          statusSelect.replaceChildren(...allowed.map(s=>node('option',{value:s,text:s})));
+        }
+        selected.addEventListener('change',statusOptions);statusOptions();
+        const form=node('form',{class:'formrow'},[lab('Visit',selected),lab('Status update',statusSelect),
+          node('button',{class:'btn secondary',type:'submit',text:'Save visit status'})]);
+        form.addEventListener('submit',async e=>{e.preventDefault();try{
+          await api('/v1/human/visits/'+selected.value,'PATCH',{tenantId,status:statusSelect.value});
+          notice('Visit status saved; no notifications were sent.');await visitList();
+        }catch(err){asError(err)}});
+        visitArea.append(form);
+      }
+    }
   }
   function selectLead(lead){
     details.replaceChildren(title('Lead: '+(lead.name||lead.mobile),'h3'),node('p',{class:'muted',text:'Consent: '+lead.consentStatus+' · DND: '+lead.dndStatus}));
@@ -342,7 +411,7 @@ async function crmWorkflow(tenantId,content,role){
     }
   }
   async function refresh(){
-    const params=new URLSearchParams({tenantId,limit:'50',status:filter.value,q:search.value.trim()});
+    const params=new URLSearchParams({tenantId,limit:'50',offset:String(offset),status:filter.value,q:search.value.trim()});
     const result=await api('/v1/human/leads?'+params.toString());
     const tbl=node('table',{class:'table'});const head=node('tr');
     ['Name','Mobile','Location','Budget','Status','Action'].forEach(t=>head.append(node('th',{text:t})));
@@ -350,7 +419,13 @@ async function crmWorkflow(tenantId,content,role){
     for(const lead of result.leads){const row=node('tr');
       [lead.name,lead.mobile,lead.preferredLocation,lead.budgetMaxInr,lead.interestStatus].forEach(t=>row.append(node('td',{text:String(t??'—')})));
       row.append(node('td',{},btn('Details',()=>selectLead(lead),true)));body.append(row)}
-    tbl.append(body);tableArea.replaceChildren(node('p',{class:'muted',text:result.total+' matching leads (first '+result.leads.length+' shown)'}),div('tablewrap',tbl));
+    tbl.append(body);
+    const prev=btn('← Previous',()=>{offset=Math.max(0,offset-50);refresh().catch(asError)},true);
+    const next=btn('Next →',()=>{offset+=50;refresh().catch(asError)},true);
+    prev.disabled=offset===0;next.disabled=offset+result.leads.length>=result.total;
+    tableArea.replaceChildren(node('p',{class:'muted',text:result.total+' matching leads · showing '+
+      (result.total?offset+1:0)+'–'+(offset+result.leads.length)}),div('tablewrap',tbl),
+      div('formrow',prev,node('span',{class:'muted',text:'Page '+(Math.floor(offset/50)+1)}),next));
     details.replaceChildren();
   }
   await Promise.all([refresh(),visitList()]);
