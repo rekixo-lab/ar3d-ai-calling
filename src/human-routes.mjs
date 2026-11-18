@@ -203,23 +203,23 @@ export async function handleHumanRequest(req,env){
   // Only initial machine-to-machine bootstrap may omit Origin and use a server secret.
   if(['POST','PUT','PATCH','DELETE'].includes(method)&&path!=='/v1/human/bootstrap'&&!mutationOriginAllowed(req))return fail('same-origin request required',403);
   try{
-    if(path==='/v1/human/bootstrap'&&method==='POST')return bootstrap(req,env);
+    if(path==='/v1/human/bootstrap'&&method==='POST')return await bootstrap(req,env);
     if(path==='/v1/human/login'&&method==='POST'){
       const gate=await reserveLoginAttempt(req,env);
       if(!gate.allowed)return fail(gate.error,gate.status);
-      return login(req,env);
+      return await login(req,env);
     }
     if(path==='/v1/human/accept-invite'&&method==='POST'){
       const gate=await reserveLoginAttempt(req,env);
       if(!gate.allowed)return fail(gate.error,gate.status);
-      return acceptInvitation(req,env);
+      return await acceptInvitation(req,env);
     }
-    if(path==='/v1/human/login/mfa'&&method==='POST')return finishMfaLogin(req,env,await payload(req));
-    if(path==='/v1/human/logout'&&method==='POST')return logout(req,env);
+    if(path==='/v1/human/login/mfa'&&method==='POST')return await finishMfaLogin(req,env,await payload(req));
+    if(path==='/v1/human/logout'&&method==='POST')return await logout(req,env);
     const user=await getSession(req,env.CONTROL_DB);
     if(!user)return fail('sign in required',401);
     if(path==='/v1/human/mfa'||path==='/v1/human/mfa/setup'||path==='/v1/human/mfa/enable'||path==='/v1/human/mfa/recovery/regenerate')
-      return handleMfaSettings(req,env,user,method==='POST'?await payload(req):null);
+      return await handleMfaSettings(req,env,user,method==='POST'?await payload(req):null);
     const consentResponse=await handleConsentRequest(req,env,user);
     if(consentResponse)return consentResponse;
     const projectResponse=await handleProjectLinkRequest(req,env,user);
@@ -243,13 +243,13 @@ export async function handleHumanRequest(req,env){
     if(lifecycle)return lifecycle;
     if(path==='/v1/human/tenants'){
       if(user.globalRole!=='super_admin')return fail('forbidden',403);
-      if(method==='GET')return listTenants(env.CONTROL_DB);
-      if(method==='POST')return createTenant(req,env.CONTROL_DB,user);
+      if(method==='GET')return await listTenants(env.CONTROL_DB);
+      if(method==='POST')return await createTenant(req,env.CONTROL_DB,user);
     }
-    if(path==='/v1/human/invitations'&&method==='POST')return invite(req,env.CONTROL_DB,user);
-    if(path==='/v1/human/overview'&&method==='GET')return overview(req,env,user);
-    if(path==='/v1/human/leads'&&method==='POST')return addLead(req,env,user);
-    if(path==='/v1/human/agents'&&method==='POST')return addAgent(req,env,user);
+    if(path==='/v1/human/invitations'&&method==='POST')return await invite(req,env.CONTROL_DB,user);
+    if(path==='/v1/human/overview'&&method==='GET')return await overview(req,env,user);
+    if(path==='/v1/human/leads'&&method==='POST')return await addLead(req,env,user);
+    if(path==='/v1/human/agents'&&method==='POST')return await addAgent(req,env,user);
     return fail('not found',404);
   }catch(e){
     const message=String(e?.message||'');
