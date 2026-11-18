@@ -19,7 +19,26 @@ const now=()=>new Date().toISOString();
 const headers={'Cache-Control':'no-store','X-Content-Type-Options':'nosniff','Referrer-Policy':'no-referrer','X-Frame-Options':'DENY','Permissions-Policy':'camera=(),microphone=()'};
 const response=(body,status=200,extra={})=>Response.json(body,{status,headers:{...headers,...extra}});
 const fail=(error,status=400)=>response({error},status);
-async function payload(req){return parseJsonBody(await req.text(),16384)}
+async function payload(req){
+  // Cap raw bytes before decoding JSON; the old req.text() buffered unlimited
+  // input and allowed a memory-exhaustion request even though JSON was bounded.
+  const max=16384;
+  if(Number(req.headers.get('content-length'))>max)throw Error('request body too large');
+  if(!req.body)throw Error('request body required');
+  const reader=req.body.getReader(),decoder=new TextDecoder('utf-8',{fatal:true});
+  let text='',size=0;
+  try{
+    while(true){
+      const {done,value}=await reader.read();
+      if(done)break;
+      size+=value.byteLength;
+      if(size>max){await reader.cancel();throw Error('request body too large')}
+      text+=decoder.decode(value,{stream:true});
+    }
+    text+=decoder.decode();
+  }finally{reader.releaseLock()}
+  return parseJsonBody(text,max);
+}
 const bearer=req=>(req.headers.get('authorization')||'').match(/^Bearer (.+)$/i)?.[1]||'';
 const allowedStatus=['trial','active'];
 function validTenantId(v){return typeof v==='string'&&/^[a-f0-9-]{36}$/i.test(v)}
@@ -174,7 +193,7 @@ async function addAgent(req,env,user){
 export async function handleHumanRequest(req,env){
   const u=new URL(req.url),path=u.pathname,method=req.method;
   if(path==='/app'&&method==='GET')return new Response(html,{headers:{...headers,'Content-Type':'text/html;charset=utf-8','Content-Security-Policy':"default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'"}});
-  if(path==='/app/simulator'&&method==='GET')return new Response(simulatorHtml,{headers:{...headers,'Content-Type':'text/html;charset=utf-8','Content-Security-Policy':"default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'"}});
+  if(path==='/app/simulator'&&method==='GET')return new Response(simulatorHtml,{headers:{...headers,'Permissions-Policy':'camera=(),microphone=(self)','Content-Type':'text/html;charset=utf-8','Content-Security-Policy':"default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'"}});
   if(path==='/app/assets/simulator.js'&&method==='GET')return new Response(simulatorJs,{headers:{...headers,'Content-Type':'text/javascript;charset=utf-8'}});
   if(path==='/app/assets/simulator.css'&&method==='GET')return new Response(simulatorCss,{headers:{...headers,'Content-Type':'text/css;charset=utf-8'}});
   if(path==='/app/assets/app.js'&&method==='GET')return new Response(js,{headers:{...headers,'Content-Type':'text/javascript;charset=utf-8'}});

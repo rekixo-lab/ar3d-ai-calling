@@ -34,14 +34,18 @@ An API token used to initialize databases needs **D1 Write** (D1 Read is not eno
 Go to [Actions](https://github.com/rekixo-lab/ar3d-ai-calling/actions) and choose **AR3D AI Calling - main Cloudflare setup (manual)**. Use branch `main`, type `AR3D_MAIN_ONLY`, then run the following choices in order:
 
 1. **`preflight`** — read-only Cloudflare API checks. Validates account format, distinct database IDs, the **exact D1 database names**, and whether both schemas are both empty or both complete. No deployment, SQL changes, or existing AR3D changes.
-2. **`initialize`** — **one-time only, for newly created empty AR3D Calling D1 databases**. Repeats the exact name and empty checks, runs the Control migrations `0001` → `0002` → `0003` → `0004` → `0005` and CRM migrations `0001` → `0002` → `0003` → `0004` → `0005` → `0006` → `0007` using Wrangler `--remote --yes`, and verifies all expected tables and key columns. Will refuse to run on an already initialized or partially migrated database. Do not use it to update a running database.
+2. **`initialize`** — **one-time only, for newly created empty AR3D Calling D1 databases**. Repeats the exact name and empty checks, runs the Control migrations `0001` → `0002` → `0003` → `0004` → `0005` → `0006` → `0007` and CRM migrations `0001` → `0002` → `0003` → `0004` → `0005` → `0006` → `0007` using Wrangler `--remote --yes`, and verifies all expected tables and key columns. Will refuse to run on an already initialized or partially migrated database. Do not use it to update a running database.
 3. **`deploy`** — checks that all required tables and columns exist, then deploys only the `ar3d-ai-calling` Worker with its two new D1 bindings and new R2 bucket. It does not modify the existing AR3D Platform/Engine Workers, routes, or databases.
 
 The same workflow is **manual-only**; there is no auto deploy on push. If any run fails, inspect the error. **Do not repeat `initialize` after a partial failure; reconcile the migration state deliberately before proceeding.** The workflow does not create databases or buckets; those must already exist. If GitHub Secrets are missing, it fails without changing Cloudflare.
 
 ## After deploy: bootstrap Super Admin securely
 
-The first human Super Admin still needs one manual credential setup. Set `ADMIN_BOOTSTRAP_TOKEN` to a random 32+ character Worker secret on **the new** `ar3d-ai-calling` Worker only; create the first Super Admin from a secure machine using `/v1/human/bootstrap` as documented in [README](../README.md). Once the `/app` admin sign-in succeeds, **remove** the Worker bootstrap secret immediately and invalidate any one-time credential copies. Never place bootstrap tokens in query strings, browser JavaScript, or GitHub workflow logs.
+The first human Super Admin still needs one manual credential setup. Set `ADMIN_BOOTSTRAP_TOKEN` to a random 32+ character Worker secret on **the new** `ar3d-ai-calling` Worker only; create the first Super Admin from a secure terminal using the new private-prompt helper, after cloning or updating this repository:
+
+    python3 scripts/bootstrap-main.py https://ar3d-ai-calling.<workers-subdomain>.workers.dev
+
+This script prompts for the token and password without exposing them as shell command arguments or terminal echo. It sends HTTPS only to the isolated Worker host. Do not paste credentials in chat or screenshots. Once the `/app` admin sign-in succeeds, **remove** the Worker bootstrap secret immediately and invalidate any one-time credential copies. Never place bootstrap tokens in query strings, browser JavaScript, or GitHub workflow logs.
 
 ## Before real clients and live calls
 

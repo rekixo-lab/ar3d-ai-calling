@@ -1,3 +1,5 @@
+**Active 48-hour execution:** See [48H-SPRINT.md](48H-SPRINT.md). The first step is GitHub production Environment secrets followed by the manual preflight. Do not initialize databases until both are confirmed fresh.
+
 # AR3D AI Calling — operator-only remaining actions
 
 Do the following only when at your own secure computer. This checklist is not proof of deployment, DND approval, telecom onboarding or billing readiness.
@@ -54,3 +56,16 @@ The Super Admin Dashboard can suspend or resume a client company with an audit r
 ### Optional encrypted storage / inbox foundations
 
 Control v7 introduces a **quarantine-only** event inbox. The private R2 recording helper is disabled and never exposed through HTTP; do not set `RECORDING_STORAGE_ENABLED=true` until verified caller number, consent, recording notice, scoped access, secure retention expiration/deletion and operator approval are available. `RECORDING_ENCRYPTION_KEY` must be a strong independent server secret and never logged or put into GitHub source. Encryption key rotation and disaster recovery remain unimplemented. Genuine provider webhook signing is vendor-specific and still must be built after selecting a provider.
+
+
+### Safer first Super Admin bootstrap
+
+After isolated Worker deploy, configure Worker-only LOGIN_RATE_LIMIT_SECRET and MFA_ENCRYPTION_KEY; then set a temporary ADMIN_BOOTSTRAP_TOKEN. From a trusted computer run:
+
+    python3 scripts/bootstrap-main.py https://ar3d-ai-calling.<workers-subdomain>.workers.dev
+
+This locally prompts for token/password invisibly rather than putting secrets in command arguments. Delete ADMIN_BOOTSTRAP_TOKEN once the Super Admin is created, sign into /app and securely save Authenticator recovery codes. Do not send login credentials, KYC scans or D1 UUIDs in chat.
+
+### Browser speech permission
+
+Only /app/simulator is allowed same-origin microphone access for explicitly user-initiated SpeechRecognition; main dashboard and other pages still block microphone.

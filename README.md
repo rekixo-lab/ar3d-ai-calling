@@ -1,3 +1,7 @@
+## Active 48-hour execution runbook
+
+Operator/developer handoff: [48H-SPRINT.md](docs/48H-SPRINT.md). Target is an isolated synthetic-data-tested CRM and AI demo MVP, not a promise of live telecom KYC approval. First admin creation helper: python3 scripts/bootstrap-main.py https://ar3d-ai-calling.<workers-subdomain>.workers.dev (interactive private token/password prompts).
+
 # AR3D AI Calling
 
 **Development foundation (Phases 1–5)** — independent multi-tenant CRM, personal admin dashboard, lead imports and deterministic text conversation simulator for AR3D clients. Product branding is **AR3D AI Calling**. **No real outbound calls or live generative AI voice conversations are implemented.**
