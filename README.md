@@ -175,3 +175,10 @@ Client admins can transition an owned visit from `requested` to `confirmed`/`can
 ### Draft campaign candidate removal
 
 Client admins can remove an incorrect lead candidate from their own non-executable draft with `DELETE /v1/human/campaigns/:id/candidates/:leadId?tenantId=...`. The Dashboard lists candidates for the selected draft with a remove control. Removal writes a tenant-scoped audit event only for an existing candidate; it **never** updates the underlying lead, Consent/DND fields, or initiates calls. A viewer cannot remove candidates. No new SQL migration is required.
+
+
+## Machine API key inventory and revocation (administrative security)
+
+- With a separately configured optional `ADMIN_API_TOKEN`, a trusted server-side operator can call `GET /v1/admin/tenants/:tenantId/keys` to list up to 100 integration key **metadata** records: ID, name, role, active state, creation/revocation time. API key plaintext and its SHA-256 digest are **never returned**.
+- `DELETE /v1/admin/tenants/:tenantId/keys/:keyId` revokes only an active key belonging to that tenant, recording `revoked_at` and an isolated Control D1 audit event. Repeated revoke attempts are idempotent. Revoked keys fail existing `tenantAuth` checks immediately on subsequent requests.
+- These machine-admin endpoints stay unavailable unless the separate `ADMIN_API_TOKEN` Worker secret is set. Never use `ADMIN_BOOTSTRAP_TOKEN` or put machine tokens into browser or mobile code. No new database migration is required.
