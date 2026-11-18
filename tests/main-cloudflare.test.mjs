@@ -68,6 +68,7 @@ function cloudflareMock({ controlTables=[],crmTables=[],controlName='ar3d-callin
         else if(sql.includes('conversation_simulations')) rows=['tenant_id','state_json','expires_at'].map(name=>({name}));
         else if(sql.includes('tenants')) rows=['id','plan_code','storage_mode'].map(name=>({name}));
         else if(sql.includes('human_users')) rows=['id','global_role','password_hash'].map(name=>({name}));
+        else if(sql.includes('human_mfa_settings')) rows=['user_id','recovery_generation_id','enabled_at'].map(name=>({name}));
         else rows=['token_hash','expires_at'].map(name=>({name}));
       } else throw Error('Unexpected SQL');
       result = [{ success:true,results:rows }];

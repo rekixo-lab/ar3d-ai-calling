@@ -132,3 +132,11 @@ The secret is never sent to the browser. Replace the example password; use a pas
 - **Required Worker secret:** `MFA_ENCRYPTION_KEY` (32+ randomly generated characters), never commit/share it. Missing key rejects MFA access. Back up the key securely; rotating/loss prevents decryption.
 - **Recovery codes/recovery workflow are not yet implemented.** Enrollment is optional; do not enable this on a sole administrator until an independently verified recovery plan is in place.
 - Migration: `migrations/control/0004_super_admin_mfa.sql` (new Control D1 only, after 0003). Existing initialized databases require reviewed incremental migration.
+
+## Phase 9 — Super Admin one-time MFA recovery codes
+
+- MFA activation now generates **8 one-time 128-bit recovery codes**. Codes are shown once, never stored in plaintext and never logged; Control D1 stores only user-scoped HMAC-SHA256 digests keyed with `MFA_ENCRYPTION_KEY`.
+- Password-validated MFA challenges may be completed with one unused recovery code instead of TOTP. A successful use marks the code consumed and creates a session only after challenge consumption. Wrong/used codes count toward challenge attempts; login per-IP limits still apply.
+- A logged-in Super Admin can **replace all backup codes** by re-entering their current password and a fresh authenticator code. An active session alone cannot rotate codes.
+- Accepting a client invitation with an existing MFA-enabled account now requires the MFA challenge rather than silently creating a password-only session. Invitation acceptance uses IP attempt limits.
+- Control D1 migration `0005_mfa_recovery.sql` is included for new empty databases. Existing databases must be backed up and upgraded incrementally. Full managed admin account recovery remains out of scope; do not lose both your authenticator and unused recovery codes.

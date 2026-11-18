@@ -84,6 +84,10 @@ async function acceptInvitation(req,env){
   const out=await db.batch(statements);
   const claim=out[user?0:1],membership=out[user?1:2];
   if(claim?.meta?.changes!==1||membership?.meta?.changes!==1)return fail('invitation has already been used',409);
+  if(user){
+    const enabled=await db.prepare('SELECT enabled_at FROM human_mfa_settings WHERE user_id=? AND enabled_at IS NOT NULL').bind(id).first();
+    if(enabled?.enabled_at)return challengeAfterPassword(db,user,env);
+  }
   const session=await newSession(db,id);
   return response({ok:true},200,{'Set-Cookie':cookieFor(session)});
 }
@@ -178,12 +182,16 @@ export async function handleHumanRequest(req,env){
       if(!gate.allowed)return fail(gate.error,gate.status);
       return login(req,env);
     }
-    if(path==='/v1/human/accept-invite'&&method==='POST')return acceptInvitation(req,env);
+    if(path==='/v1/human/accept-invite'&&method==='POST'){
+      const gate=await reserveLoginAttempt(req,env);
+      if(!gate.allowed)return fail(gate.error,gate.status);
+      return acceptInvitation(req,env);
+    }
     if(path==='/v1/human/login/mfa'&&method==='POST')return finishMfaLogin(req,env,await payload(req));
     if(path==='/v1/human/logout'&&method==='POST')return logout(req,env);
     const user=await getSession(req,env.CONTROL_DB);
     if(!user)return fail('sign in required',401);
-    if(path==='/v1/human/mfa'||path==='/v1/human/mfa/setup'||path==='/v1/human/mfa/enable')
+    if(path==='/v1/human/mfa'||path==='/v1/human/mfa/setup'||path==='/v1/human/mfa/enable'||path==='/v1/human/mfa/recovery/regenerate')
       return handleMfaSettings(req,env,user,method==='POST'?await payload(req):null);
     const crmResponse=await handleCrmRequest(req,env,user);
     if(crmResponse)return crmResponse;
