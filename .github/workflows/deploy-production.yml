@@ -1,19 +1,20 @@
-name: AR3D AI Calling - main Cloudflare deploy (manual)
+name: AR3D AI Calling - main Cloudflare setup (manual)
 
 on:
   workflow_dispatch:
     inputs:
       confirm:
-        description: 'Type AR3D_MAIN_ONLY (no staging resources)'
+        description: 'Type AR3D_MAIN_ONLY (this only targets the new AR3D AI Calling Worker)'
         required: true
         type: string
       operation:
-        description: 'Verify first; deploy only after the databases have been initialized'
+        description: 'Preflight first, initialize empty D1 databases once, then deploy'
         required: true
         type: choice
-        default: verify
+        default: preflight
         options:
-          - verify
+          - preflight
+          - initialize
           - deploy
 
 permissions:
@@ -28,7 +29,7 @@ jobs:
     if: github.ref == 'refs/heads/main' && inputs.confirm == 'AR3D_MAIN_ONLY'
     runs-on: ubuntu-latest
     environment: production
-    timeout-minutes: 20
+    timeout-minutes: 30
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
@@ -42,54 +43,34 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.13'
-      - name: Run unit and isolation tests
+      - name: Run full automated tests
         run: npm test
-      - name: Verify exact main D1 resources and initialized schema
+      - name: Verify main resource identity and schema state; generate non-committed Worker configuration
         run: |
-          node --input-type=module <<'NODE'
-          import {readFileSync,writeFileSync} from 'node:fs';
-          const token=process.env.CLOUDFLARE_API_TOKEN||'';
-          const account=process.env.CLOUDFLARE_ACCOUNT_ID||'';
-          const control=process.env.CONTROL_DB_ID||'';
-          const crm=process.env.CRM_DB_ID||'';
-          const accountPattern=/^[a-f0-9]{32}$/i;
-          const databasePattern=/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
-          if(!token||!accountPattern.test(account)||!databasePattern.test(control)||!databasePattern.test(crm)||control===crm)
-            throw Error('Missing or invalid main Cloudflare secrets; account ID is 32 hex characters, D1 IDs are UUIDs.');
-          const api='https://api.cloudflare.com/client/v4/accounts/'+account+'/d1/database/';
-          const headers={'Authorization':'Bearer '+token,'Content-Type':'application/json'};
-          async function apiCall(url,init){
-            const response=await fetch(url,{...init,headers});
-            const data=await response.json().catch(()=>({}));
-            if(!response.ok||data.success!==true)
-              throw Error('Cloudflare D1 verification failed: review token permissions and selected account.');
-            return data.result;
-          }
-          const bindings=[
-            ['CONTROL_DB','ar3d-calling-control',control,['tenants','human_users','human_sessions']],
-            ['CRM_DB','ar3d-calling-shared-crm',crm,['leads','lead_notes','conversation_simulations']]
-          ];
-          for(const [,expected,id,tables] of bindings){
-            const info=await apiCall(api+id);
-            if(info?.name!==expected)throw Error('Database ID does not belong to '+expected);
-            const sql="SELECT name FROM sqlite_master WHERE type='table' AND name IN ("+
-              tables.map(t=>"'"+t+"'").join(',')+")";
-            const results=await apiCall(api+id+'/query',{method:'POST',body:JSON.stringify({sql})});
-            const present=new Set((results?.[0]?.results||[]).map(r=>r.name));
-            const missing=tables.filter(t=>!present.has(t));
-            if(missing.length)throw Error('Database '+expected+' needs migrations; missing tables: '+missing.join(', '));
-          }
-          const config=JSON.parse(readFileSync('wrangler.example.jsonc','utf8'));
-          if(config.name!=='ar3d-ai-calling'||config.routes?.length||config.route)
-            throw Error('Unexpected Worker identity or custom routes');
-          if(!config.r2_buckets?.some(x=>x.binding==='RECORDINGS'&&x.bucket_name==='ar3d-calling-recordings'))
-            throw Error('Main R2 bucket must be ar3d-calling-recordings');
-          config.workers_dev=true; // Main Worker on its own workers.dev URL; no existing AR3D site routes.
-          config.d1_databases[0].database_id=control;
-          config.d1_databases[1].database_id=crm;
-          writeFileSync('wrangler.jsonc',JSON.stringify(config,null,2));
-          console.log('Main Cloudflare resource names, D1 IDs, and required tables verified.');
-          NODE
-      - name: Deploy main Worker (no migrations or telephony)
+          if [ '${{ inputs.operation }}' = initialize ]; then
+            node scripts/main-cloudflare.mjs fresh
+          elif [ '${{ inputs.operation }}' = deploy ]; then
+            node scripts/main-cloudflare.mjs ready
+          else
+            node scripts/main-cloudflare.mjs preflight
+          fi
+      # Runs ONLY after an explicit manual initialize selection and strict
+      # empty-schema checks. The workflow never initializes the AR3D Platform
+      # or Engine databases, and it cannot repeat on an initialized database.
+      - name: Initialize NEW AR3D Calling Control D1 database
+        if: inputs.operation == 'initialize'
+        run: |
+          npx --yes wrangler@4 d1 execute ar3d-calling-control --remote --yes --config wrangler.jsonc --file migrations/control/0001_init.sql
+          npx --yes wrangler@4 d1 execute ar3d-calling-control --remote --yes --config wrangler.jsonc --file migrations/control/0002_human_access.sql
+      - name: Initialize NEW AR3D Calling Shared CRM D1 database
+        if: inputs.operation == 'initialize'
+        run: |
+          npx --yes wrangler@4 d1 execute ar3d-calling-shared-crm --remote --yes --config wrangler.jsonc --file migrations/crm/0001_init.sql
+          npx --yes wrangler@4 d1 execute ar3d-calling-shared-crm --remote --yes --config wrangler.jsonc --file migrations/crm/0002_lead_workflow.sql
+          npx --yes wrangler@4 d1 execute ar3d-calling-shared-crm --remote --yes --config wrangler.jsonc --file migrations/crm/0003_conversation_simulator.sql
+      - name: Verify post-initialization schema before proceeding
+        if: inputs.operation == 'initialize'
+        run: node scripts/main-cloudflare.mjs ready
+      - name: Deploy only the new AR3D AI Calling Worker
         if: inputs.operation == 'deploy'
         run: npx --yes wrangler@4 deploy --config wrangler.jsonc
