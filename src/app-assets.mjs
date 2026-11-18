@@ -147,16 +147,34 @@ async function planningPanels(tenantId,content,role){
     campaignCard.append(form);
     const campaignPick=node('select',{class:'field'});
     const candidatePick=node('select',{class:'field'});
+    const candidateSearch=input('candidateSearch','search','Search eligible leads by name, phone or location');
+    candidateSearch.required=false;
+    let leadOffset=0;
+    const leadPageNote=node('span',{class:'muted'});
+    const prevLead=btn('← Previous leads',()=>{leadOffset=Math.max(0,leadOffset-50);loadPicks().catch(asError)},true);
+    const nextLead=btn('Next leads →',()=>{leadOffset+=50;loadPicks().catch(asError)},true);
+    const searchLead=btn('Find leads',()=>{leadOffset=0;loadPicks().catch(asError)},true);
+    campaignCard.append(div('formrow',candidateSearch,searchLead,prevLead,leadPageNote,nextLead));
     const pickForm=node('form',{class:'formrow'},[lab('Draft campaign',campaignPick),lab('Candidate lead',candidatePick),
       node('button',{class:'btn secondary',type:'submit',text:'Add candidate (no calling)'})]);
     const loadPicks=async()=>{
-      const campaigns=await refreshCampaigns(),leads=await api('/v1/human/leads?tenantId='+encodeURIComponent(tenantId)+'&limit=50');
+      const campaigns=await refreshCampaigns();
+      const leads=await api('/v1/human/leads?tenantId='+encodeURIComponent(tenantId)+
+        '&limit=50&offset='+String(leadOffset)+'&q='+encodeURIComponent(candidateSearch.value.trim()));
+      leadPageNote.textContent='Page '+(Math.floor(leadOffset/50)+1)+' / '+Math.max(1,Math.ceil(leads.total/50));
+      prevLead.disabled=leadOffset===0;nextLead.disabled=leadOffset+leads.leads.length>=leads.total;
       campaignPick.replaceChildren(...campaigns.map(c=>node('option',{value:c.id,text:c.name})));
       candidatePick.replaceChildren(...leads.leads.filter(l=>l.consentStatus!=='denied'&&l.dndStatus!=='blocked')
         .map(l=>node('option',{value:l.id,text:l.name+' · '+l.mobile})));
     };
     await loadPicks();
     const currentCandidate=node('select',{class:'field'});
+    let candidateOffset=0;
+    const pageHint=node('span',{class:'muted'});
+    const prevCandidate=btn('← Previous candidates',()=>{
+      candidateOffset=Math.max(0,candidateOffset-50);refreshCandidateList().catch(asError)},true);
+    const nextCandidate=btn('Next candidates →',()=>{
+      candidateOffset+=50;refreshCandidateList().catch(asError)},true);
     const removeCandidate=btn('Remove from draft',async()=>{
       if(!campaignPick.value||!currentCandidate.value)return;
       try{
@@ -169,13 +187,23 @@ async function planningPanels(tenantId,content,role){
     const refreshCandidateList=async()=>{
       currentCandidate.replaceChildren();
       if(!campaignPick.value){removeCandidate.disabled=true;return}
-      const d=await api('/v1/human/campaigns/'+campaignPick.value+'/candidates?tenantId='+encodeURIComponent(tenantId));
+      const d=await api('/v1/human/campaigns/'+campaignPick.value+'/candidates?tenantId='+
+        encodeURIComponent(tenantId)+'&limit=50&offset='+candidateOffset);
+      if(candidateOffset>0&&d.candidates.length===0){
+        candidateOffset=Math.max(0,candidateOffset-50);return refreshCandidateList();
+      }
+      pageHint.textContent='Page '+(Math.floor(candidateOffset/50)+1)+' / '+
+        Math.max(1,Math.ceil(d.total/50));
+      prevCandidate.disabled=candidateOffset===0;
+      nextCandidate.disabled=candidateOffset+d.candidates.length>=d.total;
       currentCandidate.replaceChildren(...d.candidates.map(c=>
         node('option',{value:c.leadId,text:c.name+' — '+c.consentStatus+'/'+c.dndStatus})));
       removeCandidate.disabled=d.candidates.length===0;
     };
-    campaignPick.addEventListener('change',()=>refreshCandidateList().catch(asError));
-    const candidateActions=div('formrow',lab('Candidates in selected draft',currentCandidate),removeCandidate);
+    campaignPick.addEventListener('change',()=>{
+      candidateOffset=0;refreshCandidateList().catch(asError)});
+    const candidateActions=div('formrow',lab('Candidates in selected draft',currentCandidate),
+      removeCandidate,prevCandidate,pageHint,nextCandidate);
     campaignCard.append(candidateActions);
     await refreshCandidateList();
     pickForm.addEventListener('submit',async e=>{e.preventDefault();try{
