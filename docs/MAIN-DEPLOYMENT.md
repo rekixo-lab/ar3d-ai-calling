@@ -79,3 +79,8 @@ New empty Control D1 initialization includes `migrations/control/0004_super_admi
 Run `migrations/crm/0005_consent_evidence.sql` on new empty CRM D1 after v4 during one-time `initialize`. For an already initialized independent AR3D Calling CRM D1, first back it up and inspect schema; apply the **incremental v5 only** using an authorized migration procedure. The main deployment preflight now requires the `lead_consent_evidence` table.
 
 Client admins can record only a pending reference to claimed customer consent. This does **not** make the consent verified, change the lead's consent/DND flags or permit calls. New SQL triggers prevent direct `granted`/`allowed` updates or inserts until a separately reviewed provider-based consent/DND integration is implemented. A read-only readiness report always says `eligible:false`. Do not put real customer evidence or documents into the public GitHub repository. In the app, use only synthetic data until privacy retention and lawful use are established.
+
+
+## Voice planning foundation (no migration)
+
+The `/app/simulator` preview displays locale-tagged text segments for future Hindi/English TTS integration. It **does not** generate speech audio, connect to a telephony/STT/TTS provider or send outbound calls. The optional `speech-turn` API only accepts `source:"typed_demo"`, is scoped to signed-in client admins, and stores synthetic transcript turns in existing 24-hour demo state. `voice-preview` is read-only. There are **no new D1 migrations** or Cloudflare secrets for this phase. Keep demonstration inputs fictional and do not enable real calling until independent consent, approved DND lookup, telecom onboarding, audio privacy/retention and call-time policies are implemented.
