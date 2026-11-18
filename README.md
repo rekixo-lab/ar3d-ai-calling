@@ -182,3 +182,11 @@ Client admins can remove an incorrect lead candidate from their own non-executab
 - With a separately configured optional `ADMIN_API_TOKEN`, a trusted server-side operator can call `GET /v1/admin/tenants/:tenantId/keys` to list up to 100 integration key **metadata** records: ID, name, role, active state, creation/revocation time. API key plaintext and its SHA-256 digest are **never returned**.
 - `DELETE /v1/admin/tenants/:tenantId/keys/:keyId` revokes only an active key belonging to that tenant, recording `revoked_at` and an isolated Control D1 audit event. Repeated revoke attempts are idempotent. Revoked keys fail existing `tenantAuth` checks immediately on subsequent requests.
 - These machine-admin endpoints stay unavailable unless the separate `ADMIN_API_TOKEN` Worker secret is set. Never use `ADMIN_BOOTSTRAP_TOKEN` or put machine tokens into browser or mobile code. No new database migration is required.
+
+
+## CRM data portability and read-only usage reporting
+
+- Import preview (`POST /v1/human/import/preview`) now queries only the active tenant's existing lead mobiles, reporting `existingCount`, `wouldInsert` and per-preview-row `alreadyInCrm`. Preview does not write. It is advisory: concurrent imports may change actual insert totals.
+- Draft Campaign candidate GET supports validated `limit=1..100` and `offset=0..100000`, returning `total`, `limit`, `offset` and a page of tenant-owned candidates (no calls).
+- `GET /v1/human/exports/leads?tenantId=...&limit=200&offset=0` is available **only** to authorized client admins, paginated and private (no-store, audited). Download is JSON. This endpoint exports CRM leads, **not** notes, recordings or full GDPR/DPDP portability/erasure compliance.
+- `GET /v1/human/usage?tenantId=...` is a member-scoped report of **CRM record counts** only, including synthetic simulation counts. No telecom minutes, charges, billing, external requests, payments or subscription activation are implemented.

@@ -59,8 +59,18 @@ export async function handleCrmRequest(req,env,user){
       if(isXlsx&&typeof d.xlsxBase64!=='string')return fail('XLSX file data required');
       if(!isXlsx&&typeof d.csv!=='string')return fail('CSV text required');
       const rows=isXlsx?await parseLeadXlsxBase64(d.xlsxBase64):parseLeadCsv(d.csv),{db,tid}=access;
-      if(path.endsWith('/preview'))return json({valid:true,rows:rows.length,preview:rows.slice(0,10),
-        notice:'Import is NOT calling consent. Existing mobile numbers will be skipped, never overwritten.'});
+      if(path.endsWith('/preview')){
+        // Each import has <=200 unique mobiles. Only query the authenticated
+        // tenant: never return existing lead details or modify calling flags.
+        const placeholders=rows.map(()=>'?').join(',');
+        const found=await db.prepare('SELECT mobile_e164 AS mobile FROM leads WHERE tenant_id=? AND mobile_e164 IN ('+placeholders+')')
+          .bind(tid,...rows.map(row=>row.mobile)).all();
+        const existing=new Set(found.results.map(row=>row.mobile));
+        return json({valid:true,rows:rows.length,existingCount:existing.size,
+          wouldInsert:rows.length-existing.size,preview:rows.slice(0,10).map(row=>({
+            ...row,alreadyInCrm:existing.has(row.mobile)
+          })),notice:'Preview is advisory; concurrent CRM imports can change actual inserted count. Consent/DND remains unknown.'});
+      }
       const stamp=now(),statements=rows.map(row=>db.prepare(`INSERT INTO leads
         (tenant_id,id,name,mobile_e164,source_type,consent_status,dnd_status,
          preferred_location,budget_min_inr,budget_max_inr,requirements_json,created_at,updated_at)

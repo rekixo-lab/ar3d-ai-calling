@@ -58,8 +58,17 @@ export async function handleCampaignRequest(req,env,user){
     }
     if(method==='GET'&&!match[2])return json({campaign:record,dialingEnabled:false});
     if(method==='GET'&&match[2]==='candidates'){
-      const rows=await db.prepare("SELECT cc.lead_id AS leadId,l.name,l.consent_status AS consentStatus,l.dnd_status AS dndStatus FROM call_campaign_candidates cc JOIN leads l ON l.tenant_id=cc.tenant_id AND l.id=cc.lead_id WHERE cc.tenant_id=? AND cc.campaign_id=? ORDER BY cc.created_at DESC LIMIT 100").bind(tid,campaignId).all();
-      return json({candidates:rows.results});
+      const limitRaw=url.searchParams.get('limit')||'50',offsetRaw=url.searchParams.get('offset')||'0';
+      if(!/^\d{1,3}$/.test(limitRaw)||!/^\d{1,6}$/.test(offsetRaw)||Number(limitRaw)<1||
+         Number(limitRaw)>100||Number(offsetRaw)>100000)return fail('invalid pagination');
+      const limit=Number(limitRaw),offset=Number(offsetRaw);
+      const [rows,count]=await Promise.all([
+        db.prepare("SELECT cc.lead_id AS leadId,l.name,l.consent_status AS consentStatus,l.dnd_status AS dndStatus FROM call_campaign_candidates cc JOIN leads l ON l.tenant_id=cc.tenant_id AND l.id=cc.lead_id WHERE cc.tenant_id=? AND cc.campaign_id=? ORDER BY cc.created_at DESC,cc.lead_id DESC LIMIT ? OFFSET ?")
+          .bind(tid,campaignId,limit,offset).all(),
+        db.prepare("SELECT COUNT(*) AS total FROM call_campaign_candidates WHERE tenant_id=? AND campaign_id=?")
+          .bind(tid,campaignId).first()
+      ]);
+      return json({candidates:rows.results,total:Number(count?.total||0),limit,offset});
     }
     if(method==='GET'&&match[2]==='readiness'){
       const stats=await db.prepare("SELECT COUNT(*) AS total,COALESCE(SUM(CASE WHEN l.consent_status='denied' OR l.dnd_status='blocked' THEN 1 ELSE 0 END),0) AS blocked FROM call_campaign_candidates cc JOIN leads l ON l.tenant_id=cc.tenant_id AND l.id=cc.lead_id WHERE cc.tenant_id=? AND cc.campaign_id=?").bind(tid,campaignId).first();
