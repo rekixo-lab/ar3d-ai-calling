@@ -15,11 +15,106 @@ function asError(e){notice(e instanceof Error?e.message:'Unexpected error',true)
 function table(headers,rows){const t=node('table',{class:'table'});const h=node('tr');headers.forEach(v=>h.append(node('th',{text:v})));t.append(node('thead',{},h));const b=node('tbody');rows.forEach(row=>{const tr=node('tr');row.forEach(v=>tr.append(node('td',{text:String(v??'—')})));b.append(tr)});t.append(b);return div('tablewrap',t)}
 async function load(){try{state.me=await api('/v1/human/me');dashboard()}catch{login()}}
 function login(){root.replaceChildren();const email=input('email','email','you@company.com'),pass=input('password','password','Minimum 12 characters');email.autocomplete='username';pass.autocomplete='current-password';const form=node('form',{class:'stack'},[lab('Email address',email),lab('Password',pass),node('button',{class:'btn',type:'submit',text:'Sign in'})]);form.addEventListener('submit',async e=>{e.preventDefault();try{const res=await api('/v1/human/login','POST',{email:email.value,password:pass.value});if(res.mfaRequired){mfaChallengeView(res.challenge);return}await load()}catch(err){asError(err)}});root.append(div('auth',div('card',title('AR3D AI Calling','h1'),node('p',{class:'muted',text:'Secure Super Admin & Client Login'}),div('stack',form),node('p',{class:'foot',text:'Human login is separate from backend API keys.'}))));if(location.hash.startsWith('#invite='))inviteView(location.hash.slice(8))}
-function mfaChallengeView(challenge){root.replaceChildren();const otp=input('otp','text','6-digit authenticator code');otp.inputMode='numeric';otp.pattern='[0-9]{6}';otp.maxLength=6;otp.autocomplete='one-time-code';const f=node('form',{class:'stack'},[lab('Authenticator code',otp),node('button',{class:'btn',type:'submit',text:'Verify and sign in'})]);f.addEventListener('submit',async e=>{e.preventDefault();try{await api('/v1/human/login/mfa','POST',{challenge,code:otp.value});await load()}catch(err){asError(err)}});root.append(div('auth',div('card',title('Two-factor verification','h1'),node('p',{class:'muted',text:'Enter the current 6-digit code from your authenticator app. Expires after 5 minutes.'}),f,btn('Back to login',login,true))))}
+function mfaChallengeView(challenge){
+  root.replaceChildren();
+  const mode=node('select',{class:'field'},[
+    node('option',{value:'totp',text:'Authenticator 6-digit code'}),
+    node('option',{value:'recovery',text:'One-time recovery code'})
+  ]);
+  const code=input('otp','text','6-digit code');
+  code.autocomplete='one-time-code';code.inputMode='numeric';code.maxLength=6;
+  mode.addEventListener('change',()=>{
+    code.value='';
+    if(mode.value==='totp'){code.placeholder='6-digit code';code.maxLength=6;code.inputMode='numeric'}
+    else{code.placeholder='AR3D-XXXX-... backup code';code.maxLength=45;code.inputMode='text'}
+  });
+  const f=node('form',{class:'stack'},[
+    lab('Verification method',mode),lab('Verification code',code),
+    node('button',{class:'btn',type:'submit',text:'Verify and sign in'})
+  ]);
+  f.addEventListener('submit',async e=>{
+    e.preventDefault();
+    try{
+      const payload={challenge};
+      if(mode.value==='totp')payload.code=code.value;
+      else payload.recoveryCode=code.value;
+      await api('/v1/human/login/mfa','POST',payload);
+      await load();
+    }catch(err){asError(err)}
+  });
+  root.append(div('auth',div('card',title('Two-factor verification','h1'),
+    node('p',{class:'muted',text:'Use your authenticator or an unused recovery code. The challenge expires after 5 minutes.'}),
+    f,btn('Back to login',login,true))));
+}
 function inviteView(token){root.replaceChildren();const email=input('email','email','invited@company.com'),pass=input('password','password','At least 12 characters');pass.autocomplete='new-password';const form=node('form',{class:'stack'},[lab('Invited email',email),lab('Create password',pass),node('button',{class:'btn',type:'submit',text:'Activate client account'})]);form.addEventListener('submit',async e=>{e.preventDefault();try{await api('/v1/human/accept-invite','POST',{token,email:email.value,password:pass.value});history.replaceState(null,'','/app');await load()}catch(err){asError(err)}});root.append(div('auth',div('card',title('Accept client invitation','h1'),node('p',{class:'muted',text:'Only accept an invitation you were expecting.'}),form)))}
 async function logout(){try{await api('/v1/human/logout','POST',{})}finally{state.me=null;login()}}
 function dashboard(){root.replaceChildren();const aside=div('sidebar',node('div',{class:'brand',text:'AR3D AI Calling'},node('small',{text:'MULTI-TENANT PLATFORM'})),div('navitem',state.me.superAdmin?'Super Admin':'Client Dashboard'),node('p',{class:'muted',text:state.me.email}),node('a',{href:'/app/simulator',class:'navitem',text:'Test AI Conversation'}),btn('Sign out',logout,true));const main=div('main',div('row between',title(state.me.superAdmin?'Super Admin':'Personal AI Calling','h1'),node('span',{class:'pill',text:'Development / No live calls'})),div('',node('div',{id:'notice-anchor'})));root.append(div('layout',aside,main));if(state.me.superAdmin){mfaPanel(main);superAdmin(main)}if(state.me.tenants.length)clientPanel(main)}
-async function mfaPanel(main){const card=div('card',title('Super Admin Two-Factor Authentication'));main.append(card);try{const status=await api('/v1/human/mfa');if(status.enabled){card.append(node('p',{class:'success',text:'Authenticator MFA enabled. Every new login requires a code.'}));return}card.append(node('p',{class:'note',text:'Optional while the security rollout is in progress. No recovery codes yet: retain access to your authenticator and protect the encryption key.'}));if(!status.configured){card.append(node('p',{class:'err',text:'MFA_ENCRYPTION_KEY must be configured as a Cloudflare Worker secret before setup.'}));return}const section=div('stack');card.append(section);const start=btn('Set up Authenticator',async()=>{try{const res=await api('/v1/human/mfa/setup','POST',{});section.replaceChildren(node('p',{class:'note',text:'Add this secret manually to your authenticator (TOTP, SHA1, 6 digits, 30 seconds). Do not send it to anyone.'}));const secret=node('input',{class:'field',value:res.secret,readonly:'readonly'});section.append(lab('One-time setup secret',secret));const otp=input('otp','text','6-digit code');otp.inputMode='numeric';otp.maxLength=6;otp.pattern='[0-9]{6}';otp.autocomplete='one-time-code';const f=node('form',{class:'formrow'},[lab('Confirm authenticator code',otp),node('button',{class:'btn',type:'submit',text:'Enable MFA'})]);f.addEventListener('submit',async e=>{e.preventDefault();try{await api('/v1/human/mfa/enable','POST',{code:otp.value});section.replaceChildren(node('p',{class:'success',text:'MFA is enabled. Future logins require your authenticator.'}))}catch(err){asError(err)}});section.append(f)}catch(err){asError(err)}});section.append(start)}catch(err){asError(err)}}
+function showRecoveryCodes(target,codes){
+  target.replaceChildren(node('p',{class:'success',text:'Save these one-time recovery codes now. Each works only once. They will not be displayed again.'}));
+  const box=node('textarea',{class:'field',rows:'8',readonly:'readonly'});
+  box.value=codes.join('\n');
+  target.append(lab('Recovery codes — keep offline and private',box),
+    node('p',{class:'note',text:'Do not send these codes in messages or screenshots. Store them in a trusted password manager or secure offline record.'}));
+}
+async function mfaPanel(main){
+  const card=div('card',title('Super Admin Two-Factor Authentication'));
+  main.append(card);
+  try{
+    const status=await api('/v1/human/mfa');
+    const section=div('stack');card.append(section);
+    if(status.enabled){
+      section.append(node('p',{class:'success',text:'Authenticator MFA enabled. Each new login needs an authenticator or an unused recovery code.'}),
+        node('p',{class:'note',text:'Generate a new set of backup codes using your password and current authenticator. All previous backup codes will stop working.'}));
+      const pass=input('password','password','Current password');
+      const otp=input('otp','text','6-digit authenticator code');
+      otp.inputMode='numeric';otp.maxLength=6;otp.pattern='[0-9]{6}';otp.autocomplete='one-time-code';
+      const output=div('stack');
+      const form=node('form',{class:'stack'},[lab('Current password',pass),lab('Current authenticator code',otp),
+        node('button',{class:'btn',type:'submit',text:'Replace recovery codes'})]);
+      form.addEventListener('submit',async e=>{
+        e.preventDefault();
+        if(!confirm('Replace all existing recovery codes? Old recovery codes will stop working.'))return;
+        try{
+          const data=await api('/v1/human/mfa/recovery/regenerate','POST',{password:pass.value,code:otp.value});
+          pass.value='';otp.value='';
+          showRecoveryCodes(output,data.recoveryCodes);
+        }catch(err){asError(err)}
+      });
+      section.append(form,output);
+      return;
+    }
+    section.append(node('p',{class:'note',text:'Set up an authenticator, confirm its code, then save the one-time recovery codes shown after activation.'}));
+    if(!status.configured){
+      section.append(node('p',{class:'err',text:'MFA_ENCRYPTION_KEY must be configured as a Cloudflare Worker secret before setup.'}));
+      return;
+    }
+    const start=btn('Set up Authenticator',async()=>{
+      try{
+        const data=await api('/v1/human/mfa/setup','POST',{});
+        section.replaceChildren(node('p',{class:'note',text:'Add this secret manually to your authenticator (TOTP SHA1, 6 digits, 30 seconds). Never share it.'}));
+        const seed=node('input',{class:'field',value:data.secret,readonly:'readonly'});
+        section.append(lab('One-time setup secret',seed));
+        const otp=input('otp','text','6-digit code');
+        otp.inputMode='numeric';otp.maxLength=6;otp.pattern='[0-9]{6}';otp.autocomplete='one-time-code';
+        const form=node('form',{class:'formrow'},[
+          lab('Confirm authenticator code',otp),
+          node('button',{class:'btn',type:'submit',text:'Enable MFA'})
+        ]);
+        form.addEventListener('submit',async e=>{
+          e.preventDefault();
+          try{
+            const result=await api('/v1/human/mfa/enable','POST',{code:otp.value});
+            const codes=result.recoveryCodes;
+            if(!Array.isArray(codes)||codes.length!==8)throw Error('Recovery codes missing — contact administrator before relying on MFA');
+            showRecoveryCodes(section,codes);
+          }catch(err){asError(err)}
+        });
+        section.append(form);
+      }catch(err){asError(err)}
+    });
+    section.append(start);
+  }catch(err){asError(err)}
+}
 async function superAdmin(main){const panel=div('card',title('Subscription Clients'));main.append(panel);const list=div('');panel.append(list);async function refresh(){try{const d=await api('/v1/human/tenants');list.replaceChildren(table(['Client','Plan','Storage','Status','Members'],d.tenants.map(t=>[t.display_name,t.plan_code,t.storage_mode,t.status,t.member_count])))}catch(e){asError(e)}}await refresh();const name=input('name','text','Builder company'),slug=input('slug','text','builder-company');const plan=node('select',{class:'field',name:'plan'},['starter','growth','enterprise'].map(p=>node('option',{value:p,text:p})));const mode=node('select',{class:'field'},['shared','dedicated'].map(p=>node('option',{value:p,text:p})));const f=node('form',{class:'formrow'},[lab('Company',name),lab('Slug',slug),lab('Subscription plan',plan),lab('Storage',mode),node('button',{class:'btn',type:'submit',text:'Add client'})]);f.addEventListener('submit',async e=>{e.preventDefault();try{const d=await api('/v1/human/tenants','POST',{displayName:name.value,slug:slug.value,plan:plan.value,storageMode:mode.value});notice('Client created: '+d.slug);f.reset();await refresh();await inviteSection(main)}catch(err){asError(err)}});panel.append(title('Create client','h3'),f);await inviteSection(main)}
 async function inviteSection(main){const previous=document.getElementById('invite-card');if(previous)previous.remove();const card=div('card');card.id='invite-card';card.append(title('Invite client admin','h2'),node('p',{class:'muted',text:'Invitation link shown once. Share privately with the intended client.'}));const select=node('select',{class:'field'},[node('option',{value:'',text:'Choose company'})]);const tenants=await api('/v1/human/tenants');tenants.tenants.forEach(t=>select.append(node('option',{value:t.id,text:t.display_name})));const email=input('email','email','client@builder.com');const role=node('select',{class:'field'},['client_admin','viewer'].map(x=>node('option',{value:x,text:x})));const f=node('form',{class:'formrow'},[lab('Company',select),lab('Client email',email),lab('Role',role),node('button',{type:'submit',class:'btn',text:'Create invitation'})]);f.addEventListener('submit',async e=>{e.preventDefault();try{const d=await api('/v1/human/invitations','POST',{tenantId:select.value,email:email.value,role:role.value});const share=node('input',{class:'field',value:d.inviteUrl,readonly:'readonly',style:'width:100%'});card.append(div('banner',node('p',{text:'Share this one-time link securely:'}),share));notice('Invitation generated for '+email.value)}catch(err){asError(err)}});card.append(f);main.append(card)}
 async function clientPanel(main){const panel=div('card',title('Personal CRM & AI Agent'));main.append(panel);const select=node('select',{class:'field'},state.me.tenants.map(t=>node('option',{value:t.id,text:t.name+' — '+t.plan})));const content=div('');panel.append(lab('Your company',select),content);select.addEventListener('change',()=>renderClient(select.value,content));await renderClient(select.value,content)}
