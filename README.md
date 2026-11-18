@@ -108,3 +108,11 @@ The secret is never sent to the browser. Replace the example password; use a pas
 - New database migration `migrations/crm/0003_conversation_simulator.sql` applies only to AR3D AI Calling CRM D1 databases (shared and separately provisioned dedicated DBs).
 - Demo state expires after 24 hours. Production deployment must additionally schedule deletion of expired rows and apply a data retention/privacy policy. Always use fictional customer details during testing.
 - Run `npm test` locally; CI uses the same command. Calling-provider onboarding, realtime audio transport, verified project knowledge, compliance and Cloudflare deployment remain separate, pending work.
+
+## Phase 6 — One-way client lead opt-out (manual suppression)
+
+- Signed-in `client_admin` can block an owned lead through **Do Not Call / Block number** and view a tenant-scoped opt-out event history. `viewer` can read but cannot change the contact preference.
+- `POST /v1/human/leads/:id/opt-out` takes `{tenantId,source,reason?}`, where `source` is `customer_request`, `admin_action` or `other`. It never grants calling consent or dials a lead.
+- Database migration: `migrations/crm/0004_lead_opt_out.sql`. Run on NEW CRM databases after `0003` or use an approved incremental migration process for an existing database (see [Main Deployment](docs/MAIN-DEPLOYMENT.md)). The database trigger prevents reversing a recorded opt-out through ordinary SQL updates.
+- Already-imported blocked numbers remain blocked if the same Excel/CSV number is uploaded again; imports do not overwrite existing lead records.
+- Still missing: provider-driven opt-out webhooks, DND API integration, cross-tenant/legal suppression design, and privacy retention/deletion policy. Do not mistake manual CRM suppression for compliance clearance.

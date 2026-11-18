@@ -96,6 +96,34 @@ async function crmWorkflow(tenantId,content,role){
         notice('Lead updated');await refresh();
       }catch(err){asError(err)}})}else{form.querySelectorAll('input,select').forEach(el=>el.disabled=true)}
     details.append(form);
+
+    const blocked=lead.consentStatus==='denied'||lead.dndStatus==='blocked';
+    const callPrefs=div('card',title('Calling Preferences / कॉलिंग अनुमति','h3'),
+      node('p',{class:'note',text:blocked?'DO NOT CALL — this lead is blocked. No client-side reactivation is available.':
+        'Consent is not verified. No outbound calling is available. Record an opt-out if requested.'}));
+    if(editable&&!blocked){
+      const origin=node('select',{class:'field'},
+        [['customer_request','Customer asked not to call'],['admin_action','Manual/internal block'],['other','Other']].map(([value,text])=>node('option',{value,text})));
+      const why=input('optOutReason','text','Optional reason (max 500 characters)');why.maxLength=500;why.required=false;
+      const stopForm=node('form',{class:'formrow'},[lab('Opt-out source',origin),lab('Reason (optional)',why),
+        node('button',{class:'btn secondary',type:'submit',text:'Do Not Call / Block number'})]);
+      stopForm.addEventListener('submit',async e=>{
+        e.preventDefault();
+        if(!confirm('Block this lead from calling? This cannot be undone from the CRM.'))return;
+        try{
+          await api('/v1/human/leads/'+lead.id+'/opt-out','POST',
+            {tenantId,source:origin.value,reason:why.value});
+          notice('Calling blocked; audit event saved.');await refresh();
+        }catch(err){asError(err)}
+      });
+      callPrefs.append(stopForm);
+    }
+    const history=div('');callPrefs.append(history);details.append(callPrefs);
+    api('/v1/human/leads/'+lead.id+'/opt-out?tenantId='+encodeURIComponent(tenantId))
+      .then(result=>history.replaceChildren(...(result.events.length?
+        [title('Opt-out history','h3'),table(['Source','Reason','At'],result.events.map(ev=>
+          [ev.source,ev.reason||'—',new Date(ev.createdAt).toLocaleString()]))]:[])))
+      .catch(asError);
     const notesArea=div('');details.append(title('Private Notes','h3'),notesArea);
     const fetchNotes=async()=>{const notes=await api('/v1/human/notes?tenantId='+encodeURIComponent(tenantId)+'&leadId='+lead.id);
       notesArea.replaceChildren(table(['Note','Added'],notes.notes.map(n=>[n.text,new Date(n.createdAt).toLocaleString()])))};
