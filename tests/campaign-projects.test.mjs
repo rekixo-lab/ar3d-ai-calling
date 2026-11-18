@@ -48,7 +48,7 @@ test('campaign cannot activate or supply phone provider / sensitive settings',as
     {tenantId:tenant,name:'A',languageMode:'bad',purpose:'site_visit'},
     {tenantId:tenant,name:'A',languageMode:'hi',purpose:'marketing'},
   ])assert.equal((await worker.fetch(req(url,'POST',d),stub().env)).status,400);
-  assert.equal((await worker.fetch(req(url+'/'+campaign,'PATCH',{tenantId:tenant,status:'active'}),stub().env)).status,405);
+  assert.equal((await worker.fetch(req(url+'/'+campaign+'?tenantId='+tenant,'PATCH',{tenantId:tenant,status:'active'}),stub().env)).status,405);
   assert.equal((await worker.fetch(req(url+'/'+campaign+'/readiness?tenantId='+tenant),stub().env)).status,200);
 });
 test('candidate references are tenant-scoped, skipped when opted out, never granted consent',async()=>{
