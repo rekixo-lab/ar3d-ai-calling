@@ -3,12 +3,11 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "AR3D AI Calling \u2014 multi-tenant CRM and agent configuration foundation",
+  "description": "AR3D AI Calling — multi-tenant CRM and agent configuration foundation",
   "scripts": {
     "test": "node --test tests/*.test.mjs && python3 -m unittest discover -s tests -p 'test_*.py' -v",
     "test:js": "node --test tests/*.test.mjs",
-    "check:staging": "node scripts/check-staging.mjs",
-    "smoke:staging": "node scripts/smoke-staging.mjs"
+    "smoke:main": "node scripts/smoke-main.mjs"
   },
   "engines": {
     "node": ">=22"

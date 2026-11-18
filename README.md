@@ -29,16 +29,19 @@ This starter deliberately DOES NOT change either repo or their production D1/R2 
 npm test
 ```
 
-## Cloudflare setup (later, with authorized account)
+## Main Cloudflare deployment (single environment)
 
-1. Create a **new** Cloudflare Worker project/repository named `ar3d-ai-calling`.
-2. Provision NEW D1 databases `ar3d-calling-control` and `ar3d-calling-shared-crm` and a NEW R2 bucket `ar3d-calling-recordings`.
-3. Copy `wrangler.example.jsonc` to `wrangler.jsonc`; replace placeholder D1 IDs. This file is ignored by Git.
-4. Apply `migrations/control/0001_init.sql` to the control D1 and `migrations/crm/0001_init.sql` to the shared CRM D1. Never run these on AR3D Platform or Engine D1.
-5. Set `ADMIN_BOOTSTRAP_TOKEN` as a **Worker secret** with at least 32 random characters. Do not commit or send it to the browser.
-6. Only after security review, test the Worker in an isolated staging environment. Do not enable public calling.
+Only one main AR3D AI Calling Worker and its own databases are used. Nothing here touches AR3D Platform or AR3D Engine production services. Main setup is **manual** and must not be used for real client data until the security and compliance work below is complete.
 
-## API examples (staging only)
+- D1: `ar3d-calling-control` (new), `ar3d-calling-shared-crm` (new).
+- Private R2: `ar3d-calling-recordings` (new).
+- GitHub: create environment `production` and four environment secrets `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, `AR3D_MAIN_CONTROL_DB_ID`, and `AR3D_MAIN_CRM_DB_ID`.
+- Actions: **AR3D AI Calling - main Cloudflare setup (manual)**. Run `preflight` → `initialize` (once for empty new databases only) → `deploy` after verifying results.
+- To check the isolated Worker URL after authorized deployment, run `npm run smoke:main -- https://ar3d-ai-calling.<workers-subdomain>.workers.dev`.
+
+Complete instructions: [Main Cloudflare Deployment](docs/MAIN-DEPLOYMENT.md). There is no automatic deployment from pushes. No real phone calls, billing, telecom numbers or voice AI are available in the current code.
+
+## API examples (server-to-server development only)
 
 - `GET /health`
 - `POST /v1/admin/tenants` — admin bearer secret, JSON `{"slug":"demo-builder","displayName":"Demo Builder","plan":"starter","storageMode":"shared"}`
@@ -64,7 +67,7 @@ A browser UI is now available at **`/app`**, with private JSON endpoints at `/v1
 
 **New migration:** apply `migrations/control/0002_human_access.sql` to the **AR3D AI Calling control D1 only** (after `0001_init.sql`). CRM migrations are unchanged.
 
-**First Super Admin (staging only, manual bootstrap):** after `ADMIN_BOOTSTRAP_TOKEN` has been set as a Worker secret and both new D1 databases provisioned, invoke the one-time POST endpoint with an HTTPS server-to-server request:
+**First Super Admin (after an authorized main Worker deploy):** after `ADMIN_BOOTSTRAP_TOKEN` has been set as a Worker secret and both new D1 databases provisioned, invoke the one-time POST endpoint with an HTTPS server-to-server request:
 
 ```sh
 curl -X POST https://YOUR-AR3D-CALLING-HOST/v1/human/bootstrap \
@@ -75,7 +78,7 @@ curl -X POST https://YOUR-AR3D-CALLING-HOST/v1/human/bootstrap \
 
 The secret is never sent to the browser. Replace the example password; use a password manager and secure out-of-band handoff. One-time bootstrap is guarded by a transactionally unique claim. Sign in at `/app`, add a company, and create a one-time invitation. Send the invitation URL privately to the client; the client sets their own password and can then manage only their tenant. All new leads remain `consent=unknown,dnd=unknown`. Dedicated D1 tenants remain unavailable until Cloudflare binds their database separately.
 
-**Production caveats:** This Phase 2 is a staging-grade initial prototype, not production-ready identity or paid calling. Add managed email verification, MFA for Super Admin, Cloudflare WAF and distributed rate limiting, verified invite delivery, password recovery and session management, operational audit events, PII encryption and deletion, subscription enforcement, D1 provisioning and R2 retention policies. Calling requires telecom onboarding, KYC/DLT where applicable, lead consent/DND checks, AI disclosure and correct recording notices. There is no billing, live AI voice, dialing, automatic number provisioning or deployed Cloudflare service in this phase.
+**Production caveats:** This Phase 2 is a development-grade initial prototype, not production-ready identity or paid calling. Add managed email verification, MFA for Super Admin, Cloudflare WAF and distributed rate limiting, verified invite delivery, password recovery and session management, operational audit events, PII encryption and deletion, subscription enforcement, D1 provisioning and R2 retention policies. Calling requires telecom onboarding, KYC/DLT where applicable, lead consent/DND checks, AI disclosure and correct recording notices. There is no billing, live AI voice, dialing, automatic number provisioning or deployed Cloudflare service in this phase.
 
 
 ## Phase 3 — Lead Workflow / CSV Import (historical milestone)
@@ -85,17 +88,16 @@ The secret is never sent to the browser. Replace the example password; use a pas
 - Every imported lead has `consent_status=unknown` and `dnd_status=unknown`. Import neither places calls nor authorizes them.
 - Client role permissions: `client_admin` can update lead interest/location/budgets/followups, keep notes and request site visits; `viewer` is read-only.
 - No cross-tenant reads/edits. New migration `migrations/crm/0002_lead_workflow.sql` must be applied to both shared CRM and every dedicated CRM database.
-- Staging-only Cloudflare setup instructions and safe-config validator: [docs/STAGING.md](docs/STAGING.md). This repo does **not** automatically deploy.
+- Main Cloudflare deployment is manual and gated by resource identity and schema checks: [docs/MAIN-DEPLOYMENT.md](docs/MAIN-DEPLOYMENT.md). This repo does **not** automatically deploy.
 - Strict limits: 200 CSV customer rows, 160 KB file, 50 leads displayed per CRM search, 100 max API page size. Additional pagination UX and larger batch imports remain future work.
 
 
-## Phase 4: native XLSX lead import and staged deployment gate
+## Phase 4: native XLSX lead import and deployment safeguards
 
 - `/app` accepts `.xlsx` (up to 1 MiB; first visible worksheet, max 200 leads) or CSV UTF-8 (160 KB). Both require validation/preview before commit.
 - XLSX import uses bounded ZIP/DEFLATE parsing without additional npm dependencies; rejects formulas, macros, external links, encrypted files, invalid headers, duplicate phones and oversized files. No user data leaves the CRM Worker for parsing.
 - New imports still set consent/DND to `unknown`; they never start calls and never overwrite existing leads.
-- `.github/workflows/deploy-staging.yml` is a **manual-only** staging deployment gate. It requires protected GitHub Environment secrets and pre-provisioned Cloudflare resources/migrations; it is never automatic.
-- `docs/STAGING.md` describes manual Cloudflare setup. Existing AR3D Platform and Engine production resources must remain untouched.
+- `.github/workflows/deploy-production.yml` is the **manual-only** main deployment workflow with exact resource validation, one-time database initialization and a deploy gate. Existing AR3D Platform and Engine production resources remain untouched.
 
 
 ## Phase 5 — safe, text-only AI conversation simulator
@@ -103,6 +105,6 @@ The secret is never sent to the browser. Replace the example password; use a pas
 - The **Test AI Conversation** navigation link opens `/app/simulator` for signed-in clients. Each client can select their own draft agent and try an entirely synthetic customer dialogue. It uses that agent's stored question list.
 - `GET /v1/human/simulations/agents?tenantId=...` lists only the signed-in user's tenant agents. `POST /v1/human/simulations` starts a demo; `GET /v1/human/simulations/:id?tenantId=...` reads it and `POST /v1/human/simulations/:id/turn` advances it with `expectedRevision` for concurrency safety. All POSTs require same-origin human sessions, tenant write membership, and bounded request bodies.
 - The offline logic supports **repeat, skip, opt-out, and question-by-question raw-answer storage**. Unknown prices and availability are never invented. It does **not** answer arbitrary questions using an LLM, infer facts from speech, capture real audio, change consent/DND records, or schedule actual site visits.
-- New database migration `migrations/crm/0003_conversation_simulator.sql` applies only to the new AR3D AI Calling CRM D1 environments (shared and separately provisioned dedicated DBs).
+- New database migration `migrations/crm/0003_conversation_simulator.sql` applies only to AR3D AI Calling CRM D1 databases (shared and separately provisioned dedicated DBs).
 - Demo state expires after 24 hours. Production deployment must additionally schedule deletion of expired rows and apply a data retention/privacy policy. Always use fictional customer details during testing.
 - Run `npm test` locally; CI uses the same command. Calling-provider onboarding, realtime audio transport, verified project knowledge, compliance and Cloudflare deployment remain separate, pending work.

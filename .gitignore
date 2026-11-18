@@ -5,4 +5,4 @@ wrangler.jsonc
 .wrangler/
 *.log
 
-wrangler.staging.jsonc
+wrangler.*.jsonc
