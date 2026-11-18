@@ -70,7 +70,7 @@ function cloudflareMock({ controlTables=[],crmTables=[],controlName='ar3d-callin
       else if(sql.includes('PRAGMA')) {
         if(sql.includes('leads')) rows=leadColumns.map(name=>({name}));
         else if(sql.includes('conversation_simulations')) rows=['tenant_id','state_json','expires_at'].map(name=>({name}));
-        else if(sql.includes('tenants')) rows=['id','plan_code','storage_mode'].map(name=>({name}));
+        else if(sql.includes('tenants')) rows=['id','plan_code','storage_mode','suspended_from_status'].map(name=>({name}));
         else if(sql.includes('human_users')) rows=['id','global_role','password_hash'].map(name=>({name}));
         else if(sql.includes('human_mfa_settings')) rows=['user_id','recovery_generation_id','enabled_at'].map(name=>({name}));
         else if(sql.includes('human_mfa_recovery_codes')) rows=['user_id','code_hash','used_at'].map(name=>({name}));
@@ -124,4 +124,8 @@ test('ready schema refuses absent CRM safety triggers even when all tables exist
 test('ready schema checks post-migration safety columns, not just original tables', async () => {
   assert.throws(()=>checkColumns(['tenant_id','status'],'CRM_DB','call_campaign_drafts'),/missing columns/);
   assert.throws(()=>checkColumns(['user_id'],'CONTROL_DB','human_mfa_recovery_codes'),/missing columns/);
+});
+
+test('ready deployment blocks missing tenant suspension state tracking', () => {
+  assert.throws(()=>checkColumns(['id','plan_code','storage_mode'],'CONTROL_DB','tenants'),/missing columns/);
 });

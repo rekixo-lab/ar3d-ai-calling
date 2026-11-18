@@ -190,3 +190,11 @@ Client admins can remove an incorrect lead candidate from their own non-executab
 - Draft Campaign candidate GET supports validated `limit=1..100` and `offset=0..100000`, returning `total`, `limit`, `offset` and a page of tenant-owned candidates (no calls).
 - `GET /v1/human/exports/leads?tenantId=...&limit=200&offset=0` is available **only** to authorized client admins, paginated and private (no-store, audited). Download is JSON. This endpoint exports CRM leads, **not** notes, recordings or full GDPR/DPDP portability/erasure compliance.
 - `GET /v1/human/usage?tenantId=...` is a member-scoped report of **CRM record counts** only, including synthetic simulation counts. No telecom minutes, charges, billing, external requests, payments or subscription activation are implemented.
+
+
+## Super Admin tenant access suspension and retention scaffold
+
+- `POST /v1/human/tenants/:id/suspend` / `resume` require a signed-in **Super Admin** and a 10–240 character audit reason. Suspension disables tenant human membership and backend API key access through existing active-tenant gates. Resume restores the **recorded former trial/active state**, never charges a customer or assumes a subscription was paid. Dedicated CRM tenants cannot resume without a valid provisioned D1 binding.
+- Control D1 migration `migrations/control/0006_tenant_lifecycle.sql` preserves `suspended_from_status` and installs integrity triggers. Apply only through new empty D1 initialize or operator-approved incremental migration on a backed-up existing independent Control D1.
+- `src/retention-maintenance.mjs` implements bounded cleanup plans for expired sessions, MFA challenges, invitations, stale hashed IP windows and synthetic demo transcripts. It defaults to **dry-run only**. No scheduled Worker trigger or public HTTP route is registered; future execution requires explicit `RETENTION_MAINTENANCE_ENABLED=true` and an authorized operator hooking it to a reviewed scheduled job.
+- Never delete lead opt-out, consent, live call, recordings or CRM audit data with this cleanup helper. Legal retention/erasure and backup recovery still require separate implementation and policy approval.
