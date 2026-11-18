@@ -6,7 +6,7 @@ const hex=bytes=>Array.from(bytes,b=>b.toString(16).padStart(2,'0')).join('').to
 export const RECOVERY_CODE_COUNT=8;
 
 export function validRecoveryCode(raw){
-  return typeof raw==='string' && /^AR3D-(?:[A-Fa-f0-9]{4}-){7}[A-Fa-f0-9]{4}$/.test(raw.trim());
+  return typeof raw==='string' && /^AR3D-(?:[A-F0-9]{4}-){7}[A-F0-9]{4}$/i.test(raw.trim());
 }
 export function normalizeRecoveryCode(raw){
   return validRecoveryCode(raw)?raw.trim().toUpperCase():null;
