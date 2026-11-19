@@ -78,6 +78,16 @@ No payment provider, VPS or large AI model is needed for this form.
 
 See [Boss Fixed Property Survey](docs/BOSS-FIXED-PROPERTY-SURVEY.md).
 
+## Fixed 7-question Voice Preview — no large model or VPS
+
+Client Admin can now start a sequential **Hindi/English Voice Preview**
+on an imported Excel lead. Exact question order, plot vs 2BHK/3BHK,
+lakh/crore budget, date, retry and opt-out are handled by a small
+deterministic Worker function. Optional browser speech or manual typed
+answers fill the existing CRM form for **staff confirmation**. No
+phone call, verified STT, DND grant, recording or automatic booking happens.
+See [Basic Property Survey](docs/BOSS-FIXED-PROPERTY-SURVEY.md).
+
 # AR3D AI Calling
 
 ## Exotel India Voice AI connector (dry-run only)

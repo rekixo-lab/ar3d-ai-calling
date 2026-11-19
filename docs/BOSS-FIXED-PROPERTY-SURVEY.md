@@ -64,3 +64,44 @@ path; it completes the fixed-question CRM workflow independently.
   with fictional 3BHK lead and a local API fixture only.
 - `scripts/smoke-main.mjs` checks anonymous qualification API HTTP 401
   on Workers.dev and the custom domain.
+
+## Seven-turn voice preview (no telecom provider required)
+
+The fixed-question engine now has a deterministic Hindi/English browser
+voice-preview sequence implemented in
+`src/fixed-voice-turns.mjs`. It takes **speech-recognition text** as input,
+never customer audio. It normalizes a property type, city, neighborhood,
+conditional plot size/BHK, approximate rupee budget (including lakh/crore),
+interest and prospective India-local site-visit day. Every field is checked;
+ambiguous/low-confidence answers repeat at most three times, then stop for
+human review. Explicit `do not call` stops the session and tells staff to
+review the one-way CRM Do Not Call action. This *preview itself* is not
+evidence of a verified opt-out request from a real phone call.
+
+The authenticated, same-origin `POST /v1/human/voice-preview` endpoint
+returns a short-lived, 30-minute preview state and the next fixed question.
+It does **not** read or write CRM/D1, place a call, save transcripts,
+grant consent or make a booking. The Client Admin can open a lead's
+fixed questionnaire, click **Start 7-question voice preview**, type or
+opt-in dictate one reply at a time, play the prompt using browser speech
+synthesis and copy completed answers into the existing CRM review form.
+Only clicking **Save Reviewed Answers to CRM** after staff confirmation
+persists the information.
+
+The main App now allows opt-in same-origin microphone access via a
+restricted Permissions-Policy, but speech recognition quality depends on
+the browser and its upstream speech service; it is not a private
+self-hosted STT or connected telephone stream. The microphone is never
+needed to type answers. The exact India-local timezone (+05:30) is used
+for an optional future site-visit time instead of the computer timezone.
+
+## Remaining vendor-dependent live setup
+
+A real telecom channel must provide approved business account/Caller ID,
+lawfully permitted outbound calling, consent/DND verification, actual
+Hindi/English voice capture/transcription, a provider-authenticated and
+replay-protected voice turn callback, call/visit status reconciliation
+and recording permissions/retention. Only after selecting a provider
+can its real callback schema/security and authorized dispatch route be
+implemented and tested. The deployed preview intentionally has **no**
+provider callback or live dial route.

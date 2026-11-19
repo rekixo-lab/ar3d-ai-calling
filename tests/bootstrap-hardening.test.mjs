@@ -3,13 +3,14 @@ import assert from 'node:assert/strict';
 import worker from '../src/index.mjs';
 
 const site='https://ar3d-ai-calling.demo.workers.dev';
-test('only simulator page can request browser microphone permission',async()=>{
+test('only same-origin app and simulator may request opt-in browser microphone; cameras remain disabled',async()=>{
   const app=await worker.fetch(new Request(site+'/app'));
   const simulator=await worker.fetch(new Request(site+'/app/simulator'));
   assert.equal(app.status,200);
   assert.equal(simulator.status,200);
-  assert.match(app.headers.get('permissions-policy')||'',/microphone=\(\)/);
-  assert.match(simulator.headers.get('permissions-policy')||'',/microphone=\(self\)/);
+  assert.match(app.headers.get('permissions-policy')||'',/camera=\(\),microphone=\(self\)/);
+  assert.match(simulator.headers.get('permissions-policy')||'',/camera=\(\),microphone=\(self\)/);
+  assert.match(app.headers.get('content-security-policy')||'',/frame-ancestors 'none'/);
   assert.match(simulator.headers.get('content-security-policy')||'',/script-src 'self'/);
   assert.match(simulator.headers.get('content-security-policy')||'',/frame-ancestors 'none'/);
 });
