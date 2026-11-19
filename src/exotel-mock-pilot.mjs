@@ -19,7 +19,11 @@ const baseline=Object.freeze({
   providerApproval:verified,callingWindow:verified,
   disclosure:verified,humanHandoff:verified,recordingNotice:verified
 });
-export function runExotelMockPilot({count=100,scenario='mixed'}={}){
+export function runExotelMockPilot(options={}){
+  if(!options||typeof options!=='object'||Array.isArray(options)||
+     Object.keys(options).some(k=>!['count','scenario'].includes(k)))
+    throw Error('invalid Exotel mock pilot input');
+  const {count=100,scenario='mixed'}=options;
   if(!Number.isSafeInteger(count)||count<1||count>100||!SCENARIOS.includes(scenario))
     throw Error('invalid Exotel mock pilot');
   const contract=buildExotelVoiceAiContract(fictionalConfig);
