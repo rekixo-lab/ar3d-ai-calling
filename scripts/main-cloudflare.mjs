@@ -69,8 +69,15 @@ export function makeMainConfig(template, credentials) {
     domainRoutes[0]?.pattern === 'aicalling.ar3dstudio.in' &&
     domainRoutes[0]?.custom_domain === true &&
     Object.keys(domainRoutes[0]).length === 2;
+  // Only the exact expired-auth cleanup cron may run in the Calling Worker.
+  // Reject arbitrary schedules or queue/event consumers targeting other services.
+  const onlyAuthCron = template?.triggers &&
+    Object.keys(template.triggers).length === 1 &&
+    Array.isArray(template.triggers.crons) &&
+    template.triggers.crons.length === 1 &&
+    template.triggers.crons[0] === '0 */6 * * *';
   if (template?.name !== 'ar3d-ai-calling' || template.main !== './src/index.mjs' ||
-      template.route || !onlyCallingDomain || template.triggers || template.services ||
+      template.route || !onlyCallingDomain || !onlyAuthCron || template.services ||
       !Array.isArray(template.d1_databases) || template.d1_databases.length !== 2 ||
       !Array.isArray(template.r2_buckets) || template.r2_buckets.length !== 1) {
     throw Error('Unsafe Worker template: wrong project, routes, resources or entry point.');
