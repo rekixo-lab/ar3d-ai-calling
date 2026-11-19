@@ -15,6 +15,7 @@ import {probeExotelConnectivity} from '../src/provider-connectivity.mjs';
 import {runSyntheticPilot} from '../src/sandbox-pilot.mjs';
 import {runExotelMockPilot} from '../src/exotel-mock-pilot.mjs';
 import {runExotelMediaHarness} from '../src/exotel-media-harness.mjs';
+import {fixedPropertyQuestions,PROPERTY_TYPES,normalizePropertySurvey} from '../src/fixed-property-survey.mjs';
 
 const SESSION='synthetic-browser-session-only';
 const TEST_EMAIL='sandbox-operator@example.invalid';
@@ -94,6 +95,31 @@ const server=http.createServer(async(req,res)=>{
       if(Object.keys(input).length) return respond(res,400,{error:'invalid request'});
       return respond(res,200,await probeExotelConnectivity({}));
     }
+    if(path==='/v1/human/leads/33333333-3333-4333-8333-333333333333/qualification'){
+      if(req.method==='GET')
+        return respond(res,200,{
+          leadId:'33333333-3333-4333-8333-333333333333',
+          updatedAt:'2026-11-19T10:00:00.000Z',survey:null,voiceConnected:false,
+          questionSets:Object.fromEntries(PROPERTY_TYPES.map(type=>[type,{
+            hi:fixedPropertyQuestions(type,'hi'),en:fixedPropertyQuestions(type,'en')
+          }]))
+        });
+      if(req.method==='POST'){
+        if(req.headers.origin!=='http://127.0.0.1:'+server.address().port)
+          return respond(res,403,{error:'origin required'});
+        const data=await readBounded(req);
+        if(data.expectedUpdatedAt!=='2026-11-19T10:00:00.000Z'||
+           data.tenantId!=='22222222-2222-4222-8222-222222222222')
+          return respond(res,409,{error:'stale or foreign tenant'});
+        const input={...data};delete input.tenantId;delete input.expectedUpdatedAt;
+        const reviewed=normalizePropertySurvey(input);
+        if(reviewed.propertyType!=='flat'||reviewed.size!=='3BHK'||
+           reviewed.location!=='Raipur'||reviewed.budgetInr!==3500000)
+          return respond(res,400,{error:'unexpected fictional questionnaire'});
+        return respond(res,200,{ok:true,voiceConnected:false,visitRequested:false,
+          notice:'Saved into local fictional fixture; no call placed'});
+      }
+    }
     invalidRequests++;
     return respond(res,404,{error:'not found'});
   }catch{
@@ -147,6 +173,27 @@ try{
     await page.getByText('Provider mock events: 100 | Real calls: 0 | External requests: 0').waitFor();
     await page.getByRole('button',{name:'Test 100 PCM Audio Frames (offline)'}).click();
     await page.getByText('PCM frames: 100 received and 100 returned | Real calls: 0').waitFor();
+    // Real DOM exercise of the shipped fixed questionnaire without real
+    // customer data, vendor speech recognition, telephone or D1.
+    await page.evaluate(()=>{
+      const lead={id:'33333333-3333-4333-8333-333333333333',
+        name:'Fictional Excel Customer',mobile:'98XXXXXXXX'};
+      const tenant='22222222-2222-4222-8222-222222222222';
+      document.getElementById('app').append(
+        fixedSurveyPanel(tenant,lead,async()=>{}));
+    });
+    await page.getByRole('button',{name:'Open Fixed Questionnaire'}).click();
+    await page.getByText(/Name: Fictional Excel Customer/).waitFor();
+    await page.locator('[name=surveyPropertyType]').selectOption('flat');
+    await page.locator('[name=surveyCity]').fill('Raipur');
+    await page.locator('[name=surveyArea]').fill('Shankar Nagar');
+    await page.locator('[name=surveyBudget]').fill('3500000');
+    await page.getByRole('combobox',{name:/BHK/}).first().selectOption('3BHK');
+    await page.locator('[name=surveyInterest]').selectOption('interested');
+    await page.locator('[name=surveyVisit]').fill('2027-01-12');
+    page.once('dialog',dialog=>dialog.accept());
+    await page.getByRole('button',{name:'Save Reviewed Answers to CRM'}).click();
+    await page.getByText(/CRM updated\. Visit preference is not a confirmed booking/).waitFor();
     const body=await page.locator('body').innerText();
     assert.ok(body.includes('Commercial go-live blocked:'));
     assert.ok(!body.includes('Start real calls'));

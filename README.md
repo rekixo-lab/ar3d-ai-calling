@@ -65,6 +65,19 @@ credentials have been installed. This does not enable telecom dispatch,
 recording, DND bypass or payments. See
 [Automatic Operations & Manual Gates](docs/AUTOMATIC-OPERATIONS.md).
 
+## Boss-approved basic Property Qualification — no extra AI hosting
+
+Customer **name and mobile are already in Excel**. The new client CRM
+**7 Fixed Questions** interview asks Plot/Flat/House, City, Area,
+Plot Size or BHK, Budget, Interest and Visit Preference. Staff-reviewed
+answers save to existing tenant-scoped D1; an exact future time can
+create a REQUESTED Site Visit (not automatically confirmed). Browser
+speech preview is optional and not an actual phone call. Real dialing,
+speech-to-text and recording require approved telecom and permissions.
+No payment provider, VPS or large AI model is needed for this form.
+
+See [Boss Fixed Property Survey](docs/BOSS-FIXED-PROPERTY-SURVEY.md).
+
 # AR3D AI Calling
 
 ## Exotel India Voice AI connector (dry-run only)
