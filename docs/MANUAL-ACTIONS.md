@@ -89,3 +89,19 @@ python3 scripts/bootstrap-main.py --sync-worker-secret https://ar3d-ai-calling.a
 ```
 
 This mode generates one 256-bit random bootstrap token in process memory, uploads it **directly** to the named `ar3d-ai-calling` Worker with authenticated Wrangler, and calls the existing bootstrap endpoint using the identical in-memory token. **No token/secret value is passed in process arguments, saved to a file, or shown in terminal output.** No separate clipboard paste. The Wrangler command runs from a temporary empty directory to avoid inadvertently using a config for AR3D Platform/Engine; it targets only the exact new Worker name. If authentication/upload fails, account creation does not run. This operation is for **first bootstrap only**; never use it to reset an existing Super Admin. Wrangler `secret put` creates a new Worker version. Once the Super Admin exists and you can sign in, immediately delete the temporary Worker-only `ADMIN_BOOTSTRAP_TOKEN`; keep `LOGIN_RATE_LIMIT_SECRET` and `MFA_ENCRYPTION_KEY`.
+
+
+### Exact Bootstrap 401 diagnosis and single-token propagation retry
+
+The read-only Wrangler secret list confirms **names**, not values. An intentionally
+invalid Bearer token returning 401 with the expected JSON proves the Bootstrap
+route rejects invalid input, not that a previous real token was accepted.
+
+The guarded synchronized flow uploads exactly one token, then reuses the **same
+in-memory token and password** for up to four requests when (and only when) the
+Worker responds with the exact JSON 401. Retry delays are 5, 10 and 15 seconds;
+there are no extra secret writes. HTTP 403/409, upstream 401, transport errors,
+and unexpected responses stop without retry. The script never displays token,
+password or the raw HTTP body. Persistent 401 may be a deployment or secret
+value mismatch: investigate before trying another rotation. Never bootstrap an
+existing Super Admin.
