@@ -105,3 +105,16 @@ and their databases must remain unchanged.
 
 Run the existing \`npm test\`, and (after installing its temporary Playwright
 dependency) \`node scripts/browser-e2e.mjs\`. The GitHub PR CI performs both.
+
+
+## Exotel Voice AI adapter and mock lifecycle (2026-11-19)
+
+The Exotel India Voice AI Connect *request shape* is now documented and tested
+without API credentials or external network calls. Super Admins may run
+100 fictional Exotel mock events under strict origin/session/field limits.
+The adapter rejects malformed numbers/URLs, unexpected headers and untrusted
+callbacks. All caller/consent/DND checks remain fail-closed and can never
+authorize dialing from these mock inputs. Real provider approval, callback
+source verification, live bidirectional WSS transport, calling-time validation,
+and billing reconciliation remain P0 blockers. See
+[Exotel Provider Gates](EXOTEL-PROVIDER-GATES.md).
