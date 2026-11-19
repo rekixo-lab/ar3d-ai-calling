@@ -27,5 +27,10 @@
       "pattern": "aicalling.ar3dstudio.in",
       "custom_domain": true
     }
-  ]
+  ],
+  "triggers": {
+    "crons": [
+      "0 */6 * * *"
+    ]
+  }
 }
