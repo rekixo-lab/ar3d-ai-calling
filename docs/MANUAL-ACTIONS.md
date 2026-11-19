@@ -105,3 +105,19 @@ and unexpected responses stop without retry. The script never displays token,
 password or the raw HTTP body. Persistent 401 may be a deployment or secret
 value mismatch: investigate before trying another rotation. Never bootstrap an
 existing Super Admin.
+
+
+### Python urllib / workers.dev Browser Integrity Check (403 / error 1010)
+
+Cloudflare documents that the default Python urllib User-Agent can trigger an
+unavoidable Browser Integrity Check on workers.dev before the Worker runs.
+The trusted one-time bootstrap helper now sends the descriptive application
+User-Agent `AR3D-AI-Calling-Bootstrap/1.0 (+https://ar3d-ai-calling.ai-8f3.workers.dev)` on the existing isolated HTTPS endpoint, not a fake
+browser identity. This fixes a known 403 risk without disabling Cloudflare
+security or changing other Workers. For an explicit Cloudflare error 1010 the
+helper prints a safe classification, never the raw HTTP body. Any other 403
+still stops immediately. A prior 403 alone does not prove error 1010 without
+its response body or Cloudflare logs. Keep existing one-time bootstrap and
+secret-removal rules.
+
+Cloudflare documentation: https://developers.cloudflare.com/workers/configuration/routing/workers-dev/
