@@ -1,4 +1,5 @@
 import {handleCrmRequest} from './crm-routes.mjs';
+import {handlePropertyQualificationRequest} from './property-qualification-routes.mjs';
 import {handleEngineeringRequest} from './engineering-routes.mjs';
 import {handleTenantLifecycleRequest} from './tenant-lifecycle-routes.mjs';
 import {handleDataPortabilityRequest} from './data-portability-routes.mjs';
@@ -242,6 +243,8 @@ export async function handleHumanRequest(req,env){
     if(auditResponse)return auditResponse;
     const dataResponse=await handleDataPortabilityRequest(req,env,user);
     if(dataResponse)return dataResponse;
+    const qualificationResponse=await handlePropertyQualificationRequest(req,env,user);
+    if(qualificationResponse)return qualificationResponse;
     const crmResponse=await handleCrmRequest(req,env,user);
     if(crmResponse)return crmResponse;
     const simulationResponse=await handleConversationRequest(req,env,user);
