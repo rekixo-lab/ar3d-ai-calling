@@ -146,7 +146,8 @@ test('Periodic monitor is secretless, GET-only and checks the exact Calling orig
   };
   for(const path of ['/v1/human/me','/v1/human/engineering/status',
     '/v1/human/engineering/provider-pilot','/v1/human/engineering/media-protocol',
-    '/v1/human/engineering/provider-connectivity'])
+    '/v1/human/engineering/provider-connectivity',
+    '/v1/human/leads/33333333-3333-4333-8333-333333333333/qualification'])
     content[path]=[401,'application/json',JSON.stringify({error:'sign in required'})];
   const seen=[];
   const result=await monitor({fetchFn:async(url,opts)=>{
@@ -155,7 +156,7 @@ test('Periodic monitor is secretless, GET-only and checks the exact Calling orig
     return new Response(body,{status:code,headers:{'Content-Type':type}});
   }});
   assert.equal(result.healthy,true);
-  assert.equal(seen.length,9);
+  assert.equal(seen.length,10);
   assert.ok(seen.every(([u,o])=>u.startsWith(ORIGIN+'/')&&
     o.method==='GET'&&o.redirect==='error'&&o.cache==='no-store'));
   const yaml=readFileSync('.github/workflows/monitor-production.yml','utf8');
