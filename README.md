@@ -55,6 +55,16 @@ does not activate subscriptions or collect payments.
 Nothing connects a real dialer, payment gateway webhook or live media endpoint.
 See [Exact Operator Go-Live Steps](docs/OPERATOR-GO-LIVE.md).
 
+## Active safe operations (no new manual setup)
+
+The isolated Calling Worker now has a six-hour Cloudflare Cron Trigger for
+**expired auth artifacts only** (not customer records), plus a six-hour
+GitHub Actions public health monitor. Super Admins can use **Check Exotel
+Connection (read-only)** to verify a vendor account after its private
+credentials have been installed. This does not enable telecom dispatch,
+recording, DND bypass or payments. See
+[Automatic Operations & Manual Gates](docs/AUTOMATIC-OPERATIONS.md).
+
 # AR3D AI Calling
 
 ## Exotel India Voice AI connector (dry-run only)
