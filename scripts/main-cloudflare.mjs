@@ -1,10 +1,10 @@
 /**
  * AR3D AI Calling — guarded main Cloudflare D1 preflight.
  * Pure checks below can be tested without credentials. Never prints tokens.
- * This script does not write to Cloudflare; only the manual GitHub workflow's
- * explicit `initialize` and `deploy` operations perform remote writes.
+ * This script does not write to Cloudflare; the guarded main-only GitHub
+ * workflow separately performs one-time fresh initialization and deployment.
  */
-import { readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync, appendFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 const D1_NAME = Object.freeze({
@@ -188,12 +188,25 @@ export async function inspectCloudflare({ credentials, mode, apiFetch = fetch, t
   return { config, modes };
 }
 
+// A single clean state is mandatory for unattended deployment. Mixed/partial
+// schemas are NEVER safe to automatically initialize or deploy.
+export function verifiedSchemaState(modes) {
+  if (!modes || !['fresh','ready'].includes(modes.CONTROL_DB) ||
+      modes.CONTROL_DB !== modes.CRM_DB)
+    throw Error('Refusing automated deployment: D1 schema states are mixed or invalid.');
+  return modes.CONTROL_DB;
+}
+
 async function run() {
   const mode = process.argv[2] || 'preflight';
   const credentials = getCredentials(process.env);
   const template = JSON.parse(readFileSync('wrangler.example.jsonc', 'utf8'));
   const { config, modes } = await inspectCloudflare({ credentials, mode, template });
+  const state = verifiedSchemaState(modes);
   writeFileSync('wrangler.jsonc', JSON.stringify(config, null, 2));
+  // Safe output for GitHub Actions step conditions: state only, never any
+  // account ID, database UUID, token or credential-derived worker URL.
+  if (process.env.GITHUB_OUTPUT) appendFileSync(process.env.GITHUB_OUTPUT, 'schema_state=' + state + '\n');
   console.log('AR3D main Cloudflare identity verified. CONTROL_DB=' + modes.CONTROL_DB + ', CRM_DB=' + modes.CRM_DB + '.');
   console.log('Only new ar3d-ai-calling Worker bindings were configured; no other AR3D services were touched.');
 }
