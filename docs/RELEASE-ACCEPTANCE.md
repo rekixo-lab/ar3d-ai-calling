@@ -154,3 +154,18 @@ signed or allowlisted callback origins, production media gateway, speech AI,
 D1/R2 disaster recovery, MFA, lawful billing and end-to-end supervised
 calls are still separate signed-off release gates. See
 [Operator Go-Live Checklist](OPERATOR-GO-LIVE.md).
+
+
+## Safe operations turned on
+
+Configured a single Cloudflare scheduled event to remove ONLY expired login
+sessions, MFA challenges, invitations and old unblocked IP login-limit rows
+from the Calling Control D1 database; it cannot access CRM leads/consent or
+start calls. The exact Cron Trigger is guard-checked during deployment.
+A separate secretless GitHub Action monitors the custom domain and 401 auth
+barrier every six hours. Actual first scheduled executions require checking
+Cloudflare Cron Events and GitHub Actions history; code deployment alone is
+not evidence they have run. Super Admin can run a server-side read-only Exotel
+connection probe if and only if vendor credentials are configured; missing
+credentials produce a safe, clear result without network access. These
+features do NOT unblock real dialing, payment fulfillment or voice streaming.
