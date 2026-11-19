@@ -76,3 +76,16 @@ Only /app/simulator is allowed same-origin microphone access for explicitly user
 The live `POST /v1/human/bootstrap` returns HTTP 401 when the presented Bearer token is absent, differs from the Worker-only `ADMIN_BOOTSTRAP_TOKEN`, or the binding is absent/too short. Token values are intentionally inaccessible from the Cloudflare dashboard. The bootstrap helper now strips accidental surrounding paste whitespace, reports entered token character count **only**, and never logs the token/password. The Worker normalizes accidental surrounding whitespace before checking a constant-time hash comparison. Normal login and API tokens are unrelated.
 
 After a main auto-deploy, CI uses the Cloudflare Workers **read-only list-secrets-metadata endpoint** to report whether the standalone Worker has the required `LOGIN_RATE_LIMIT_SECRET` and `MFA_ENCRYPTION_KEY` bindings and whether temporary `ADMIN_BOOTSTRAP_TOKEN` exists. **No values or hashes are ever logged or returned.** If the name exists but bootstrap still returns 401, check the exact 32+ char one-time token in your *private* password manager and Cloudflare Production Worker; update only that isolated Worker secret then retry with fresh local clipboard. Do not print, screenshot, paste or send it into chat. After first Super Admin bootstrap, immediately delete only `ADMIN_BOOTSTRAP_TOKEN` and retain the two permanent auth secrets. Rotation of a bootstrap secret invalidates previously copied old values.
+
+
+## If the first Super Admin bootstrap repeatedly returns 401 despite a 44-character token
+
+Cloudflare secret-binding metadata can confirm **only the secret name exists**, not that its value matches what was pasted. Do **not** keep rotating/copying the same token. On a trusted Linux Mint terminal in `~/Workspace/ar3d-ai-calling`, run `npx --yes wrangler@4 login` once and authorize the Cloudflare account containing the existing standalone `ar3d-ai-calling` Worker. Then run:
+
+```bash
+cd ~/Workspace/ar3d-ai-calling
+git pull origin main
+python3 scripts/bootstrap-main.py --sync-worker-secret https://ar3d-ai-calling.ai-8f3.workers.dev
+```
+
+This mode generates one 256-bit random bootstrap token in process memory, uploads it **directly** to the named `ar3d-ai-calling` Worker with authenticated Wrangler, and calls the existing bootstrap endpoint using the identical in-memory token. **No token/secret value is passed in process arguments, saved to a file, or shown in terminal output.** No separate clipboard paste. The Wrangler command runs from a temporary empty directory to avoid inadvertently using a config for AR3D Platform/Engine; it targets only the exact new Worker name. If authentication/upload fails, account creation does not run. This operation is for **first bootstrap only**; never use it to reset an existing Super Admin. Wrangler `secret put` creates a new Worker version. Once the Super Admin exists and you can sign in, immediately delete the temporary Worker-only `ADMIN_BOOTSTRAP_TOKEN`; keep `LOGIN_RATE_LIMIT_SECRET` and `MFA_ENCRYPTION_KEY`.

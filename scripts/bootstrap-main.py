@@ -8,8 +8,12 @@ No third-party libraries; no credentials are written to disk or printed.
 import getpass
 import json
 import re
+import secrets
 import ssl
+import subprocess
 import sys
+import tempfile
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -68,10 +72,76 @@ def bootstrap(host: str, email: str, password: str, token: str, opener=None) -> 
     return 0
 
 
+# This operation is limited to a single existing standalone Cloudflare Worker.
+# No credentials are passed via argv, printed or persisted to disk.
+PRODUCTION_WORKER = "ar3d-ai-calling"
+PRODUCTION_URL = "https://ar3d-ai-calling.ai-8f3.workers.dev"
+
+
+def upload_one_time_token(token: str, runner=None) -> bool:
+    """Put token directly into the existing Worker via locally authenticated Wrangler.
+
+    Use an empty temporary directory so an unrelated repo's Wrangler config
+    can never redirect the command. The Worker name is exact and fixed.
+    """
+    if not re.fullmatch(r"[A-Za-z0-9_-]{43}", token):
+        raise ValueError("Expected a freshly generated 256-bit URL-safe token")
+    if runner is None:
+        runner = subprocess.run
+    command = [
+        "npx", "--yes", "wrangler@4", "secret", "put", "ADMIN_BOOTSTRAP_TOKEN",
+        "--name", PRODUCTION_WORKER,
+    ]
+    with tempfile.TemporaryDirectory(prefix="ar3d-calling-bootstrap-") as workdir:
+        try:
+            result = runner(
+                command, input=token + "\n", text=True,
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                cwd=workdir, timeout=180, check=False,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            print("Cloudflare sync failed; check Node.js/npm and Wrangler login. Token hidden.")
+            return False
+    if result.returncode != 0:
+        print("Cloudflare sync rejected. Run: npx --yes wrangler@4 login")
+        print("Ensure you authorize the account containing ONLY ar3d-ai-calling, then retry.")
+        print("No credentials or provider error output is shown.")
+        return False
+    print("One-time bootstrap secret synchronized directly to ar3d-ai-calling (value hidden).")
+    return True
+
+
+def synchronized_bootstrap(raw_host: str) -> int:
+    """Generate once, upload once, bootstrap using the SAME in-memory token."""
+    host = validate_host(raw_host)
+    if host != PRODUCTION_URL:
+        raise ValueError("Secure sync is permitted only for the verified main Calling Worker URL")
+    email = input("Super Admin email: ")
+    password = getpass.getpass("New Super Admin password (hidden): ")
+    again = getpass.getpass("Confirm password (hidden): ")
+    if password != again:
+        print("Passwords do not match. No secret was changed.")
+        return 2
+    # Validate both credentials before even uploading the new secret.
+    build_request(host, email, password, "X" * 43)
+    token = secrets.token_urlsafe(32)
+    if not upload_one_time_token(token):
+        return 1
+    # Give the newly published Worker secret a brief moment to propagate.
+    time.sleep(3)
+    return bootstrap(host, email, password, token)
+
+
 def main(argv=None) -> int:
     argv = sys.argv[1:] if argv is None else argv
+    if len(argv) == 2 and argv[0] == "--sync-worker-secret":
+        try:
+            return synchronized_bootstrap(argv[1])
+        except (ValueError, EOFError, KeyboardInterrupt):
+            print("Synchronized bootstrap cancelled or invalid input. Secret not displayed.")
+            return 2
     if len(argv) != 1:
-        print("Usage: python3 scripts/bootstrap-main.py https://ar3d-ai-calling.<subdomain>.workers.dev")
+        print("Usage: python3 scripts/bootstrap-main.py [--sync-worker-secret] https://ar3d-ai-calling.<subdomain>.workers.dev")
         return 2
     try:
         host = validate_host(argv[0])
