@@ -35,7 +35,7 @@ function dateTime(value,label='Date'){
   return new Date(value).toISOString();
 }
 function optionalPlotSize(value){
-  if(value===null||value==='')return null;
+  if(value===null||value===undefined||value==='')return null;
   if(typeof value!=='string'||value.trim().length>120||/[\u0000-\u001f]/u.test(value))
     throw Error('invalid plot size preference');
   return value.trim()||null;
