@@ -48,7 +48,32 @@ function mfaChallengeView(challenge){
 }
 function inviteView(token){root.replaceChildren();const email=input('email','email','invited@company.com'),pass=input('password','password','At least 12 characters');pass.autocomplete='new-password';const form=node('form',{class:'stack'},[lab('Invited email',email),lab('Create password',pass),node('button',{class:'btn',type:'submit',text:'Activate client account'})]);form.addEventListener('submit',async e=>{e.preventDefault();try{await api('/v1/human/accept-invite','POST',{token,email:email.value,password:pass.value});history.replaceState(null,'','/app');await load()}catch(err){asError(err)}});root.append(div('auth',div('card',title('Accept client invitation','h1'),node('p',{class:'muted',text:'Only accept an invitation you were expecting.'}),form)))}
 async function logout(){try{await api('/v1/human/logout','POST',{})}finally{state.me=null;login()}}
-function dashboard(){root.replaceChildren();const aside=div('sidebar',node('div',{class:'brand',text:'AR3D AI Calling'},node('small',{text:'MULTI-TENANT PLATFORM'})),div('navitem',state.me.superAdmin?'Super Admin':'Client Dashboard'),node('p',{class:'muted',text:state.me.email}),node('a',{href:'/app/simulator',class:'navitem',text:'Test AI Conversation'}),btn('Sign out',logout,true));const main=div('main',div('row between',title(state.me.superAdmin?'Super Admin':'Personal AI Calling','h1'),node('span',{class:'pill',text:'Development / No live calls'})),div('',node('div',{id:'notice-anchor'})));root.append(div('layout',aside,main));if(state.me.superAdmin){mfaPanel(main);superAdmin(main)}if(state.me.tenants.length)clientPanel(main)}
+function engineeringPanel(main){
+  const card=div('card',title('Production Readiness & Safe AI Calling Pilot'));
+  const status=div('stack',node('p',{class:'muted',text:'Engineering-only. No telecom provider, real calls or payments are connected.'}));
+  const summary=div('stack');
+  const launch=btn('Run 100 Synthetic Calls (no dialing)',async()=>{
+    launch.disabled=true;summary.replaceChildren(node('p',{class:'muted',text:'Running local-in-Worker mock conversation tests...'}));
+    try{
+      const result=await api('/v1/human/engineering/pilot','POST',{count:100,scenario:'mixed',quotaCalls:100});
+      summary.replaceChildren(
+        node('p',{class:'success',text:'Synthetic calls: '+result.count+' | Real calls: '+result.realCallsStarted+' | Audio generated: '+result.realAudioGenerated}),
+        table(['Outcome','Count'],[['Completed',result.outcomes.completed],['Opted out',result.outcomes.opted_out],['Repeat prompts',result.outcomes.repeat_requested],['Pricing deferred',result.outcomes.pricing_deferred],['Low-confidence repeats',result.outcomes.low_confidence_repeated]]),
+        node('p',{class:'muted',text:'Hypothetical rounded minutes: '+result.usagePreview.hypotheticalRoundedMinutes+' | Real billing: disabled | Payment collected: no'}),
+        node('p',{class:'note',text:result.notice})
+      );
+    }catch(err){asError(err)}finally{launch.disabled=false}
+  });
+  card.append(status,launch,summary);
+  main.append(card);
+  api('/v1/human/engineering/status').then(result=>{
+    const states=result.gates.filter(g=>g.state!=='available');
+    const list=node('ul');
+    states.forEach(g=>list.append(node('li',{text:g.id.replace(/_/g,' ')+': '+g.description})));
+    status.append(node('p',{class:'note',text:'Commercial go-live blocked: '+states.length+' release gates still require verification, integration or approval.'}),list);
+  }).catch(asError);
+}
+function dashboard(){root.replaceChildren();const aside=div('sidebar',node('div',{class:'brand',text:'AR3D AI Calling'},node('small',{text:'MULTI-TENANT PLATFORM'})),div('navitem',state.me.superAdmin?'Super Admin':'Client Dashboard'),node('p',{class:'muted',text:state.me.email}),node('a',{href:'/app/simulator',class:'navitem',text:'Test AI Conversation'}),btn('Sign out',logout,true));const main=div('main',div('row between',title(state.me.superAdmin?'Super Admin':'Personal AI Calling','h1'),node('span',{class:'pill',text:'Development / No live calls'})),div('',node('div',{id:'notice-anchor'})));root.append(div('layout',aside,main));if(state.me.superAdmin){engineeringPanel(main);mfaPanel(main);superAdmin(main)}if(state.me.tenants.length)clientPanel(main)}
 function showRecoveryCodes(target,codes){
   target.replaceChildren(node('p',{class:'success',text:'Save these one-time recovery codes now. Each works only once. They will not be displayed again.'}));
   const box=node('textarea',{class:'field',rows:'8',readonly:'readonly'});
