@@ -11,6 +11,7 @@ import {chromium} from 'playwright';
 import {html,css,js} from '../src/app-assets.mjs';
 import {productionReadiness} from '../src/release-gates.mjs';
 import {operationalReadiness} from '../src/operational-readiness.mjs';
+import {probeExotelConnectivity} from '../src/provider-connectivity.mjs';
 import {runSyntheticPilot} from '../src/sandbox-pilot.mjs';
 import {runExotelMockPilot} from '../src/exotel-mock-pilot.mjs';
 import {runExotelMediaHarness} from '../src/exotel-media-harness.mjs';
@@ -86,6 +87,13 @@ const server=http.createServer(async(req,res)=>{
       mediaRuns++;
       return respond(res,200,runExotelMediaHarness(params));
     }
+    if(req.method==='POST'&&path==='/v1/human/engineering/provider-connectivity'){
+      if(req.headers.origin!=='http://127.0.0.1:'+server.address().port)
+        return respond(res,403,{error:'origin required'});
+      const input=await readBounded(req);
+      if(Object.keys(input).length) return respond(res,400,{error:'invalid request'});
+      return respond(res,200,await probeExotelConnectivity({}));
+    }
     invalidRequests++;
     return respond(res,404,{error:'not found'});
   }catch{
@@ -123,6 +131,8 @@ try{
     await page.getByRole('heading',{name:'Super Admin',exact:true}).waitFor();
     await page.getByRole('heading',{name:'Production Readiness & Safe AI Calling Pilot'}).waitFor();
     await page.getByRole('heading',{name:'Operator Setup Checklist'}).waitFor();
+    await page.getByRole('button',{name:'Check Exotel Connection (read-only)'}).click();
+    await page.getByText('Exotel API: Not verified | Real dialing: disabled').waitFor();
     const nav=page.getByRole('link',{name:'Test AI Conversation'});
     const signout=page.getByRole('button',{name:'Sign out'});
     await nav.waitFor();await signout.waitFor();
