@@ -121,3 +121,35 @@ its response body or Cloudflare logs. Keep existing one-time bootstrap and
 secret-removal rules.
 
 Cloudflare documentation: https://developers.cloudflare.com/workers/configuration/routing/workers-dev/
+
+
+### Bootstrap 500 root cause: workerd PBKDF2 iteration ceiling (2026-11-19)
+
+A Cloudflare Worker 401 (while a newly published secret propagates) followed
+by a 500 after the **same** bootstrap token strongly suggests the application
+proceeded past token authorization but failed while hashing the password.
+The previous `src/human-auth.mjs` requested **240,000** iterations in one
+native `crypto.subtle.deriveBits(PBKDF2)` operation, while workerd caps a
+single PBKDF2 operation at **100,000**. The source is the most likely root
+cause; confirm with Cloudflare runtime logs where available. References:
+https://github.com/cloudflare/workerd/issues/1346 and
+https://github.com/payloadcms/payload/issues/18274
+
+New passwords use versioned chained PBKDF2-SHA256 with **three** separately
+salted 100,000-iteration rounds and a 128-bit random per-user salt. Stored
+`password_iterations=300000` identifies this V2 scheme; it is not the same
+hash as one vanilla PBKDF2 operation with 300k iterations. Each individual
+PBKDF2 call complies with the Workers limit. No D1 schema rewrite/reset or
+relaxation of the existing >=200000 constraint is required. Historical
+`password_iterations=240000` rows still mean the original legacy algorithm
+and require separately reviewed credential migration if present, as live
+workerd cannot verify them. Do NOT silently rehash old credentials.
+
+Before retrying first Super Admin bootstrap after a previous 500, verify
+whether a Super Admin or singleton claim was created in the dedicated Control
+D1 (read-only counts, no email/password disclosure). A 500 response alone is
+not proof that the transaction did not commit. Do not regenerate credentials
+until state has been checked. For paid SaaS production security, review a
+memory-hard password KDF / dedicated identity provider: three chained rounds
+are a compatibility workaround, not a claim of equivalence to a standards-
+recommended single high-cost or memory-hard KDF.
