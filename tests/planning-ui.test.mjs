@@ -51,7 +51,8 @@ test('public smoke checks health, login UI, sidebar fix and 401 without writes o
     ['/app/assets/app.js',[200,'text/javascript','Test AI Conversation Sign out']],
     ['/v1/human/me',[401,'application/json',JSON.stringify({error:'sign in required'})]],
     ['/v1/human/engineering/status',[401,'application/json',JSON.stringify({error:'sign in required'})]],
-    ['/v1/human/engineering/provider-pilot',[401,'application/json',JSON.stringify({error:'sign in required'})]]
+    ['/v1/human/engineering/provider-pilot',[401,'application/json',JSON.stringify({error:'sign in required'})]],
+    ['/v1/human/engineering/media-protocol',[401,'application/json',JSON.stringify({error:'sign in required'})]]
   ]);
   const seen=[];
   const fetchFn=async (url,opts)=>{
@@ -84,6 +85,15 @@ test('Exotel mock adapter visible in super-admin engineering panel without enabl
   assert.match(js,/Test Exotel Mock Provider \(100 events\)/);
   assert.match(js,/\/v1\/human\/engineering\/provider-pilot/);
   assert.match(js,/External requests:/);
+  assert.doesNotMatch(js,/\/v1\/human\/calls\/start/);
+  assert.doesNotThrow(()=>new vm.Script(js));
+});
+
+
+test('AgentStream Offline PCM protocol acceptance is strictly Super Admin-only',()=>{
+  assert.match(js,/Test 100 PCM Audio Frames \(offline\)/);
+  assert.match(js,/\/v1\/human\/engineering\/media-protocol/);
+  assert.match(js,/Media server connected: no/);
   assert.doesNotMatch(js,/\/v1\/human\/calls\/start/);
   assert.doesNotThrow(()=>new vm.Script(js));
 });
