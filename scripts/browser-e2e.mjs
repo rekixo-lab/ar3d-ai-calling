@@ -16,6 +16,7 @@ import {runSyntheticPilot} from '../src/sandbox-pilot.mjs';
 import {runExotelMockPilot} from '../src/exotel-mock-pilot.mjs';
 import {runExotelMediaHarness} from '../src/exotel-media-harness.mjs';
 import {fixedPropertyQuestions,PROPERTY_TYPES,normalizePropertySurvey} from '../src/fixed-property-survey.mjs';
+import {beginFixedVoicePreview,advanceFixedVoicePreview} from '../src/fixed-voice-turns.mjs';
 
 const SESSION='synthetic-browser-session-only';
 const TEST_EMAIL='sandbox-operator@example.invalid';
@@ -94,6 +95,17 @@ const server=http.createServer(async(req,res)=>{
       const input=await readBounded(req);
       if(Object.keys(input).length) return respond(res,400,{error:'invalid request'});
       return respond(res,200,await probeExotelConnectivity({}));
+    }
+    if(req.method==='POST'&&path==='/v1/human/voice-preview'){
+      if(req.headers.origin!=='http://127.0.0.1:'+server.address().port)
+        return respond(res,403,{error:'origin required'});
+      const input=await readBounded(req);
+      if(input.action==='start')
+        return respond(res,200,beginFixedVoicePreview({language:input.language}));
+      if(input.action==='turn')
+        return respond(res,200,advanceFixedVoicePreview(input.state,{
+          transcript:input.transcript,confidence:input.confidence}));
+      return respond(res,400,{error:'invalid preview request'});
     }
     if(path==='/v1/human/leads/33333333-3333-4333-8333-333333333333/qualification'){
       if(req.method==='GET')
@@ -184,6 +196,18 @@ try{
     });
     await page.getByRole('button',{name:'Open Fixed Questionnaire'}).click();
     await page.getByText(/Name: Fictional Excel Customer/).waitFor();
+    await page.getByRole('button',{name:'Start 7-question voice preview'}).click();
+    await page.getByText(/Question 1 of 7/).waitFor();
+    const spokenAnswers=['flat','Raipur','Shankar Nagar','3BHK','35 lakh','yes','2027-01-12'];
+    for(let n=0;n<spokenAnswers.length;n++){
+      await page.getByPlaceholder('Type or dictate the answer').fill(spokenAnswers[n]);
+      await page.getByRole('button',{name:'Next fixed question'}).click();
+      if(n<6)await page.getByText(new RegExp('Question '+(n+2)+' of 7')).waitFor();
+    }
+    await page.getByText('Seven questions completed — answers filled into the CRM form for your review.').waitFor();
+    assert.equal(await page.locator('[name=surveyPropertyType]').inputValue(),'flat');
+    assert.equal(await page.locator('[name=surveyCity]').inputValue(),'Raipur');
+    assert.equal(await page.locator('[name=surveyBudget]').inputValue(),'3500000');
     await page.locator('[name=surveyPropertyType]').selectOption('flat');
     await page.locator('[name=surveyCity]').fill('Raipur');
     await page.locator('[name=surveyArea]').fill('Shankar Nagar');
