@@ -66,3 +66,13 @@ test('public smoke fails closed on an unsafe redirect, broken content or wrong r
   const result=await smoke('https://aicalling.ar3dstudio.in',async()=>new Response('Not found',{status:404,headers:{'Content-Type':'text/html'}}));
   assert.equal(result,false);
 });
+
+test('Engineering status and 100 synthetic calls are Super Admin-only UI and do not expose live dialing',()=>{
+  assert.match(js,/Production Readiness & Safe AI Calling Pilot/);
+  assert.match(js,/Run 100 Synthetic Calls \(no dialing\)/);
+  assert.match(js,/\/v1\/human\/engineering\/status/);
+  assert.match(js,/\/v1\/human\/engineering\/pilot/);
+  assert.match(js,/realCallsStarted/);
+  assert.doesNotMatch(js,/\/v1\/human\/calls\/start/);
+  assert.doesNotThrow(()=>new vm.Script(js));
+});
