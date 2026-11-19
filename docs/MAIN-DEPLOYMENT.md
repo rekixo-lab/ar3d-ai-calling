@@ -184,3 +184,16 @@ python3 scripts/bootstrap-main.py --sync-worker-secret https://ar3d-ai-calling.a
 ```
 
 This mode generates one 256-bit random bootstrap token in process memory, uploads it **directly** to the named `ar3d-ai-calling` Worker with authenticated Wrangler, and calls the existing bootstrap endpoint using the identical in-memory token. **No token/secret value is passed in process arguments, saved to a file, or shown in terminal output.** No separate clipboard paste. The Wrangler command runs from a temporary empty directory to avoid inadvertently using a config for AR3D Platform/Engine; it targets only the exact new Worker name. If authentication/upload fails, account creation does not run. This operation is for **first bootstrap only**; never use it to reset an existing Super Admin. Wrangler `secret put` creates a new Worker version. Once the Super Admin exists and you can sign in, immediately delete the temporary Worker-only `ADMIN_BOOTSTRAP_TOKEN`; keep `LOGIN_RATE_LIMIT_SECRET` and `MFA_ENCRYPTION_KEY`.
+
+
+## Read-only custom-domain release smoke
+
+After the isolated Worker deploy, the guarded main GitHub Action now checks both
+its original workers.dev origin (when Wrangler publishes the URL) and
+`https://aicalling.ar3dstudio.in` using the same read-only `smoke-main.mjs`
+script. It performs **GET only**: service/status at `/health`, HTML `/app`,
+UI styles/JS assets including the sidebar navigation fix, and unauthenticated
+`/v1/human/me` returning HTTP 401. It rejects redirects and off-host URLs.
+No credentials, cookies, customer records, D1 mutations or telecom operations
+are involved. A green smoke is *not* an authenticated E2E, browser visual,
+privacy compliance, performance/load or live-provider call test.
