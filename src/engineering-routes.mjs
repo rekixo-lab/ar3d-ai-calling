@@ -5,6 +5,7 @@ import {productionReadiness} from './release-gates.mjs';
 import {runSyntheticPilot} from './sandbox-pilot.mjs';
 import {runExotelMockPilot} from './exotel-mock-pilot.mjs';
 import {runExotelMediaHarness} from './exotel-media-harness.mjs';
+import {operationalReadiness} from './operational-readiness.mjs';
 
 const headers={'Cache-Control':'no-store','X-Content-Type-Options':'nosniff',
   'Referrer-Policy':'no-referrer','X-Frame-Options':'DENY'};
@@ -29,13 +30,13 @@ async function boundedJson(req){
   }finally{reader.releaseLock()}
   return parseJsonBody(text,MAX_BYTES);
 }
-export async function handleEngineeringRequest(req,user){
+export async function handleEngineeringRequest(req,user,env={}){
   const path=new URL(req.url).pathname;
   if(!path.startsWith(BASE))return null;
   if(user?.globalRole!=='super_admin')return fail('forbidden',403);
   if(path===BASE+'status'){
     if(req.method!=='GET')return fail('method not allowed',405);
-    return json(productionReadiness());
+    return json({...productionReadiness(),operational:operationalReadiness(env)});
   }
   if(path===BASE+'pilot'){
     if(req.method!=='POST')return fail('method not allowed',405);

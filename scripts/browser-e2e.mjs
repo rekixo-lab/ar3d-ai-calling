@@ -10,6 +10,7 @@ import {once} from 'node:events';
 import {chromium} from 'playwright';
 import {html,css,js} from '../src/app-assets.mjs';
 import {productionReadiness} from '../src/release-gates.mjs';
+import {operationalReadiness} from '../src/operational-readiness.mjs';
 import {runSyntheticPilot} from '../src/sandbox-pilot.mjs';
 import {runExotelMockPilot} from '../src/exotel-mock-pilot.mjs';
 import {runExotelMediaHarness} from '../src/exotel-media-harness.mjs';
@@ -63,7 +64,7 @@ const server=http.createServer(async(req,res)=>{
     if(req.method==='GET'&&path==='/v1/human/tenants')
       return respond(res,200,{tenants:[]});
     if(req.method==='GET'&&path==='/v1/human/engineering/status')
-      return respond(res,200,productionReadiness());
+      return respond(res,200,{...productionReadiness(),operational:operationalReadiness({})});
     if(req.method==='POST'&&path==='/v1/human/engineering/pilot'){
       if(req.headers.origin!=='http://127.0.0.1:'+server.address().port)
         return respond(res,403,{error:'origin required'});
@@ -121,6 +122,7 @@ try{
     await page.getByRole('button',{name:'Sign in',exact:true}).click();
     await page.getByRole('heading',{name:'Super Admin',exact:true}).waitFor();
     await page.getByRole('heading',{name:'Production Readiness & Safe AI Calling Pilot'}).waitFor();
+    await page.getByRole('heading',{name:'Operator Setup Checklist'}).waitFor();
     const nav=page.getByRole('link',{name:'Test AI Conversation'});
     const signout=page.getByRole('button',{name:'Sign out'});
     await nav.waitFor();await signout.waitFor();
