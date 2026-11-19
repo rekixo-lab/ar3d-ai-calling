@@ -16,6 +16,7 @@ import {runSyntheticPilot} from '../src/sandbox-pilot.mjs';
 import {runExotelMockPilot} from '../src/exotel-mock-pilot.mjs';
 import {runExotelMediaHarness} from '../src/exotel-media-harness.mjs';
 import {fixedPropertyQuestions,PROPERTY_TYPES,normalizePropertySurvey} from '../src/fixed-property-survey.mjs';
+import {exotelTrialReadiness,managedVoicebotInstructions} from '../src/exotel-trial-readiness.mjs';
 import {beginFixedVoicePreview,advanceFixedVoicePreview} from '../src/fixed-voice-turns.mjs';
 
 const SESSION='synthetic-browser-session-only';
@@ -68,6 +69,8 @@ const server=http.createServer(async(req,res)=>{
       return respond(res,200,{tenants:[]});
     if(req.method==='GET'&&path==='/v1/human/engineering/status')
       return respond(res,200,{...productionReadiness(),operational:operationalReadiness({})});
+    if(req.method==='GET'&&path==='/v1/human/engineering/exotel-trial-setup')
+      return respond(res,200,{...exotelTrialReadiness({}),managedVoicebotPrompt:managedVoicebotInstructions()});
     if(req.method==='POST'&&path==='/v1/human/engineering/pilot'){
       if(req.headers.origin!=='http://127.0.0.1:'+server.address().port)
         return respond(res,403,{error:'origin required'});
@@ -169,6 +172,9 @@ try{
     await page.getByRole('heading',{name:'Super Admin',exact:true}).waitFor();
     await page.getByRole('heading',{name:'Production Readiness & Safe AI Calling Pilot'}).waitFor();
     await page.getByRole('heading',{name:'Operator Setup Checklist'}).waitFor();
+    await page.getByRole('heading',{name:'Exotel Trial Setup — What Is Ready?'}).waitFor();
+    await page.getByRole('button',{name:'Copy 7-question Exotel Voicebot instructions'}).waitFor();
+    await page.getByText('Missing: EXOTEL_API_TOKEN').waitFor();
     await page.getByRole('button',{name:'Check Exotel Connection (read-only)'}).click();
     await page.getByText('Exotel API: Not verified | Real dialing: disabled').waitFor();
     const nav=page.getByRole('link',{name:'Test AI Conversation'});
