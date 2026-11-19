@@ -5,10 +5,27 @@
   "compatibility_date": "2026-11-17",
   "workers_dev": false,
   "d1_databases": [
-    {"binding":"CONTROL_DB","database_name":"ar3d-calling-control","database_id":"REPLACE_WITH_CONTROL_DATABASE_ID"},
-    {"binding":"CRM_DB","database_name":"ar3d-calling-shared-crm","database_id":"REPLACE_WITH_SHARED_CRM_DATABASE_ID"}
+    {
+      "binding": "CONTROL_DB",
+      "database_name": "ar3d-calling-control",
+      "database_id": "REPLACE_WITH_CONTROL_DATABASE_ID"
+    },
+    {
+      "binding": "CRM_DB",
+      "database_name": "ar3d-calling-shared-crm",
+      "database_id": "REPLACE_WITH_SHARED_CRM_DATABASE_ID"
+    }
   ],
   "r2_buckets": [
-    {"binding":"RECORDINGS","bucket_name":"ar3d-calling-recordings"}
+    {
+      "binding": "RECORDINGS",
+      "bucket_name": "ar3d-calling-recordings"
+    }
+  ],
+  "routes": [
+    {
+      "pattern": "aicalling.ar3dstudio.in",
+      "custom_domain": true
+    }
   ]
 }
