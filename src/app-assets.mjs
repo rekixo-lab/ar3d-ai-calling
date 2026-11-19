@@ -668,7 +668,7 @@ function fixedSurveyPanel(tenantId,lead,onSave){
       const propertyType=node('select',{class:'field'},[
         ['plot','Plot / प्लॉट'],['flat','Flat / फ्लैट'],['house','House / घर']
       ].map(([value,label])=>node('option',{value,text:label})));
-      propertyType.value=previous.propertyType||'plot';
+      propertyType.name='surveyPropertyType';propertyType.value=previous.propertyType||'plot';
       const city=input('surveyCity','text','City / Location');
       city.maxLength=120;city.value=previous.location||'';
       const area=input('surveyArea','text','Neighborhood / Area');
@@ -683,7 +683,7 @@ function fixedSurveyPanel(tenantId,lead,onSave){
         ['later','Follow up later / बाद में'],
         ['not_interested','Not interested / रुचि नहीं']
       ].map(([value,label])=>node('option',{value,text:label})));
-      interest.value=previous.interest||'interested';
+      interest.name='surveyInterest';interest.value=previous.interest||'interested';
       const visitDate=input('surveyVisit','date');
       visitDate.required=false;visitDate.value=previous.visitDate||'';
       const visitTime=input('surveyVisitTime','time');visitTime.required=false;
@@ -726,7 +726,10 @@ function fixedSurveyPanel(tenantId,lead,onSave){
       }
       propertyType.addEventListener('change',()=>{buildSize();refreshQuestions()});
       language.addEventListener('change',refreshQuestions);
-      interest.addEventListener('change',refreshQuestions);
+      interest.addEventListener('change',()=>{
+        if(interest.value!=='interested'){visitDate.value='';visitTime.value=''}
+        refreshQuestions();
+      });
       buildSize();refreshQuestions();
 
       // Browser speech is opt-in, may depend on browser speech services and
