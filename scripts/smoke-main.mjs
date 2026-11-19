@@ -33,6 +33,7 @@ export async function smoke(base,fetchFn=fetch){
     ['/v1/human/engineering/media-protocol',401,'application/json',async r=>(await r.json()).error==='sign in required'],
     ['/v1/human/engineering/provider-connectivity',401,'application/json',async r=>(await r.json()).error==='sign in required'],
     ['/v1/human/leads/33333333-3333-4333-8333-333333333333/qualification',401,'application/json',async r=>(await r.json()).error==='sign in required'],
+    ['/v1/human/voice-preview',401,'application/json',async r=>(await r.json()).error==='sign in required'],
   ];
   let ok=true;
   for(const [path,status,contentType,check] of checks){
