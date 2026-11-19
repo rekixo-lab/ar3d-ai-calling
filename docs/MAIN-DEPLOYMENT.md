@@ -1,5 +1,36 @@
 # AR3D AI Calling — Main Cloudflare Setup
 
+## Custom domain (only standalone AR3D AI Calling Worker)
+
+The operator attached **https://aicalling.ar3dstudio.in** to `ar3d-ai-calling` in
+Cloudflare's Worker Custom Domains view. Do not create a second hostname,
+rewrite `ar3dstudio.in` root routes, or touch existing AR3D Platform/Engine
+Workers. The Admin UI is at **https://aicalling.ar3dstudio.in/app** and the read-only
+health endpoint at **https://aicalling.ar3dstudio.in/health**.
+
+The guarded `wrangler.example.jsonc` and `makeMainConfig()` now allow
+**exactly one** locked Custom Domain route:
+
+```json
+"routes": [{"pattern": "aicalling.ar3dstudio.in", "custom_domain": true}]
+```
+
+Unlike a wildcard route, a Custom Domain maps all paths at this exact host
+to this Worker. Cloudflare manages DNS/TLS for its Custom Domains.
+GitHub `main` deploys generate the same explicit custom-domain mapping so
+future Wrangler deploys do not inadvertently diverge from the dashboard.
+`workers_dev:true` remains enabled for standalone bootstrap tools and
+the existing read-only smoke. Cloudflare token must have permission to
+deploy the calling Worker and manage its Custom Domain in this account.
+If a deployment fails because of domain authorization, **do not remove
+safety checks or switch zones**. Check token permissions manually.
+
+Before production customer use, verify health, admin login, cookie isolation,
+MFA and Cloudflare Access as appropriate. Do not accept real customer data
+solely because this hostname is configured. Login cookies are host-only,
+so logging into `workers.dev` does not sign in on this custom hostname.
+
+
 **Status:** AR3D AI Calling is a development-grade CRM and text conversation simulator, **not a production-ready voice calling service**. The main Worker can be deployed at its own isolated workers.dev address, but use synthetic/demo data only until identity, privacy, retention, opt-out, and compliance protections are hardened. This setup does **not** make real phone calls.
 
 This repository is public. Never commit or paste Cloudflare tokens, business IDs, database UUIDs, admin passwords, real leads, recordings, or customer data to GitHub issues, README files, or chat. GitHub Environment secrets are encrypted and not exposed in source.
