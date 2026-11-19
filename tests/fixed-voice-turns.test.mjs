@@ -55,7 +55,7 @@ test('A seven-turn Hindi and English questionnaire collects only requirements, n
     assert.equal(r.consentGranted,false);
     assert.equal(r.dndCleared,false);
     assert.equal(r.recordingSaved,false);
-    await assert.rejects(async()=>turn(r.state,'extra'),/already finished/);
+    assert.throws(()=>turn(r.state,'extra'),/already finished/);
   }
 });
 test('Plot size, Hindi labels, lakh/crore and customer not interested skips visit',()=>{
