@@ -52,7 +52,8 @@ test('public smoke checks health, login UI, sidebar fix and 401 without writes o
     ['/v1/human/me',[401,'application/json',JSON.stringify({error:'sign in required'})]],
     ['/v1/human/engineering/status',[401,'application/json',JSON.stringify({error:'sign in required'})]],
     ['/v1/human/engineering/provider-pilot',[401,'application/json',JSON.stringify({error:'sign in required'})]],
-    ['/v1/human/engineering/media-protocol',[401,'application/json',JSON.stringify({error:'sign in required'})]]
+    ['/v1/human/engineering/media-protocol',[401,'application/json',JSON.stringify({error:'sign in required'})]],
+    ['/v1/human/engineering/provider-connectivity',[401,'application/json',JSON.stringify({error:'sign in required'})]]
   ]);
   const seen=[];
   const fetchFn=async (url,opts)=>{
@@ -96,4 +97,12 @@ test('AgentStream Offline PCM protocol acceptance is strictly Super Admin-only',
   assert.match(js,/Media server connected: no/);
   assert.doesNotMatch(js,/\/v1\/human\/calls\/start/);
   assert.doesNotThrow(()=>new vm.Script(js));
+});
+
+
+test('Exotel connectivity uses private read-only Super Admin endpoint and shows no live dial UI',()=>{
+ assert.match(js,/Check Exotel Connection \(read-only\)/);
+ assert.match(js,/\/v1\/human\/engineering\/provider-connectivity/);
+ assert.match(js,/Real dialing: disabled/);
+ assert.doesNotMatch(js,/\/v1\/human\/calls\/start/);
 });
