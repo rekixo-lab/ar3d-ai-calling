@@ -543,6 +543,9 @@ async function crmWorkflow(tenantId,content,role){
         notice('Lead updated');await refresh();
       }catch(err){asError(err)}})}else{form.querySelectorAll('input,select').forEach(el=>el.disabled=true)}
     details.append(form);
+    if(editable)details.append(fixedSurveyPanel(tenantId,lead,async()=>{
+      await refresh();await visitList();
+    }));
 
     const blocked=lead.consentStatus==='denied'||lead.dndStatus==='blocked';
     const callPrefs=div('card',title('Calling Preferences / कॉलिंग अनुमति','h3'),
@@ -644,6 +647,190 @@ async function crmWorkflow(tenantId,content,role){
     details.replaceChildren();
   }
   await Promise.all([refresh(),visitList()]);
+}
+
+
+// Boss-approved 7-question property qualification: staff/browser preview only.
+// Name/mobile are read from the CRM Excel import, never asked or overwritten.
+function fixedSurveyPanel(tenantId,lead,onSave){
+  const card=div('card',title('7 Fixed Questions — Property Qualification','h3'),
+    node('p',{class:'note',text:'Excel Name: '+lead.name+' | Mobile: '+lead.mobile+
+      '. These are already known; do not ask again. Browser preview only — no phone call.'}));
+  const open=btn('Open Fixed Questionnaire',async()=>{
+    open.disabled=true;
+    try{
+      const url='/v1/human/leads/'+lead.id+'/qualification?tenantId='+encodeURIComponent(tenantId);
+      const record=await api(url),previous=record.survey||{};
+      const form=node('form',{class:'stack'});
+      const language=node('select',{class:'field'},[
+        ['hi','हिंदी'],['en','English']
+      ].map(([value,label])=>node('option',{value,text:label})));
+      const propertyType=node('select',{class:'field'},[
+        ['plot','Plot / प्लॉट'],['flat','Flat / फ्लैट'],['house','House / घर']
+      ].map(([value,label])=>node('option',{value,text:label})));
+      propertyType.value=previous.propertyType||'plot';
+      const city=input('surveyCity','text','City / Location');
+      city.maxLength=120;city.value=previous.location||'';
+      const area=input('surveyArea','text','Neighborhood / Area');
+      area.required=false;area.maxLength=120;area.value=previous.area||'';
+      const sizeHost=div('');let sizeInput=null;
+      const budget=input('surveyBudget','number','Rupees, e.g. 3500000');
+      budget.required=false;budget.min='1';budget.step='1';
+      budget.value=previous.budgetInr===null||previous.budgetInr===undefined?
+        '':String(previous.budgetInr);
+      const interest=node('select',{class:'field'},[
+        ['interested','Interested / इंटरेस्टेड'],
+        ['later','Follow up later / बाद में'],
+        ['not_interested','Not interested / रुचि नहीं']
+      ].map(([value,label])=>node('option',{value,text:label})));
+      interest.value=previous.interest||'interested';
+      const visitDate=input('surveyVisit','date');
+      visitDate.required=false;visitDate.value=previous.visitDate||'';
+      const visitTime=input('surveyVisitTime','time');visitTime.required=false;
+      const visitTimeLabel=lab('Optional exact time for a visit REQUEST (India local; sales must confirm)',visitTime);
+      const visitDateField=div('stack',lab('Preferred visit date (not confirmed)',visitDate),visitTimeLabel);
+      const labels={};
+      const question=(field,control)=>{
+        const item=lab(field,control);
+        labels[field]=item.querySelector('.label');
+        return item;
+      };
+      form.append(
+        lab('Question language',language),
+        question('propertyType',propertyType),
+        question('location',city),
+        question('area',area),
+        question('size',sizeHost),
+        question('budgetInr',budget),
+        question('interest',interest),
+        question('visitDate',visitDateField)
+      );
+      function buildSize(){
+        const old=sizeInput?.value||previous.size||'';
+        sizeInput=propertyType.value==='plot'?
+          input('surveyPlotSize','text','e.g. 1200 sqft / 30x40 ft'):
+          node('select',{class:'field'},['1BHK','2BHK','3BHK','4BHK','5BHK+']
+            .map(value=>node('option',{value,text:value})));
+        if(propertyType.value==='plot'){
+          sizeInput.maxLength=80;
+          sizeInput.value=old&&old.includes('BHK')?'':old;
+        }else sizeInput.value=['1BHK','2BHK','3BHK','4BHK','5BHK+'].includes(old)?old:'2BHK';
+        sizeHost.replaceChildren(sizeInput);
+      }
+      function refreshQuestions(){
+        const set=record.questionSets[propertyType.value][language.value];
+        for(const q of set)labels[q.field].textContent=q.text;
+        const interested=interest.value==='interested';
+        visitDateField.hidden=!interested;
+        visitDate.disabled=!interested;visitTime.disabled=!interested;
+      }
+      propertyType.addEventListener('change',()=>{buildSize();refreshQuestions()});
+      language.addEventListener('change',refreshQuestions);
+      interest.addEventListener('change',refreshQuestions);
+      buildSize();refreshQuestions();
+
+      // Browser speech is opt-in, may depend on browser speech services and
+      // is never a verified telecom recording or a trusted speech transcript.
+      const speechArea=div('stack',
+        node('p',{class:'note',text:'Optional browser voice preview. The browser may use its own speech service. Do not use sensitive real-customer audio without an approved notice and permission. Always review the recognized text before Save.'}));
+      const promptPick=node('select',{class:'field'},[
+        'propertyType','location','area','size','budgetInr','interest','visitDate'
+      ].map((value,i)=>node('option',{value:String(i),text:'Question '+(i+1)})));
+      const speak=btn('Speak selected question',()=>{
+        if(!('speechSynthesis' in window)||!('SpeechSynthesisUtterance' in window))
+          return notice('Browser speech playback is unavailable',true);
+        window.speechSynthesis.cancel();
+        const q=record.questionSets[propertyType.value][language.value][Number(promptPick.value)];
+        const utterance=new SpeechSynthesisUtterance(q.text);
+        utterance.lang=language.value==='hi'?'hi-IN':'en-IN';
+        window.speechSynthesis.speak(utterance);
+      },true);
+      const micField=node('select',{class:'field'},[
+        ['location','Location'],['area','Area'],['size','Property size'],['budget','Budget']
+      ].map(([value,label])=>node('option',{value,text:label})));
+      const dictate=btn('Dictate answer (browser mic)',()=>{
+        const Recognition=window.SpeechRecognition||window.webkitSpeechRecognition;
+        if(!Recognition)return notice('Browser speech recognition unavailable. Type the answer.',true);
+        const engine=new Recognition();
+        engine.lang=language.value==='hi'?'hi-IN':'en-IN';
+        engine.interimResults=false;engine.maxAlternatives=1;
+        dictate.disabled=true;
+        engine.onend=()=>{dictate.disabled=false};
+        engine.onerror=()=>{dictate.disabled=false;notice('Speech recognition failed. Type the answer instead.',true)};
+        engine.onresult=e=>{
+          const words=String(e.results?.[0]?.[0]?.transcript||'').trim();
+          if(!words)return;
+          const target=micField.value;
+          if(target==='location')city.value=words.slice(0,120);
+          else if(target==='area')area.value=words.slice(0,120);
+          else if(target==='size'){
+            if(propertyType.value==='plot')sizeInput.value=words.slice(0,80);
+            else{
+              const m=words.match(/[1-5]\s*(?:BHK|बीएचके)/i);
+              if(m){const number=m[0].match(/[1-5]/)[0];
+                sizeInput.value=number==='5'?'5BHK+':number+'BHK'}
+              else notice('BHK not recognized. Select 2BHK/3BHK manually.',true);
+            }
+          }else{
+            const cleaned=words.replace(/[०-९]/g,ch=>String('०१२३४५६७८९'.indexOf(ch)))
+              .replace(/,/g,'');
+            const m=cleaned.match(/\d+(?:\.\d+)?/);
+            const scale=/करोड़|crore/i.test(cleaned)?10000000:
+              /लाख|lakh|lac/i.test(cleaned)?100000:
+              /हजार|thousand|thou/i.test(cleaned)?1000:1;
+            const number=m?Math.round(Number(m[0])*scale):NaN;
+            if(Number.isSafeInteger(number)&&number>0)budget.value=String(number);
+            else notice('Budget not recognized. Enter amount in rupees manually.',true);
+          }
+          notice('Browser speech captured. Review the answer before saving.');
+        };
+        engine.start();
+      },true);
+      const Recognition=window.SpeechRecognition||window.webkitSpeechRecognition;
+      if(!Recognition)dictate.disabled=true;
+      speechArea.append(div('formrow',lab('Listen to',promptPick),speak),
+        div('formrow',lab('Fill from microphone',micField),dictate));
+      form.append(speechArea);
+
+      const save=node('button',{class:'btn',type:'submit',text:'Save Reviewed Answers to CRM'});
+      form.append(save);
+      form.addEventListener('submit',async e=>{
+        e.preventDefault();save.disabled=true;
+        try{
+          let amount=null;
+          if(budget.value!==''){
+            if(!/^\d+$/.test(budget.value))throw Error('Enter budget as full rupees');
+            amount=Number(budget.value);
+            if(!Number.isSafeInteger(amount)||amount<1)throw Error('Invalid budget');
+          }
+          const desired=interest.value==='interested'?visitDate.value||null:null;
+          if(visitTime.value&&!desired)throw Error('Choose a visit date before an exact time');
+          const at=desired&&visitTime.value?
+            new Date(desired+'T'+visitTime.value).toISOString():null;
+          const payload={
+            tenantId,expectedUpdatedAt:record.updatedAt,
+            propertyType:propertyType.value,location:city.value,
+            area:area.value||null,size:sizeInput.value,
+            budgetInr:amount,interest:interest.value,
+            visitDate:desired,visitAt:at
+          };
+          if(!window.confirm('Save the reviewed property answers for '+lead.name+'? No phone call will be made.'))
+            return;
+          const result=await api('/v1/human/leads/'+lead.id+'/qualification','POST',payload);
+          notice(result.visitRequested?
+            'CRM updated. Site visit REQUEST created; sales must confirm. No call placed.':
+            'CRM updated. Visit preference is not a confirmed booking. No call placed.');
+          await onSave();
+        }catch(error){asError(error)}
+        finally{save.disabled=false}
+      });
+      card.replaceChildren(title('7 Fixed Questions — Property Qualification','h3'),
+        node('p',{class:'note',text:'Name: '+lead.name+' | Mobile: '+lead.mobile+
+          ' (from Excel). No questions about these.'}),form);
+    }catch(err){asError(err);open.disabled=false}
+  });
+  card.append(open);
+  return card;
 }
 
 load();`;
