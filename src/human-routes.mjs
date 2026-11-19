@@ -43,9 +43,14 @@ const bearer=req=>(req.headers.get('authorization')||'').match(/^Bearer (.+)$/i)
 const allowedStatus=['trial','active'];
 function validTenantId(v){return typeof v==='string'&&/^[a-f0-9-]{36}$/i.test(v)}
 async function allowBootstrap(req,env){
-  if(!env.ADMIN_BOOTSTRAP_TOKEN||String(env.ADMIN_BOOTSTRAP_TOKEN).length<32)return false;
-  const got=bearer(req);if(!got||got.length>256)return false;
-  const [a,b]=await Promise.all([sha256hex(got),sha256hex(env.ADMIN_BOOTSTRAP_TOKEN)]);
+  // Bootstrap credentials are generated as ASCII base64 and should have no
+  // whitespace. Dashboard paste can accidentally store a trailing newline.
+  // Normalize at both sides, then still compare the full digest in constant time.
+  // Never log the presented or configured credential.
+  const expected=String(env.ADMIN_BOOTSTRAP_TOKEN||'').trim();
+  if(expected.length<32||expected.length>256)return false;
+  const got=bearer(req).trim();if(!got||got.length>256)return false;
+  const [a,b]=await Promise.all([sha256hex(got),sha256hex(expected)]);
   let mismatch=0;for(let i=0;i<a.length;i++)mismatch|=a.charCodeAt(i)^b.charCodeAt(i);
   return mismatch===0;
 }

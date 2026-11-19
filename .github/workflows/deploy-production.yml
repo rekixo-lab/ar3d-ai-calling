@@ -116,6 +116,9 @@ jobs:
           else
             echo "worker_url=$URL" >> "$GITHUB_OUTPUT"
           fi
+      - name: Inspect isolated Worker secret binding names (never values)
+        if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.operation == 'deploy')
+        run: node scripts/inspect-main-secrets.mjs
       - name: Read-only smoke test on deployed isolated Worker
         if: steps.publish.outputs.worker_url != ''
         shell: bash

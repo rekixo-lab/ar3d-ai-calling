@@ -69,3 +69,10 @@ This locally prompts for token/password invisibly rather than putting secrets in
 ### Browser speech permission
 
 Only /app/simulator is allowed same-origin microphone access for explicitly user-initiated SpeechRecognition; main dashboard and other pages still block microphone.
+
+
+## Bootstrap 401: exact-token mismatch troubleshooting (non-secret)
+
+The live `POST /v1/human/bootstrap` returns HTTP 401 when the presented Bearer token is absent, differs from the Worker-only `ADMIN_BOOTSTRAP_TOKEN`, or the binding is absent/too short. Token values are intentionally inaccessible from the Cloudflare dashboard. The bootstrap helper now strips accidental surrounding paste whitespace, reports entered token character count **only**, and never logs the token/password. The Worker normalizes accidental surrounding whitespace before checking a constant-time hash comparison. Normal login and API tokens are unrelated.
+
+After a main auto-deploy, CI uses the Cloudflare Workers **read-only list-secrets-metadata endpoint** to report whether the standalone Worker has the required `LOGIN_RATE_LIMIT_SECRET` and `MFA_ENCRYPTION_KEY` bindings and whether temporary `ADMIN_BOOTSTRAP_TOKEN` exists. **No values or hashes are ever logged or returned.** If the name exists but bootstrap still returns 401, check the exact 32+ char one-time token in your *private* password manager and Cloudflare Production Worker; update only that isolated Worker secret then retry with fresh local clipboard. Do not print, screenshot, paste or send it into chat. After first Super Admin bootstrap, immediately delete only `ADMIN_BOOTSTRAP_TOKEN` and retain the two permanent auth secrets. Rotation of a bootstrap secret invalidates previously copied old values.
