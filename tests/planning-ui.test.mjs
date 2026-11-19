@@ -50,7 +50,8 @@ test('public smoke checks health, login UI, sidebar fix and 401 without writes o
     ['/app/assets/style.css',[200,'text/css','.sidebar .navitem{display:block;margin:0']],
     ['/app/assets/app.js',[200,'text/javascript','Test AI Conversation Sign out']],
     ['/v1/human/me',[401,'application/json',JSON.stringify({error:'sign in required'})]],
-    ['/v1/human/engineering/status',[401,'application/json',JSON.stringify({error:'sign in required'})]]
+    ['/v1/human/engineering/status',[401,'application/json',JSON.stringify({error:'sign in required'})]],
+    ['/v1/human/engineering/provider-pilot',[401,'application/json',JSON.stringify({error:'sign in required'})]]
   ]);
   const seen=[];
   const fetchFn=async (url,opts)=>{
@@ -74,6 +75,15 @@ test('Engineering status and 100 synthetic calls are Super Admin-only UI and do 
   assert.match(js,/\/v1\/human\/engineering\/status/);
   assert.match(js,/\/v1\/human\/engineering\/pilot/);
   assert.match(js,/realCallsStarted/);
+  assert.doesNotMatch(js,/\/v1\/human\/calls\/start/);
+  assert.doesNotThrow(()=>new vm.Script(js));
+});
+
+
+test('Exotel mock adapter visible in super-admin engineering panel without enabling telecom',()=>{
+  assert.match(js,/Test Exotel Mock Provider \(100 events\)/);
+  assert.match(js,/\/v1\/human\/engineering\/provider-pilot/);
+  assert.match(js,/External requests:/);
   assert.doesNotMatch(js,/\/v1\/human\/calls\/start/);
   assert.doesNotThrow(()=>new vm.Script(js));
 });

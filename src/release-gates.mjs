@@ -6,6 +6,7 @@ export const RELEASE_GATES=Object.freeze([
   Object.freeze({id:'admin_mfa_enrollment',workstream:'A',state:'operator_pending',description:'MFA code is present; per-account enrollment and enforced rollout remain unverified'}),
   Object.freeze({id:'browser_e2e',workstream:'A',state:'unverified',description:'Real browser/mobile acceptance and cross-tenant staging tests are not signed off'}),
   Object.freeze({id:'backup_restore',workstream:'A',state:'unverified',description:'Scheduled backup, restore drill and incident alerting are not signed off'}),
+  Object.freeze({id:'exotel_voice_ai_contract',workstream:'B',state:'mock_tested',description:'Exotel Connect Voice AI request shape and untrusted callback parsing are mock-tested only; live integration remains blocked'}),
   Object.freeze({id:'approved_telecom',workstream:'B',state:'blocked',description:'Provider contract, authorized caller identity and telecom classification are missing'}),
   Object.freeze({id:'consent_and_dnd',workstream:'B',state:'blocked',description:'Independent consent verification and DND clearance are not integrated'}),
   Object.freeze({id:'realtime_voice',workstream:'B',state:'blocked',description:'Realtime provider transport and production STT/LLM/TTS are not connected'}),

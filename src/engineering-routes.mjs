@@ -3,6 +3,7 @@
 import {parseJsonBody} from './core.mjs';
 import {productionReadiness} from './release-gates.mjs';
 import {runSyntheticPilot} from './sandbox-pilot.mjs';
+import {runExotelMockPilot} from './exotel-mock-pilot.mjs';
 
 const headers={'Cache-Control':'no-store','X-Content-Type-Options':'nosniff',
   'Referrer-Policy':'no-referrer','X-Frame-Options':'DENY'};
@@ -45,6 +46,18 @@ export async function handleEngineeringRequest(req,user){
       return json(runSyntheticPilot(input));
     }catch{
       return fail('invalid sandbox input; no simulation executed',400);
+    }
+  }
+  if(path===BASE+'provider-pilot'){
+    if(req.method!=='POST')return fail('method not allowed',405);
+    try{
+      const input=await boundedJson(req);
+      if(!input||typeof input!=='object'||Array.isArray(input)||
+         Object.keys(input).some(k=>!['count','scenario'].includes(k)))
+        return fail('invalid mock provider request',400);
+      return json(runExotelMockPilot(input));
+    }catch{
+      return fail('invalid provider simulation request; nothing executed',400);
     }
   }
   return fail('not found',404);
