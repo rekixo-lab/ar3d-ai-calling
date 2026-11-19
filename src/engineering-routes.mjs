@@ -1,0 +1,51 @@
+// Super Admin-only engineering sandbox, strictly separated from customer CRM.
+// All operations are read-only or in-memory, with zero provider or D1 writes.
+import {parseJsonBody} from './core.mjs';
+import {productionReadiness} from './release-gates.mjs';
+import {runSyntheticPilot} from './sandbox-pilot.mjs';
+
+const headers={'Cache-Control':'no-store','X-Content-Type-Options':'nosniff',
+  'Referrer-Policy':'no-referrer','X-Frame-Options':'DENY'};
+const json=(obj,status=200)=>Response.json(obj,{status,headers});
+const fail=(message,status)=>json({error:message},status);
+const BASE='/v1/human/engineering/';
+const MAX_BYTES=512;
+async function boundedJson(req){
+  if(!req.body||Number(req.headers.get('content-length'))>MAX_BYTES)
+    throw Error('invalid or oversized request');
+  const reader=req.body.getReader(),decoder=new TextDecoder('utf-8',{fatal:true});
+  let text='',size=0;
+  try{
+    while(true){
+      const {done,value}=await reader.read();
+      if(done)break;
+      size+=value.byteLength;
+      if(size>MAX_BYTES){await reader.cancel();throw Error('request too large')}
+      text+=decoder.decode(value,{stream:true});
+    }
+    text+=decoder.decode();
+  }finally{reader.releaseLock()}
+  return parseJsonBody(text,MAX_BYTES);
+}
+export async function handleEngineeringRequest(req,user){
+  const path=new URL(req.url).pathname;
+  if(!path.startsWith(BASE))return null;
+  if(user?.globalRole!=='super_admin')return fail('forbidden',403);
+  if(path===BASE+'status'){
+    if(req.method!=='GET')return fail('method not allowed',405);
+    return json(productionReadiness());
+  }
+  if(path===BASE+'pilot'){
+    if(req.method!=='POST')return fail('method not allowed',405);
+    try{
+      const input=await boundedJson(req);
+      if(!input||typeof input!=='object'||Array.isArray(input)||
+         Object.keys(input).some(k=>!['count','scenario','quotaCalls','ratePaisePerMinute'].includes(k)))
+        return fail('invalid sandbox request',400);
+      return json(runSyntheticPilot(input));
+    }catch{
+      return fail('invalid sandbox input; no simulation executed',400);
+    }
+  }
+  return fail('not found',404);
+}

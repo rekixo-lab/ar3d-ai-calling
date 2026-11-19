@@ -1,4 +1,5 @@
 import {handleCrmRequest} from './crm-routes.mjs';
+import {handleEngineeringRequest} from './engineering-routes.mjs';
 import {handleTenantLifecycleRequest} from './tenant-lifecycle-routes.mjs';
 import {handleDataPortabilityRequest} from './data-portability-routes.mjs';
 import {handleAgentSettingsRequest} from './agent-settings-routes.mjs';
@@ -225,6 +226,8 @@ export async function handleHumanRequest(req,env){
     if(!user)return fail('sign in required',401);
     if(path==='/v1/human/mfa'||path==='/v1/human/mfa/setup'||path==='/v1/human/mfa/enable'||path==='/v1/human/mfa/recovery/regenerate')
       return await handleMfaSettings(req,env,user,method==='POST'?await payload(req):null);
+    const engineeringResponse=await handleEngineeringRequest(req,user);
+    if(engineeringResponse)return engineeringResponse;
     const consentResponse=await handleConsentRequest(req,env,user);
     if(consentResponse)return consentResponse;
     const projectResponse=await handleProjectLinkRequest(req,env,user);

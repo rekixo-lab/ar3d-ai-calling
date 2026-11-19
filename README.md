@@ -2,6 +2,22 @@
 
 Operator/developer handoff: [48H-SPRINT.md](docs/48H-SPRINT.md). Target is an isolated synthetic-data-tested CRM and AI demo MVP, not a promise of live telecom KYC approval. First admin creation helper: python3 scripts/bootstrap-main.py https://ar3d-ai-calling.<workers-subdomain>.workers.dev (interactive private token/password prompts).
 
+## 2026-11-19 consolidated engineering workstreams (A/B/C)
+
+Production hostname: https://aicalling.ar3dstudio.in/app. After signing in as
+Super Admin, the **Production Readiness & Safe AI Calling Pilot** panel reports
+security/vendor release gates and can execute **100 deterministic synthetic
+conversations** with opt-out, repeat, pricing-defer and low-confidence branches.
+The in-memory Usage Preview deduplicates fake events and shows an illustrative
+quota/rounding calculation. **Zero real calls, real audio, client PII, billing
+or provider access** occurs in this workflow.
+
+The new Super Admin engineering API is strictly authenticated and fails closed
+on untrusted body fields and invalid origins. Independent provider/telecom
+authorization, MFA enrollment, backups, browser E2E, live voice, compliance,
+signed vendor callbacks, durable metering and real paid subscriptions are NOT
+ready. See [Production Release Gates](docs/RELEASE-ACCEPTANCE.md).
+
 # AR3D AI Calling
 
 **Development foundation (Phases 1–5)** — independent multi-tenant CRM, personal admin dashboard, lead imports and deterministic text conversation simulator for AR3D clients. Product branding is **AR3D AI Calling**. **No real outbound calls or live generative AI voice conversations are implemented.**

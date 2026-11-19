@@ -49,7 +49,8 @@ test('public smoke checks health, login UI, sidebar fix and 401 without writes o
     ['/app',[200,'text/html','<title>AR3D AI Calling</title>']],
     ['/app/assets/style.css',[200,'text/css','.sidebar .navitem{display:block;margin:0']],
     ['/app/assets/app.js',[200,'text/javascript','Test AI Conversation Sign out']],
-    ['/v1/human/me',[401,'application/json',JSON.stringify({error:'sign in required'})]]
+    ['/v1/human/me',[401,'application/json',JSON.stringify({error:'sign in required'})]],
+    ['/v1/human/engineering/status',[401,'application/json',JSON.stringify({error:'sign in required'})]]
   ]);
   const seen=[];
   const fetchFn=async (url,opts)=>{
@@ -65,4 +66,14 @@ test('public smoke checks health, login UI, sidebar fix and 401 without writes o
 test('public smoke fails closed on an unsafe redirect, broken content or wrong response',async()=>{
   const result=await smoke('https://aicalling.ar3dstudio.in',async()=>new Response('Not found',{status:404,headers:{'Content-Type':'text/html'}}));
   assert.equal(result,false);
+});
+
+test('Engineering status and 100 synthetic calls are Super Admin-only UI and do not expose live dialing',()=>{
+  assert.match(js,/Production Readiness & Safe AI Calling Pilot/);
+  assert.match(js,/Run 100 Synthetic Calls \(no dialing\)/);
+  assert.match(js,/\/v1\/human\/engineering\/status/);
+  assert.match(js,/\/v1\/human\/engineering\/pilot/);
+  assert.match(js,/realCallsStarted/);
+  assert.doesNotMatch(js,/\/v1\/human\/calls\/start/);
+  assert.doesNotThrow(()=>new vm.Script(js));
 });
