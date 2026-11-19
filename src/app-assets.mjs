@@ -86,6 +86,22 @@ function engineeringPanel(main){
     title('Telecom Provider Integration — Mock Validation','h3'),
     node('p',{class:'note',text:'Exotel API contract only; no provider account, verified callback, audio stream or live calls are connected.'}),
     providerLaunch,providerSummary);
+  const mediaOutput=div('stack');
+  const mediaTest=btn('Test 100 PCM Audio Frames (offline)',async()=>{
+    mediaTest.disabled=true;
+    mediaOutput.replaceChildren(node('p',{class:'muted',text:'Validating raw PCM framing locally on Worker...'}));
+    try{
+      const result=await api('/v1/human/engineering/media-protocol','POST',{frames:100,sampleRate:8000});
+      mediaOutput.replaceChildren(
+        node('p',{class:'success',text:'PCM frames: '+result.decodedFrames+' received and '+result.encodedFrames+' returned | Real calls: '+result.realCallsStarted}),
+        node('p',{class:'note',text:'Media server connected: no | STT/TTS/LLM calls: 0 | Recording saved: 0'}),
+        node('p',{class:'note',text:result.notice})
+      );
+    }catch(err){asError(err)}finally{mediaTest.disabled=false}
+  });
+  card.append(title('AgentStream Audio Gateway — Protocol Acceptance','h3'),
+    node('p',{class:'note',text:'Tests Exotel raw PCM 16-bit mono frames and bidirectional packet formats. No public WebSocket or microphone.'}),
+    mediaTest,mediaOutput);
   main.append(card);
   api('/v1/human/engineering/status').then(result=>{
     const states=result.gates.filter(g=>g.state!=='available');

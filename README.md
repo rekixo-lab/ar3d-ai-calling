@@ -28,6 +28,18 @@ These are stronger engineering tests, not claims of live D1 disaster recovery,
 MFA enrollment, live telecom enablement or commercial readiness. See
 [Release Acceptance](docs/RELEASE-ACCEPTANCE.md).
 
+## Exotel AgentStream PCM and HTTP staging (no real calls)
+
+The Exotel Voice AI HTTP Basic Auth + multipart request can now be **prepared**
+as a server-only `Request` without invoking `fetch`; live submission remains
+an explicit error. AgentStream WebSocket `connected/start/media/dtmf/mark/stop`
+frames and 8/16/24 kHz 16-bit mono PCM round-trip in memory with strict stream,
+sequence and payload guards. A Super Admin-only **100 PCM Audio Frames (offline)**
+button runs on the deployed Worker. Provider callbacks can be CallSid/nonce
+correlated but remain **untrusted/quarantined**, without real source validation,
+call-state changes, or billing. No production media WebSocket endpoint exists.
+See [Exotel Integration Gates](docs/EXOTEL-PROVIDER-GATES.md).
+
 # AR3D AI Calling
 
 ## Exotel India Voice AI connector (dry-run only)

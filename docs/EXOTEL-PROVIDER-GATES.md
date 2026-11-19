@@ -66,3 +66,61 @@ Actual provider approval, account API keys, assigned ExoPhone, voice streaming
 endpoint, DLT/legal review and costs must be supplied/verified before any
 future privileged, intentionally enabled *real* integration can be built.
 Do not infer commercial eligibility from this simulated contract.
+
+## AgentStream audio protocol and HTTP request staging
+
+Official references (checked 2026-11-19):
+- https://developer.exotel.com/docs/agentstream/websocket-protocol
+- https://developer.exotel.com/docs/agentstream/connect-voice-ai
+- https://developer.exotel.com/docs/references/webhooks
+
+`src/exotel-http-preparation.mjs` builds a real-format, India-region
+`POST /v1/Accounts/{AccountSid}/Calls/connect` `Request` with HTTP
+Basic Auth and multipart form fields, but **never submits it**. The exported
+`submitExotelConnect()` explicitly refuses all dispatch. No customer or
+vendor credentials are loaded by production Worker routes. The request
+object must never be logged, exposed to the browser or serialized.
+
+`src/exotel-media-protocol.mjs` validates the AgentStream JSON frames
+`connected`, `start`, `media`, `dtmf`, `mark`, `stop`; it also creates
+outgoing `media`, `mark`, `clear` JSON objects. PCM is 16-bit little endian
+mono with `audio/x-raw`, supported 8000/16000/24000 Hz, base64 chunks
+3200–100000 bytes in multiples of 320. It rejects duplicate/rewound
+sequences, out-of-order frames, another stream SID, malformed payloads,
+unsupported rates and unexpected fields. No socket, audio stream, STT,
+TTS, LLM or provider connection is launched.
+
+The engineering endpoint `POST /v1/human/engineering/media-protocol`
+is Super Admin session- and same-origin-protected. It sends exactly 100
+fictional 3200-byte frames through the pure codec and reports aggregate
+counts only. This is **not an end-to-end live voice test**.
+
+`src/exotel-callback-correlation.mjs` checks untrusted CallSid and an
+application-generated correlation nonce against a previously expected
+context. Neither matching values nor a TLS connection proves Exotel
+authorship; it returns *quarantine pending provider verification*. Before
+launch, real callback handling must implement documented Exotel source IP
+verification at the edge, durable replay-idempotency, independent call
+details reconciliation and authorized tenant/call correlation. No public
+provider callback route has been activated.
+
+### What remains blocked before a first approved live call
+
+1. Exotel account and AI Calling permission, API Key, Token, Account SID,
+   approved ExoPhone/CallerId and traffic classification (verify KYC/DLT
+   and the correct 140/1600/other-number use case with Exotel).
+2. Independently reviewed recipient consent and fresh DND clearance,
+   opted-out contacts excluded, legal calling window and AI disclosure.
+3. Authenticated and replay-protected media gateway (WSS) with a
+   deliberately enabled private dispatch path, provider callback source
+   checks, call-state ledger, and error/timeout handling.
+4. Connected STT + LLM + TTS or approved conversational voice provider,
+   transcript handling and human transfer, recording/retention safeguards.
+5. QA against Exotel's *actual* account/region and test number, cost
+   ceiling, concurrency, alarms, call reconciliation, remote backups
+   and recovery controls. MFA enrollment remains deferred by operator
+   instruction but is still a production release blocker.
+
+Do not remove `trg_no_call_launch` or agent activation blockers to make
+the demo appear operational. They protect real customer data until the
+separately approved launch milestone.

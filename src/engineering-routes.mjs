@@ -4,6 +4,7 @@ import {parseJsonBody} from './core.mjs';
 import {productionReadiness} from './release-gates.mjs';
 import {runSyntheticPilot} from './sandbox-pilot.mjs';
 import {runExotelMockPilot} from './exotel-mock-pilot.mjs';
+import {runExotelMediaHarness} from './exotel-media-harness.mjs';
 
 const headers={'Cache-Control':'no-store','X-Content-Type-Options':'nosniff',
   'Referrer-Policy':'no-referrer','X-Frame-Options':'DENY'};
@@ -58,6 +59,18 @@ export async function handleEngineeringRequest(req,user){
       return json(runExotelMockPilot(input));
     }catch{
       return fail('invalid provider simulation request; nothing executed',400);
+    }
+  }
+  if(path===BASE+'media-protocol'){
+    if(req.method!=='POST')return fail('method not allowed',405);
+    try{
+      const input=await boundedJson(req);
+      if(!input||typeof input!=='object'||Array.isArray(input)||
+         Object.keys(input).some(k=>!['frames','sampleRate'].includes(k)))
+        return fail('invalid media protocol request',400);
+      return json(runExotelMediaHarness(input));
+    }catch{
+      return fail('invalid media protocol simulation; nothing executed',400);
     }
   }
   return fail('not found',404);
