@@ -7,7 +7,8 @@
 const TARGET='https://api.in.exotel.com';
 const number=/^\+91[6-9][0-9]{9}$/;
 const sid=/^[A-Za-z0-9_-]{4,64}$/;
-const caller=/^[0-9+]{6,20}$/;
+// A legitimate ExoPhone cannot be only plus signs or contain repeated '+'.
+const caller=/^\+?[0-9]{6,19}$/;
 const key=/^[A-Za-z0-9._-]{1,128}$/;
 const validWss=v=>{
   try {
