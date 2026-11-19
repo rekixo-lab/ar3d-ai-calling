@@ -12,6 +12,7 @@ const env = {
 };
 const template = {
   name:'ar3d-ai-calling', main:'./src/index.mjs', workers_dev:false,
+  routes:[{pattern:'aicalling.ar3dstudio.in',custom_domain:true}],
   d1_databases:[
     {binding:'CONTROL_DB',database_name:'ar3d-calling-control',database_id:'PLACEHOLDER'},
     {binding:'CRM_DB',database_name:'ar3d-calling-shared-crm',database_id:'PLACEHOLDER'},
@@ -25,16 +26,20 @@ test('validates account and two independent D1 IDs', () => {
   assert.throws(() => getCredentials({...env, CLOUDFLARE_ACCOUNT_ID:env.CONTROL_DB_ID}), /invalid/);
   assert.throws(() => getCredentials({...env, CRM_DB_ID:env.CONTROL_DB_ID}), /invalid/);
 });
-test('config binds only main AR3D Calling resources without existing AR3D routes', () => {
+test('config binds only main Calling resources and exact approved custom domain', () => {
   const config = makeMainConfig(template,getCredentials(env));
   assert.equal(config.name,'ar3d-ai-calling');
   assert.equal(config.workers_dev,true);
   assert.equal(config.d1_databases[0].database_id, env.CONTROL_DB_ID);
   assert.equal(config.r2_buckets[0].bucket_name,'ar3d-calling-recordings');
-  assert.equal(config.routes, undefined);
+  assert.deepEqual(config.routes,[{pattern:'aicalling.ar3dstudio.in',custom_domain:true}]);
 });
 test('rejects existing production Cloudflare routes and wrong database/bucket names', () => {
   assert.throws(() => makeMainConfig({...template,routes:[{pattern:'admin.rekixo.com/*'}]},getCredentials(env)), /Unsafe/);
+  assert.throws(() => makeMainConfig({...template,routes:[{pattern:'aicalling.ar3dstudio.in',custom_domain:false}]},getCredentials(env)), /Unsafe/);
+  assert.throws(() => makeMainConfig({...template,routes:[{pattern:'aicalling.ar3dstudio.in',custom_domain:true},{pattern:'rekixo.com',custom_domain:true}]},getCredentials(env)), /Unsafe/);
+  assert.throws(() => makeMainConfig({...template,routes:[{pattern:'aicalling.ar3dstudio.in',custom_domain:true,zone_name:'ar3dstudio.in'}]},getCredentials(env)), /Unsafe/);
+  assert.throws(() => makeMainConfig({...template,routes:[]},getCredentials(env)), /Unsafe/);
   assert.throws(() => makeMainConfig({...template,d1_databases:[{...template.d1_databases[0],database_name:'tiyansh-production'},template.d1_databases[1]]},getCredentials(env)), /Unexpected/);
   assert.throws(() => makeMainConfig({...template,r2_buckets:[{binding:'RECORDINGS',bucket_name:'rekixo-3d-assets'}]},getCredentials(env)), /Wrong/);
 });
