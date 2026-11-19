@@ -40,6 +40,7 @@ class MainOnlyDeploymentLayoutTests(unittest.TestCase):
     def test_main_config_is_isolated(self):
         config = json.loads((ROOT / "wrangler.example.jsonc").read_text())
         self.assertEqual(config["name"], "ar3d-ai-calling")
+        self.assertEqual(config["triggers"], {"crons": ["0 */6 * * *"]})
         self.assertEqual(config["routes"], [
             {"pattern": "aicalling.ar3dstudio.in", "custom_domain": True}
         ])

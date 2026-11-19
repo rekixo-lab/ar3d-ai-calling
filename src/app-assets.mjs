@@ -86,6 +86,21 @@ function engineeringPanel(main){
     title('Telecom Provider Integration — Mock Validation','h3'),
     node('p',{class:'note',text:'Exotel API contract only; no provider account, verified callback, audio stream or live calls are connected.'}),
     providerLaunch,providerSummary);
+  const connectionSummary=div('stack');
+  const connectionButton=btn('Check Exotel Connection (read-only)',async()=>{
+    connectionButton.disabled=true;
+    connectionSummary.replaceChildren(node('p',{class:'muted',text:'Checking approved Exotel account connectivity with server-side secrets only...'}));
+    try{
+      const result=await api('/v1/human/engineering/provider-connectivity','POST',{});
+      connectionSummary.replaceChildren(
+        node('p',{class:result.verified?'success':'note',text:'Exotel API: '+(result.verified?'Connection verified':'Not verified')+' | Real dialing: disabled'}),
+        node('p',{class:'note',text:result.note})
+      );
+    }catch(err){asError(err)}finally{connectionButton.disabled=false}
+  });
+  card.append(title('Exotel Account Connectivity (read-only)','h3'),
+    node('p',{class:'note',text:'Uses server-side Exotel credentials only after you add them. Never places calls or exposes keys.'}),
+    connectionButton,connectionSummary);
   const mediaOutput=div('stack');
   const mediaTest=btn('Test 100 PCM Audio Frames (offline)',async()=>{
     mediaTest.disabled=true;

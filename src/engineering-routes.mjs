@@ -6,6 +6,7 @@ import {runSyntheticPilot} from './sandbox-pilot.mjs';
 import {runExotelMockPilot} from './exotel-mock-pilot.mjs';
 import {runExotelMediaHarness} from './exotel-media-harness.mjs';
 import {operationalReadiness} from './operational-readiness.mjs';
+import {probeExotelConnectivity} from './provider-connectivity.mjs';
 
 const headers={'Cache-Control':'no-store','X-Content-Type-Options':'nosniff',
   'Referrer-Policy':'no-referrer','X-Frame-Options':'DENY'};
@@ -72,6 +73,17 @@ export async function handleEngineeringRequest(req,user,env={}){
       return json(runExotelMediaHarness(input));
     }catch{
       return fail('invalid media protocol simulation; nothing executed',400);
+    }
+  }
+  if(path===BASE+'provider-connectivity'){
+    if(req.method!=='POST')return fail('method not allowed',405);
+    try{
+      const input=await boundedJson(req);
+      if(Object.keys(input).length!==0)
+        return fail('connectivity check accepts no caller/customer inputs',400);
+      return json(await probeExotelConnectivity(env));
+    }catch{
+      return fail('provider connectivity check could not complete',503);
     }
   }
   return fail('not found',404);

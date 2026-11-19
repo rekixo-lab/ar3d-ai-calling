@@ -1,4 +1,5 @@
 import {handleHumanRequest} from './human-routes.mjs';
+import {handleCallingCron} from './automatic-auth-maintenance.mjs';
 import {
   checkSlug,checkName,checkStorageMode,normalizeIndianPhone,
   resolveCrmDb,newApiKey,sha256hex,parseJsonBody,SOURCES
@@ -199,5 +200,8 @@ export default {
       console.error('AR3D AI Calling request failed',e);
       return fail('internal server error',500);
     }
+  },
+  async scheduled(controller,env){
+    return handleCallingCron(controller,env);
   }
 };

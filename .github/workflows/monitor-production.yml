@@ -1,0 +1,35 @@
+name: AR3D AI Calling - production read-only monitor
+
+on:
+  schedule:
+    - cron: '23 */6 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ar3d-ai-calling-public-monitor
+  cancel-in-progress: true
+
+jobs:
+  public-health:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify exact custom domain, login barrier and immutable UI assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          for attempt in 1 2 3; do
+            if node scripts/monitor-production.mjs; then
+              exit 0
+            fi
+            if [ "$attempt" -lt 3 ]; then sleep 8; fi
+          done
+          echo "::error::Standalone AR3D AI Calling public monitoring failed"
+          exit 1
