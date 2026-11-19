@@ -88,6 +88,20 @@ answers fill the existing CRM form for **staff confirmation**. No
 phone call, verified STT, DND grant, recording or automatic booking happens.
 See [Basic Property Survey](docs/BOSS-FIXED-PROPERTY-SURVEY.md).
 
+## Exotel Free Trial handoff (not automatic live dialing)
+
+The Super Admin has **Exotel Trial Setup — What Is Ready?**, which
+shows the missing server-side Exotel SID/API secret binding names and a
+copy-ready seven-question Hindi/English **Managed Voicebot** draft. An
+Exotel account with these keys can be checked by the existing
+**Check Exotel Connection (read-only)** control, but **keys alone will
+not start calling or sync voice transcripts to CRM**. Managed Voicebot
+may eliminate our separate WSS/STT server *if* Exotel grants that
+feature and a secure transcript API/webhook; verify access, pricing and
+KYC with the provider. The new onboarding endpoint is Super Admin-only,
+read-only and cannot dial. See
+[Exotel Trial Setup](docs/EXOTEL-TRIAL-SETUP.md).
+
 # AR3D AI Calling
 
 ## Exotel India Voice AI connector (dry-run only)
