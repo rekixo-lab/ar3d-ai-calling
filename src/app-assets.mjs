@@ -101,6 +101,21 @@ function engineeringPanel(main){
   card.append(title('Exotel Account Connectivity (read-only)','h3'),
     node('p',{class:'note',text:'Uses server-side Exotel credentials only after you add them. Never places calls or exposes keys.'}),
     connectionButton,connectionSummary);
+  const ownSipPanel=div('stack',node('p',{class:'note',
+    text:'Yes, we can operate our own Asterisk PBX. A 140 caller number ALONE cannot place calls: an authorized telemarketing SIP Trunk and always-on PBX host are required. The lab has NO outbound routes.'}));
+  card.append(title('Our Own Calling Engine — No Exotel Required','h3'),ownSipPanel);
+  api('/v1/human/engineering/own-sip-setup').then(result=>{
+    const lab=node('p',{class:'success',
+      text:'Private Asterisk local-only lab: source ready for installation | Real 140 calls: NOT enabled | Automatic voice-to-CRM: NOT enabled'});
+    const steps=node('ol');
+    for(const task of result.steps||[])
+      steps.append(node('li',{text:task.title+' — '+task.owner}));
+    const link=node('a',{href:result.reference,target:'_blank',rel:'noopener noreferrer',
+      text:'Jio Business — official 140 SIP Trunk example'});
+    ownSipPanel.replaceChildren(lab,
+      node('p',{class:'note',text:'Do not buy a 140 number without an operator-authorized outbound SIP trunk. A PBX host, SIP routing, audio/STT, secure callbacks and real customer permissions are independent requirements.'}),
+      title('Needed for an actual outbound pilot','h3'),steps,link);
+  }).catch(asError);
   const trialSetup=div('stack');
   card.append(title('Exotel Trial Setup — What Is Ready?','h3'),
     node('p',{class:'note',text:'This is an onboarding checklist, not a dialer. Setting API keys alone will NOT make live calls possible.'}),
