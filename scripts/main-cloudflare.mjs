@@ -62,8 +62,15 @@ export function getCredentials(input) {
 }
 
 export function makeMainConfig(template, credentials) {
+  // Lock this Worker to its one explicitly approved custom hostname only.
+  // Never accept wildcard routes or another AR3D project's hostname.
+  const domainRoutes = template?.routes;
+  const onlyCallingDomain = Array.isArray(domainRoutes) && domainRoutes.length === 1 &&
+    domainRoutes[0]?.pattern === 'aicalling.ar3dstudio.in' &&
+    domainRoutes[0]?.custom_domain === true &&
+    Object.keys(domainRoutes[0]).length === 2;
   if (template?.name !== 'ar3d-ai-calling' || template.main !== './src/index.mjs' ||
-      template.route || template.routes?.length || template.triggers || template.services ||
+      template.route || !onlyCallingDomain || template.triggers || template.services ||
       !Array.isArray(template.d1_databases) || template.d1_databases.length !== 2 ||
       !Array.isArray(template.r2_buckets) || template.r2_buckets.length !== 1) {
     throw Error('Unsafe Worker template: wrong project, routes, resources or entry point.');
