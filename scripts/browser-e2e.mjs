@@ -82,7 +82,9 @@ await once(server,'listening');
 const origin='http://127.0.0.1:'+server.address().port;
 let browser;
 try{
-  browser=await chromium.launch({headless:true});
+  // GitHub's ubuntu-24.04 image includes stable Google Chrome; avoid the
+  // large Playwright-managed Chromium download and unsupported runner detection.
+  browser=await chromium.launch({headless:true,channel:'chrome'});
   for(const viewport of [
     {name:'desktop',width:1440,height:900},
     {name:'tablet',width:768,height:1024},
