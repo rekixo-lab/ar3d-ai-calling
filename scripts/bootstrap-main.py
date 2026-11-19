@@ -42,7 +42,8 @@ def build_request(host: str, email: str, password: str, token: str):
     return urllib.request.Request(
         url + "/v1/human/bootstrap",
         data=payload,
-        headers={"Authorization": "Bearer " + token, "Content-Type": "application/json"},
+        headers={"Authorization": "Bearer " + token, "Content-Type": "application/json",
+                 "User-Agent": "AR3D-AI-Calling-Bootstrap/1.0 (+https://ar3d-ai-calling.ai-8f3.workers.dev)"},
         method="POST",
     )
 
@@ -95,7 +96,19 @@ def bootstrap(host: str, email: str, password: str, token: str,
                     print("Bootstrap HTTP 401: response is not the expected Worker JSON. "
                           "Check Cloudflare access or upstream routing.")
             elif exc.code == 403:
-                print("Bootstrap HTTP 403: forbidden. No automatic retry.")
+                # A default Python urllib User-Agent can trigger Cloudflare
+                # workers.dev Browser Integrity Check (1010) before Worker code.
+                # Read a bounded body only for this safe classification.
+                try:
+                    blocked_body = exc.read(4096)
+                except (OSError, ValueError):
+                    blocked_body = b""
+                if b"1010" in blocked_body:
+                    print("Bootstrap HTTP 403 (Cloudflare error 1010): "
+                          "Browser Integrity Check blocked the request.")
+                else:
+                    print("Bootstrap HTTP 403: forbidden; check upstream "
+                          "Cloudflare Access/security rules. No automatic retry.")
             elif exc.code == 409:
                 print("Super Admin already exists. Do NOT repeat bootstrap.")
             else:

@@ -24,9 +24,17 @@ class BootstrapHelperTests(unittest.TestCase):
         r=MODULE.build_request(url,"Owner@Example.com","A"*20,"B"*40)
         self.assertEqual(r.full_url,url+"/v1/human/bootstrap")
         self.assertEqual(r.get_method(),"POST")
+        self.assertEqual(r.get_header("User-agent"), "AR3D-AI-Calling-Bootstrap/1.0 (+https://ar3d-ai-calling.ai-8f3.workers.dev)")
         self.assertNotIn("B"*40,r.full_url)
         self.assertNotIn("A"*20,r.full_url)
         self.assertEqual(json.loads(r.data),{"email":"owner@example.com","password":"A"*20})
+    def test_descriptive_agent_is_used_for_isolated_worker_only(self):
+        url="https://ar3d-ai-calling.operator-test.workers.dev"
+        req=MODULE.build_request(url,"admin@example.com","ValidPassWord123!","Q"*43)
+        self.assertIn("AR3D-AI-Calling-Bootstrap/1.0",req.get_header("User-agent"))
+        self.assertNotIn("Python-urllib",req.get_header("User-agent"))
+        self.assertEqual(req.get_method(),"POST")
+
     def test_invalid_credentials_fail_before_network(self):
         url="https://ar3d-ai-calling.operator-test.workers.dev"
         for token,password in (("short","ValidStrongPass123"),("B"*40,"short")):
@@ -136,6 +144,23 @@ class SynchronizedBootstrapTests(unittest.TestCase):
         self.assertEqual(len(calls), 1)
         self.assertEqual(delays, [])
         self.assertIn("not the expected Worker JSON", output.getvalue())
+
+    def test_cloudflare_1010_block_is_reported_without_raw_response(self):
+        calls=[]
+        def opener(req, **_):
+            calls.append(1)
+            raise MODULE.urllib.error.HTTPError(
+                req.full_url,403,"Forbidden",{"Content-Type":"text/html"},
+                io.BytesIO(b"<html>error code: 1010</html>"))
+        with patch("sys.stdout", io.StringIO()) as out:
+            result=MODULE.bootstrap(
+                MODULE.PRODUCTION_URL,"admin@example.com","ValidPassWord123!",
+                "Q"*43, opener=opener, retry_unauthorized=True,
+                sleeper=lambda _:self.fail("403 must not retry"))
+        self.assertEqual(result,1)
+        self.assertEqual(len(calls),1)
+        self.assertIn("Cloudflare error 1010",out.getvalue())
+        self.assertNotIn("<html>",out.getvalue())
 
     def test_worker_401_retry_exhausts_without_secret_rotation(self):
         delays, count = [], []
