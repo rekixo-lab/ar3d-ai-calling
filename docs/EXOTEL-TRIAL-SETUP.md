@@ -97,6 +97,58 @@ Official sources:
   recording notice and retention (if recording is enabled), MFA,
   backups, alerts and a controlled end-to-end pilot.
 
+## Pre-built Exotel Managed Voicebot transcript contract (offline)
+
+On 19 November 2026, Exotel's official
+[VoiceBot Webhooks](https://docs.exotel.com/intelligent-voice-agents/voicebot-webhooks)
+documented a JSON envelope with session_id, conversation_id, external_id,
+session_state, trigger_reason, network_type, metadata.call_sid and events.
+Transcript events include sequence, status (inprogress/completed), speaker and
+text segments. These callbacks are retried and may be OUT OF ORDER.
+**The session_end event does not carry the complete transcript.**
+
+Our code now prepares a **pure offline parser/reconciler** in
+src/exotel-voicebot-webhook-contract.mjs. It:
+- Validates IDs, event types, bounded text, completed turn sequences and
+  timestamps; checks call/session/account equality against supplied expected
+  references (not proof of authenticity).
+- Ignores nonfinal 'inprogress' transcripts, deduplicates exact retries
+  and rejects conflicting duplicate event IDs or turn sequences.
+- Sorts completed turns by sequence and flags potential "don't call"
+  opt-out wording for immediate human review.
+- Discards contact_uri, landing_number, custom params and other phone/PII
+  from every Admin-visible result. No transcript text returned to the UI.
+- Exposes a Super Admin-only TEST button **Test Exotel Voicebot Transcript
+  Webhooks (offline)** for fictional seven-question, reordered, retried
+  and opt-out scenarios. No real customer payload may be supplied there.
+- Does NOT register a public webhook, verify Exotel source, place a call,
+  import a CRM lead, save transcripts, mutate opt-out/DND, confirm visits,
+  or charge any customer. Those gates remain CLOSED.
+
+**After Exotel account activation, request exactly:**
+
+1. Is **Managed Voicebot** in our trial? Can we 'Talk to Bot' using one
+   personally controlled verified mobile number? Which costs apply?
+2. Are the seven Hindi/English questions and *per-turn transcript_events*
+   available, including structured answer extraction? Exotel documentation
+   shows raw transcripts; it does **not** guarantee a seven-field answer API.
+3. What is the supported webhook authentication (e.g. an approved shared
+   auth header / IP allowlist), real delivery IPs, retries and event IDs?
+   The public docs do not guarantee an HMAC signature. NEVER deploy a
+   public webhook before agreeing on the exact authenticated contract.
+4. Can we correlate the approved test call SID to a particular tenant,
+   Builder and Excel Lead without using guessable phone-only matching?
+5. Can the trial use an approved Caller ID, and what KYC/DLT and consent
+   rules apply for the different production promotional traffic type?
+6. What is the pricing for 100 calls including minutes, Voicebot, STT,
+   assigned number and fees? Does multi-Builder usage need an agreement?
+
+Our next integration after a REAL sample/provider contract is a secure,
+authenticated/replay-proof per-call **durable inbox** and authorized
+tenant-to-CRM mapping with staff verification; later a narrow, expressly
+approved dial/campaign path. No blind automatic write from a random
+webhook, HTTP URL or untrusted transcript.
+
 ## What the deployed code guarantees
 
 - Isolated Client CRM, Excel name/mobile, fixed questions, review form,
