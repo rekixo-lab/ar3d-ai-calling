@@ -131,3 +131,13 @@ jobs:
             sleep 5
           done
           echo "::error::Read-only isolated Worker smoke failed"; exit 1
+      - name: Read-only custom domain smoke (including sidebar assets and auth gate)
+        if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.operation == 'deploy')
+        shell: bash
+        run: |
+          set -euo pipefail
+          for attempt in 1 2 3 4 5; do
+            if node scripts/smoke-main.mjs 'https://aicalling.ar3dstudio.in'; then exit 0; fi
+            sleep 5
+          done
+          echo "::error::Custom Calling domain smoke failed"; exit 1
