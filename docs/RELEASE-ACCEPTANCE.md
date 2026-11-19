@@ -134,3 +134,23 @@ server-side but NOT sent. Exotel CallSid + nonce callback correlation remains
 unverified and quarantined. A future verified source/IP/Details API callback
 stage, real WSS media gateway, approved provider/caller ID, lawful consent,
 DND verification, STT/LLM/TTS and commercial billing are **not** complete.
+
+## Provider read-only verification and operator readiness
+
+Read-only Exotel Account/Call Details checks are implemented with a fixed
+India API host, private Basic Auth, bounded JSON, no redirect and strict
+CallSid/Status/AccountSid/Caller ID verification. No fetched phone numbers,
+recordings, tokens or charges are displayed or persisted. The optional
+Razorpay raw-body HMAC verifier explicitly does **not** fulfill paid
+subscriptions, and a duplicate-aware provider usage preview never invoices.
+
+The Super Admin Production Readiness panel shows only yes/no presence for
+Worker bindings and a separate manual approval checklist. Presence alone
+does not authorize telecom calling, consent, DND, AI voice or payments.
+The browser E2E job checks this panel using a localhost-only fixture.
+
+Real provider accounts, verified caller ID, KYC/DLT, legal consent/DND,
+signed or allowlisted callback origins, production media gateway, speech AI,
+D1/R2 disaster recovery, MFA, lawful billing and end-to-end supervised
+calls are still separate signed-off release gates. See
+[Operator Go-Live Checklist](OPERATOR-GO-LIVE.md).
