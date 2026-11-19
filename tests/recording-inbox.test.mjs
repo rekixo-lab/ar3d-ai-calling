@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {recordingContext,putEncryptedRecording,decryptRecordingForAuthorizedWorker} from '../src/recording-storage.mjs';
 import {quarantineSyntheticEvent} from '../src/provider-inbox.mjs';
 import {encodeSignedMessage} from '../src/provider-contract.mjs';
+import {sha256hex} from '../src/core.mjs';
 const tenant='22222222-2222-4222-8222-222222222222',call='33333333-3333-4333-8333-333333333333';
 const eventId='44444444-4444-4444-8444-444444444444';
 const secret='not-real-synthetic-hmac-signing-secret-12345678';
@@ -46,10 +47,14 @@ async function signedEnvelope(body,timestamp,evt){
     b=>b.toString(16).padStart(2,'0')).join('');
   return {bodyBytes:bytes,signature,timestamp,eventId:evt,secret,now:timestamp*1000};
 }
-function mockInbox(inserted=true){
+function mockInbox(inserted=true,recorded=null){
   const log=[];
   const db={prepare(sql){return {bind(...params){log.push({sql,params});return {
-    async first(){return {id:tenant}},
+    async first(){
+      if(sql.includes('FROM tenants'))return {id:tenant};
+      if(sql.includes('FROM provider_event_inbox'))return recorded;
+      throw Error('unrecognized mock inbox query');
+    },
     async run(){return {meta:{changes:inserted?1:0}}}
   }}}}};
   return {db,log};
@@ -65,8 +70,19 @@ test('signed synthetic event is idempotently quarantined with digest only',async
   assert.ok(f.log.some(x=>x.sql.includes('INSERT OR IGNORE INTO provider_event_inbox')));
   assert.ok(f.log.some(x=>x.params.some(y=>typeof y==='string'&&y.length===64)));
   assert.ok(!f.log.some(x=>/INSERT INTO calls|consent_status|paid_minutes|billable/.test(x.sql)));
-  const duplicate=await quarantineSyntheticEvent(mockInbox(false).db,input);
+  const digest=await sha256hex(Array.from(input.bodyBytes,b=>b.toString(16).padStart(2,'0')).join(''));
+  const recorded={payload_digest:digest,event_kind:'call.completed',status:'quarantined'};
+  const duplicate=await quarantineSyntheticEvent(mockInbox(false,recorded).db,input);
   assert.equal(duplicate.duplicate,true);
+  const mismatched=mockInbox(false,{...recorded,payload_digest:'0'.repeat(64)});
+  await assert.rejects(quarantineSyntheticEvent(mismatched.db,input),/conflicting/);
+  const missing=mockInbox(false,null);
+  await assert.rejects(quarantineSyntheticEvent(missing.db,input),/unconfirmed/);
+  const kindTamper=mockInbox(false,{...recorded,event_kind:'call.failed'});
+  await assert.rejects(quarantineSyntheticEvent(kindTamper.db,input),/conflicting/);
+  const statusTamper=mockInbox(false,{...recorded,status:'processed'});
+  await assert.rejects(quarantineSyntheticEvent(statusTamper.db,input),/conflicting/);
+  assert.ok(mismatched.log.every(x=>!/UPDATE .*calls|lead.*consent|invoice/.test(x.sql)));
 });
 test('invalid signed synthetic event never reaches database',async()=>{
   const ts=Math.floor(Date.now()/1000),payload={eventId,tenantId:tenant,callId:call,
