@@ -47,30 +47,68 @@ def build_request(host: str, email: str, password: str, token: str):
     )
 
 
-def bootstrap(host: str, email: str, password: str, token: str, opener=None) -> int:
+def bootstrap(host: str, email: str, password: str, token: str,
+              opener=None, retry_unauthorized=False, sleeper=None) -> int:
+    """Retry only the exact Worker JSON 401, not upstream/ambiguous failures.
+
+    All attempts use the same in-memory password and token, with no reupload.
+    Normal, non-synchronized mode continues to make just one request.
+    """
     request = build_request(host, email, password, token)
     if opener is None:
         opener = urllib.request.urlopen
-    try:
-        with opener(request, timeout=20, context=ssl.create_default_context()) as reply:
-            if reply.status != 201:
-                print("Bootstrap was not confirmed (unexpected HTTP status).")
-                return 1
-    except urllib.error.HTTPError as exc:
-        if exc.code == 409:
-            print("Super Admin already exists. Do NOT repeat bootstrap.")
-        elif exc.code in (401, 403):
-            print("Bootstrap unauthorized. Check the Worker-only ADMIN_BOOTSTRAP_TOKEN.")
-        else:
-            print("Bootstrap failed with HTTP status " + str(exc.code) + ".")
-        return 1
-    except (urllib.error.URLError, TimeoutError, OSError):
-        print("Connection failed. Verify the isolated Worker URL and TLS/network access.")
-        return 1
-    print("Super Admin created. Sign in at " + validate_host(host) + "/app")
-    print("IMPORTANT: Remove ADMIN_BOOTSTRAP_TOKEN from the Worker now.")
-    return 0
-
+    if sleeper is None:
+        sleeper = time.sleep
+    delays = (0, 5, 10, 15) if retry_unauthorized else (0,)
+    for attempt, delay in enumerate(delays):
+        if delay:
+            print("Retrying existing bootstrap request after " + str(delay) +
+                  " seconds (same in-memory token; no secret change).")
+            sleeper(delay)
+        try:
+            with opener(request, timeout=20, context=ssl.create_default_context()) as reply:
+                if reply.status != 201:
+                    print("Bootstrap was not confirmed (unexpected HTTP status " +
+                          str(reply.status) + ").")
+                    return 1
+        except urllib.error.HTTPError as exc:
+            if exc.code == 401:
+                # Do not mistake an upstream 401 for an application rejection.
+                # Neither token nor response body is ever printed.
+                worker_denied = False
+                try:
+                    content_type = exc.headers.get("Content-Type", "") if exc.headers else ""
+                    body = exc.read(256)
+                    worker_denied = (
+                        content_type.lower().split(";", 1)[0].strip() == "application/json"
+                        and json.loads(body) == {"error": "unauthorized"}
+                    )
+                except (ValueError, UnicodeError, OSError):
+                    pass
+                if worker_denied and attempt < len(delays) - 1:
+                    print("Worker HTTP 401; waiting for possible secret propagation.")
+                    continue
+                if worker_denied:
+                    print("Bootstrap HTTP 401: Worker rejected the token. "
+                          "A present secret name does not prove its value matched.")
+                else:
+                    print("Bootstrap HTTP 401: response is not the expected Worker JSON. "
+                          "Check Cloudflare access or upstream routing.")
+            elif exc.code == 403:
+                print("Bootstrap HTTP 403: forbidden. No automatic retry.")
+            elif exc.code == 409:
+                print("Super Admin already exists. Do NOT repeat bootstrap.")
+            else:
+                print("Bootstrap failed with HTTP status " + str(exc.code) + ".")
+            return 1
+        except (urllib.error.URLError, TimeoutError, OSError):
+            print("Connection failed or result unknown. No automatic retry; "
+                  "verify admin state before trying again.")
+            return 1
+        print("Super Admin created. Sign in at " + validate_host(host) + "/app")
+        print("IMPORTANT: Remove ADMIN_BOOTSTRAP_TOKEN from the Worker now.")
+        return 0
+    return 1
 
 # This operation is limited to a single existing standalone Cloudflare Worker.
 # No credentials are passed via argv, printed or persisted to disk.
@@ -127,9 +165,8 @@ def synchronized_bootstrap(raw_host: str) -> int:
     token = secrets.token_urlsafe(32)
     if not upload_one_time_token(token):
         return 1
-    # Give the newly published Worker secret a brief moment to propagate.
-    time.sleep(3)
-    return bootstrap(host, email, password, token)
+    # Retry only the exact Worker JSON 401 after a secret change.
+    return bootstrap(host, email, password, token, retry_unauthorized=True)
 
 
 def main(argv=None) -> int:

@@ -79,7 +79,7 @@ class SynchronizedBootstrapTests(unittest.TestCase):
         seen=[]
         with patch.object(MODULE.secrets,"token_urlsafe",return_value=generated), \
              patch.object(MODULE,"upload_one_time_token",side_effect=lambda token: seen.append(("upload",token)) or True), \
-             patch.object(MODULE,"bootstrap",side_effect=lambda host,email,pw,token:seen.append(("bootstrap",token,host,email,pw)) or 0), \
+             patch.object(MODULE,"bootstrap",side_effect=lambda host,email,pw,token,**kw:seen.append(("bootstrap",token,host,email,pw,kw)) or 0), \
              patch.object(MODULE.time,"sleep",return_value=None), \
              patch("builtins.input",return_value="owner@example.com"), \
              patch.object(MODULE.getpass,"getpass",side_effect=["StrongPassWord!2026","StrongPassWord!2026"]):
@@ -88,6 +88,90 @@ class SynchronizedBootstrapTests(unittest.TestCase):
         self.assertEqual(seen[0],("upload",generated))
         self.assertEqual(seen[1][0:2],("bootstrap",generated))
         self.assertEqual(seen[1][2],MODULE.PRODUCTION_URL)
+        self.assertEqual(seen[1][5],{"retry_unauthorized":True})
+
+    def test_retry_reuses_one_request_and_succeeds_after_worker_401(self):
+        class Created:
+            status = 201
+            def __enter__(self): return self
+            def __exit__(self, *args): return False
+
+        calls, delays = [], []
+        def opener(request, **_):
+            calls.append(request)
+            if len(calls) <= 2:
+                raise MODULE.urllib.error.HTTPError(
+                    request.full_url, 401, "Unauthorized",
+                    {"Content-Type": "application/json"},
+                    io.BytesIO(b'{"error":"unauthorized"}'))
+            return Created()
+
+        output = io.StringIO()
+        token = "Q" * 43
+        with patch("sys.stdout", output):
+            result = MODULE.bootstrap(
+                MODULE.PRODUCTION_URL, "admin@example.com", "StrongPassword123!",
+                token, opener=opener, retry_unauthorized=True,
+                sleeper=delays.append)
+        self.assertEqual(result, 0)
+        self.assertEqual(len(calls), 3)
+        self.assertTrue(all(req is calls[0] for req in calls))
+        self.assertEqual(delays, [5, 10])
+        self.assertNotIn(token, output.getvalue())
+
+    def test_non_worker_401_is_not_retried(self):
+        calls, delays = [], []
+        def opener(request, **_):
+            calls.append(request)
+            raise MODULE.urllib.error.HTTPError(
+                request.full_url, 401, "Unauthorized",
+                {"Content-Type": "text/html"},
+                io.BytesIO(b"<html>access denied</html>"))
+        with patch("sys.stdout", io.StringIO()) as output:
+            result = MODULE.bootstrap(
+                MODULE.PRODUCTION_URL, "admin@example.com", "StrongPassword123!",
+                "Q" * 43, opener=opener, retry_unauthorized=True,
+                sleeper=delays.append)
+        self.assertEqual(result, 1)
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(delays, [])
+        self.assertIn("not the expected Worker JSON", output.getvalue())
+
+    def test_worker_401_retry_exhausts_without_secret_rotation(self):
+        delays, count = [], []
+        def opener(request, **_):
+            count.append(1)
+            raise MODULE.urllib.error.HTTPError(
+                request.full_url, 401, "Unauthorized",
+                {"Content-Type": "application/json"},
+                io.BytesIO(b'{"error":"unauthorized"}'))
+        with patch("sys.stdout", io.StringIO()) as output:
+            result = MODULE.bootstrap(
+                MODULE.PRODUCTION_URL, "admin@example.com", "StrongPassword123!",
+                "Q" * 43, opener=opener, retry_unauthorized=True,
+                sleeper=delays.append)
+        self.assertEqual(result, 1)
+        self.assertEqual(len(count), 4)
+        self.assertEqual(delays, [5, 10, 15])
+        self.assertIn("Worker rejected the token", output.getvalue())
+
+    def test_409_is_not_retried(self):
+        delays, count = [], []
+        def opener(request, **_):
+            count.append(1)
+            raise MODULE.urllib.error.HTTPError(
+                request.full_url, 409, "Conflict",
+                {"Content-Type": "application/json"},
+                io.BytesIO(b'{"error":"super admin already exists"}'))
+        with patch("sys.stdout", io.StringIO()) as output:
+            result = MODULE.bootstrap(
+                MODULE.PRODUCTION_URL, "admin@example.com", "StrongPassword123!",
+                "Q" * 43, opener=opener, retry_unauthorized=True,
+                sleeper=delays.append)
+        self.assertEqual(result, 1)
+        self.assertEqual(len(count), 1)
+        self.assertEqual(delays, [])
+        self.assertIn("already exists", output.getvalue())
 
     def test_synchronized_bootstrap_rejects_unverified_domain_without_writes(self):
         with self.assertRaises(ValueError):
