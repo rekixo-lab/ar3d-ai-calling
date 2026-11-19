@@ -30,6 +30,11 @@ MFA enrollment, live telecom enablement or commercial readiness. See
 
 # AR3D AI Calling
 
+## Exotel India Voice AI connector (dry-run only)
+
+Verified against Exotel's official Voice AI Connect parameters; added a strict fail-closed consent/DND/caller-ID review contract, untrusted callback parser, Super Admin 100-event Exotel Mock Pilot, and comprehensive security/negative tests. Neither live dispatch nor provider webhooks/streaming are registered. See [Exotel Voice AI Adapter — Safe Contract & Compliance Gates](docs/EXOTEL-PROVIDER-GATES.md).
+
+
 **Development foundation (Phases 1–5)** — independent multi-tenant CRM, personal admin dashboard, lead imports and deterministic text conversation simulator for AR3D clients. Product branding is **AR3D AI Calling**. **No real outbound calls or live generative AI voice conversations are implemented.**
 
 ## What works in this starter
