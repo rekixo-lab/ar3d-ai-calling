@@ -14,8 +14,11 @@ function assertMockStateChain(){
     if(planCallStatusTransition(stages[i-1],stages[i]).allowed!==true)
       throw Error('synthetic state transition contract mismatch');
 }
-export function runSyntheticPilot({count=100,scenario='mixed',quotaCalls=100,
-  ratePaisePerMinute=null}={}){
+export function runSyntheticPilot(options={}){
+  if(!options||typeof options!=='object'||Array.isArray(options)||
+     Object.keys(options).some(k=>!['count','scenario','quotaCalls','ratePaisePerMinute'].includes(k)))
+    throw Error('unexpected sandbox input; no customer data accepted');
+  const {count=100,scenario='mixed',quotaCalls=100,ratePaisePerMinute=null}=options;
   if(!Number.isSafeInteger(count)||count<1||count>100||
      !['mixed',...SCENARIOS].includes(scenario))throw Error('invalid sandbox pilot parameters');
   assertMockStateChain();
