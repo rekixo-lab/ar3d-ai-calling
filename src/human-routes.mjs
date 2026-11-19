@@ -1,5 +1,6 @@
 import {handleCrmRequest} from './crm-routes.mjs';
 import {handlePropertyQualificationRequest} from './property-qualification-routes.mjs';
+import {handleFixedVoicePreviewRequest} from './fixed-voice-preview-routes.mjs';
 import {handleEngineeringRequest} from './engineering-routes.mjs';
 import {handleTenantLifecycleRequest} from './tenant-lifecycle-routes.mjs';
 import {handleDataPortabilityRequest} from './data-portability-routes.mjs';
@@ -18,7 +19,7 @@ import {html,css,js} from './app-assets.mjs';
 import {COOKIE,validEmail,validPassword,makePassword,checkPassword,randomSecret,cookieFor,readCookie,mutationOriginAllowed,getSession,newSession,requireMembership,userSummary} from './human-auth.mjs';
 
 const now=()=>new Date().toISOString();
-const headers={'Cache-Control':'no-store','X-Content-Type-Options':'nosniff','Referrer-Policy':'no-referrer','X-Frame-Options':'DENY','Permissions-Policy':'camera=(),microphone=()'};
+const headers={'Cache-Control':'no-store','X-Content-Type-Options':'nosniff','Referrer-Policy':'no-referrer','X-Frame-Options':'DENY','Permissions-Policy':'camera=(),microphone=(self)'};
 const response=(body,status=200,extra={})=>Response.json(body,{status,headers:{...headers,...extra}});
 const fail=(error,status=400)=>response({error},status);
 async function payload(req){
@@ -243,6 +244,8 @@ export async function handleHumanRequest(req,env){
     if(auditResponse)return auditResponse;
     const dataResponse=await handleDataPortabilityRequest(req,env,user);
     if(dataResponse)return dataResponse;
+    const voicePreviewResponse=await handleFixedVoicePreviewRequest(req);
+    if(voicePreviewResponse)return voicePreviewResponse;
     const qualificationResponse=await handlePropertyQualificationRequest(req,env,user);
     if(qualificationResponse)return qualificationResponse;
     const crmResponse=await handleCrmRequest(req,env,user);
