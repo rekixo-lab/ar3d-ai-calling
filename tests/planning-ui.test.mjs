@@ -28,8 +28,6 @@ test('dashboard sidebar has distinct block navigation and accessible sign-out sp
   assert.match(js,/btn\('Sign out',logout,true\)/);
 });
 
-import test from 'node:test';
-import assert from 'node:assert/strict';
 import {smoke,validateSmokeBase} from '../scripts/smoke-main.mjs';
 
 test('public production smoke accepts only calling hosts and rejects external targets',()=>{
