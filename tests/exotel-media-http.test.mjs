@@ -41,8 +41,8 @@ test('Exotel bidirectional PCM builder roundtrips mono linear16 byte-perfect',()
     event:'mark',stream_sid:stream,mark:{name:'turn_3_end'}
   });
   assert.deepEqual(makeExotelOutboundClear(stream),{event:'clear',stream_sid:stream});
-  const large=new Uint8Array(100000);
-  assert.equal(unpackPcmPayload(packPcmPayload(large)).length,100000);
+  const large=new Uint8Array(99840);
+  assert.equal(unpackPcmPayload(packPcmPayload(large)).length,99840);
   for(const bad of [new Uint8Array(1),new Uint8Array(3199),
     new Uint8Array(100320),[1,2,3],null])
     assert.throws(()=>packPcmPayload(bad),/invalid/);
@@ -112,7 +112,7 @@ test('AgentStream hard rejects cross-call, wrong media format, forged DTMF and e
   assert.throws(()=>s.accept({event:'mark',sequence_number:'2',stream_sid:stream,
     mark:{name:'bad mark!'}}),/invalid/);
   assert.throws(()=>s.accept({event:'clear',sequence_number:'2',stream_sid:stream}),
-    /unsupported inbound/);
+    /unsupported AgentStream inbound/);
   assert.throws(()=>s.accept({...stop(2),stop:{...stop(2).stop,call_sid:'CAothercallxxx'}}),/invalid/);
 });
 
