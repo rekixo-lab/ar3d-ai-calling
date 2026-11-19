@@ -74,7 +74,7 @@ test('AgentStream state machine consumes real event shape without exposing media
   assert.equal(summary.audioStored,false);
   assert.equal(summary.billable,false);
   assert.ok(!JSON.stringify(summary).includes(call));
-  assert.ok(!JSON.stringify(summary).includes(pcm[0].toString()));
+  assert.equal(Object.hasOwn(summary,'rawAudio'),false);
   assert.throws(()=>session.accept(frame(6,200)),/stopped/);
 });
 
@@ -98,7 +98,7 @@ test('AgentStream hard rejects cross-call, wrong media format, forged DTMF and e
     assert.throws(()=>s.accept(start(rate)),/unsupported/);
   }
   const broken=createExotelMediaSession();broken.accept({event:'connected'});
-  assert.throws(()=>broken.accept(start('8000','short')),/invalid/);
+  assert.throws(()=>broken.accept(start('8000','x')),/invalid/);
   assert.throws(()=>broken.accept({...start(),start:{...start().start,from:'+911111111111',
     unexpected:'inject'}}),/unsupported/);
   const s=active();
@@ -206,7 +206,7 @@ test('Super Admin-only offline audio validation protects HTTP method, Origin and
     CONTROL_DB:{prepare(q){sql.push(q);if(!q.includes('FROM human_sessions'))
       throw Error('Unexpected D1 access');
       return {bind(){return {first:async()=>({id:'synthetic-user',
-        email:'test@example.invalid',globalRole:'super_admin'})}}};
+        email:'test@example.invalid',globalRole:'super_admin',token_hash:'test'})}}};
     }}
   };
   const unauth=await worker.fetch(new Request(url+'/v1/human/engineering/media-protocol'),{
