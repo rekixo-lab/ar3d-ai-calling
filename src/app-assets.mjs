@@ -108,6 +108,15 @@ function engineeringPanel(main){
     const list=node('ul');
     states.forEach(g=>list.append(node('li',{text:g.id.replace(/_/g,' ')+': '+g.description})));
     status.append(node('p',{class:'note',text:'Commercial go-live blocked: '+states.length+' release gates still require verification, integration or approval.'}),list);
+    if(result.operational){
+      const o=result.operational,configured=o.credentialBindingsConfigured||{};
+      const binds=Object.entries(configured);
+      status.append(title('Operator Setup Checklist','h3'),
+        node('p',{class:'note',text:'Provider/API bindings configured: '+binds.filter(([,yes])=>yes).length+'/'+binds.length+' (presence only; not approval)'}));
+      const tasks=node('ul');
+      for(const t of o.operatorActions||[])tasks.append(node('li',{text:t.label+' — requires manual verification'}));
+      status.append(tasks);
+    }
   }).catch(asError);
 }
 function dashboard(){root.replaceChildren();const aside=div('sidebar',node('div',{class:'brand',text:'AR3D AI Calling'},node('small',{text:'MULTI-TENANT PLATFORM'})),div('navitem',state.me.superAdmin?'Super Admin':'Client Dashboard'),node('p',{class:'muted',text:state.me.email}),node('a',{href:'/app/simulator',class:'navitem',text:'Test AI Conversation'}),btn('Sign out',logout,true));const main=div('main',div('row between',title(state.me.superAdmin?'Super Admin':'Personal AI Calling','h1'),node('span',{class:'pill',text:'Development / No live calls'})),div('',node('div',{id:'notice-anchor'})));root.append(div('layout',aside,main));if(state.me.superAdmin){engineeringPanel(main);mfaPanel(main);superAdmin(main)}if(state.me.tenants.length)clientPanel(main)}
