@@ -225,3 +225,6 @@ CSV/XLSX imports optionally accept Customer Type, Plot Size and Visit Date Prefe
 ## Unattended main deployment (isolated Cloudflare Worker)
 
 Pushing verified code to `main` now triggers the guarded `deploy-production.yml`: complete automated tests first, check exact D1/R2 identity, initialize **only if both D1s are fresh**, refuse any mixed/partial states, check post-migration columns/6 safety triggers, deploy the standalone Calling Worker and run a read-only health/auth smoke if Wrangler exposes its URL. GitHub `production` must restrict branch to `main`. Runtime security secrets and telecom onboarding remain separately required. Manual workflow operations still exist for recovery; other AR3D production resources are not targeted.
+
+
+For repeated first-admin bootstrap HTTP 401 from mismatched copied tokens, the one-time Wrangler **direct-sync** flow is documented in [docs/MANUAL-ACTIONS.md](docs/MANUAL-ACTIONS.md). It regenerates and uploads a token to the standalone Cloudflare Worker and bootstraps using the same in-memory token—no token copies in terminal, argv, logs or repo.
