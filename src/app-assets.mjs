@@ -64,7 +64,28 @@ function engineeringPanel(main){
       );
     }catch(err){asError(err)}finally{launch.disabled=false}
   });
-  card.append(status,launch,summary);
+  const providerSummary=div('stack');
+  const providerLaunch=btn('Test Exotel Mock Provider (100 events)',async()=>{
+    providerLaunch.disabled=true;
+    providerSummary.replaceChildren(node('p',{class:'muted',text:'Validating provider contract and mock callback lifecycle...'}));
+    try{
+      const result=await api('/v1/human/engineering/provider-pilot','POST',{count:100,scenario:'mixed'});
+      providerSummary.replaceChildren(
+        node('p',{class:'success',text:'Provider mock events: '+result.count+' | Real calls: '+result.realCallsStarted+' | External requests: '+result.providerNetworkRequests}),
+        table(['Mock result','Count'],[
+          ['Completed',result.outcomes.completed],['Busy',result.outcomes.busy],
+          ['No answer',result.outcomes.no_answer],['Failed',result.outcomes.failed],
+          ['Opt-out blocked',result.outcomes.opt_out_blocked],
+          ['Consent/DND blocked',result.outcomes.consent_dnd_blocked]
+        ]),
+        node('p',{class:'note',text:result.notice})
+      );
+    }catch(err){asError(err)}finally{providerLaunch.disabled=false}
+  });
+  card.append(status,launch,summary,
+    title('Telecom Provider Integration — Mock Validation','h3'),
+    node('p',{class:'note',text:'Exotel API contract only; no provider account, verified callback, audio stream or live calls are connected.'}),
+    providerLaunch,providerSummary);
   main.append(card);
   api('/v1/human/engineering/status').then(result=>{
     const states=result.gates.filter(g=>g.state!=='available');
