@@ -18,6 +18,16 @@ authorization, MFA enrollment, backups, browser E2E, live voice, compliance,
 signed vendor callbacks, durable metering and real paid subscriptions are NOT
 ready. See [Production Release Gates](docs/RELEASE-ACCEPTANCE.md).
 
+
+## Consolidated production hardening acceptance
+
+The same PR adds real Chromium responsive E2E on a localhost-only fake login/
+Super Admin fixture, plus SQL backup→restore integrity drills on synthetic
+Control + CRM databases and fail-closed synthetic provider replay detection.
+These are stronger engineering tests, not claims of live D1 disaster recovery,
+MFA enrollment, live telecom enablement or commercial readiness. See
+[Release Acceptance](docs/RELEASE-ACCEPTANCE.md).
+
 # AR3D AI Calling
 
 **Development foundation (Phases 1–5)** — independent multi-tenant CRM, personal admin dashboard, lead imports and deterministic text conversation simulator for AR3D clients. Product branding is **AR3D AI Calling**. **No real outbound calls or live generative AI voice conversations are implemented.**
