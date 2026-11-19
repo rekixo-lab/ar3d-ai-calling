@@ -1,9 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import worker from '../src/index.mjs';
-import {cookieFor,validEmail,validPassword,makePassword,checkPassword,mutationOriginAllowed,requireMembership,randomSecret} from '../src/human-auth.mjs';
+import {cookieFor,validEmail,validPassword,makePassword,checkPassword,passwordDigest,ITERATIONS,LEGACY_ITERATIONS,PBKDF2_ROUND_ITERATIONS,mutationOriginAllowed,requireMembership,randomSecret} from '../src/human-auth.mjs';
 import {js,html} from '../src/app-assets.mjs';
 import vm from 'node:vm';
+import {pbkdf2Sync} from 'node:crypto';
 
 test('human passwords use salted slow PBKDF2 and verify without plaintext storage',async()=>{
   const p=await makePassword('correct horse battery staple');
@@ -17,6 +18,26 @@ test('human passwords use salted slow PBKDF2 and verify without plaintext storag
   assert.equal(validEmail('  OWNER@EXAMPLE.COM '),'owner@example.com');
   assert.throws(()=>validEmail('not-an-email'));
 });
+test('v2 password KDF uses three independent workerd-compatible 100k rounds',async()=>{
+  assert.equal(ITERATIONS,300000);
+  assert.equal(PBKDF2_ROUND_ITERATIONS,100000);
+  const input='a strong 2026 test password!';
+  const saltHex='0123456789abcdef0123456789abcdef';
+  const salt=Buffer.from(saltHex,'hex');
+  let state=Buffer.from(input,'utf8');
+  const domain=Buffer.from('ar3d:human-password:v2:','utf8');
+  for(let round=1;round<=3;round++){
+    const roundSalt=Buffer.concat([salt,domain,Buffer.from([round])]);
+    state=pbkdf2Sync(state,roundSalt,100000,32,'sha256');
+  }
+  assert.equal(await passwordDigest(input,saltHex),state.toString('hex'));
+  assert.notEqual(await passwordDigest(input+' wrong',saltHex),state.toString('hex'));
+  const legacy=pbkdf2Sync(input,salt,LEGACY_ITERATIONS,32,'sha256').toString('hex');
+  assert.equal(await passwordDigest(input,saltHex,LEGACY_ITERATIONS),legacy);
+  await assert.rejects(passwordDigest(input,saltHex,200001),/unsupported/);
+  await assert.rejects(passwordDigest(input,'invalid'),/invalid/);
+});
+
 test('session cookie cannot be accessed by JS and browser mutations need same origin',()=>{
   assert.match(cookieFor(randomSecret()),/HttpOnly; Secure; SameSite=Strict/);
   assert.match(cookieFor('',0),/Max-Age=0/);

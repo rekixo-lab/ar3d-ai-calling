@@ -33,6 +33,40 @@ test('bootstrap handles terminal-pasted outer whitespace but never accepts a dif
   assert.equal(wrong.status,401);
   assert.equal(reads,1);
 });
+test('bootstrap makes a compatible V2 password hash and atomic singleton claim',async()=>{
+  const secret='S'.repeat(48),prepared=[];
+  let batches=0;
+  const db={
+    prepare(sql){
+      return {
+        async first(){
+          assert.match(sql,/SELECT COUNT/);
+          return {n:0};
+        },
+        bind(...args){prepared.push({sql,args});return {sql,args}}
+      };
+    },
+    async batch(items){
+      batches++;
+      assert.equal(items.length,2);
+      return [{success:true},{success:true}];
+    }
+  };
+  const req=new Request(site+'/v1/human/bootstrap',{
+    method:'POST',
+    headers:{Authorization:'Bearer '+secret,'Content-Type':'application/json'},
+    body:JSON.stringify({email:'admin@example.test',password:'CorrectHorseBattery123!'})
+  });
+  const res=await worker.fetch(req,{ADMIN_BOOTSTRAP_TOKEN:secret,CONTROL_DB:db});
+  assert.equal(res.status,201,JSON.stringify(await res.clone().json()));
+  assert.equal(batches,1);
+  const statement=prepared.find(x=>x.sql.includes('INSERT INTO human_users'));
+  assert.ok(statement);
+  assert.equal(statement.args[4],300000);
+  assert.match(statement.args[3],/^[a-f0-9]{64}$/);
+  assert.notEqual(statement.args[3],'CorrectHorseBattery123!');
+});
+
 test('one-time bootstrap streaming request rejects >16 KiB BEFORE D1 access',async()=>{
   let dbReads=0;
   const secret='B'.repeat(48);

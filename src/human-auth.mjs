@@ -1,7 +1,12 @@
 import {sha256hex} from './core.mjs';
 
 export const SESSION_MS=8*60*60*1000;
-export const ITERATIONS=240000;
+// Stored password_iterations=300000 is the V2 three-stage KDF identifier.
+ // Every native PBKDF2 invocation uses <=100,000 iterations (workerd's cap).
+ // This is NOT bitwise-equivalent to one standard 300k PBKDF2 invocation.
+export const ITERATIONS=300000;
+export const LEGACY_ITERATIONS=240000;
+export const PBKDF2_ROUND_ITERATIONS=100000;
 export const COOKIE='ar3d_calling_session';
 const encoder=new TextEncoder();
 export function validEmail(value){
@@ -17,11 +22,40 @@ export function randomSecret(){
   return Array.from(crypto.getRandomValues(new Uint8Array(32)),b=>b.toString(16).padStart(2,'0')).join('');
 }
 function hex(bytes){return Array.from(bytes,b=>b.toString(16).padStart(2,'0')).join('')}
+// Cloudflare workerd rejects a single native PBKDF2 call above 100,000.
+// V2 deliberately chains three domain-separated 100k PBKDF2-SHA256 rounds
+// over the original 128-bit random salt. password_iterations=300000 is a
+// version marker for this scheme, not standard PBKDF2(password, salt, 300000).
+// Existing 240000 legacy hashes retain their original meaning.
 export async function passwordDigest(password,saltHex,iterations=ITERATIONS){
-  const key=await crypto.subtle.importKey('raw',encoder.encode(password),'PBKDF2',false,['deriveBits']);
+  if(typeof password!=='string'||!/^[a-f0-9]{32}$/.test(saltHex))
+    throw Error('invalid password hash parameters');
   const salt=Uint8Array.from(saltHex.match(/.{2}/g).map(x=>parseInt(x,16)));
-  const bits=await crypto.subtle.deriveBits({name:'PBKDF2',hash:'SHA-256',salt,iterations},key,256);
-  return hex(new Uint8Array(bits));
+  if(iterations===LEGACY_ITERATIONS){
+    // Never create new legacy hashes. Node can verify pre-existing hashes;
+    // Cloudflare workerd may reject this legacy operation. Affected accounts
+    // require a separately reviewed credential-migration path.
+    const key=await crypto.subtle.importKey('raw',encoder.encode(password),'PBKDF2',false,['deriveBits']);
+    const bits=await crypto.subtle.deriveBits({
+      name:'PBKDF2',hash:'SHA-256',salt,iterations:LEGACY_ITERATIONS
+    },key,256);
+    return hex(new Uint8Array(bits));
+  }
+  if(iterations!==ITERATIONS)throw Error('unsupported password hash version');
+  const domain=encoder.encode('ar3d:human-password:v2:');
+  let material=encoder.encode(password);
+  for(let round=1;round<=3;round++){
+    const roundSalt=new Uint8Array(salt.length+domain.length+1);
+    roundSalt.set(salt);
+    roundSalt.set(domain,salt.length);
+    roundSalt[roundSalt.length-1]=round;
+    const key=await crypto.subtle.importKey('raw',material,'PBKDF2',false,['deriveBits']);
+    material=new Uint8Array(await crypto.subtle.deriveBits({
+      name:'PBKDF2',hash:'SHA-256',salt:roundSalt,
+      iterations:PBKDF2_ROUND_ITERATIONS
+    },key,256));
+  }
+  return hex(material);
 }
 export async function makePassword(password){
   validPassword(password);
@@ -31,7 +65,8 @@ export async function makePassword(password){
 export async function checkPassword(password,user){
   if(typeof password!=='string'||password.length>128||!user)return false;
   const expected=String(user.password_hash||'');
-  if(!/^[a-f0-9]{64}$/.test(expected)||!/^[a-f0-9]{32}$/.test(user.password_salt)||user.password_iterations<200000)return false;
+  if(!/^[a-f0-9]{64}$/.test(expected)||!/^[a-f0-9]{32}$/.test(user.password_salt)||
+     ![ITERATIONS,LEGACY_ITERATIONS].includes(Number(user.password_iterations)))return false;
   const hash=await passwordDigest(password,user.password_salt,user.password_iterations);
   let delta=0;for(let i=0;i<64;i++)delta|=hash.charCodeAt(i)^expected.charCodeAt(i);
   return delta===0;
