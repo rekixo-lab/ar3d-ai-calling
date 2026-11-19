@@ -104,6 +104,8 @@ test('Exotel adapter rejects endpoint injection, unexpected data, non-TLS media 
     {...good,from:'1234567890'},
     {...good,from:'+19876543210'},
     {...good,callerId:'abc'},
+    {...good,callerId:'++++++'},
+    {...good,callerId:'91++12345678'},
     {...good,streamUrl:'ws://bot.example.invalid/stream'},
     {...good,streamUrl:'wss://u:pass@bot.example.invalid/path'},
     {...good,streamUrl:'wss://bot.example.invalid:9999/path'},

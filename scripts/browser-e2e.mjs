@@ -18,6 +18,7 @@ import {runExotelMediaHarness} from '../src/exotel-media-harness.mjs';
 import {fixedPropertyQuestions,PROPERTY_TYPES,normalizePropertySurvey} from '../src/fixed-property-survey.mjs';
 import {exotelTrialReadiness,managedVoicebotInstructions} from '../src/exotel-trial-readiness.mjs';
 import {ownSipSetup} from '../src/own-sip-readiness.mjs';
+import {runExotelVoicebotOfflineFixture} from '../src/exotel-voicebot-webhook-contract.mjs';
 import {beginFixedVoicePreview,advanceFixedVoicePreview} from '../src/fixed-voice-turns.mjs';
 
 const SESSION='synthetic-browser-session-only';
@@ -87,6 +88,14 @@ const server=http.createServer(async(req,res)=>{
       const params=await readBounded(req);
       providerRuns++;
       return respond(res,200,runExotelMockPilot(params));
+    }
+    if(req.method==='POST'&&path==='/v1/human/engineering/voicebot-fixture'){
+      if(req.headers.origin!=='http://127.0.0.1:'+server.address().port)
+        return respond(res,403,{error:'origin required'});
+      const input=await readBounded(req);
+      if(Object.keys(input).length!==1||typeof input.scenario!=='string')
+        return respond(res,400,{error:'invalid fictional input'});
+      return respond(res,200,runExotelVoicebotOfflineFixture(input.scenario));
     }
     if(req.method==='POST'&&path==='/v1/human/engineering/media-protocol'){
       if(req.headers.origin!=='http://127.0.0.1:'+server.address().port)
@@ -194,6 +203,10 @@ try{
     await page.getByText(/Real billing: disabled \| Payment collected: no/).waitFor();
     await page.getByRole('button',{name:'Test Exotel Mock Provider (100 events)'}).click();
     await page.getByText('Provider mock events: 100 | Real calls: 0 | External requests: 0').waitFor();
+    await page.getByRole('button',{name:'Test Exotel Voicebot Transcript Webhooks (offline)'}).click();
+    await page.getByText('seven questions',{exact:true}).waitFor();
+    await page.getByText('opt out',{exact:true}).waitFor();
+    await page.getByText(/Session-end does NOT contain the full transcript/).waitFor();
     await page.getByRole('button',{name:'Test 100 PCM Audio Frames (offline)'}).click();
     await page.getByText('PCM frames: 100 received and 100 returned | Real calls: 0').waitFor();
     // Real DOM exercise of the shipped fixed questionnaire without real

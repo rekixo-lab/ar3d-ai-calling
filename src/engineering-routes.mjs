@@ -9,6 +9,7 @@ import {operationalReadiness} from './operational-readiness.mjs';
 import {probeExotelConnectivity} from './provider-connectivity.mjs';
 import {exotelTrialReadiness,managedVoicebotInstructions} from './exotel-trial-readiness.mjs';
 import {ownSipSetup} from './own-sip-readiness.mjs';
+import {runExotelVoicebotOfflineFixture} from './exotel-voicebot-webhook-contract.mjs';
 
 const headers={'Cache-Control':'no-store','X-Content-Type-Options':'nosniff',
   'Referrer-Policy':'no-referrer','X-Frame-Options':'DENY'};
@@ -75,6 +76,18 @@ export async function handleEngineeringRequest(req,user,env={}){
       return json(runExotelMediaHarness(input));
     }catch{
       return fail('invalid media protocol simulation; nothing executed',400);
+    }
+  }
+  if(path===BASE+'voicebot-fixture'){
+    if(req.method!=='POST')return fail('method not allowed',405);
+    try{
+      const input=await boundedJson(req);
+      if(!input||typeof input!=='object'||Array.isArray(input)||
+         Object.keys(input).some(k=>k!=='scenario'))
+        return fail('invalid fictional Voicebot scenario',400);
+      return json(runExotelVoicebotOfflineFixture(input.scenario));
+    }catch{
+      return fail('invalid fictional Voicebot event; no processing occurred',400);
     }
   }
   if(path===BASE+'own-sip-setup'){

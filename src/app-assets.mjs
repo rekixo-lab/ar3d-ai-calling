@@ -157,6 +157,28 @@ function engineeringPanel(main){
       node('p',{class:'muted',text:'Managed Voicebot may avoid building a separate WSS/STT gateway; its trial, export API, pricing and builder access must be confirmed.'}),
       promptButton,docs);
   }).catch(asError);
+  const webhookResults=div('stack');
+  const webhookCheck=btn('Test Exotel Voicebot Transcript Webhooks (offline)',async()=>{
+    webhookCheck.disabled=true;
+    webhookResults.replaceChildren(node('p',{class:'muted',text:'Checking the official Exotel transcript-event format with fictional data only...'}));
+    try{
+      const checks=[];
+      for(const name of ['seven_questions','out_of_order','retry_duplicate','opt_out']){
+        const result=await api('/v1/human/engineering/voicebot-fixture','POST',{scenario:name});
+        checks.push([name.replaceAll('_',' '),result.completedTurns,
+          result.duplicateEventsIgnored,result.optOutReviewNeeded?'Review':'No']);
+        if(result.crmWrites!==0||result.phoneCallsStarted!==0||result.providerWebhookAuthenticated)
+          throw Error('Unexpected real provider activity');
+      }
+      webhookResults.replaceChildren(
+        table(['Offline case','Turns','Replays ignored','Opt-out flag'],checks),
+        node('p',{class:'note',text:'Only fictional events were tested. Session-end does NOT contain the full transcript. Real webhook authentication, call/lead matching and automatic CRM save remain disabled.'})
+      );
+    }catch(err){asError(err)}finally{webhookCheck.disabled=false}
+  },true);
+  card.append(title('Managed Exotel Voicebot — Transcript Webhook Checks','h3'),
+    node('p',{class:'note',text:'Seven fixed-question transcripts: validates Exotel vendor-format turn events, reordered delivery, retries and opt-out flags offline. No real calls, customer data or CRM edits.'}),
+    webhookCheck,webhookResults);
   const mediaOutput=div('stack');
   const mediaTest=btn('Test 100 PCM Audio Frames (offline)',async()=>{
     mediaTest.disabled=true;
