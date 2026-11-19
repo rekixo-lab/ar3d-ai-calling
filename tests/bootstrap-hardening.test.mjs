@@ -13,6 +13,26 @@ test('only simulator page can request browser microphone permission',async()=>{
   assert.match(simulator.headers.get('content-security-policy')||'',/script-src 'self'/);
   assert.match(simulator.headers.get('content-security-policy')||'',/frame-ancestors 'none'/);
 });
+test('bootstrap handles terminal-pasted outer whitespace but never accepts a different token',async()=>{
+  let reads=0;
+  const env={ADMIN_BOOTSTRAP_TOKEN:'\n  '+'K'.repeat(44)+' \n',
+    CONTROL_DB:{prepare(){reads++;return {first:async()=>({n:1})}}}};
+  const base={
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({email:'demo@example.test',password:'unused-validpass-123'})
+  };
+  const good=await worker.fetch(new Request(site+'/v1/human/bootstrap',{
+    ...base,headers:{...base.headers,Authorization:'Bearer '+'K'.repeat(44)}
+  }),env);
+  assert.equal(good.status,409);
+  assert.equal(reads,1);
+  const wrong=await worker.fetch(new Request(site+'/v1/human/bootstrap',{
+    ...base,headers:{...base.headers,Authorization:'Bearer '+'J'.repeat(44)}
+  }),env);
+  assert.equal(wrong.status,401);
+  assert.equal(reads,1);
+});
 test('one-time bootstrap streaming request rejects >16 KiB BEFORE D1 access',async()=>{
   let dbReads=0;
   const secret='B'.repeat(48);

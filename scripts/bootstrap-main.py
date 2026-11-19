@@ -76,7 +76,14 @@ def main(argv=None) -> int:
     try:
         host = validate_host(argv[0])
         email = input("Super Admin email: ")
-        token = getpass.getpass("One-time Worker bootstrap token (hidden): ")
+        raw_token = getpass.getpass("One-time Worker bootstrap token (hidden): ")
+        token = raw_token.strip()
+        if token != raw_token:
+            print("Note: surrounding whitespace was trimmed from the pasted token.")
+        if len(token) < 32:
+            print("Token is too short. Copy the actual ADMIN_BOOTSTRAP_TOKEN, not its name.")
+            return 2
+        print("Bootstrap token input received (" + str(len(token)) + " characters; value hidden).")
         password = getpass.getpass("New Super Admin password (hidden): ")
         again = getpass.getpass("Confirm password (hidden): ")
         if password != again:
