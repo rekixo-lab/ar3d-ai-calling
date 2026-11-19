@@ -69,3 +69,8 @@ CRM v8 optional Excel columns: Customer Type, Plot Size, Visit Date Preference (
 Valid customer types: prior inquiry, unknown contact or unclassified. Missing defaults to unclassified.
 Customer type alone NEVER grants calling consent or permission. CRM v8 must be backed up
 and applied incrementally on existing Calling D1; new empty D1 initialize includes it.
+
+
+## 19 Nov update: automatic setup enabled on main merge
+
+After four production GitHub secrets are available and preflight confirms BOTH independent databases fresh, the main branch's Cloudflare deployment workflow is designed to run automatically upon each `main` push. It runs the full tests, fresh-only migrations (on first setup), verifies ready and safety triggers, deploys the isolated Worker, and attempts read-only HTTPS smoke. User no longer needs to click `initialize`/`deploy` for normal code changes; the manual workflow remains as a fallback for controlled incident recovery. Any partial or mixed schema stops. Future external/provider setup, login/MFA secrets, initial Super Admin account creation and regulated telecom approval still require trusted operator action.

@@ -1,6 +1,8 @@
-name: AR3D AI Calling - main Cloudflare setup (manual)
+name: AR3D AI Calling - guarded main auto deployment
 
 on:
+  push:
+    branches: [main]
   workflow_dispatch:
     inputs:
       confirm:
@@ -26,7 +28,7 @@ concurrency:
 
 jobs:
   main:
-    if: github.ref == 'refs/heads/main' && inputs.confirm == 'AR3D_MAIN_ONLY'
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || inputs.confirm == 'AR3D_MAIN_ONLY')
     runs-on: ubuntu-latest
     environment: production
     timeout-minutes: 30
@@ -45,20 +47,33 @@ jobs:
           python-version: '3.13'
       - name: Run full automated tests
         run: npm test
-      - name: Verify main resource identity and schema state; generate non-committed Worker configuration
+      # Green Node/Python CI must finish BEFORE any remote write. This step
+      # verifies both D1 identities + private R2 bucket and writes a non-committed
+      # Wrangler config. Main pushes choose auto; manual operations remain for recovery.
+      - name: Plan isolated main operation; verify both D1 and R2 identities
+        id: schema
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          MANUAL_OPERATION: ${{ inputs.operation }}
+        shell: bash
         run: |
-          if [ '${{ inputs.operation }}' = initialize ]; then
+          set -euo pipefail
+          if [ "$EVENT_NAME" = push ] || [ "$MANUAL_OPERATION" = preflight ]; then
+            node scripts/main-cloudflare.mjs preflight
+          elif [ "$MANUAL_OPERATION" = initialize ]; then
             node scripts/main-cloudflare.mjs fresh
-          elif [ '${{ inputs.operation }}' = deploy ]; then
+          elif [ "$MANUAL_OPERATION" = deploy ]; then
             node scripts/main-cloudflare.mjs ready
           else
-            node scripts/main-cloudflare.mjs preflight
+            echo "::error::Unsupported operation"; exit 1
           fi
-      # Runs ONLY after an explicit manual initialize selection and strict
-      # empty-schema checks. The workflow never initializes the AR3D Platform
-      # or Engine databases, and it cannot repeat on an initialized database.
+      # Never auto-migrate partial or mixed schemas. Re-check the EMPTY state
+      # immediately before writing, even if the previous read said fresh.
+      - name: Confirm both isolated D1 schemas are still empty
+        if: (github.event_name == 'push' && steps.schema.outputs.schema_state == 'fresh') || (github.event_name == 'workflow_dispatch' && inputs.operation == 'initialize')
+        run: node scripts/main-cloudflare.mjs fresh
       - name: Initialize NEW AR3D Calling Control D1 database
-        if: inputs.operation == 'initialize'
+        if: (github.event_name == 'push' && steps.schema.outputs.schema_state == 'fresh') || (github.event_name == 'workflow_dispatch' && inputs.operation == 'initialize')
         run: |
           npx --yes wrangler@4 d1 execute ar3d-calling-control --remote --yes --config wrangler.jsonc --file migrations/control/0001_init.sql
           npx --yes wrangler@4 d1 execute ar3d-calling-control --remote --yes --config wrangler.jsonc --file migrations/control/0002_human_access.sql
@@ -68,7 +83,7 @@ jobs:
           npx --yes wrangler@4 d1 execute ar3d-calling-control --remote --yes --config wrangler.jsonc --file migrations/control/0006_tenant_lifecycle.sql
           npx --yes wrangler@4 d1 execute ar3d-calling-control --remote --yes --config wrangler.jsonc --file migrations/control/0007_provider_inbox.sql
       - name: Initialize NEW AR3D Calling Shared CRM D1 database
-        if: inputs.operation == 'initialize'
+        if: (github.event_name == 'push' && steps.schema.outputs.schema_state == 'fresh') || (github.event_name == 'workflow_dispatch' && inputs.operation == 'initialize')
         run: |
           npx --yes wrangler@4 d1 execute ar3d-calling-shared-crm --remote --yes --config wrangler.jsonc --file migrations/crm/0001_init.sql
           npx --yes wrangler@4 d1 execute ar3d-calling-shared-crm --remote --yes --config wrangler.jsonc --file migrations/crm/0002_lead_workflow.sql
@@ -79,8 +94,37 @@ jobs:
           npx --yes wrangler@4 d1 execute ar3d-calling-shared-crm --remote --yes --config wrangler.jsonc --file migrations/crm/0007_agent_safety.sql
           npx --yes wrangler@4 d1 execute ar3d-calling-shared-crm --remote --yes --config wrangler.jsonc --file migrations/crm/0008_customer_qualification.sql
       - name: Verify post-initialization schema before proceeding
-        if: inputs.operation == 'initialize'
+        if: (github.event_name == 'push' && steps.schema.outputs.schema_state == 'fresh') || (github.event_name == 'workflow_dispatch' && inputs.operation == 'initialize')
+        run: node scripts/main-cloudflare.mjs ready
+      # On every main push, fresh schemas are created once or an already
+      # ready schema is reused. Final checked state MUST be ready before deploy.
+      - name: Recheck complete safety triggers, columns and identities before deploy
+        if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.operation == 'deploy')
         run: node scripts/main-cloudflare.mjs ready
       - name: Deploy only the new AR3D AI Calling Worker
-        if: inputs.operation == 'deploy'
-        run: npx --yes wrangler@4 deploy --config wrangler.jsonc
+        id: publish
+        if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.operation == 'deploy')
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx --yes wrangler@4 deploy --config wrangler.jsonc 2>&1 | tee /tmp/ar3d-calling-wrangler-deploy.log
+          # Wrangler's published workers.dev URL is non-secret; never construct
+          # a URL from Cloudflare credentials or accept unrelated Worker names.
+          URL="$(grep -Eo 'https://ar3d-ai-calling\.[a-z0-9-]+\.workers\.dev/?' /tmp/ar3d-calling-wrangler-deploy.log | head -n 1 || true)"
+          if [ -z "$URL" ]; then
+            echo "::warning::No verified Worker URL found in Wrangler output; run read-only smoke manually."
+          else
+            echo "worker_url=$URL" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Read-only smoke test on deployed isolated Worker
+        if: steps.publish.outputs.worker_url != ''
+        shell: bash
+        env:
+          WORKER_URL: ${{ steps.publish.outputs.worker_url }}
+        run: |
+          set -euo pipefail
+          for attempt in 1 2 3 4 5; do
+            if node scripts/smoke-main.mjs "$WORKER_URL"; then exit 0; fi
+            sleep 5
+          done
+          echo "::error::Read-only isolated Worker smoke failed"; exit 1

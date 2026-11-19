@@ -220,3 +220,8 @@ The synthetic simulator now offers explicit user-click **Speak agent demo text**
 ## CRM v8: Boss Excel customer types and plot preferences
 
 CSV/XLSX imports optionally accept Customer Type, Plot Size and Visit Date Preference (YYYY-MM-DD). Prior enquiry and unknown contact are informational categories; all other records default to unclassified. Client Admin can edit/search these fields; export also includes them. Date preference does NOT schedule or confirm a site visit. Calling, DND and recording permissions remain unverified. Back up existing isolated Calling CRM D1 before incremental v8 migration; new empty initialization includes it.
+
+
+## Unattended main deployment (isolated Cloudflare Worker)
+
+Pushing verified code to `main` now triggers the guarded `deploy-production.yml`: complete automated tests first, check exact D1/R2 identity, initialize **only if both D1s are fresh**, refuse any mixed/partial states, check post-migration columns/6 safety triggers, deploy the standalone Calling Worker and run a read-only health/auth smoke if Wrangler exposes its URL. GitHub `production` must restrict branch to `main`. Runtime security secrets and telecom onboarding remain separately required. Manual workflow operations still exist for recovery; other AR3D production resources are not targeted.

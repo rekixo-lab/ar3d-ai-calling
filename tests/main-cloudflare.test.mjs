@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  REQUIRED_TABLES, REQUIRED_SAFETY_TRIGGERS, getCredentials, makeMainConfig, checkTables, checkColumns, checkSafetyTriggers, inspectCloudflare,
+  REQUIRED_TABLES, REQUIRED_SAFETY_TRIGGERS, getCredentials, makeMainConfig, checkTables, checkColumns, checkSafetyTriggers, inspectCloudflare, verifiedSchemaState,
 } from '../scripts/main-cloudflare.mjs';
 
 const env = {
@@ -133,4 +133,13 @@ test('ready deployment blocks missing tenant suspension state tracking', () => {
 
 test('preflight refuses incomplete provider event inbox schema',()=>{
   assert.throws(()=>checkColumns(['tenant_id','provider'],'CONTROL_DB','provider_event_inbox'),/missing columns/);
+});
+
+
+test('unattended operations allow only both new-empty or both verified-ready schemas',()=>{
+  assert.equal(verifiedSchemaState({CONTROL_DB:'fresh',CRM_DB:'fresh'}),'fresh');
+  assert.equal(verifiedSchemaState({CONTROL_DB:'ready',CRM_DB:'ready'}),'ready');
+  assert.throws(()=>verifiedSchemaState({CONTROL_DB:'fresh',CRM_DB:'ready'}),/mixed or invalid/);
+  assert.throws(()=>verifiedSchemaState({CONTROL_DB:'ready',CRM_DB:'partial'}),/mixed or invalid/);
+  assert.throws(()=>verifiedSchemaState({CONTROL_DB:'unsafe',CRM_DB:'unsafe'}),/mixed or invalid/);
 });
