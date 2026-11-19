@@ -71,8 +71,8 @@ export async function handleCampaignRequest(req,env,user){
       return json({candidates:rows.results,total:Number(count?.total||0),limit,offset});
     }
     if(method==='GET'&&match[2]==='readiness'){
-      const stats=await db.prepare("SELECT COUNT(*) AS total,COALESCE(SUM(CASE WHEN l.consent_status='denied' OR l.dnd_status='blocked' THEN 1 ELSE 0 END),0) AS blocked FROM call_campaign_candidates cc JOIN leads l ON l.tenant_id=cc.tenant_id AND l.id=cc.lead_id WHERE cc.tenant_id=? AND cc.campaign_id=?").bind(tid,campaignId).first();
-      return json({executionAllowed:false,campaignId,stats:{total:Number(stats?.total||0),blocked:Number(stats?.blocked||0)},
+      const stats=await db.prepare("SELECT COUNT(*) AS total,COALESCE(SUM(CASE WHEN l.consent_status='denied' OR l.dnd_status='blocked' THEN 1 ELSE 0 END),0) AS blocked,COALESCE(SUM(CASE WHEN l.consent_status!='granted' OR l.dnd_status!='allowed' THEN 1 ELSE 0 END),0) AS unverified FROM call_campaign_candidates cc JOIN leads l ON l.tenant_id=cc.tenant_id AND l.id=cc.lead_id WHERE cc.tenant_id=? AND cc.campaign_id=?").bind(tid,campaignId).first();
+      return json({executionAllowed:false,campaignId,stats:{total:Number(stats?.total||0),blocked:Number(stats?.blocked||0),unverified:Number(stats?.unverified||0)},
         reasons:['Telecom provider and caller number not approved','Independent consent and DND checks unavailable','Lawful call windows and opt-out sync not implemented']});
     }
     if(method==='POST'&&match[2]==='candidates'){

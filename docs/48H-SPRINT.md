@@ -53,3 +53,19 @@ Full paid multi-tenant commercial production remains a separate sign-off.
 Send ONLY: GitHub preflight run link and fresh/ready/error; isolated Worker public URL after deploy; telecom provider NAME plus KYC/approved number status; speech/LLM provider NAMES and account status; payment gateway choice and whether it must be live for the 48-hour MVP. Never paste API token/password/TOTP seed/database ID.
 
 Current code has CRM, synthetic browser speech, disabled encrypted R2 adapter and quarantined synthetic event inbox. Real calls, certified DND checks, vendor webhooks, full billable subscriptions, complete customer-data erasure and production voice AI are NOT done.
+
+## Boss-confirmed requirements (Nov 19 WhatsApp)
+
+- Source: Excel. Previous enquiry and unknown/new contact customers are both supported.
+- AI should initiate outbound calls once telecom onboarding, consent and DND clearance are proven.
+- Language: Hindi and English options. Desired data: name, budget, location, plot size and visit preference.
+- Interested customer: request/confirm a site visit. A preferred date is not a confirmed appointment.
+- Call recordings requested; real recordings disabled pending approval, notice, retention and provider setup.
+- Daily call quantity is dependent on company data; pilot with minimum viable paid provider costs.
+- Telecom service, DLT registration and approved number: not yet available according to Boss.
+- Unanswered: fixed questions only, or autonomous answers to customer questions? Boss replied about language instead.
+
+CRM v8 optional Excel columns: Customer Type, Plot Size, Visit Date Preference (YYYY-MM-DD).
+Valid customer types: prior inquiry, unknown contact or unclassified. Missing defaults to unclassified.
+Customer type alone NEVER grants calling consent or permission. CRM v8 must be backed up
+and applied incrementally on existing Calling D1; new empty D1 initialize includes it.

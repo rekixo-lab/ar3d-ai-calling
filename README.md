@@ -215,3 +215,8 @@ The synthetic simulator now offers explicit user-click **Speak agent demo text**
 - `src/provider-inbox.mjs` accepts **only project-signed synthetic** normalized events into a new Control D1 `provider_event_inbox` table, with tenant-keyed event ID uniqueness and immutable `quarantined` status. It stores only event type, digest, timestamps—not phone numbers, transcripts or payloads. It does not process real provider webhooks, update CRM, grant consent or meter calls.
 - Control D1 migration `0007_provider_inbox.sql` joins the **new empty** main initialization workflow; already initialized Control D1 requires a backed-up, reviewed incremental migration. No existing AR3D resources are accessed or changed.
 - **Still required:** real telecom provider contract/signed adapter, consent and recording law review, secured download authorization, actual R2 lifecycle deletion/retention, billing reconciliation and verified call creation. These are not ready for production data.
+
+
+## CRM v8: Boss Excel customer types and plot preferences
+
+CSV/XLSX imports optionally accept Customer Type, Plot Size and Visit Date Preference (YYYY-MM-DD). Prior enquiry and unknown contact are informational categories; all other records default to unclassified. Client Admin can edit/search these fields; export also includes them. Date preference does NOT schedule or confirm a site visit. Calling, DND and recording permissions remain unverified. Back up existing isolated Calling CRM D1 before incremental v8 migration; new empty initialization includes it.

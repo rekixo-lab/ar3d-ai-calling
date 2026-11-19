@@ -11,6 +11,7 @@ const fail=(msg,status=400)=>json({error:msg},status);
 const now=()=>new Date().toISOString();
 const idOk=s=>typeof s==='string'&&/^[0-9a-f-]{36}$/i.test(s);
 const statuses=['new','contacted','interested','followup','not_interested','converted'];
+const segments=['unclassified','prior_inquiry','unknown_contact'];
 async function payload(req,max=16384){
   // Bound HTTP body *before* JSON parsing, including chunked uploads.
   if(Number(req.headers.get('content-length'))>max)return Promise.reject(Error('request body too large'));
@@ -28,10 +29,25 @@ async function payload(req,max=16384){
   return parseJsonBody(text,max);
 }
 function dateTime(value,label='Date'){
-  if(value===null||value==='')return null;
+  if(value===null||value===undefined||value==='')return null;
   if(typeof value!=='string'||!/^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}(?::[0-9]{2}(?:\.\d{1,3})?)?(?:Z|[+-][0-9]{2}:[0-9]{2})$/.test(value)||!Number.isFinite(Date.parse(value)))
     throw Error('invalid '+label+' (ISO datetime with timezone required)');
   return new Date(value).toISOString();
+}
+function optionalPlotSize(value){
+  if(value===null||value==='')return null;
+  if(typeof value!=='string'||value.trim().length>120||/[\u0000-\u001f]/u.test(value))
+    throw Error('invalid plot size preference');
+  return value.trim()||null;
+}
+function preferredVisitDate(value){
+  if(value===null||value===undefined||value==='')return null;
+  if(typeof value!=='string'||!/^\d{4}-\d{2}-\d{2}$/.test(value))
+    throw Error('invalid visit date preference');
+  const d=new Date(value+'T00:00:00Z');
+  if(!Number.isFinite(d.getTime())||d.toISOString().slice(0,10)!==value)
+    throw Error('invalid visit date preference');
+  return value;
 }
 function budget(v){if(v===null||v==='')return null;if(!Number.isSafeInteger(v)||v<0||v>1000000000000)throw Error('invalid budget');return v}
 function text(v,label,max=2000){if(typeof v!=='string'||v.trim().length<1||v.trim().length>max)throw Error('invalid '+label);return v.trim()}
@@ -73,11 +89,13 @@ export async function handleCrmRequest(req,env,user){
       }
       const stamp=now(),statements=rows.map(row=>db.prepare(`INSERT INTO leads
         (tenant_id,id,name,mobile_e164,source_type,consent_status,dnd_status,
-         preferred_location,budget_min_inr,budget_max_inr,requirements_json,created_at,updated_at)
-        VALUES(?,?,?,?,'excel','unknown','unknown',?,?,?,?,?,?)
+         preferred_location,budget_min_inr,budget_max_inr,requirements_json,created_at,updated_at,
+         customer_segment,plot_size_preference,visit_date_preference)
+        VALUES(?,?,?,?,'excel','unknown','unknown',?,?,?,?,?,?,?,?,?)
         ON CONFLICT(tenant_id,mobile_e164) DO NOTHING`).bind(
           tid,crypto.randomUUID(),row.name,row.mobile,row.location,row.budgetMinInr,
-          row.budgetMaxInr,JSON.stringify(row.requirement?{raw:row.requirement}:{}),stamp,stamp));
+          row.budgetMaxInr,JSON.stringify(row.requirement?{raw:row.requirement}:{}),stamp,stamp,
+          row.customerSegment,row.plotSizePreference,row.visitDatePreference));
       // D1.batch is transactional: either the entire file succeeds or none is committed.
       statements.push(db.prepare(`INSERT INTO crm_audit_events(tenant_id,id,actor,action,target_id,created_at)
         VALUES(?,?,'human:'||?,?,?)`).bind(tid,crypto.randomUUID(),user.id,isXlsx?'leads.xlsx_import':'leads.csv_import',String(rows.length),stamp));
@@ -89,7 +107,9 @@ export async function handleCrmRequest(req,env,user){
     if(path==='/v1/human/leads'&&method==='GET'){
       const access=await resolve(env,user,u.searchParams.get('tenantId'));
       if(!access)return fail('forbidden',403);
-      const status=u.searchParams.get('status')||'',search=(u.searchParams.get('q')||'').trim();
+      const status=u.searchParams.get('status')||'',segment=u.searchParams.get('segment')||'',
+        search=(u.searchParams.get('q')||'').trim();
+      if(segment&&!segments.includes(segment))return fail('invalid customer segment');
       if(status&&!statuses.includes(status))return fail('invalid status');
       if(search.length>80)return fail('search too long');
       const limit=Math.min(100,Math.max(1,Number(u.searchParams.get('limit')||50)||50));
@@ -97,13 +117,16 @@ export async function handleCrmRequest(req,env,user){
       if(!Number.isSafeInteger(offset)||offset<0||offset>100000)return fail('invalid offset');
       const where=[access.tid];let sql=' WHERE tenant_id=?';
       if(status){sql+=' AND interest_status=?';where.push(status)}
+      if(segment){sql+=' AND customer_segment=?';where.push(segment)}
       if(search){sql+=" AND (name LIKE ? OR mobile_e164 LIKE ? OR preferred_location LIKE ?)";
         const pattern='%'+search.replace(/[\\%_]/g,'\\$&')+'%';sql=sql.replaceAll(' LIKE ?',' LIKE ? ESCAPE \'\\\'');where.push(pattern,pattern,pattern)}
       const [list,count]=await Promise.all([
         access.db.prepare(`SELECT id,name,mobile_e164 AS mobile,source_type AS sourceType,
           preferred_location AS preferredLocation,budget_min_inr AS budgetMinInr,
           budget_max_inr AS budgetMaxInr,interest_status AS interestStatus,followup_at AS followupAt,
-          consent_status AS consentStatus,dnd_status AS dndStatus,updated_at AS updatedAt
+          consent_status AS consentStatus,dnd_status AS dndStatus,updated_at AS updatedAt,
+          customer_segment AS customerSegment,plot_size_preference AS plotSizePreference,
+          visit_date_preference AS visitDatePreference
           FROM leads ${sql} ORDER BY created_at DESC,id DESC LIMIT ? OFFSET ?`)
           .bind(...where,limit,offset).all(),
         access.db.prepare('SELECT COUNT(*) AS total FROM leads '+sql).bind(...where).first()
@@ -163,11 +186,14 @@ export async function handleCrmRequest(req,env,user){
     if(leadMatch&&method==='PATCH'){
       const d=await payload(req),access=await resolve(env,user,d.tenantId,true);
       if(!access)return fail('forbidden',403);
-      const keys=['interestStatus','preferredLocation','budgetMinInr','budgetMaxInr','followupAt'];
+      const keys=['interestStatus','preferredLocation','budgetMinInr','budgetMaxInr','followupAt',
+        'customerSegment','plotSizePreference','visitDatePreference'];
       if(!keys.some(k=>Object.hasOwn(d,k)))return fail('no updates supplied');
       if(Object.keys(d).some(k=>!['tenantId',...keys].includes(k)))return fail('invalid update field');
       const old=await access.db.prepare(`SELECT interest_status AS interestStatus,preferred_location AS preferredLocation,
-        budget_min_inr AS budgetMinInr,budget_max_inr AS budgetMaxInr,followup_at AS followupAt
+        budget_min_inr AS budgetMinInr,budget_max_inr AS budgetMaxInr,followup_at AS followupAt,
+        customer_segment AS customerSegment,plot_size_preference AS plotSizePreference,
+        visit_date_preference AS visitDatePreference
         FROM leads WHERE tenant_id=? AND id=?`).bind(access.tid,leadMatch[1]).first();
       if(!old)return fail('lead not found',404);
       const status=Object.hasOwn(d,'interestStatus')?d.interestStatus:old.interestStatus;
@@ -178,10 +204,15 @@ export async function handleCrmRequest(req,env,user){
       const max=budget(Object.hasOwn(d,'budgetMaxInr')?d.budgetMaxInr:old.budgetMaxInr);
       if(min!==null&&max!==null&&min>max)return fail('invalid budget range');
       const followup=dateTime(Object.hasOwn(d,'followupAt')?d.followupAt:old.followupAt,'followupAt');
+      const segment=Object.hasOwn(d,'customerSegment')?d.customerSegment:(old.customerSegment||'unclassified');
+      if(!segments.includes(segment))return fail('invalid customer segment');
+      const plotSize=optionalPlotSize(Object.hasOwn(d,'plotSizePreference')?d.plotSizePreference:old.plotSizePreference);
+      const visitPreference=preferredVisitDate(Object.hasOwn(d,'visitDatePreference')?d.visitDatePreference:old.visitDatePreference);
       const timestamp=now();
       await access.db.batch([
         access.db.prepare(`UPDATE leads SET interest_status=?,preferred_location=?,budget_min_inr=?,
-          budget_max_inr=?,followup_at=?,updated_at=? WHERE tenant_id=? AND id=?`).bind(status,location?.trim()||null,min,max,followup,timestamp,access.tid,leadMatch[1]),
+          budget_max_inr=?,followup_at=?,customer_segment=?,plot_size_preference=?,
+          visit_date_preference=?,updated_at=? WHERE tenant_id=? AND id=?`).bind(status,location?.trim()||null,min,max,followup,segment,plotSize,visitPreference,timestamp,access.tid,leadMatch[1]),
         access.db.prepare(`INSERT INTO crm_audit_events(tenant_id,id,actor,action,target_id,created_at)
           VALUES(?,?,'human:'||?,'lead.updated',?,?)`).bind(access.tid,crypto.randomUUID(),user.id,leadMatch[1],timestamp)
       ]);
