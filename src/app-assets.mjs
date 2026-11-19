@@ -794,6 +794,91 @@ function fixedSurveyPanel(tenantId,lead,onSave){
       speechArea.append(div('formrow',lab('Listen to',promptPick),speak),
         div('formrow',lab('Fill from microphone',micField),dictate));
       form.append(speechArea);
+      const voiceDemo=div('card',title('Question-by-question Voice Preview (no calls)','h3'),
+        node('p',{class:'note',text:'7 fixed turns only. Browser voice is optional and may use a browser speech service. All answers require review. No customer dial, recording or automatic consent.'}));
+      const questionText=node('p',{class:'banner',text:'Start to hear the first fixed question.'});
+      const voiceHint=node('p',{class:'muted',text:'Review each answer. Unsupported or low-confidence speech will repeat the question.'});
+      const voiceAnswer=input('demoVoiceAnswer','text','Type or dictate the answer');
+      voiceAnswer.required=false;voiceAnswer.maxLength=220;
+      const voiceStart=btn('Start 7-question voice preview',async()=>{
+        try{
+          const out=await api('/v1/human/voice-preview','POST',
+            {action:'start',language:language.value});
+          displayTurn(out);
+        }catch(err){asError(err)}
+      },true);
+      const playVoice=btn('Speak current question',()=>{
+        if(!demoState||demoState.status!=='active'||!('speechSynthesis' in window)||
+           !('SpeechSynthesisUtterance' in window))
+          return notice('Browser question audio is unavailable',true);
+        window.speechSynthesis.cancel();
+        const utterance=new SpeechSynthesisUtterance(questionText.textContent);
+        utterance.lang=language.value==='en'?'en-IN':'hi-IN';
+        window.speechSynthesis.speak(utterance);
+      },true);
+      const voiceDictate=btn('Answer with browser microphone',()=>{
+        if(!demoState||demoState.status!=='active')
+          return notice('Start the preview first',true);
+        const R=window.SpeechRecognition||window.webkitSpeechRecognition;
+        if(!R)return notice('Browser speech recognition unavailable. Type your answer.',true);
+        const rec=new R();rec.lang=language.value==='en'?'en-IN':'hi-IN';
+        rec.interimResults=false;rec.maxAlternatives=1;
+        voiceDictate.disabled=true;
+        rec.onend=()=>{voiceDictate.disabled=false};
+        rec.onerror=()=>{voiceDictate.disabled=false;
+          notice('Microphone recognition failed. Type the answer instead.',true)};
+        rec.onresult=e=>{
+          const heard=String(e.results?.[0]?.[0]?.transcript||'').trim();
+          voiceAnswer.value=heard.slice(0,220);
+          voiceHint.textContent='Recognized text is unverified. Check spelling and meaning before Next.';
+        };
+        rec.start();
+      },true);
+      const nextVoice=btn('Next fixed question',async()=>{
+        if(!demoState||demoState.status!=='active')return;
+        nextVoice.disabled=true;
+        try{
+          const out=await api('/v1/human/voice-preview','POST',{
+            action:'turn',state:demoState,transcript:voiceAnswer.value,confidence:1
+          });
+          displayTurn(out);
+        }catch(err){asError(err)}
+        finally{nextVoice.disabled=demoState?.status!=='active'}
+      });
+      let demoState=null;
+      function displayTurn(result){
+        demoState=result.state;
+        const current=result.state;
+        if(current.status==='active'){
+          const field=result.currentField;
+          questionText.textContent='Question '+(current.index+1)+' of 7 — '+result.prompt;
+          voiceAnswer.value='';
+          voiceHint.textContent=result.warning||'Answer this question, then click Next.';
+          nextVoice.disabled=false;
+        }else if(current.status==='completed'){
+          const a=current.answers;
+          propertyType.value=a.propertyType;buildSize();
+          city.value=a.location||'';area.value=a.area||'';
+          sizeInput.value=a.size||'';
+          budget.value=a.budgetInr===null||a.budgetInr===undefined?'':String(a.budgetInr);
+          interest.value=a.interest;visitDate.value=a.visitDate||'';
+          visitTime.value='';refreshQuestions();
+          questionText.textContent='Seven questions completed — answers filled into the CRM form for your review.';
+          voiceHint.textContent='Inspect every field and click Save Reviewed Answers to CRM separately. No live call or booking was made.';
+          nextVoice.disabled=true;
+        }else{
+          questionText.textContent=current.status==='opted_out'?
+            'Customer said stop calling — stop this preview. Verify and use the Do Not Call action in CRM.':
+            'Three unclear attempts — staff review required. No CRM changes made.';
+          voiceHint.textContent=result.warning||'Restart the preview when ready.';
+          nextVoice.disabled=true;
+        }
+      }
+      nextVoice.disabled=true;
+      voiceDemo.append(questionText,voiceHint,
+        div('formrow',voiceStart,playVoice),
+        div('formrow',lab('Customer answer for preview',voiceAnswer),voiceDictate,nextVoice));
+      form.append(voiceDemo);
 
       const save=node('button',{class:'btn',type:'submit',text:'Save Reviewed Answers to CRM'});
       form.append(save);
