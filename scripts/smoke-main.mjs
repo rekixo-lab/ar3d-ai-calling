@@ -28,6 +28,7 @@ export async function smoke(base,fetchFn=fetch){
       const js=await r.text();return js.includes('Test AI Conversation')&&js.includes('Sign out');
     }],
     ['/v1/human/me',401,'application/json',async r=>(await r.json()).error==='sign in required'],
+    ['/v1/human/engineering/status',401,'application/json',async r=>(await r.json()).error==='sign in required'],
   ];
   let ok=true;
   for(const [path,status,contentType,check] of checks){
