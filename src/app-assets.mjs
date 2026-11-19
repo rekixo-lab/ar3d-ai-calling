@@ -850,7 +850,6 @@ function fixedSurveyPanel(tenantId,lead,onSave){
         demoState=result.state;
         const current=result.state;
         if(current.status==='active'){
-          const field=result.currentField;
           questionText.textContent='Question '+(current.index+1)+' of 7 — '+result.prompt;
           voiceAnswer.value='';
           voiceHint.textContent=result.warning||'Answer this question, then click Next.';
@@ -894,7 +893,7 @@ function fixedSurveyPanel(tenantId,lead,onSave){
           const desired=interest.value==='interested'?visitDate.value||null:null;
           if(visitTime.value&&!desired)throw Error('Choose a visit date before an exact time');
           const at=desired&&visitTime.value?
-            new Date(desired+'T'+visitTime.value).toISOString():null;
+            new Date(desired+'T'+visitTime.value+':00+05:30').toISOString():null;
           const payload={
             tenantId,expectedUpdatedAt:record.updatedAt,
             propertyType:propertyType.value,location:city.value,
