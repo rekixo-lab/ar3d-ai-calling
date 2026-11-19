@@ -118,3 +118,19 @@ authorize dialing from these mock inputs. Real provider approval, callback
 source verification, live bidirectional WSS transport, calling-time validation,
 and billing reconciliation remain P0 blockers. See
 [Exotel Provider Gates](EXOTEL-PROVIDER-GATES.md).
+
+## Provider integration hardening: AgentStream PCM and request preparation
+
+The isolated calling Worker now has a Super Admin-only
+`POST /v1/human/engineering/media-protocol` with strict request bounds,
+session/CSRF checks, 100 fictional PCM frames, and deterministic
+8000/16000/24000 Hz encode/decode and start/stop verification. It does
+not accept user audio or phone numbers, and cannot start a telephone call.
+The production public smoke checks that unauthenticated users receive 401;
+Chromium Browser E2E checks the new Button and 100-frame count.
+
+Vendor HTTP Basic Auth + multipart Connect Voice AI requests are serializable
+server-side but NOT sent. Exotel CallSid + nonce callback correlation remains
+unverified and quarantined. A future verified source/IP/Details API callback
+stage, real WSS media gateway, approved provider/caller ID, lawful consent,
+DND verification, STT/LLM/TTS and commercial billing are **not** complete.
