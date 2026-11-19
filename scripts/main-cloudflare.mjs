@@ -33,7 +33,8 @@ export const REQUIRED_COLUMNS = Object.freeze({
     human_ip_login_limits: Object.freeze(['ip_hash','attempt_count','blocked_until']),
   }),
   CRM_DB: Object.freeze({
-    leads: Object.freeze(['tenant_id','consent_status','dnd_status','interest_status','followup_at']),
+    leads: Object.freeze(['tenant_id','consent_status','dnd_status','interest_status','followup_at',
+      'customer_segment','plot_size_preference','visit_date_preference']),
     conversation_simulations: Object.freeze(['tenant_id','state_json','expires_at']),
     lead_opt_out_events: Object.freeze(['tenant_id','lead_id','source','created_at']),
     lead_consent_evidence: Object.freeze(['tenant_id','lead_id','review_status','submitted_by']),

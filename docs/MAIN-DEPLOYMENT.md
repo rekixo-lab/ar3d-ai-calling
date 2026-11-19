@@ -119,3 +119,8 @@ A pure `retentionPlan()` and gated `executeRetention()` helper are provided, but
 New **empty** Control D1 initialization now applies `0007_provider_inbox.sql` after v6. Existing Control D1 must be backed up and updated incrementally. The main preflight checks that the new table and required columns are present. No inbound HTTP webhook or dialing endpoint is exposed. The inbox accepts only synthetic internal-test signed events and records idempotent quarantined metadata. Real external provider authentication and replay persistence must be separately reviewed and implemented.
 
 The private recording encryption helper is intentionally disabled unless the isolated Worker receives server-only `RECORDING_STORAGE_ENABLED=true` and `RECORDING_ENCRYPTION_KEY`. **Do not enable these or upload real customer recordings until company policy, verified consent/recording notice, authenticated access, lifecycle deletion and legal review are complete.** There is no browser upload route. The helper's presence does not prove a working telecom recorder.
+
+
+## CRM v8: Excel lead segmentation and qualification
+
+New migration migrations/crm/0008_customer_qualification.sql adds customer category, plot size and date preference; preflight requires these columns. Run only after v7 on the independent AR3D Calling CRM D1, with a backup for populated databases. New empty initialization includes v8. Never rerun initialize on a populated database or infer dialing permission from customer category.

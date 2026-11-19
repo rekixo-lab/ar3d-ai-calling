@@ -31,6 +31,8 @@ export async function handleDataPortabilityRequest(req,env,user){
            preferred_location AS preferredLocation,budget_min_inr AS budgetMinInr,
            budget_max_inr AS budgetMaxInr,interest_status AS interestStatus,
            followup_at AS followupAt,requirements_json AS requirementsJson,
+           customer_segment AS customerSegment,plot_size_preference AS plotSizePreference,
+           visit_date_preference AS visitDatePreference,
            created_at AS createdAt,updated_at AS updatedAt
            FROM leads WHERE tenant_id=? ORDER BY created_at DESC,id DESC LIMIT ? OFFSET ?`)
           .bind(tid,limit,offset).all(),

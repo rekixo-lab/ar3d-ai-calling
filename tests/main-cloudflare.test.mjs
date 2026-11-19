@@ -55,7 +55,7 @@ test('ready requires every required migration table', () => {
 
 const mockTriggers=Object.entries(REQUIRED_SAFETY_TRIGGERS).map(([name,parts])=>
   ({name,sql:'CREATE TRIGGER '+name+' '+parts.join(' ')+' BEGIN SELECT RAISE(ABORT, "deny"); END'}));
-function cloudflareMock({ controlTables=[],crmTables=[],controlName='ar3d-calling-control',crmName='ar3d-calling-shared-crm',leadColumns=['tenant_id','consent_status','dnd_status','interest_status','followup_at'],bucketName='ar3d-calling-recordings',triggers=mockTriggers }={}) {
+function cloudflareMock({ controlTables=[],crmTables=[],controlName='ar3d-calling-control',crmName='ar3d-calling-shared-crm',leadColumns=['tenant_id','consent_status','dnd_status','interest_status','followup_at','customer_segment','plot_size_preference','visit_date_preference'],bucketName='ar3d-calling-recordings',triggers=mockTriggers }={}) {
   return async (url,opts) => {
     const control=url.includes(env.CONTROL_DB_ID);
     const tableNames=control?controlTables:crmTables;

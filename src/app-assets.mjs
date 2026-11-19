@@ -370,7 +370,8 @@ async function crmWorkflow(tenantId,content,role){
         importData=await makeImportPayload(file);
         const result=await api('/v1/human/import/preview','POST',importData);
         previewBox.replaceChildren(node('p',{class:'success',text:result.rows+' valid rows; '+result.existingCount+' existing in CRM; '+result.wouldInsert+' potentially new.'}),
-          table(['Name','Mobile','Location','Max budget'],result.preview.map(r=>[r.name,r.mobile,r.location,r.budgetMaxInr])));
+          table(['Name','Mobile','Customer type','Plot size','Visit preference'],result.preview.map(r=>
+            [r.name,r.mobile,r.customerSegment,r.plotSizePreference||'—',r.visitDatePreference||'—'])));
         commitBtn.disabled=false;
       }catch(e){importData=null;commitBtn.disabled=true;previewBox.replaceChildren();asError(e)}
     });
@@ -388,10 +389,14 @@ async function crmWorkflow(tenantId,content,role){
   const search=input('search','search','Name, number or location');search.required=false;
   const filter=node('select',{class:'field'},['','new','contacted','interested','followup','not_interested','converted']
     .map(s=>node('option',{value:s,text:s||'All statuses'})));
+  const segmentFilter=node('select',{class:'field'},[
+    ['','All customer types'],['prior_inquiry','Previous enquiry'],
+    ['unknown_contact','Unknown/new contact'],['unclassified','Unclassified']
+  ].map(([value,text])=>node('option',{value,text})));
   let offset=0;
   const searchBtn=btn('Search',()=>{offset=0;refresh().catch(asError)},true);
   const tableArea=div(''),details=div(''),visitArea=div('');
-  workflow.append(div('formrow',lab('Search leads',search),lab('Interest status',filter),searchBtn),tableArea,details);
+  workflow.append(div('formrow',lab('Search leads',search),lab('Interest status',filter),lab('Customer type',segmentFilter),searchBtn),tableArea,details);
   const schedule=div('card',title('Site Visits','h3'));workflow.append(schedule,visitArea);
   async function visitList(){
     const result=await api('/v1/human/visits?tenantId='+encodeURIComponent(tenantId));
@@ -426,17 +431,29 @@ async function crmWorkflow(tenantId,content,role){
       .map(s=>node('option',{value:s,text:s})));
     editStatus.value=lead.interestStatus;
     const loc=input('location','text','Preferred location');loc.required=false;loc.value=lead.preferredLocation||'';
+    const customerType=node('select',{class:'field'},[
+      ['unclassified','Unclassified'],['prior_inquiry','Previous enquiry'],
+      ['unknown_contact','Unknown/new contact']
+    ].map(([value,text])=>node('option',{value,text})));
+    customerType.value=lead.customerSegment||'unclassified';
+    const plotSize=input('plotSize','text','e.g. 30x40 ft');plotSize.required=false;plotSize.maxLength=120;
+    plotSize.value=lead.plotSizePreference||'';
+    const visitPreference=input('visitPreference','date');visitPreference.required=false;
+    visitPreference.value=lead.visitDatePreference||'';
     const min=input('min','number','Budget minimum INR'),max=input('max','number','Budget maximum INR');
     min.required=false;max.required=false;
     min.min='0';max.min='0';min.value=lead.budgetMinInr??'';max.value=lead.budgetMaxInr??'';
     const follow=input('follow','datetime-local');follow.required=false;
     if(lead.followupAt){const d=new Date(lead.followupAt); const localDate=new Date(d.getTime()-d.getTimezoneOffset()*60000);follow.value=localDate.toISOString().slice(0,16)}
-    const form=node('form',{class:'formrow'},[lab('Status',editStatus),lab('Location',loc),lab('Min budget',min),lab('Max budget',max),lab('Follow-up',follow)]);
+    const form=node('form',{class:'formrow'},[lab('Status',editStatus),lab('Location',loc),lab('Min budget',min),lab('Max budget',max),lab('Follow-up',follow),lab('Customer type',customerType),
+      lab('Plot size',plotSize),lab('Preferred visit date (not booked)',visitPreference)]);
     if(editable){form.append(node('button',{class:'btn',type:'submit',text:'Update lead'}));
       form.addEventListener('submit',async e=>{e.preventDefault();try{
         await api('/v1/human/leads/'+lead.id,'PATCH',{tenantId,interestStatus:editStatus.value,preferredLocation:loc.value,
           budgetMinInr:min.value===''?null:Number(min.value),budgetMaxInr:max.value===''?null:Number(max.value),
-          followupAt:follow.value?new Date(follow.value).toISOString():null});
+          followupAt:follow.value?new Date(follow.value).toISOString():null,
+          customerSegment:customerType.value,plotSizePreference:plotSize.value||null,
+          visitDatePreference:visitPreference.value||null});
         notice('Lead updated');await refresh();
       }catch(err){asError(err)}})}else{form.querySelectorAll('input,select').forEach(el=>el.disabled=true)}
     details.append(form);
@@ -521,13 +538,15 @@ async function crmWorkflow(tenantId,content,role){
     }
   }
   async function refresh(){
-    const params=new URLSearchParams({tenantId,limit:'50',offset:String(offset),status:filter.value,q:search.value.trim()});
+    const params=new URLSearchParams({tenantId,limit:'50',offset:String(offset),status:filter.value,
+      segment:segmentFilter.value,q:search.value.trim()});
     const result=await api('/v1/human/leads?'+params.toString());
     const tbl=node('table',{class:'table'});const head=node('tr');
-    ['Name','Mobile','Location','Budget','Status','Action'].forEach(t=>head.append(node('th',{text:t})));
+    ['Name','Mobile','Type','Plot size','Location','Budget','Status','Action'].forEach(t=>head.append(node('th',{text:t})));
     tbl.append(node('thead',{},head));const body=node('tbody');
     for(const lead of result.leads){const row=node('tr');
-      [lead.name,lead.mobile,lead.preferredLocation,lead.budgetMaxInr,lead.interestStatus].forEach(t=>row.append(node('td',{text:String(t??'—')})));
+      [lead.name,lead.mobile,lead.customerSegment,lead.plotSizePreference,
+        lead.preferredLocation,lead.budgetMaxInr,lead.interestStatus].forEach(t=>row.append(node('td',{text:String(t??'—')})));
       row.append(node('td',{},btn('Details',()=>selectLead(lead),true)));body.append(row)}
     tbl.append(body);
     const prev=btn('← Previous',()=>{offset=Math.max(0,offset-50);refresh().catch(asError)},true);

@@ -11,6 +11,9 @@ const HEADERS=Object.freeze({
   budgetMin:['budget min','min budget','minimum budget','budget from'],
   budgetMax:['budget max','max budget','maximum budget','budget','budget to'],
   requirement:['requirements','requirement','notes','customer requirement','plot requirement'],
+  customerSegment:['customer segment','customer type','lead type','contact type','customer category'],
+  plotSize:['plot size','preferred plot size','plot size preference','size requirement','area requirement'],
+  visitDate:['visit date preference','preferred visit date','visit date'],
 });
 function normalizeHeader(s){return String(s).trim().toLowerCase().replace(/[\s_-]+/g,' ')}
 function csvCells(text){
@@ -58,6 +61,21 @@ function money(raw){
   if(!Number.isSafeInteger(value)||value>1000000000000)throw Error('Budget out of range');
   return value;
 }
+function parseSegment(raw,line){
+  const s=String(raw||'').trim().toLowerCase().replace(/[\s_-]+/g,' ');
+  if(!s||['unclassified','unspecified','not sure'].includes(s))return 'unclassified';
+  if(['prior inquiry','previous inquiry','existing','known','old customer','existing customer'].includes(s))return 'prior_inquiry';
+  if(['unknown contact','unknown','new','new customer','cold lead'].includes(s))return 'unknown_contact';
+  throw Error('CSV row '+line+': invalid customer type');
+}
+function parseVisitDate(raw,line){
+  if(!raw)return null;
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(raw))throw Error('CSV row '+line+': visit preference must be YYYY-MM-DD');
+  const d=new Date(raw+'T00:00:00.000Z');
+  if(!Number.isFinite(d.getTime())||d.toISOString().slice(0,10)!==raw)
+    throw Error('CSV row '+line+': invalid visit preference date');
+  return raw;
+}
 export function parseLeadCsv(csv){
   const rows=csvCells(csv),head=rows.shift().map(normalizeHeader);
   const positions={};
@@ -77,13 +95,17 @@ export function parseLeadCsv(csv){
     if(seen.has(mobile))throw Error('CSV row '+line+': repeated mobile number within file');
     seen.add(mobile);
     const name=get('name'),location=get('location'),requirement=get('requirement');
+    const plotSize=get('plotSize'),customerSegment=parseSegment(get('customerSegment'),line);
+    const visitDatePreference=parseVisitDate(get('visitDate'),line);
+    if(plotSize.length>120||/[\u0000-\u001f]/u.test(plotSize))
+      throw Error('CSV row '+line+': invalid plot size');
     if(name.length>120||location.length>160||requirement.length>1000)
       throw Error('CSV row '+line+': text field too long');
     let min,max;
     try{min=money(get('budgetMin'));max=money(get('budgetMax'))}
     catch(e){throw Error('CSV row '+line+': '+e.message)}
     if(min!==null&&max!==null&&min>max)throw Error('CSV row '+line+': minimum budget exceeds maximum');
-    parsed.push({name,mobile,location:location||null,budgetMinInr:min,budgetMaxInr:max,requirement:requirement||null});
+    parsed.push({name,mobile,location:location||null,budgetMinInr:min,budgetMaxInr:max,requirement:requirement||null,customerSegment,plotSizePreference:plotSize||null,visitDatePreference});
   }
   return parsed;
 }
