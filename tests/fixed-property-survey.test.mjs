@@ -224,10 +224,10 @@ test('UI: name/mobile prefilled from Excel, 7 fixed questions, BHK conditional a
   assert.doesNotThrow(()=>new vm.Script(js));
   assert.match(js,/7 Fixed Questions — Property Qualification/);
   assert.match(js,/Excel Name:/);
-  assert.match(js,/questionSets\\[propertyType.value\\]\\[language.value\\]/);
+  assert.ok(js.includes('questionSets[propertyType.value][language.value]'));
   assert.match(js,/Open Fixed Questionnaire/);
   assert.match(js,/Save Reviewed Answers to CRM/);
   assert.match(js,/visitRequested/);
   assert.match(js,/No phone call/);
-  assert.doesNotMatch(js,/\\/v1\\/human\\/calls\\/start/);
+  assert.ok(!js.includes('/v1/human/calls/start'));
 });
