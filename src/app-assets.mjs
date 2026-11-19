@@ -101,6 +101,47 @@ function engineeringPanel(main){
   card.append(title('Exotel Account Connectivity (read-only)','h3'),
     node('p',{class:'note',text:'Uses server-side Exotel credentials only after you add them. Never places calls or exposes keys.'}),
     connectionButton,connectionSummary);
+  const trialSetup=div('stack');
+  card.append(title('Exotel Trial Setup — What Is Ready?','h3'),
+    node('p',{class:'note',text:'This is an onboarding checklist, not a dialer. Setting API keys alone will NOT make live calls possible.'}),
+    trialSetup);
+  api('/v1/human/engineering/exotel-trial-setup').then(result=>{
+    const creds=result.credentialsPresent||{};
+    const credentials=div('stack',
+      node('p',{class:'muted',text:'Private Worker secret bindings only (values never displayed):'}));
+    for(const [name,present] of Object.entries(creds)){
+      credentials.append(node('p',{class:present?'success':'muted',
+        text:(present?'Configured: ':'Missing: ')+name}));
+    }
+    const pending=node('ol');
+    for(const t of result.manualSteps||[])
+      pending.append(node('li',{text:t.title+' — '+t.owner}));
+    const codeTasks=node('ul');
+    for(const item of result.engineeringRemaining||[])
+      codeTasks.append(node('li',{text:item}));
+    const promptButton=btn('Copy 7-question Exotel Voicebot instructions',async()=>{
+      // User gesture only; contains fixed questions, never keys or customer PII.
+      try{
+        await navigator.clipboard.writeText(result.managedVoicebotPrompt);
+        notice('Draft 7-question instructions copied. Paste into an approved Exotel Voicebot editor; review before use.');
+      }catch{
+        // No clipboard permissions? Show editable text without app secrets.
+        const textarea=node('textarea',{class:'field',rows:14,readonly:'readonly'});
+        textarea.value=result.managedVoicebotPrompt;
+        trialSetup.append(lab('Copy this fixed bot template manually',textarea));
+        notice('Clipboard unavailable — copy the instructions from the text box.');
+      }
+    },true);
+    const docs=node('a',{href:result.managedVoicebotTrialDocs,target:'_blank',rel:'noopener noreferrer',
+      text:'Official Exotel Managed Voicebot Guide'});
+    trialSetup.replaceChildren(
+      node('p',{class:'note',text:'Live calls: disabled | Provider transcript auto-save: disabled | Browser preview: ready'}),
+      credentials,
+      title('Manual setup (company/Exotel)','h3'),pending,
+      title('Still needs engineering after approved account/voice access','h3'),codeTasks,
+      node('p',{class:'muted',text:'Managed Voicebot may avoid building a separate WSS/STT gateway; its trial, export API, pricing and builder access must be confirmed.'}),
+      promptButton,docs);
+  }).catch(asError);
   const mediaOutput=div('stack');
   const mediaTest=btn('Test 100 PCM Audio Frames (offline)',async()=>{
     mediaTest.disabled=true;
