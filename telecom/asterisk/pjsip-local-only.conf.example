@@ -1,0 +1,30 @@
+; ONLY same-machine SIP lab softphone. NOT suitable for public internet.
+; A real 140 SIP trunk requires independently reviewed carrier credentials,
+; IP allowlists, SBC/firewall, commercial approval and a different config.
+
+[ar3d-lab-loopback]
+type=transport
+protocol=udp
+bind=127.0.0.1:5062
+
+[ar3d-lab-phone]
+type=endpoint
+transport=ar3d-lab-loopback
+context=ar3d-local-only
+disallow=all
+allow=ulaw,alaw
+auth=ar3d-lab-auth
+aors=ar3d-lab-aor
+direct_media=no
+
+[ar3d-lab-auth]
+type=auth
+auth_type=userpass
+username=lab7000
+password=REPLACE_WITH_LONG_RANDOM_TEST_ONLY_PASSWORD
+
+[ar3d-lab-aor]
+type=aor
+max_contacts=1
+
+; NO provider registration, identify match, outside transport or outbound trunk.
