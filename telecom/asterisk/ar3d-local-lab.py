@@ -78,8 +78,9 @@ class LabAGI:
         stem = str(dest.with_suffix(""))
         self.command("RECORD FILE " + stem + ' wav "#" 18000 0 BEEP s=2')
         path = dest.with_suffix(".wav")
-        if path.exists():
-            os.chmod(path, 0o600)
+        if not path.is_file() or path.stat().st_size < 44:
+            raise OSError("Asterisk did not save a local WAV answer")
+        os.chmod(path, 0o600)
         return path.name
 
 
@@ -94,6 +95,7 @@ def run_survey(agi, language, root=DEFAULT_ROOT, clock=None):
     folder.mkdir(parents=True, mode=0o700, exist_ok=False)
     os.chmod(folder, 0o700)
     answers = {}
+    completed = False
     try:
         kind = agi.digit(f"ar3d/{language}-propertyType", {"1", "2", "3", "9"})
         if kind in (None, "9"):
@@ -133,11 +135,22 @@ def run_survey(agi, language, root=DEFAULT_ROOT, clock=None):
         with result_file.open("x", encoding="utf-8") as handle:
             json.dump(manifest, handle, ensure_ascii=False, indent=2)
         os.chmod(result_file, 0o600)
+        completed = True
         agi.announce(f"ar3d/{language}-thank-you-unconfirmed")
         return {"status": "recorded_local_only", "crmSaves": 0, "phoneCallsStarted": 0,
                 "sessionId": session_id}
     except HungUp:
         return {"status": "hung_up", "crmSaves": 0, "phoneCallsStarted": 0}
+    finally:
+        if not completed:
+            # Incomplete sessions cannot be imported and are not retained.
+            for name in ("location", "area", "size", "budgetInr", "visitDate"):
+                (folder / (name + ".wav")).unlink(missing_ok=True)
+            (folder / "answers.json").unlink(missing_ok=True)
+            try:
+                folder.rmdir()
+            except OSError:
+                pass
 
 
 def main():
