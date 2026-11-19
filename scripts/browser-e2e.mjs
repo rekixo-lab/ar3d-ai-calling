@@ -11,11 +11,12 @@ import {chromium} from 'playwright';
 import {html,css,js} from '../src/app-assets.mjs';
 import {productionReadiness} from '../src/release-gates.mjs';
 import {runSyntheticPilot} from '../src/sandbox-pilot.mjs';
+import {runExotelMockPilot} from '../src/exotel-mock-pilot.mjs';
 
 const SESSION='synthetic-browser-session-only';
 const TEST_EMAIL='sandbox-operator@example.invalid';
 const TEST_PASSWORD='FictionalBrowserTestPassword2026!';
-let pilotRuns=0,invalidRequests=0;
+let pilotRuns=0,providerRuns=0,invalidRequests=0;
 const respond=(res,code,body,type='application/json',extra={})=>{
   res.writeHead(code,{'Content-Type':type,'Cache-Control':'no-store',...extra});
   res.end(typeof body==='string'?body:JSON.stringify(body));
@@ -69,6 +70,13 @@ const server=http.createServer(async(req,res)=>{
       pilotRuns++;
       return respond(res,200,runSyntheticPilot(params));
     }
+    if(req.method==='POST'&&path==='/v1/human/engineering/provider-pilot'){
+      if(req.headers.origin!=='http://127.0.0.1:'+server.address().port)
+        return respond(res,403,{error:'origin required'});
+      const params=await readBounded(req);
+      providerRuns++;
+      return respond(res,200,runExotelMockPilot(params));
+    }
     invalidRequests++;
     return respond(res,404,{error:'not found'});
   }catch{
@@ -115,6 +123,8 @@ try{
     await page.getByRole('button',{name:'Run 100 Synthetic Calls (no dialing)'}).click();
     await page.getByText('Synthetic calls: 100 | Real calls: 0 | Audio generated: 0').waitFor();
     await page.getByText(/Real billing: disabled \| Payment collected: no/).waitFor();
+    await page.getByRole('button',{name:'Test Exotel Mock Provider (100 events)'}).click();
+    await page.getByText('Provider mock events: 100 | Real calls: 0 | External requests: 0').waitFor();
     const body=await page.locator('body').innerText();
     assert.ok(body.includes('Commercial go-live blocked:'));
     assert.ok(!body.includes('Start real calls'));
@@ -126,9 +136,10 @@ try{
     console.log(viewport.name+': authenticated browser E2E + 100 fake calls + signout + sidebar PASS');
   }
   assert.equal(pilotRuns,3);
+  assert.equal(providerRuns,3);
   // Missing favicon requests are harmless and never reach remote services.
   assert.ok(invalidRequests<=3,'unexpected fixture requests');
-  console.log('Browser E2E PASS: 3 responsive viewports, no real calls/DB/customer data');
+  console.log('Browser E2E PASS: 3 responsive viewports, no real calls/DB/customer data/vendor network');
 }finally{
   await browser?.close();
   await new Promise(resolve=>server.close(resolve));
