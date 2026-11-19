@@ -218,7 +218,7 @@ test('no access for viewer, other tenant, unauthenticated, cross origin or unkno
     {...payload,callNow:true},
     {...payload,propertyType:'apartment-tower'}
   ])assert.equal((await worker.fetch(request('POST',input),fixture().env)).status,400);
-  assert.equal((await worker.fetch(request('DELETE'),fixture().env)).status,403);
+  assert.equal((await worker.fetch(request('DELETE'),fixture().env)).status,405);
 });
 test('UI: name/mobile prefilled from Excel, 7 fixed questions, BHK conditional and no live call buttons',()=>{
   assert.doesNotThrow(()=>new vm.Script(js));
