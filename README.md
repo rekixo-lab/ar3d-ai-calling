@@ -40,6 +40,21 @@ correlated but remain **untrusted/quarantined**, without real source validation,
 call-state changes, or billing. No production media WebSocket endpoint exists.
 See [Exotel Integration Gates](docs/EXOTEL-PROVIDER-GATES.md).
 
+## Exotel verification, safe metering and go-live operator checklist
+
+The Super Admin Production Readiness panel now shows an explicit operator
+checklist and **only secret-binding presence**, not secret values.
+`src/exotel-readonly-verification.mjs` implements bounded **GET-only**
+Exotel account and existing-call lookups; CLI: `node scripts/check-exotel-readonly.mjs`
+(requires private environment variables; never log/send them).
+`src/usage-reconciliation.mjs` checks source tags, duplicate/conflicting
+records, quota/price estimates but NEVER creates invoices.
+An optional Razorpay adapter validates raw-body HMAC signatures yet
+does not activate subscriptions or collect payments.
+
+Nothing connects a real dialer, payment gateway webhook or live media endpoint.
+See [Exact Operator Go-Live Steps](docs/OPERATOR-GO-LIVE.md).
+
 # AR3D AI Calling
 
 ## Exotel India Voice AI connector (dry-run only)
