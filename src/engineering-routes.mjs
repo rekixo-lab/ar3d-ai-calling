@@ -8,6 +8,7 @@ import {runExotelMediaHarness} from './exotel-media-harness.mjs';
 import {operationalReadiness} from './operational-readiness.mjs';
 import {probeExotelConnectivity} from './provider-connectivity.mjs';
 import {exotelTrialReadiness,managedVoicebotInstructions} from './exotel-trial-readiness.mjs';
+import {ownSipSetup} from './own-sip-readiness.mjs';
 
 const headers={'Cache-Control':'no-store','X-Content-Type-Options':'nosniff',
   'Referrer-Policy':'no-referrer','X-Frame-Options':'DENY'};
@@ -75,6 +76,10 @@ export async function handleEngineeringRequest(req,user,env={}){
     }catch{
       return fail('invalid media protocol simulation; nothing executed',400);
     }
+  }
+  if(path===BASE+'own-sip-setup'){
+    if(req.method!=='GET')return fail('method not allowed',405);
+    return json(ownSipSetup());
   }
   if(path===BASE+'exotel-trial-setup'){
     if(req.method!=='GET')return fail('method not allowed',405);

@@ -102,6 +102,21 @@ KYC with the provider. The new onboarding endpoint is Super Admin-only,
 read-only and cannot dial. See
 [Exotel Trial Setup](docs/EXOTEL-TRIAL-SETUP.md).
 
+## Our own Calling Engine — without Exotel
+
+We can self-host a small **Asterisk** PBX and use an authorized Indian
+**140-series promotional outbound SIP Trunk** from a telecom operator
+(e.g. Jio Business), instead of Exotel. A 140 caller number **alone**
+does not connect any phone call: a carrier trunk, approved use case,
+sender registration, DND/consent and always-on private SIP/RTP PBX are
+also required. The source now contains a **local-only two-extension
+Hindi/English Asterisk voice lab**, original seven-question audio
+prompt checklist and a private recordings-only AGI example; it has
+**no public/outbound dialplan and no live voice-to-CRM link**. Super
+Admin can view the prerequisites under **Our Own Calling Engine —
+No Exotel Required**. See
+[Own Asterisk Pilot](telecom/asterisk/README.md).
+
 # AR3D AI Calling
 
 ## Exotel India Voice AI connector (dry-run only)
