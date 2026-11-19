@@ -22,3 +22,22 @@ jobs:
           python-version: '3.13'
       - name: Run JavaScript and SQLite isolation tests
         run: npm test
+
+  browser-e2e:
+    needs: foundation-tests
+    # Pin to the Playwright 1.56.x supported runner; ubuntu-latest has moved to 26.04.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Use preinstalled Google Chrome on pinned Ubuntu 24.04 runner
+        run: |
+          command -v google-chrome || command -v google-chrome-stable
+          npm install --no-save --ignore-scripts playwright@1.56.1
+      - name: Test actual Chrome UI on desktop, tablet and mobile (synthetic localhost only)
+        run: node scripts/browser-e2e.mjs

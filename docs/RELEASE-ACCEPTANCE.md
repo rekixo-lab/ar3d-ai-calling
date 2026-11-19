@@ -78,3 +78,30 @@ consent/DND, security, recording and data-governance gates are independently
 completed and tested. The first Super Admin bootstrap must never be repeated;
 \`ADMIN_BOOTSTRAP_TOKEN\` stays removed. Other AR3D Platform/Engine services
 and their databases must remain unchanged.
+
+## Production hardening acceptance (next engineering batch)
+
+- **Actual Chromium browser E2E** is a separate GitHub CI job after the original
+  Node/Python foundation suite. It opens the real shipped Login/Admin UI at an
+  in-process **127.0.0.1-only synthetic HTTP fixture** on desktop, tablet and
+  mobile sizes. It verifies login form, Admin release gates, the 100-call mock,
+  billing-off text, sidebar layout and sign-out. **No real account, Cloudflare
+  production DB, telecom API, phone number or charge** is accessed. No production
+  credentials or secrets are required.
+- **SQLite backup/restore drill** loads every Control + CRM migration from source
+  into *in-memory fictional databases*, checks integrity/foreign keys and copies
+  them using SQLite's backup API. It verifies the resulting restores retain
+  tenant boundaries, opt-out history, active-agent prohibition and call-launch
+  deny-all triggers. It does **not** back up Cloudflare remote D1/R2 or count as
+  a verified production disaster recovery procedure.
+- **Provider synthetic inbox replay hardening** rejects duplicate signed event
+  IDs whose immutable payload digest, event type or quarantine state differs.
+  Exact duplicates remain idempotent; mismatched or missing rows fail closed.
+  There is still no real provider webhook or call launch endpoint.
+- A production release still requires actual **Cloudflare D1/R2 backup, access-
+  controlled encrypted backup storage, restore rehearsal**, browser tests on
+  deployed security settings, telecom approvals, data protection/retention,
+  MFA enrollment, vendor callbacks, real-time voice, and billing reconciliation.
+
+Run the existing \`npm test\`, and (after installing its temporary Playwright
+dependency) \`node scripts/browser-e2e.mjs\`. The GitHub PR CI performs both.
