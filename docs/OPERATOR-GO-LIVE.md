@@ -128,3 +128,15 @@ a webhook signature alone or a successful provider GET as permission to
 call real people or collect payments. Only the operator/provider can
 complete the external actions, and engineering must then wire them into
 a reviewed, deliberately enabled real integration.
+
+
+## Automatic services in Calling Worker (no extra secret needed)
+
+The Calling Worker runs a locked six-hour Cloudflare Cron cleanup for expired
+Control D1 auth artifacts only. A separate GitHub Actions scheduled monitor
+checks the Calling custom domain's health and anonymous API safety without
+creating calls or modifying customer data. Super Admins can press
+**Check Exotel Connection (read-only)** once their Exotel credentials have
+been added privately to this Worker. Provider approval, live voice, billing,
+MFA and genuine remote backup/restore gates are still required.
+See [Automatic Operations](AUTOMATIC-OPERATIONS.md).
