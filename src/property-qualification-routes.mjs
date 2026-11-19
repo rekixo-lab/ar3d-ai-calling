@@ -3,7 +3,7 @@
 // Never grants consent, clears DND, creates calls, or activates an AI agent.
 import {requireMembership} from './human-auth.mjs';
 import {resolveCrmDb,parseJsonBody} from './core.mjs';
-import {normalizePropertySurvey,surveyToCrm} from './fixed-property-survey.mjs';
+import {normalizePropertySurvey,surveyToCrm,PROPERTY_TYPES,fixedPropertyQuestions} from './fixed-property-survey.mjs';
 
 const route=/^\/v1\/human\/leads\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/qualification$/i;
 const json=(v,s=200)=>Response.json(v,{status:s,headers:{
@@ -52,7 +52,11 @@ export async function handlePropertyQualificationRequest(req,env,user){
     if(!existing)return fail('lead not found',404);
     if(req.method==='GET'){
       return json({leadId:id,updatedAt:existing.updatedAt,
-        survey:savedAnswers(existing),voiceConnected:false,
+        survey:savedAnswers(existing),
+        questionSets:Object.fromEntries(PROPERTY_TYPES.map(type=>[type,{
+          hi:fixedPropertyQuestions(type,'hi'),en:fixedPropertyQuestions(type,'en')
+        }])),
+        voiceConnected:false,
         notice:'Name/mobile remain from Excel. No phone call or speech service was used.'});
     }
     if(!body||typeof body!=='object'||Array.isArray(body)||
