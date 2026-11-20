@@ -95,6 +95,41 @@ export function isExplicitExotelWebhookProbe(bytes){
       value[k].length<=48&&PROBE_WORD.test(value[k].trim())));
   return recognized;
 }
+// Only the *literal documentation sample* (with placeholders, no real call
+// identifiers) may be ACKed as a non-persistent connectivity test. This
+// precise match is not a shortcut for real events with malformed fields.
+export function isExactExotelDocumentationSample(bytes){
+  if(!(bytes instanceof Uint8Array)||bytes.length>4096||bytes.length<100)
+    return false;
+  let value;
+  try{value=JSON.parse(new TextDecoder('utf-8',{fatal:true}).decode(bytes))}
+  catch{return false}
+  if(!value||typeof value!=='object'||Array.isArray(value))return false;
+  const keys=new Set([
+    'session_id','conversation_id','start_time','end_time','landing_number',
+    'external_id','session_state','trigger_reason','contact_uri',
+    'network_type','account_id','bot_id','bot_name','metadata',
+    'custom_parameters','events'
+  ]);
+  if(Object.keys(value).some(key=>!keys.has(key)))return false;
+  const exampleId='CAxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx';
+  if(value.session_id!=='<voicebot session id>'||
+     value.conversation_id!=='<voicebot conversation id>'||
+     value.external_id!==exampleId||
+     value.session_state!=='session_start | session_in_progress | session_end'||
+     value.trigger_reason!=='timer | turn-complete | turn-progress | pre-agent-transfer | start | end'||
+     value.network_type!=='sip | pstn'||value.account_id!==''||
+     value.bot_id!=='bot_uuid'||value.bot_name!=='bot_name'||
+     value.contact_uri!=='<phone number / endpoint>'||
+     value.metadata?.call_sid!==exampleId||
+     value.metadata?.stream_sid!==''||
+     !Array.isArray(value.events)||value.events.length!==1)
+    return false;
+  const item=value.events[0];
+  return item?.event_type==='sentiment'&&item.event_id==='evt_1'&&
+    item.event_data&&typeof item.event_data==='object'&&
+    !Array.isArray(item.event_data)&&Object.keys(item.event_data).length===0;
+}
 // For troubleshooting EXOTEL's unpublicized Test URL shape, return only a
 // fixed list of field PRESENCE indicators, NEVER values or raw body fragments.
 // Authorization has already been confirmed before this can be called.
@@ -115,10 +150,35 @@ function invalidPayloadDiagnostics(bytes,error){
   const staticErrors=[
     'session identity','session state','network type','event list',
     'event','transcript turn','turn sequence','turn status',
-    'turn segments','speaker','timestamp','raw bytes','JSON','envelope'
+    'turn segments','speaker','timestamp','raw bytes','JSON','envelope',
+    'account','bot','metadata','call reference mismatch',
+    'transcript segment','duplicate event id in one delivery'
   ];
   const message=String(error?.message||'');
-  outcome.validation=staticErrors.find(tag=>message.includes('invalid Exotel Voicebot '+tag))||'schema_or_body';
+  const prefix='invalid Exotel Voicebot ';
+  outcome.validation=message.startsWith(prefix)&&
+    staticErrors.includes(message.slice(prefix.length))?
+    message.slice(prefix.length):'schema_or_body';
+  // Format flags reveal no identifiers, field values, event text or credentials.
+  // They help identify a vendor test envelope using placeholder/sample strings.
+  try{
+    const obj=JSON.parse(new TextDecoder('utf-8',{fatal:true}).decode(bytes));
+    if(obj&&typeof obj==='object'&&!Array.isArray(obj)){
+      const idPattern=/^[A-Za-z0-9_.:-]{4,128}$/;
+      const stateSet=new Set(['session_start','session_in_progress','session_end']);
+      const reasonSet=new Set(['timer','turn-complete','turn-progress','pre-agent-transfer','start','end']);
+      outcome.format_checks={
+        session_id:idPattern.test(obj.session_id)&&typeof obj.session_id==='string',
+        conversation_id:idPattern.test(obj.conversation_id)&&typeof obj.conversation_id==='string',
+        external_id:idPattern.test(obj.external_id)&&typeof obj.external_id==='string',
+        session_state:stateSet.has(obj.session_state),
+        trigger_reason:reasonSet.has(obj.trigger_reason),
+        network_type:['pstn','sip'].includes(obj.network_type),
+        events:Array.isArray(obj.events)&&obj.events.length>0&&obj.events.length<=8
+      };
+      outcome.documentation_sample=isExactExotelDocumentationSample(bytes);
+    }
+  }catch{}
   return outcome;
 }
 async function receiptHmac(token,domain,value){
@@ -234,7 +294,8 @@ export async function handleExotelVoicebotWebhookRequest(req,env){
     rawBytes=await readBounded(req);
     // A well-identified dashboard connectivity probe is never a call event:
     // return the documented ACK, no D1 records, no customer/CRM changes.
-    if(isExplicitExotelWebhookProbe(rawBytes))
+    if(isExplicitExotelWebhookProbe(rawBytes)||
+       isExactExotelDocumentationSample(rawBytes))
       return response(exotelVoicebotAck());
     parsed=parseExotelVoicebotEvent(rawBytes);
     if(parsed.accountId&&parsed.accountId!==env.EXOTEL_ACCOUNT_SID)
