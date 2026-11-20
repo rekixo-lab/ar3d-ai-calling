@@ -164,6 +164,15 @@ test('operational readiness reports only binding presence, never claims live pro
   });
   assert.equal(setup.credentialBindingsConfigured.loginRateLimit,true);
   assert.equal(setup.credentialBindingsConfigured.exotelApiKey,true);
+  assert.equal(operationalReadiness({
+    EXOTEL_ACCOUNT_SID:'test123'
+  }).credentialBindingsConfigured.exotelAccount,true);
+  assert.equal(operationalReadiness({
+    EXOTEL_ACCOUNT_SID:'abc'
+  }).credentialBindingsConfigured.exotelAccount,false);
+  assert.ok(!JSON.stringify(operationalReadiness({
+    EXOTEL_ACCOUNT_SID:'test123'
+  })).includes('test123'));
   assert.equal(setup.credentialBindingsConfigured.voiceProvider,false);
   assert.equal(setup.liveCallingEnabled,false);
   assert.equal(setup.paymentCollectionEnabled,false);
