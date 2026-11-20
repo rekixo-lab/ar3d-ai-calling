@@ -3,6 +3,7 @@
 // consent grants, automatic transcripts, payment, or customer dialing.
 // https://developer.exotel.com/docs/agentstream/connect-voice-ai-flow
 import {exotelApiBase,configuredExotelRegion} from './exotel-region.mjs';
+import {inspectOperatorWebhookCandidates} from './exotel-operator-webhook-correlation.mjs';
 
 const PATH='/v1/human/engineering/exotel-self-test';
 const E164=/^\+91[6-9][0-9]{9}$/;
@@ -133,7 +134,7 @@ async function lastCalls(db,userId){
     'SELECT t.id,t.state,t.error_code AS errorCode,t.created_at AS createdAt, '+
     'sc.state AS checkState,sc.provider_status AS providerStatus, '+
     'sc.duration_seconds AS durationSeconds,sc.error_code AS checkError, '+
-    'sc.created_at AS checkedAt '+
+    'sc.created_at AS checkedAt, t.provider_call_sid AS providerCallSid '+
     'FROM exotel_operator_test_calls t '+
     'LEFT JOIN exotel_operator_status_checks sc ON sc.id=('+
     'SELECT c.id FROM exotel_operator_status_checks c '+
@@ -162,6 +163,17 @@ export async function handleExotelOperatorTest(req,env,user,{apiFetch=fetch,now=
     let recent=[];
     try{recent=await lastCalls(env.CONTROL_DB,user.id)}
     catch{return error('self_test_schema_not_provisioned',503)}
+    // The provider CallSid is Control-DB-only and is NEVER sent to the
+    // browser. Compare HMAC receipt fingerprints only for THIS user's
+    // already registered calls, after current MFA has been established.
+    recent=await Promise.all(recent.map(async ({providerCallSid,...safe})=>({
+      ...safe,
+      webhookCandidate:mfaEnabled&&safe.state==='submitted'&&providerCallSid?
+        await inspectOperatorWebhookCandidates(env.CONTROL_DB,{
+          webhookToken:env.EXOTEL_VOICEBOT_WEBHOOK_TOKEN,
+          accountSid:env.EXOTEL_ACCOUNT_SID,registeredCallSid:providerCallSid,now
+        }):null
+    })));
     return json({
       mode:'operator_verified_number_only',configured:cfg.ready,
       missing:cfg.missing,mfaEnabled,recent,realCallsStartedByRead:0,

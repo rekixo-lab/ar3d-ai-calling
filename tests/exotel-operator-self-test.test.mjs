@@ -21,12 +21,19 @@ const req=(method='GET',body=null)=>new Request(
 );
 const confirm={confirm:'CALL_MY_VERIFIED_NUMBER_ONCE'};
 class MockDb{
-  constructor(){this.mfa=true;this.oldSession=false;this.entries=[];this.writes=0}
+  constructor(){this.mfa=true;this.oldSession=false;this.entries=[];this.writes=0;this.receiptLookups=0}
   prepare(sql){
     const db=this;
     return {bind(...params){
       return {
         async first(){
+          if(sql.includes('FROM exotel_voicebot_event_receipts')){
+            db.receiptLookups++;
+            assert.equal(params.length,5);
+            return {uniqueReceipts:2,transcriptEvents:1,sessionEnds:1,
+              completedTurns:1,possibleOptOutEvents:0,uniqueSessions:1,
+              lastReceivedAt:'2026-11-20T10:00:00.000Z'};
+          }
           if(sql.includes('human_mfa_settings'))
             return db.mfa&&!db.oldSession&&params[1]===user.token_hash?
               {enabled_at:'2026-11-20T09:00:00Z'}:null;
@@ -35,7 +42,7 @@ class MockDb{
         async all(){
           if(sql.includes('SELECT t.id,t.state,t.error_code AS errorCode'))
             return {results:db.entries.filter(r=>r.actor===params[0]).map(r=>({
-              id:r.id,state:r.state,errorCode:r.code||null,
+              id:r.id,state:r.state,providerCallSid:r.sid,errorCode:r.code||null,
               createdAt:r.createdAt,checkState:null,providerStatus:null,
               durationSeconds:null,checkError:null,checkedAt:null
             })).reverse().slice(0,5)};
@@ -197,4 +204,29 @@ test('response must correlate provider call SID, outbound direction and caller I
     {...valid,Call:{...valid.Call,Status:'failed'}},
     {...valid,Call:{...valid.Call,Sid:'invalid space'}}
   ])assert.throws(()=>validateOperatorTestResult(bad,'09513886363'));
+});
+
+test('GET only shows HMAC candidate counts for self-test belonging to this MFA operator',async()=>{
+  const db=new MockDb(),env={...envBase,CONTROL_DB:db,
+    EXOTEL_VOICEBOT_WEBHOOK_TOKEN:'c'.repeat(64)};
+  await handleExotelOperatorTest(req('POST',confirm),env,user,{
+    now:at,apiFetch:async()=>success()
+  });
+  const r=await handleExotelOperatorTest(req(),env,user,{now:at+2000});
+  assert.equal(r.status,200);
+  const data=await r.json();
+  assert.equal(data.recent.length,1);
+  assert.equal(data.recent[0].webhookCandidate.state,'candidate_only');
+  assert.equal(data.recent[0].webhookCandidate.uniqueReceipts,2);
+  assert.equal(data.recent[0].webhookCandidate.sourceAuthenticated,false);
+  assert.equal(data.recent[0].webhookCandidate.leadMatched,false);
+  assert.equal(db.receiptLookups,1);
+  assert.equal(db.writes,2,'GET must be read-only');
+  for(const secret of [env.EXOTEL_VOICEBOT_WEBHOOK_TOKEN,
+    env.EXOTEL_API_KEY,env.EXOTEL_API_TOKEN,db.entries[0].sid])
+    assert.ok(!JSON.stringify(data).includes(secret),secret);
+  db.mfa=false;
+  const weak=await (await handleExotelOperatorTest(req(),env,user,{now:at+3000})).json();
+  assert.equal(weak.recent[0].webhookCandidate,null);
+  assert.equal(db.receiptLookups,1,'without MFA no receipt lookup');
 });
