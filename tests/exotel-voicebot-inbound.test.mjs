@@ -220,3 +220,62 @@ test('even explicit verification request requires matching private Bearer token'
   assert.equal((await worker.fetch(request({test:true},{token:null}),env)).status,401);
   assert.equal((await worker.fetch(request({test:true},{token:'f'.repeat(64)}),env)).status,401);
 });
+
+test('official Exotel docs literal placeholder example is ACKed as an authenticated no-write connectivity check',async()=>{
+  const db=memoryD1(),env=fixture(db);
+  const sample={
+    session_id:'<voicebot session id>',
+    conversation_id:'<voicebot conversation id>',
+    start_time:'2025-07-16T11:40:57.000Z',end_time:null,
+    landing_number:'',
+    external_id:'CAxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx',
+    session_state:'session_start | session_in_progress | session_end',
+    trigger_reason:'timer | turn-complete | turn-progress | pre-agent-transfer | start | end',
+    contact_uri:'<phone number / endpoint>',network_type:'sip | pstn',
+    account_id:'',bot_id:'bot_uuid',bot_name:'bot_name',
+    metadata:{call_sid:'CAxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx',stream_sid:''},
+    custom_parameters:{key1:'value1',key2:'value2'},
+    events:[{event_type:'sentiment',event_id:'evt_1',event_data:{}}]
+  };
+  let res=await worker.fetch(request(sample),env);
+  assert.equal(res.status,200);
+  assert.deepEqual(await res.json(),{http_code:200,response:{data:{}}});
+  assert.equal(db.writes,0);
+  assert.equal(db.reads,0);
+  // Require the exact documented placeholder values; never ACK an
+  // alternate malformed pseudo-call as a docs fixture.
+  for(const altered of [
+    {...sample,session_id:'<random session id>'},
+    {...sample,external_id:'CArealbad'},
+    {...sample,metadata:{call_sid:'CArealbad',stream_sid:''}},
+    {...sample,events:[{event_type:'transcript',event_id:'evt_1',event_data:{}}]},
+    {...sample,session_state:'session_in_progress'},
+    {...sample,network_type:'pstn'}
+  ]){
+    res=await worker.fetch(request(altered),env);
+    assert.equal(res.status,400);
+    const info=await res.json();
+    assert.equal(info.error,'invalid_webhook_payload');
+    assert.ok(!JSON.stringify(info).includes('<voicebot session id>'));
+  }
+  assert.equal(db.writes,0);
+});
+test('vendor validation categories and field flags are redacted and accurately identify malformed samples',async()=>{
+  const db=memoryD1(),env=fixture(db);
+  const input={...event,account_id:12,contact_uri:'+919876543210',
+    custom_parameters:{mobile:'+919876543210'}};
+  const res=await worker.fetch(request(input),env);
+  assert.equal(res.status,400);
+  const info=await res.json();
+  assert.equal(info.validation,'account');
+  assert.deepEqual(info.format_checks,{
+    session_id:true,conversation_id:true,external_id:true,session_state:true,
+    trigger_reason:true,network_type:true,events:true
+  });
+  assert.equal(info.documentation_sample,false);
+  for(const pii of ['919876543210','CAfictionalcall2026','test123','a3a3a3',
+    'fictional-session-2026']){
+    assert.ok(!JSON.stringify(info).includes(pii));
+  }
+  assert.equal(db.writes,0);
+});
