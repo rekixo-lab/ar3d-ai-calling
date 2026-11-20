@@ -160,3 +160,63 @@ test('separate session_end receipt is accepted without pretending final transcri
   assert.equal([...db.rows.values()][0].turn_status,'none');
   assert.equal((await worker.fetch(request(end,{route:'transcript-events'}),env)).status,422);
 });
+
+test('authenticated explicit Exotel Test URL probes receive vendor ACK without D1 or CRM writes',async()=>{
+  const db=memoryD1(),env=fixture(db);
+  for(const probe of [
+    {test:true},
+    {is_test:true},
+    {webhook_test:true,message:'Test the webhook'},
+    {event:'test',timestamp:'2026-11-20T10:00:00Z'},
+    {type:'webhook_test',webhook_type:'transcript_events'},
+    {event_type:'ping',source:'exotel'}
+  ]){
+    const res=await worker.fetch(request(probe),env);
+    assert.equal(res.status,200,JSON.stringify(probe));
+    assert.deepEqual(await res.json(),{http_code:200,response:{data:{}}});
+  }
+  assert.equal(db.writes,0);
+  assert.equal(db.reads,0);
+});
+test('test marker cannot disguise real calls or malformed transcript payloads',async()=>{
+  const db=memoryD1(),env=fixture(db);
+  for(const bad of [
+    {test:true,session_id:'call-session-id'},
+    {type:'test',events:[]},
+    {test:true,contact_uri:'+919876543210'},
+    {test:true,phone:'+919876543210'},
+    {test:true,unrecognized_field:'x'},
+    {test:false},
+    {event:'sample_transcript'},
+    {message:'test'},
+    {...event,test:true,session_id:'INVALID'},
+    {test:true,description:'x'.repeat(2000)}
+  ]){
+    const r=await worker.fetch(request(bad),env);
+    assert.equal(r.status,400,JSON.stringify(bad).slice(0,100));
+    const v=await r.json();
+    assert.equal(v.error,'invalid_webhook_payload');
+  }
+  assert.equal(db.writes,0);
+});
+test('Exotel diagnostic reveals only documented top-level field presence, never values',async()=>{
+  const db=memoryD1(),env=fixture(db);
+  const input={
+    session_id:'PRIVATE_CALL_SID',contact_uri:'+919876543210',
+    custom_parameters:{mobile:'+919876543210'},
+    somePrivateText:'₹20 lakh in Raipur'
+  };
+  const res=await worker.fetch(request(input),env);
+  assert.equal(res.status,400);
+  const data=await res.json();
+  assert.equal(data.validation,'session identity');
+  assert.deepEqual(data.present_fields,['session_id']);
+  for(const pii of ['PRIVATE_CALL_SID','+919876543210','₹20 lakh','somePrivateText']){
+    assert.ok(!JSON.stringify(data).includes(pii),pii);
+  }
+});
+test('even explicit verification request requires matching private Bearer token',async()=>{
+  const env=fixture(memoryD1());
+  assert.equal((await worker.fetch(request({test:true},{token:null}),env)).status,401);
+  assert.equal((await worker.fetch(request({test:true},{token:'f'.repeat(64)}),env)).status,401);
+});
