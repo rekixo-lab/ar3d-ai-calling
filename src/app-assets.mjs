@@ -145,6 +145,22 @@ function engineeringPanel(main){
           entry.append(node('p',{class:'muted',
             text:'Previous Exotel status check still pending. No call initiated.'}));
         }
+        if(item.webhookCandidate){
+          const c=item.webhookCandidate;
+          if(c.state==='candidate_only'){
+            entry.append(node('p',{class:'muted',text:
+              'Potential Exotel webhook matches (hashed metadata only): '+
+              c.uniqueReceipts+' unique events | '+c.completedTurns+
+              ' completed turns | '+c.sessionEnds+' session ends | '+
+              c.possibleOptOutEvents+' potential opt-out event flags'+
+              (c.lastReceivedAt?' | last '+c.lastReceivedAt:'')}));
+            entry.append(node('p',{class:'note',text:
+              'Candidate only: the webhook external_id must equal this registered test CallSid and its optional leg SID must not conflict. No independent vendor-origin proof, transcript text, CRM lead link, consent or verified opt-out follows. A zero count is NOT proof no webhook arrived.'}));
+          }else{
+            entry.append(node('p',{class:'muted',text:
+              'Webhook matching is unavailable (private token/schema missing or query failed); no conclusion about delivery.'}));
+          }
+        }
         if(item.state==='submitted'&&r.mfaEnabled){
           const refresh=btn('Check existing Exotel call status (read-only)',async()=>{
             refresh.disabled=true;
