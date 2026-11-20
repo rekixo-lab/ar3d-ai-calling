@@ -96,6 +96,8 @@ function engineeringPanel(main){
         node('p',{class:result.verified?'success':'note',text:'Exotel API: '+(result.verified?'Connection verified':'Not verified')+' | Region: '+(result.apiRegion||'not configured')+' ('+(result.apiRegionStatus||'unknown')+') | Real dialing: disabled'}),
         node('p',{class:'note',text:result.note})
       );
+      if(typeof result.checkDiagnostic==='string')
+        connectionSummary.append(node('p',{class:'note',text:'Read-only diagnostic: '+result.checkDiagnostic}));
     }catch(err){asError(err)}finally{connectionButton.disabled=false}
   });
   card.append(title('Exotel Account Connectivity (read-only)','h3'),

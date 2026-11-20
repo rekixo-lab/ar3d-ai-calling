@@ -7,6 +7,22 @@ const SID=/^[a-zA-Z0-9_-]{4,128}$/;
 const CRED=/^[\x21-\x7e]{8,256}$/;
 const VALID_STATUS=new Set(['queued','in-progress','completed','failed','busy','no-answer']);
 const MAX_BYTES=65536;
+// Codes are fixed and non-sensitive. Never forward vendor error bodies,
+// full URLs, account IDs, credentials or transient HTTP exception messages.
+function safeProviderError(code,message){
+  const error=new Error(message);
+  error.diagnosticCode=code;
+  return error;
+}
+function responseCode(response){
+  const status=response?.status;
+  if(status===401)return 'http_401';
+  if(status===403)return 'http_403';
+  if(status===404)return 'http_404';
+  if(status===429)return 'http_429';
+  if(Number.isInteger(status)&&status>=500&&status<600)return 'http_5xx';
+  return 'unexpected_http_status';
+}
 function validateString(value,pattern){return typeof value==='string'&&pattern.test(value)}
 function credentials(input){
   if(!input||typeof input!=='object'||Array.isArray(input)||
@@ -31,10 +47,11 @@ async function boundedProviderGet(url,auth,apiFetch){
       method:'GET',headers:{Authorization:authorization,Accept:'application/json'},
       redirect:'error',cache:'no-store',signal:AbortSignal.timeout(7000)
     });
-  } catch {throw Error('Exotel read-only lookup transport unavailable')}
-  if(!response||response.status!==200)throw Error('Exotel read-only lookup not authorized or unavailable');
+  } catch {throw safeProviderError('transport_unavailable','Exotel read-only lookup transport unavailable')}
+  if(!response||response.status!==200)throw safeProviderError(
+    responseCode(response),'Exotel read-only lookup not authorized or unavailable');
   if(!(response.headers?.get('content-type')||'').toLowerCase().includes('application/json'))
-    throw Error('Exotel read-only lookup returned unexpected format');
+    throw safeProviderError('unexpected_content_type','Exotel read-only lookup returned unexpected format');
   let size=0,payload='';
   const reader=response.body?.getReader();
   if(!reader)throw Error('Exotel read-only lookup body missing');
@@ -47,18 +64,18 @@ async function boundedProviderGet(url,auth,apiFetch){
       payload+=decoder.decode(next.value,{stream:true});
     }
     payload+=decoder.decode();
-  }catch{throw Error('Exotel read-only response rejected')}finally{reader.releaseLock()}
+  }catch{throw safeProviderError('response_unreadable','Exotel read-only response rejected')}finally{reader.releaseLock()}
   try {
     const result=JSON.parse(payload);
     if(!result||typeof result!=='object'||Array.isArray(result))
       throw Error('invalid');
     return result;
-  }catch{throw Error('Exotel response JSON invalid')}
+  }catch{throw safeProviderError('invalid_response_json','Exotel response JSON invalid')}
 }
 export async function checkExotelAccountReadOnly(auth,{apiFetch=fetch}={}){
   const c=credentials(auth);
   const data=await boundedProviderGet(urlFor(c.accountSid,'Calls.json?PageSize=1',c.region??'india'),c,apiFetch);
-  if(!Array.isArray(data.Calls))throw Error('Exotel account response schema mismatch');
+  if(!Array.isArray(data.Calls))throw safeProviderError('unexpected_call_list_schema','Exotel account response schema mismatch');
   return Object.freeze({
     provider:'exotel',reachable:true,accountLookupSucceeded:true,
     callsCreated:0,existingCallDataReturned:false,tokenMaterialReturned:false,
