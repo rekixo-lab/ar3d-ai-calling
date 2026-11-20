@@ -58,6 +58,69 @@ async function readBounded(req){
   for(const chunk of chunks){bytes.set(chunk,offset);offset+=chunk.length}
   return bytes;
 }
+// Exotel's dashboard "Test URL" can send a connectivity probe rather than
+// the documented call/session envelope. Its exact synthetic payload is not
+// specified by the public vendor webhook contract. A strictly identified,
+// authenticated, tiny probe may be acknowledged without treating it as a
+// genuine voicebot session or writing anything to D1.
+// This is deliberately NOT a fallback for malformed call/session events.
+const PROBE_KEYS=new Set([
+  'test','is_test','webhook_test','type','event','event_type',
+  'webhook_type','message','timestamp','status','source'
+]);
+const REAL_EVENT_KEYS=new Set([
+  'session_id','conversation_id','external_id','account_id','bot_id',
+  'events','contact_uri','landing_number','metadata','custom_parameters',
+  'session_state','trigger_reason','network_type','start_time','end_time'
+]);
+const SENSITIVE_KEYS=new Set([
+  'phone','mobile','number','call_sid','lead_id','tenant_id','transcript',
+  'customer','contact','recording'
+]);
+const PROBE_WORD=/^(?:test|test[_ -]?webhook|webhook[_ -]?test|ping|health[_ -]?check|verification|verify|validate|validation|webhook[_ -]?verification)$/i;
+export function isExplicitExotelWebhookProbe(bytes){
+  if(!(bytes instanceof Uint8Array)||bytes.length<2||bytes.length>1024)
+    return false;
+  let value;
+  try{value=JSON.parse(new TextDecoder('utf-8',{fatal:true}).decode(bytes))}
+  catch{return false}
+  if(!value||typeof value!=='object'||Array.isArray(value))return false;
+  const keys=Object.keys(value);
+  if(keys.length<1||keys.length>9||
+     keys.some(k=>!PROBE_KEYS.has(k)||REAL_EVENT_KEYS.has(k)||SENSITIVE_KEYS.has(k)))
+    return false;
+  const recognized=(value.test===true||value.is_test===true||
+    value.webhook_test===true||
+    ['type','event','event_type'].some(k=>typeof value[k]==='string'&&
+      value[k].length<=48&&PROBE_WORD.test(value[k].trim())));
+  return recognized;
+}
+// For troubleshooting EXOTEL's unpublicized Test URL shape, return only a
+// fixed list of field PRESENCE indicators, NEVER values or raw body fragments.
+// Authorization has already been confirmed before this can be called.
+function invalidPayloadDiagnostics(bytes,error){
+  const outcome={error:'invalid_webhook_payload'};
+  if(!(bytes instanceof Uint8Array)||bytes.length>MAX_BODY)return outcome;
+  try{
+    const obj=JSON.parse(new TextDecoder('utf-8',{fatal:true}).decode(bytes));
+    if(obj&&typeof obj==='object'&&!Array.isArray(obj)){
+      const documented=[
+        'session_id','conversation_id','external_id','account_id',
+        'session_state','trigger_reason','network_type','events',
+        'test','is_test','webhook_test','type','event','event_type'
+      ];
+      outcome.present_fields=documented.filter(key=>Object.hasOwn(obj,key));
+    }
+  }catch{}
+  const staticErrors=[
+    'session identity','session state','network type','event list',
+    'event','transcript turn','turn sequence','turn status',
+    'turn segments','speaker','timestamp','raw bytes','JSON','envelope'
+  ];
+  const message=String(error?.message||'');
+  outcome.validation=staticErrors.find(tag=>message.includes('invalid Exotel Voicebot '+tag))||'schema_or_body';
+  return outcome;
+}
 async function receiptHmac(token,domain,value){
   const key=await crypto.subtle.importKey('raw',new TextEncoder().encode(token),
     {name:'HMAC',hash:'SHA-256'},false,['sign']);
@@ -166,9 +229,14 @@ export async function handleExotelVoicebotWebhookRequest(req,env){
     return fail(415,'json_required');
   if(!env?.CONTROL_DB?.prepare||!env.CONTROL_DB.batch)
     return fail(503,'webhook_storage_unavailable');
-  let parsed;
+  let parsed,rawBytes;
   try{
-    parsed=parseExotelVoicebotEvent(await readBounded(req));
+    rawBytes=await readBounded(req);
+    // A well-identified dashboard connectivity probe is never a call event:
+    // return the documented ACK, no D1 records, no customer/CRM changes.
+    if(isExplicitExotelWebhookProbe(rawBytes))
+      return response(exotelVoicebotAck());
+    parsed=parseExotelVoicebotEvent(rawBytes);
     if(parsed.accountId&&parsed.accountId!==env.EXOTEL_ACCOUNT_SID)
       return fail(422,'account_mismatch');
     if(kind==='transcript'&&
@@ -177,7 +245,9 @@ export async function handleExotelVoicebotWebhookRequest(req,env){
     if(kind==='session_end'&&
        (parsed.state!=='session_end'||parsed.events.length!==0))
       return fail(422,'invalid_session_end');
-  }catch{return fail(400,'invalid_webhook_payload')}
+  }catch(error){
+    return response(invalidPayloadDiagnostics(rawBytes,error),400);
+  }
   try{
     await quarantineExotelVoicebotDelivery(env,parsed,{kind});
   }catch{
