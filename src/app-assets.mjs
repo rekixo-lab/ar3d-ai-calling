@@ -128,9 +128,39 @@ function engineeringPanel(main){
       operatorDial.disabled=!r.configured||!r.mfaEnabled;
       operatorHistory.replaceChildren();
       for(const item of r.recent||[]){
-        operatorHistory.append(node('p',{class:'muted',
+        const entry=div('stack',node('p',{class:'muted',
           text:item.createdAt+' — '+item.state+' — '+item.id+
             (item.errorCode?' ('+item.errorCode+')':'')}));
+        if(item.checkState==='verified'){
+          entry.append(node('p',{class:'success',text:
+            'Verified Exotel Call Details: '+item.providerStatus+
+            (item.durationSeconds===null?' | duration pending':
+              ' | '+item.durationSeconds+' seconds')+
+            ' | checked '+item.checkedAt}));
+        }else if(item.checkState==='unknown'){
+          entry.append(node('p',{class:'muted',
+            text:'Latest Exotel status could not be verified ('+item.checkError+
+            '). No call was initiated by this check.'}));
+        }else if(item.checkState==='reserved'){
+          entry.append(node('p',{class:'muted',
+            text:'Previous Exotel status check still pending. No call initiated.'}));
+        }
+        if(item.state==='submitted'&&r.mfaEnabled){
+          const refresh=btn('Check existing Exotel call status (read-only)',async()=>{
+            refresh.disabled=true;
+            try{
+              const result=await api('/v1/human/engineering/exotel-status-check',
+                'POST',{requestId:item.id});
+              if(result.state==='verified')notice('Exotel verified: '+
+                result.providerStatus+(result.durationSeconds===null?
+                  ' | duration pending':' | '+result.durationSeconds+' sec')+
+                '. No new call started.');
+            }catch(err){asError(err)}
+            finally{loadOperatorTest()}
+          },true);
+          entry.append(refresh);
+        }
+        operatorHistory.append(entry);
       }
       if(!r.configured)operatorHistory.append(node('p',{class:'note',
         text:'Operator setup missing: '+r.missing.join(', ')+
