@@ -61,5 +61,6 @@ try{
  await adminPage.getByLabel('Fictional buyer — '+lead.slice(0,8),{exact:true}).check();
  await adminPage.getByRole('button',{name:'Approve selected customers',exact:true}).click();
  await adminPage.getByText('1 customer approvals saved.',{exact:true}).waitFor();
+ await adminPage.evaluate(()=>window.scrollTo(0,0));await adminPage.screenshot({path:'artifacts/premium-super-admin.png',fullPage:true});
  await adminContext.close();console.log('Super Admin UI: current MFA session, company policy and selected customer clearances PASS');
 }catch(e){console.error(await lastPage?.locator('body').innerText());await lastPage?.screenshot({path:'/tmp/ar3d-calling-failure.png',fullPage:true});throw e}finally{await browser.close();server.close();f.close()}
