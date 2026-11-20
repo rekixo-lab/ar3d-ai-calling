@@ -83,9 +83,8 @@ export function makeMainConfig(template, credentials) {
   const onlyAuthCron = template?.triggers &&
     Object.keys(template.triggers).length === 1 &&
     Array.isArray(template.triggers.crons) &&
-    template.triggers.crons.length === 2 &&
-    template.triggers.crons[0] === '0 */6 * * *' &&
-    template.triggers.crons[1] === '* * * * *';
+    template.triggers.crons.length === 1 &&
+    template.triggers.crons[0] === '* * * * *';
   if (template?.name !== 'ar3d-ai-calling' || template.main !== './src/index.mjs' ||
       template.route || !onlyCallingDomain || !onlyAuthCron || template.services ||
       !Array.isArray(template.d1_databases) || template.d1_databases.length !== 2 ||

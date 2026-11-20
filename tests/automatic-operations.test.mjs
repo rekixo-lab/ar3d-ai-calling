@@ -184,3 +184,12 @@ test('Monitoring refuses other AR3D sites, malicious paths and unhealthy health 
   const result=await monitor({fetchFn:async()=>new Response('Not found',{status:404})});
   assert.equal(result.healthy,false);
 });
+test('one minute cron slot dispatches safely and preserves six-hour cleanup',async()=>{
+ const f=dbFixture({changes:0});
+ const between=Date.parse('2026-11-20T06:01:00Z');
+ const idle=await handleCallingCron({cron:'* * * * *',scheduledTime:between},f.env);
+ assert.equal(idle.processed,0);assert.equal(f.calls.length,0);
+ const due=await handleCallingCron({cron:'* * * * *',scheduledTime:Date.parse('2026-11-20T06:00:00Z')},f.env);
+ assert.equal(due.processed,0);assert.equal(due.maintenance.webhookReceiptsDeleted,0);
+ assert.equal(f.calls.length,5);
+});

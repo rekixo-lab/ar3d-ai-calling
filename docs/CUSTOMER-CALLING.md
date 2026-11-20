@@ -74,3 +74,8 @@ Live acceptance still requires an explicitly selected verified recipient,
 provider-permitted trial/production caller, chosen agent version and a real
 conversation check. Passing automated tests is not evidence that those
 account-side steps happened.
+
+The account has the Workers Free five-cron ceiling. This Worker therefore uses
+one minute schedule in place of its old six-hour schedule. The minute handler
+runs auth/receipt cleanup only at the original UTC six-hour boundaries. It does
+not add an account cron slot or touch any other Worker schedule.

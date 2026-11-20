@@ -61,7 +61,17 @@ export async function pruneExpiredExotelWebhookReceipts(env,{
   return changes;
 }
 export async function handleCallingCron(controller,env){
-  if(controller?.cron===CAMPAIGN_CRON)return runCampaignCron(env,{now:controller.scheduledTime??Date.now()});
+  if(controller?.cron===CAMPAIGN_CRON){
+    const timestamp=controller.scheduledTime??Date.now();
+    let campaigns;
+    try{campaigns=await runCampaignCron(env,{now:timestamp})}
+    catch{console.error('AR3D campaign scheduler unavailable');campaigns={processed:0,error:'scheduler_unavailable'}}
+    // Reuse ONE account cron slot. Auth maintenance still runs only on the
+    // original six-hour UTC boundaries; a campaign failure cannot skip it.
+    if(Math.floor(timestamp/60000)%360!==0)return campaigns;
+    const maintenance=await handleCallingCron({cron:AUTH_MAINTENANCE_CRON,scheduledTime:timestamp},env);
+    return {...campaigns,maintenance};
+  }
   if(controller?.cron!==AUTH_MAINTENANCE_CRON)
     throw Error('unknown Calling Worker cron expression');
   const timestamp=controller?.scheduledTime??Date.now();
