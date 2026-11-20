@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import worker from '../src/index.mjs';
-import {AUTH_MAINTENANCE_CRON,pruneExpiredAuth,
+import {AUTH_MAINTENANCE_CRON,pruneExpiredAuth,pruneExpiredExotelWebhookReceipts,
   handleCallingCron} from '../src/automatic-auth-maintenance.mjs';
 import {probeExotelConnectivity} from '../src/provider-connectivity.mjs';
 import {monitor} from '../scripts/monitor-production.mjs';
@@ -21,16 +21,18 @@ function dbFixture({changes=1,throwOn=null}={}){
   }};
   return {env:{CONTROL_DB:db,CRM_DB:{prepare(){throw Error('CRM touched')}}},calls};
 }
-test('Cloudflare scheduled cleanup uses only exact authorized cron and four expired auth tables',async()=>{
+test('Cloudflare scheduled cleanup uses four auth tables and isolated Exotel receipt expiry',async()=>{
   const {env,calls}=dbFixture({changes:2});
   const output=await worker.scheduled({cron:AUTH_MAINTENANCE_CRON,scheduledTime:NOW},env);
   assert.equal(output.rowsDeleted,8);
   assert.equal(output.tablesChecked,4);
+  assert.equal(output.webhookReceiptsDeleted,2);
   assert.equal(output.consentTouched,false);
   assert.equal(output.crmTouched,false);
   assert.equal(output.recordingsTouched,false);
   assert.equal(output.billingTouched,false);
-  assert.equal(calls.length,4);
+  assert.equal(calls.length,5);
+  assert.ok(calls.some(x=>x.sql.includes('DELETE FROM exotel_voicebot_event_receipts')&&x.params.includes(NOW)));
   assert.ok(calls.every(x=>x.params.at(-1)===100));
   const sql=calls.map(x=>x.sql).join(' ');
   assert.ok(sql.includes('DELETE FROM human_sessions'));
@@ -46,6 +48,8 @@ test('Unknown schedules and DBs fail closed before touching customer data',async
   await assert.rejects(pruneExpiredAuth(f.env,{cron:'every minute',now:NOW}),/unauthorized/);
   await assert.rejects(pruneExpiredAuth({}, {now:NOW}),/unauthorized/);
   await assert.rejects(pruneExpiredAuth(f.env,{now:-2}),/unauthorized/);
+  await assert.rejects(pruneExpiredExotelWebhookReceipts(f.env,{now:-2}),/unauthorized/);
+  await assert.rejects(pruneExpiredExotelWebhookReceipts(f.env,{cron:'* * * * *',now:NOW}),/unauthorized/);
   assert.equal(f.calls.length,0);
   await assert.rejects(pruneExpiredAuth(dbFixture({changes:101}).env,{now:NOW}),/unconfirmed/);
   await assert.rejects(pruneExpiredAuth(dbFixture({changes:NaN}).env,{now:NOW}),/unconfirmed/);
@@ -55,6 +59,7 @@ test('Maintenance never requires providers, payments or extra operator secrets',
   const f=dbFixture({changes:0});
   const out=await handleCallingCron({cron:AUTH_MAINTENANCE_CRON,scheduledTime:NOW},f.env);
   assert.equal(out.rowsDeleted,0);
+  assert.equal(out.webhookReceiptsDeleted,0);
   assert.equal(out.service,'ar3d-ai-calling');
   assert.ok(!JSON.stringify(out).includes('token_hash'));
 });
