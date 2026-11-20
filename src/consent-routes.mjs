@@ -58,19 +58,41 @@ export async function handleConsentRequest(req,env,user){
     const member=await requireMembership(env.CONTROL_DB,user,tenantId,method==='POST');
     if(!member)return fail('forbidden',403);
     const db=resolveCrmDb(env,member),tid=member.tenant_id;
-    const lead=await db.prepare('SELECT id,consent_status,dnd_status FROM leads WHERE tenant_id=? AND id=?')
+    const lead=await db.prepare('SELECT id,consent_status,dnd_status,customer_segment FROM leads WHERE tenant_id=? AND id=?')
       .bind(tid,leadId).first();
     if(!lead)return fail('lead not found',404);
     if(route==='call-readiness'){
-      // Intentionally always blocked. No verifier, provider-approved number,
-      // provider DND lookup, lawful calling-hours rules or live dialing exists.
-      return json({eligible:false,leadId,tenantId:tid,
+      // Read-only facts from this authenticated tenant's CRM. Even a previously
+      // enquired customer or submitted evidence NEVER authorizes a call.
+      const [optOut,evidence]=await Promise.all([
+        db.prepare('SELECT COUNT(*) AS total FROM lead_opt_out_events WHERE tenant_id=? AND lead_id=?')
+          .bind(tid,leadId).first(),
+        db.prepare("SELECT COUNT(*) AS total FROM lead_consent_evidence WHERE tenant_id=? AND lead_id=? AND review_status='pending'")
+          .bind(tid,leadId).first()
+      ]);
+      const optOutRecorded=Number(optOut?.total||0)>0;
+      const pendingEvidence=Math.max(0,Number(evidence?.total||0));
+      const reasons=[];
+      if(optOutRecorded)reasons.push('Customer opt-out is recorded. No further calls.');
+      if(lead.consent_status==='denied')reasons.push('Lead has denied contact permission.');
+      else if(lead.consent_status!=='granted')
+        reasons.push('Purpose-specific customer consent has not been independently verified.');
+      if(lead.dnd_status==='blocked')reasons.push('Lead is blocked by DND/contact preference.');
+      else if(lead.dnd_status!=='allowed')
+        reasons.push('Independent DND/customer preference verification is unavailable.');
+      if(pendingEvidence>0)
+        reasons.push('Submitted consent evidence is pending review; this does not grant permission.');
+      else reasons.push('No pending consent evidence reference is recorded.');
+      if(!['prior_inquiry','unknown_contact'].includes(lead.customer_segment))
+        reasons.push('Customer segment is not classified.');
+      reasons.push('Approved caller ID, traffic classification and calling window have not been verified.');
+      reasons.push('Provider launch entitlement, AI disclosure and opt-out escalation remain unverified.');
+      // This is a preparation report, not a client-supplied compliance switch.
+      return json({eligible:false,executionAllowed:false,leadId,tenantId:tid,
         consentStatus:lead.consent_status,dndStatus:lead.dnd_status,
-        reasons:[
-          'Independent evidence review and consent verification are not integrated',
-          'Telecom provider DND status has not been checked',
-          'Approved caller number and compliant calling schedule are unavailable'
-        ],notice:'No calls can be placed from this service.'});
+        optOutRecorded,pendingEvidenceCount:pendingEvidence,
+        customerSegment:lead.customer_segment||'unclassified',
+        reasons,notice:'Read-only compliance preparation: no outgoing calls allowed.'});
     }
     if(method==='GET'){
       const rows=await db.prepare('SELECT id,source,purpose,reference,captured_at AS capturedAt,received_at AS receivedAt,review_status AS reviewStatus FROM lead_consent_evidence WHERE tenant_id=? AND lead_id=? ORDER BY received_at DESC,id DESC LIMIT 50')
