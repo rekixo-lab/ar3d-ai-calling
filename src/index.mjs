@@ -13,7 +13,15 @@ const now=()=>new Date().toISOString();
 const bearer=(req)=>(req.headers.get('authorization')||'').match(/^Bearer (.+)$/i)?.[1]||'';
 const isPost=(r)=>r.method==='POST';
 const isGet=(r)=>r.method==='GET';
-const allowedOrigin=(r)=>!r.headers.has('origin')||new URL(r.headers.get('origin')).origin===new URL(r.url).origin;
+const allowedOrigin=(r)=>{
+  // Machine API Bearer requests may omit Origin, but malformed or cross-site
+  // Origin headers must fail closed rather than throwing outside fetch's catch.
+  if(!r.headers.has('origin'))return true;
+  try{
+    const raw=r.headers.get('origin');
+    return raw!=='null'&&new URL(raw).origin===new URL(r.url).origin;
+  }catch{return false}
+};
 async function body(req){
   const max=16384;
   if(Number(req.headers.get('content-length'))>max)throw Error('request body too large');
