@@ -193,7 +193,8 @@ export async function inspectCloudflare({ credentials, mode, apiFetch = fetch, t
     const names = rows.map(x => x.name);
     const state = checkTables(names, binding, mode);
     modes[binding] = state;
-    if (state === 'ready' || state === 'crm_additive_upgrade') {
+    if (state === 'ready' || state === 'crm_additive_upgrade' ||
+        state === 'control_additive_upgrade') {
       if (binding === 'CRM_DB') {
         const triggers = await query(id, "SELECT name,sql FROM sqlite_master WHERE type='trigger' AND name LIKE 'trg_%'");
         checkSafetyTriggers(triggers,{allowAdditiveUpgrade:state === 'crm_additive_upgrade'});
