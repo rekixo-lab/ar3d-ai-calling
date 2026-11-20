@@ -60,7 +60,8 @@ export async function handleVoicebotReviewRequest(req,env,user){
       const rows=await db.prepare([
         'SELECT r.id,r.lead_id AS leadId,r.status,r.possible_opt_out AS possibleOptOut,',
         'r.survey_json AS surveyJson,r.created_at AS createdAt,',
-        'l.updated_at AS leadUpdatedAt',
+        'l.updated_at AS leadUpdatedAt,l.consent_status AS consentStatus,',
+        'l.dnd_status AS dndStatus',
         'FROM voicebot_qualification_reviews r JOIN leads l',
         'ON l.tenant_id=r.tenant_id AND l.id=r.lead_id',
         'WHERE r.tenant_id=? ORDER BY r.created_at DESC,r.id DESC LIMIT ? OFFSET ?'
@@ -73,6 +74,7 @@ export async function handleVoicebotReviewRequest(req,env,user){
         }
         return {id:x.id,leadId:x.leadId,status:x.status,
           possibleOptOut:Number(x.possibleOptOut)===1,
+          suppressionConfirmed:x.consentStatus==='denied'&&x.dndStatus==='blocked',
           provisionalSurvey:parsed,leadUpdatedAt:x.leadUpdatedAt,
           createdAt:x.createdAt};
       });
@@ -93,7 +95,8 @@ export async function handleVoicebotReviewRequest(req,env,user){
     const record=await db.prepare([
       'SELECT r.id,r.lead_id,r.survey_json,r.status,r.possible_opt_out,',
       'r.source_verified,r.mapping_verified,',
-      'l.updated_at AS leadUpdatedAt,l.requirements_json AS requirementsJson',
+      'l.updated_at AS leadUpdatedAt,l.requirements_json AS requirementsJson,',
+      'l.consent_status AS consentStatus,l.dnd_status AS dndStatus',
       'FROM voicebot_qualification_reviews r JOIN leads l',
       'ON r.tenant_id=l.tenant_id AND r.lead_id=l.id',
       'WHERE r.tenant_id=? AND r.id=? LIMIT 1'
@@ -104,6 +107,9 @@ export async function handleVoicebotReviewRequest(req,env,user){
       return fail('provider evidence is not independently verified',409);
     const at=new Date().toISOString();
     if(action==='dismiss'){
+      if(Number(record.possible_opt_out)===1 &&
+         !(record.consentStatus==='denied'&&record.dndStatus==='blocked'))
+        return fail('verified Do Not Call suppression is required before dismissing possible opt-out',409);
       const updates=await db.batch([
         db.prepare("UPDATE voicebot_qualification_reviews SET status='dismissed',reviewed_by=?,reviewed_at=? WHERE tenant_id=? AND id=? AND status='pending'")
           .bind(user.id,at,tid,id),
