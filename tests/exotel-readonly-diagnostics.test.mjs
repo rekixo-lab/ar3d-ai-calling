@@ -14,13 +14,14 @@ const vendorBody='SENSITIVE vendor body '+SECRET+' +919876543210';
 test('Exotel HTTP failures are classified without vendor responses, credentials or PII',async()=>{
   for(const [status,code] of [
     [401,'http_401'],[403,'http_403'],[404,'http_404'],[429,'http_429'],
-    [500,'http_5xx'],[503,'http_5xx'],[402,'unexpected_http_status']
+    [500,'http_5xx'],[503,'http_5xx'],[302,'http_redirect_rejected'],[402,'unexpected_http_status']
   ]){
     let requests=0;
     const r=await probeExotelConnectivity(env,{apiFetch:async(url,opts)=>{
       requests++;
       assert.equal(url,'https://api.exotel.com/v1/Accounts/test123/Calls.json?PageSize=1');
       assert.equal(opts.method,'GET');
+      assert.equal(opts.redirect,'manual');
       return new Response(vendorBody,{status,headers:{'Content-Type':'text/plain'}});
     }});
     assert.equal(requests,1);

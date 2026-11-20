@@ -87,7 +87,7 @@ test('Exotel connectivity uses only read-only India GET and returns no private a
   assert.equal(r.voiceStreamingEnabled,false);
   assert.equal(calls.length,1);
   assert.equal(calls[0].opts.method,'GET');
-  assert.equal(calls[0].opts.redirect,'error');
+  assert.equal(calls[0].opts.redirect,'manual');
   assert.equal(calls[0].opts.cache,'no-store');
   assert.equal(calls[0].url,'https://api.in.exotel.com/v1/Accounts/fictional_account/Calls.json?PageSize=1');
   assert.ok(!JSON.stringify(r).includes(exotelEnv.EXOTEL_API_KEY));

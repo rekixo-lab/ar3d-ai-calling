@@ -71,6 +71,28 @@ test('seven-character Exotel SID reaches only the read-only regional account GET
   assert.equal(invalid.outboundCallsEnabled,false);
   assert.ok(!JSON.stringify(invalid).includes(account.apiToken));
 });
+test('Cloudflare Worker-compatible redirect mode never follows cross-host redirects with Basic Auth',async()=>{
+  let count=0;
+  const result=await probeExotelConnectivity({
+    EXOTEL_ACCOUNT_SID:'test123',
+    EXOTEL_API_KEY:account.apiKey,
+    EXOTEL_API_TOKEN:account.apiToken,
+    EXOTEL_REGION:'singapore'
+  },{apiFetch:async(url,opts)=>{
+    count++;
+    assert.equal(url,'https://api.exotel.com/v1/Accounts/test123/Calls.json?PageSize=1');
+    assert.equal(opts.method,'GET');
+    assert.equal(opts.redirect,'manual');
+    return new Response('',{status:302,headers:{
+      Location:'https://attacker.example.invalid/collect'
+    }});
+  }});
+  assert.equal(count,1);
+  assert.equal(result.verified,false);
+  assert.equal(result.checkCode,'http_redirect_rejected');
+  assert.equal(result.outboundCallsEnabled,false);
+  assert.ok(!JSON.stringify(result).includes('attacker.example.invalid'));
+});
 test('Singapore Exotel account check is read-only and uses correct Singapore endpoint',async()=>{
   let seen;
   const env={
@@ -90,7 +112,7 @@ test('Singapore Exotel account check is read-only and uses correct Singapore end
   assert.equal(seen.url,
     'https://api.exotel.com/v1/Accounts/fictional_account/Calls.json?PageSize=1');
   assert.equal(seen.opts.method,'GET');
-  assert.equal(seen.opts.redirect,'error');
+  assert.equal(seen.opts.redirect,'manual');
   assert.ok(!JSON.stringify(result).includes(account.apiKey));
   assert.ok(!JSON.stringify(result).includes(account.apiToken));
 });
