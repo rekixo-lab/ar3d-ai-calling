@@ -4,7 +4,7 @@
 import {requireMembership} from './human-auth.mjs';
 import {resolveCrmDb,parseJsonBody} from './core.mjs';
 import {normalizePropertySurvey,surveyToCrm} from './fixed-property-survey.mjs';
-const UUID=/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
+const UUID=/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
 const ACTION=/^\/v1\/human\/voicebot-reviews\/([a-f0-9-]{36})\/(apply|dismiss)$/i;
 const LIST='/v1/human/voicebot-reviews';
 const json=(body,status=200)=>Response.json(body,{status,headers:{
