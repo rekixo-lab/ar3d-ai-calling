@@ -9,6 +9,7 @@ const EXOTEL_CHECK_REASONS=Object.freeze({
   http_403:'HTTP 403: Exotel refused this read-only resource. Check account verification, API permissions or trial restrictions with Exotel.',
   http_404:'HTTP 404: Exotel could not find this Account SID or endpoint in the selected account region.',
   http_429:'HTTP 429: Exotel API rate limit. Avoid repeated requests and retry later.',
+  http_redirect_rejected:'Exotel returned a redirect. It was rejected safely; verify the regional API host and ask Exotel support if it persists.',
   http_5xx:'HTTP 5xx: Exotel service returned an error; retry when the service is healthy.',
   transport_unavailable:'Exotel could not be reached within the request timeout. Check connectivity and try again.',
   unexpected_content_type:'Exotel responded with a non-JSON format; inspect the provider account/API access.',
