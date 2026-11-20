@@ -53,6 +53,7 @@ export function compileVoicebotQualification(deliveries,{
     duplicateEventsIgnored:review.duplicateEventsIgnored,
     nonfinalTurnsIgnored:review.nonfinalTurnsIgnored,
     sessionEndReceived:review.seenSessionEnd,
+    completedSequenceContinuous:review.completedSequenceContinuous,
     optOutReviewNeeded:review.optOutReviewNeeded
   };
   if(review.optOutReviewNeeded){
@@ -70,7 +71,8 @@ export function compileVoicebotQualification(deliveries,{
     if(result.action==='repeat'||result.action==='human_review')break;
   }
   const finished=result.state.status==='completed';
-  const clean=finished&&review.seenSessionEnd&&used===answers.length&&
+  const clean=finished&&review.seenSessionEnd&&review.completedSequenceContinuous&&
+    used===answers.length&&
     (answers.length===6||answers.length===7);
   const status=clean?'provisional_review_ready':'needs_human_review';
   // No raw transcript, customer phone, account ID, CallSid or webhook metadata
