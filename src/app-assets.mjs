@@ -122,7 +122,7 @@ function engineeringPanel(main){
     try{
       const r=await api('/v1/human/engineering/exotel-self-test');
       operatorStatus.textContent='Test dispatch: '+(r.configured?'Configured':'Blocked')+
-        ' | Super Admin MFA: '+(r.mfaEnabled?'Enabled':'Required')+
+        ' | Current login MFA: '+(r.mfaEnabled?'Verified':'Sign out and sign in with authenticator')+
         ' | Flow: '+(r.voicebotFlowId||'not configured')+
         ' | Verified destination ending: '+(r.destinationLast4||'not configured');
       operatorDial.disabled=!r.configured||!r.mfaEnabled;
