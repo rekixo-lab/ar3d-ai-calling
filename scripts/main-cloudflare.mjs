@@ -19,7 +19,7 @@ export const REQUIRED_TABLES = Object.freeze({
   ]),
   CRM_DB: Object.freeze([
     'leads','agents','calls','site_visits','crm_audit_events',
-    'lead_notes','conversation_simulations','lead_opt_out_events','lead_consent_evidence','call_campaign_drafts','call_campaign_candidates',
+    'lead_notes','conversation_simulations','lead_opt_out_events','lead_consent_evidence','call_campaign_drafts','call_campaign_candidates','voicebot_qualification_reviews',
   ]),
 });
 export const REQUIRED_COLUMNS = Object.freeze({
@@ -41,6 +41,7 @@ export const REQUIRED_COLUMNS = Object.freeze({
     call_campaign_drafts: Object.freeze(['tenant_id','status','language_mode']),
     call_campaign_candidates: Object.freeze(['tenant_id','campaign_id','lead_id']),
     agents: Object.freeze(['tenant_id','status','questions_json']),
+    voicebot_qualification_reviews: Object.freeze(['tenant_id','lead_id','provider','status','survey_json','source_verified','mapping_verified','possible_opt_out']),
   }),
 });
 const accountPattern = /^[a-f0-9]{32}$/i;
@@ -112,12 +113,15 @@ export const REQUIRED_SAFETY_TRIGGERS = Object.freeze({
   trg_no_call_launch: ['before insert on calls','raise(abort'],
   trg_agents_block_active_insert: ['before insert on agents','raise(abort'],
   trg_agents_block_active_update: ['before update of status on agents','raise(abort'],
+  trg_voicebot_review_terminal: ['before update of status on voicebot_qualification_reviews','raise(abort'],
+  trg_voicebot_review_immutable: ['before update of tenant_id','voicebot_qualification_reviews','raise(abort'],
 });
-export function checkSafetyTriggers(records) {
+export function checkSafetyTriggers(records,{allowAdditiveUpgrade=false}={}) {
   if (!Array.isArray(records)) throw Error('Invalid CRM trigger inspection result.');
   const triggers = new Map(records.map(row => [row?.name, String(row?.sql || '')
     .toLowerCase().replace(/\s+/g, ' ').trim()]));
   for (const [name, signatures] of Object.entries(REQUIRED_SAFETY_TRIGGERS)) {
+    if (allowAdditiveUpgrade && name.startsWith('trg_voicebot_review_')) continue;
     const sql = triggers.get(name);
     if (!sql || signatures.some(signature => !sql.includes(signature)))
       throw Error('CRM safety trigger missing or invalid: ' + name + '. Deployment refused.');
@@ -139,6 +143,12 @@ export function checkTables(tables, binding, mode) {
   }
   if (mode === 'preflight') {
     if (present.size === 0) return 'fresh';
+    // Only one specifically reviewed ADDITIVE table may be absent on an
+    // existing CRM D1. Every original table and calling safety trigger must
+    // already exist; unknown partial schemas still fail closed.
+    if (binding === 'CRM_DB' && missing.length === 1 &&
+        missing[0] === 'voicebot_qualification_reviews')
+      return 'crm_additive_upgrade';
     if (missing.length) throw Error(D1_NAME[binding] + ' has partial schema; inspect manually: ' + missing.join(', '));
     return 'ready';
   }
@@ -179,12 +189,13 @@ export async function inspectCloudflare({ credentials, mode, apiFetch = fetch, t
     const names = rows.map(x => x.name);
     const state = checkTables(names, binding, mode);
     modes[binding] = state;
-    if (state === 'ready') {
+    if (state === 'ready' || state === 'crm_additive_upgrade') {
       if (binding === 'CRM_DB') {
         const triggers = await query(id, "SELECT name,sql FROM sqlite_master WHERE type='trigger' AND name LIKE 'trg_%'");
-        checkSafetyTriggers(triggers);
+        checkSafetyTriggers(triggers,{allowAdditiveUpgrade:state === 'crm_additive_upgrade'});
       }
       for (const table of Object.keys(REQUIRED_COLUMNS[binding])) {
+        if (state === 'crm_additive_upgrade' && table === 'voicebot_qualification_reviews')continue;
         const columns = await query(id, 'PRAGMA table_info(' + table + ')');
         checkColumns(columns.map(x => x.name), binding, table);
       }
@@ -197,7 +208,8 @@ export async function inspectCloudflare({ credentials, mode, apiFetch = fetch, t
   if (bucketResult?.name !== 'ar3d-calling-recordings')
     throw Error('Main R2 bucket is missing or belongs to an unexpected resource.');
   // Preflight rejects a mixed state. This stops accidental double-initialize.
-  if (mode === 'preflight' && modes.CONTROL_DB !== modes.CRM_DB)
+  if (mode === 'preflight' && modes.CONTROL_DB !== modes.CRM_DB &&
+      !(modes.CONTROL_DB === 'ready' && modes.CRM_DB === 'crm_additive_upgrade'))
     throw Error('D1 databases have mixed initialized/empty states; manual reconciliation required.');
   return { config, modes };
 }
@@ -205,6 +217,8 @@ export async function inspectCloudflare({ credentials, mode, apiFetch = fetch, t
 // A single clean state is mandatory for unattended deployment. Mixed/partial
 // schemas are NEVER safe to automatically initialize or deploy.
 export function verifiedSchemaState(modes) {
+  if (modes?.CONTROL_DB === 'ready' && modes?.CRM_DB === 'crm_additive_upgrade')
+    return 'crm_additive_upgrade';
   if (!modes || !['fresh','ready'].includes(modes.CONTROL_DB) ||
       modes.CONTROL_DB !== modes.CRM_DB)
     throw Error('Refusing automated deployment: D1 schema states are mixed or invalid.');
