@@ -5,7 +5,7 @@ PRAGMA foreign_keys=ON;
 CREATE TABLE IF NOT EXISTS exotel_operator_test_calls (
   id TEXT PRIMARY KEY NOT NULL CHECK(length(id)=36),
   actor_user_id TEXT NOT NULL REFERENCES human_users(id),
-  rate_slot TEXT NOT NULL UNIQUE CHECK(length(rate_slot) BETWEEN 10 AND 24),
+  rate_slot TEXT NOT NULL UNIQUE CHECK(length(rate_slot) BETWEEN 5 AND 24),
   provider_call_sid TEXT UNIQUE,
   state TEXT NOT NULL CHECK(state IN ('reserved','submitted','unknown','rejected')),
   error_code TEXT,
