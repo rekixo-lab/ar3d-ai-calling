@@ -658,7 +658,52 @@ async function planningPanels(tenantId,content,role){
       notice('Candidate references added: '+result.inserted+'. No call started.');await refreshCandidateList();
     }catch(err){asError(err)}});
     campaignCard.append(pickForm);
+    const addIntent=btn('Record blocked call intent for selected candidate (no call)',async()=>{
+      if(!campaignPick.value||!currentCandidate.value){
+        notice('Choose an existing draft candidate first. No call can start.');
+        return;
+      }
+      if(!confirm('Record a BLOCKED planning-only intent for this candidate? This does NOT authorize or start a real call.'))return;
+      addIntent.disabled=true;
+      try{
+        const r=await api('/v1/human/call-intent-proposals','POST',{
+          tenantId,campaignId:campaignPick.value,leadId:currentCandidate.value,
+          acknowledgeNoDial:true
+        });
+        if(r.state!=='blocked'||r.executionAllowed||r.customerCallsStarted!==0)
+          throw Error('Unsafe intent response');
+        notice('Blocked planning intent recorded. No dial request created.');
+        await refreshIntentProposals();
+      }catch(err){asError(err)}finally{addIntent.disabled=false}
+    },true);
+    campaignCard.append(addIntent);
   }
+  const intentCard=div('card',
+    title('Blocked Call Intents — planning only','h3'),
+    node('p',{class:'note',text:
+      'An immutable proposal records which tenant draft and lead needs review. It is NOT consent approval, provider registration, call authorization or an Exotel dial request.'}));
+  const intentList=div('stack');
+  content.append(intentCard);
+  intentCard.append(intentList);
+  async function refreshIntentProposals(){
+    try{
+      const result=await api('/v1/human/call-intent-proposals?tenantId='+
+        encodeURIComponent(tenantId)+'&limit=50');
+      if(result.executionAllowed!==false||result.customerCallsStarted!==0)
+        throw Error('Unexpected intent readiness');
+      intentList.replaceChildren(
+        table(['Draft','Lead reference','Purpose','State','Consent','DND','Opt-out'],
+          result.proposals.map(p=>[
+            p.campaignName,p.leadId.slice(0,8),p.purpose,
+            p.state,p.consentStatus,p.dndStatus,p.optOutRecorded?'Yes':'No'
+          ])),
+        node('p',{class:'muted',text:
+          'All proposals remain blocked, including when an earlier lead later revokes permission. This list contains no phone numbers or transcripts.'})
+      );
+    }catch(err){intentList.replaceChildren(
+      node('p',{class:'err',text:'Blocked intent history unavailable.'}));asError(err)}
+  }
+  await refreshIntentProposals();
   const projectCard=div('card',title('AR3D Project Links — pending verification','h3'),
     node('p',{class:'note',text:'Metadata only. No Platform/Engine data is fetched.'}));
   content.append(projectCard);
