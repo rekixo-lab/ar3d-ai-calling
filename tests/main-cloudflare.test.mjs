@@ -91,6 +91,7 @@ function cloudflareMock({ controlTables=[],crmTables=[],controlName='ar3d-callin
         else if(sql.includes('lead_consent_evidence')) rows=['tenant_id','lead_id','review_status','submitted_by'].map(name=>({name}));
         else if(sql.includes('call_campaign_drafts')) rows=['tenant_id','status','language_mode'].map(name=>({name}));
         else if(sql.includes('call_campaign_candidates')) rows=['tenant_id','campaign_id','lead_id'].map(name=>({name}));
+        else if(sql.includes('voicebot_qualification_reviews')) rows=['tenant_id','lead_id','provider','status','survey_json','source_verified','mapping_verified','possible_opt_out'].map(name=>({name}));
         else if(sql.includes('agents')) rows=['tenant_id','status','questions_json'].map(name=>({name}));
         else rows=['token_hash','expires_at'].map(name=>({name}));
       } else throw Error('Unexpected SQL');
@@ -102,6 +103,20 @@ function cloudflareMock({ controlTables=[],crmTables=[],controlName='ar3d-callin
 test('preflight accepts new empty resources with correct Cloudflare identities', async () => {
   const r = await inspectCloudflare({credentials:getCredentials(env),mode:'preflight',template,apiFetch:cloudflareMock()});
   assert.deepEqual(r.modes,{CONTROL_DB:'fresh',CRM_DB:'fresh'});
+});
+test('exact old CRM baseline is upgradeable without mistaking partial schemas as safe',async()=>{
+  const old=REQUIRED_TABLES.CRM_DB.filter(t=>t!=='voicebot_qualification_reviews');
+  assert.equal(checkTables(old,'CRM_DB','preflight'),'crm_additive_upgrade');
+  assert.throws(()=>checkTables(old,'CRM_DB','ready'),/missing tables/);
+  assert.throws(()=>checkTables(old.filter(t=>t!=='leads'),'CRM_DB','preflight'),/partial schema/);
+  assert.equal(verifiedSchemaState({CONTROL_DB:'ready',CRM_DB:'crm_additive_upgrade'}),'crm_additive_upgrade');
+  const result=await inspectCloudflare({credentials:getCredentials(env),mode:'preflight',template,
+    apiFetch:cloudflareMock({controlTables:REQUIRED_TABLES.CONTROL_DB,crmTables:old,
+      triggers:mockTriggers.filter(t=>!t.name.startsWith('trg_voicebot_review_'))})});
+  assert.deepEqual(result.modes,{CONTROL_DB:'ready',CRM_DB:'crm_additive_upgrade'});
+  await assert.rejects(inspectCloudflare({credentials:getCredentials(env),mode:'preflight',template,
+    apiFetch:cloudflareMock({controlTables:REQUIRED_TABLES.CONTROL_DB,crmTables:old,
+      triggers:mockTriggers.filter(t=>t.name!=='trg_no_call_launch')})}),/safety trigger/);
 });
 test('identity mismatch blocks touching any resource', async () => {
   await assert.rejects(inspectCloudflare({credentials:getCredentials(env),mode:'fresh',template,apiFetch:cloudflareMock({controlName:'tiyansh-production'})}),/mismatch/);
@@ -136,6 +151,7 @@ test('ready schema refuses absent CRM safety triggers even when all tables exist
 test('ready schema checks post-migration safety columns, not just original tables', async () => {
   assert.throws(()=>checkColumns(['tenant_id','status'],'CRM_DB','call_campaign_drafts'),/missing columns/);
   assert.throws(()=>checkColumns(['user_id'],'CONTROL_DB','human_mfa_recovery_codes'),/missing columns/);
+  assert.throws(()=>checkColumns(['tenant_id','status'],'CRM_DB','voicebot_qualification_reviews'),/missing columns/);
 });
 
 test('ready deployment blocks missing tenant suspension state tracking', () => {
