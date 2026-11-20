@@ -76,6 +76,16 @@ const server=http.createServer(async(req,res)=>{
       return respond(res,200,{...exotelTrialReadiness({}),managedVoicebotPrompt:managedVoicebotInstructions()});
     if(req.method==='GET'&&path==='/v1/human/engineering/own-sip-setup')
       return respond(res,200,ownSipSetup());
+    if(req.method==='GET'&&path==='/v1/human/engineering/exotel-webhook-health')
+      return respond(res,200,{
+        mode:'read_only_quarantined_metadata',window:'unexpired_receipts_only',
+        webhookTokenConfigured:true,lastReceivedAt:'2026-11-20T12:20:00.000Z',
+        metrics:{uniqueReceipts:3,transcriptReceipts:2,sessionEndReceipts:1,
+          completedTurns:1,inProgressTurns:1,distinctSessions:1,
+          possibleOptOutSignals:1},
+        sourceVerified:false,callToLeadLinked:false,crmWrites:0,liveCallsStarted:0
+      });
+
     if(req.method==='POST'&&path==='/v1/human/engineering/pilot'){
       if(req.headers.origin!=='http://127.0.0.1:'+server.address().port)
         return respond(res,403,{error:'origin required'});
@@ -216,6 +226,12 @@ try{
     await page.getByText('seven questions',{exact:true}).waitFor();
     await page.getByText('opt out',{exact:true}).waitFor();
     await page.getByText(/Session-end does NOT contain the full transcript/).waitFor();
+    await page.getByRole('heading',{name:'Exotel Webhook Receipt Health (real saved metadata)'}).waitFor();
+    await page.getByRole('button',{name:'Check saved Exotel webhooks (read-only)'}).click();
+    await page.getByText('Webhook Bearer token: configured | Last saved event: 2026-11-20T12:20:00.000Z').waitFor();
+    await page.getByRole('row',{name:'Potential opt-out signals 1'}).waitFor();
+    await page.getByText(/NOT all webhook attempts or verified provider-origin events/).waitFor();
+
     await page.getByRole('button',{name:'Test Voicebot Answers to CRM Review (offline)'}).click();
     await page.getByText('provisional_review_ready').first().waitFor();
     await page.getByText('opt_out_needs_verification').waitFor();
