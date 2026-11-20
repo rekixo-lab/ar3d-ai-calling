@@ -1,9 +1,13 @@
 # AR3D AI Calling — operator-required go-live actions
 
-**State: 2026-11-19.** The standalone app at
-https://aicalling.ar3dstudio.in/app is a guarded CRM, AI conversation and
-provider-protocol engineering environment. **No live phone call, actual
-WebSocket streaming, vendor-signed callback, payment or invoice is enabled.**
+**Updated 2026-11-20.** The standalone app at
+https://aicalling.ar3dstudio.in/app is a guarded CRM and Exotel engineering
+environment. An MFA-protected, fixed verified-number **one-time Exotel
+operator self-test** has been implemented and previously exercised; it is
+not a customer dialer. **Customer campaigns, independently verified vendor
+callback-to-lead mapping, live customer transcript ingestion, payment and
+invoices are not enabled.** See
+[Production Cutover — GO/NO-GO](PRODUCTION-CUTOVER-2026-11-20.md).
 The bootstrap secret is gone. Do not repeat first-Super-Admin bootstrap.
 Do not remove the SQL no-call and no-active-agent triggers.
 

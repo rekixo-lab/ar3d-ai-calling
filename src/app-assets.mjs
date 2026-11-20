@@ -103,6 +103,40 @@ function engineeringPanel(main){
   card.append(title('Exotel Account Connectivity (read-only)','h3'),
     node('p',{class:'note',text:'Uses server-side Exotel credentials only after you add them. Never places calls or exposes keys.'}),
     connectionButton,connectionSummary);
+  const cutoverOutput=div('stack');
+  const cutoverButton=btn('Run Production GO/NO-GO Audit (no calls)',async()=>{
+    cutoverButton.disabled=true;
+    cutoverOutput.replaceChildren(node('p',{class:'muted',text:
+      'Inspecting isolated Calling database guards and remaining independent approvals...'}));
+    try{
+      const r=await api('/v1/human/engineering/production-cutover');
+      cutoverOutput.replaceChildren(
+        node('p',{class:r.verdict==='NO_GO'?'note':'err',text:
+          'Customer launch: '+r.verdict+
+          ' | Control DB: '+r.databaseSafety.control+
+          ' | CRM safety: '+r.databaseSafety.crm+
+          ' | Customer calls: '+r.customerCallsPlaced+
+          ' | Provider requests: '+r.providerNetworkRequests}),
+        table(['Unverified production gate','Owner','Next required step'],
+          r.blockers.filter(item=>item.requiredForPilot).map(item=>
+            [item.title,item.owner,item.action])),
+        node('p',{class:'note',text:r.note})
+      );
+      if(r.databaseSafety.crmMissing.length||r.databaseSafety.controlMissing.length){
+        cutoverOutput.append(node('p',{class:'err',text:
+          'Critical: Missing database protections. Control: '+
+          (r.databaseSafety.controlMissing.join(', ')||'none')+
+          ' | CRM: '+(r.databaseSafety.crmMissing.join(', ')||'none')}));
+      }
+      if(r.verdict!=='NO_GO'||r.customerCampaignLaunchAuthorized||
+         r.hundredCustomerCallPilotAuthorized||r.customerCallsPlaced!==0)
+        throw Error('Unexpected unsafe production gate response');
+    }catch(err){asError(err)}finally{cutoverButton.disabled=false}
+  },true);
+  card.append(title('Customer Production Launch — GO / NO-GO','h3'),
+    node('p',{class:'note',text:
+      'A successful code deployment does not permit commercial customer calls. This audited, read-only report checks actual CRM no-dial and consent SQL protection, then lists outstanding Exotel, telecom, privacy, consent/DND, source authentication, backup and operational approvals. No switch can approve launch.'}),
+    cutoverButton,cutoverOutput);
   const operatorPanel=div('stack',
     node('p',{class:'note',text:'Software-initiated Exotel Voicebot test: only the one verified phone set privately on the Worker. OFF by default. Never calls Excel leads or runs campaigns. A real test may consume Exotel credits.'}));
   const operatorStatus=node('p',{class:'muted',text:'Checking trial setup...'});

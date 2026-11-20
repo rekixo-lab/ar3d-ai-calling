@@ -72,6 +72,19 @@ const server=http.createServer(async(req,res)=>{
       return respond(res,200,{tenants:[]});
     if(req.method==='GET'&&path==='/v1/human/engineering/status')
       return respond(res,200,{...productionReadiness(),operational:operationalReadiness({})});
+    if(req.method==='GET'&&path==='/v1/human/engineering/production-cutover')
+      return respond(res,200,{
+        verdict:'NO_GO',databaseSafety:{
+          control:'guarded',crm:'guarded',controlMissing:[],crmMissing:[]
+        },customerCampaignLaunchAuthorized:false,
+        hundredCustomerCallPilotAuthorized:false,
+        customerCallsPlaced:0,providerNetworkRequests:0,
+        blockers:[{id:'telecom_contract',requiredForPilot:true,
+          title:'Approved commercial outbound Exotel agreement',
+          owner:'Exotel / business',
+          action:'Obtain written commercial outbound entitlement'}],
+        note:'Live provider proof, consent/DND and independently verified telecom approval are pending.'
+      });
     if(req.method==='GET'&&path==='/v1/human/engineering/exotel-trial-setup')
       return respond(res,200,{...exotelTrialReadiness({}),managedVoicebotPrompt:managedVoicebotInstructions()});
     if(req.method==='GET'&&path==='/v1/human/engineering/own-sip-setup')
@@ -216,6 +229,11 @@ try{
     await page.getByRole('heading',{name:'Super Admin',exact:true}).waitFor();
     await page.getByRole('heading',{name:'Production Readiness & Safe AI Calling Pilot'}).waitFor();
     await page.getByRole('heading',{name:'Operator Setup Checklist'}).waitFor();
+    await page.getByRole('heading',{name:'Customer Production Launch — GO / NO-GO'}).waitFor();
+    await page.getByRole('button',{name:'Run Production GO/NO-GO Audit (no calls)'}).click();
+    await page.getByText('Customer launch: NO_GO | Control DB: guarded | CRM safety: guarded | Customer calls: 0 | Provider requests: 0').waitFor();
+    await page.getByRole('row',{name:/Approved commercial outbound Exotel agreement/}).waitFor();
+
     await page.getByRole('heading',{name:'Exotel Trial Setup — What Is Ready?'}).waitFor();
     await page.getByText(/Potential Exotel webhook matches \(hashed metadata only\): 2 unique events/).waitFor();
     await page.getByText(/Candidate only: the webhook external_id must equal/).waitFor();

@@ -227,6 +227,11 @@ test('GET only shows HMAC candidate counts for self-test belonging to this MFA o
     assert.ok(!JSON.stringify(data).includes(secret),secret);
   db.mfa=false;
   const weak=await (await handleExotelOperatorTest(req(),env,user,{now:at+3000})).json();
-  assert.equal(weak.recent[0].webhookCandidate,null);
+  assert.equal(weak.mfaEnabled,false);
+  assert.equal(weak.configured,false);
+  assert.deepEqual(weak.recent,[]);
+  assert.equal(weak.voicebotFlowId,null);
+  assert.equal(weak.destinationLast4,null);
+  assert.deepEqual(weak.missing,['current_mfa_session_required']);
   assert.equal(db.receiptLookups,1,'without MFA no receipt lookup');
 });

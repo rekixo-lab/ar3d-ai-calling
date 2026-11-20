@@ -1,3 +1,17 @@
+## 20 November 2026 — Production cutover: NO-GO for customer campaigns
+
+AR3D AI Calling has a deployed, guarded engineering Worker and a narrowly
+authorized **single verified-phone Exotel self-test**. This is not an
+approved commercial multi-builder AI outbound calling service. Super Admin
+with post-enrollment MFA can run **Production GO/NO-GO Audit (no calls)**:
+an isolated Control+CRM SQLite protection check and a complete list of
+unverified telecom, consent/DND, independent webhook source, call-to-lead,
+privacy, billing, backup and live acceptance requirements. It always
+refuses customer or 100-lead launch; setting an environment flag or passing
+CI cannot grant it. See
+[Production Cutover Checklist](docs/PRODUCTION-CUTOVER-2026-11-20.md).
+
+
 ## Exotel verified-result review queue (staged, not yet connected)
 
 The additive isolated CRM schema `voicebot_qualification_reviews` provides
