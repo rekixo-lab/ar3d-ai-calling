@@ -26,8 +26,14 @@ const bindings=Object.freeze([
 export function operationalReadiness(env={}){
   if(!env||typeof env!=='object')env={};
   const configured={};
-  for(const [name,key] of bindings)
-    configured[name]=typeof env[key]==='string'&&env[key].trim().length>=8;
+  for(const [name,key] of bindings){
+    const value=env[key];
+    // Exotel account IDs are 4..128 safe ASCII; unlike private API keys
+    // they are not required to contain eight characters.
+    configured[name]=name==='exotelAccount'?
+      (typeof value==='string'&&/^[A-Za-z0-9_-]{4,128}$/.test(value)):
+      (typeof value==='string'&&value.trim().length>=8);
+  }
   return {
     stage:'operator_and_provider_approval_required',
     codeDeployed:true,commercialLaunchApproved:false,
