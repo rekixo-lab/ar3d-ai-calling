@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import vm from 'node:vm';
-import {js} from '../src/app-assets.mjs';
+import {js,css} from '../src/app-assets.mjs';
 test('planning UI has valid browser JS and no call launch UI',()=>{
   assert.doesNotThrow(()=>new vm.Script(js));
   assert.match(js,/Calling Campaign Drafts/);
@@ -45,7 +45,7 @@ test('public smoke checks health, login UI, sidebar fix and 401 without writes o
   const responses=new Map([
     ['/health',[200,'application/json',JSON.stringify({service:'AR3D AI Calling',status:'foundation'})]],
     ['/app',[200,'text/html','<title>AR3D AI Calling</title>']],
-    ['/app/assets/style.css',[200,'text/css','.sidebar .navitem{display:block;margin:0']],
+    ['/app/assets/style.css',[200,'text/css',css]],
     ['/app/assets/app.js',[200,'text/javascript','Test AI Conversation Sign out']],
     ['/v1/human/me',[401,'application/json',JSON.stringify({error:'sign in required'})]],
     ['/v1/human/engineering/status',[401,'application/json',JSON.stringify({error:'sign in required'})]],
