@@ -550,6 +550,26 @@ async function planningPanels(tenantId,content,role){
     const candidateActions=div('formrow',lab('Candidates in selected draft',currentCandidate),
       removeCandidate,prevCandidate,pageHint,nextCandidate);
     campaignCard.append(candidateActions);
+    const campaignRisk=div('stack');
+    const checkCampaign=btn('Check draft calling readiness (no calls)',async()=>{
+      if(!campaignPick.value)return notice('Create a campaign draft first.');
+      checkCampaign.disabled=true;
+      try{
+        const result=await api('/v1/human/campaigns/'+campaignPick.value+
+          '/readiness?tenantId='+encodeURIComponent(tenantId));
+        const c=result.stats;
+        campaignRisk.replaceChildren(
+          node('p',{class:'err',text:'NOT APPROVED FOR CALLING — '+c.total+
+            ' candidates | '+c.blocked+' explicitly blocked | '+c.optedOut+
+            ' opt-outs | '+c.unverified+' unverified | '+c.pendingEvidence+
+            ' pending consent evidence | '+c.unclassified+' unclassified'}),
+          ...result.reasons.map(reason=>node('p',{class:'note',text:reason})),
+          ...result.nextActions.map(action=>node('p',{class:'muted',text:action}))
+        );
+      }catch(err){asError(err)}
+      finally{checkCampaign.disabled=false}
+    },true);
+    campaignCard.append(checkCampaign,campaignRisk);
     await refreshCandidateList();
     pickForm.addEventListener('submit',async e=>{e.preventDefault();try{
       if(!campaignPick.value||!candidatePick.value)throw Error('Create a draft and a lead first');
@@ -835,7 +855,9 @@ async function crmWorkflow(tenantId,content,role){
     }
     const readiness=div('card',title('Calling readiness','h3'));details.append(readiness);
     api('/v1/human/leads/'+lead.id+'/call-readiness?tenantId='+encodeURIComponent(tenantId))
-      .then(result=>readiness.append(node('p',{class:'err',text:'BLOCKED — '+result.reasons.join('; ')})))
+      .then(result=>readiness.append(node('p',{class:'err',text:'BLOCKED — '+
+        (result.optOutRecorded?'Opt-out recorded. ':'')+
+        result.pendingEvidenceCount+' pending evidence reference(s). '+result.reasons.join('; ')})))
       .catch(asError);
     const notesArea=div('');details.append(title('Private Notes','h3'),notesArea);
     const fetchNotes=async()=>{const notes=await api('/v1/human/notes?tenantId='+encodeURIComponent(tenantId)+'&leadId='+lead.id);
