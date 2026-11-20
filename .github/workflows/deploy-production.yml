@@ -67,6 +67,12 @@ jobs:
           else
             echo "::error::Unsupported operation"; exit 1
           fi
+      # Additive-only migration on previously verified Calling CRM schema.
+      # No Platform/Engine resources; no lead/call/consent changes or trigger drops.
+      - name: Upgrade only the isolated Calling CRM Voicebot review schema
+        if: github.event_name == 'push' && steps.schema.outputs.schema_state == 'crm_additive_upgrade'
+        run: |
+          npx --yes wrangler@4 d1 execute ar3d-calling-shared-crm --remote --yes --config wrangler.jsonc --file migrations/crm/0009_voicebot_review_queue.sql
       # Never auto-migrate partial or mixed schemas. Re-check the EMPTY state
       # immediately before writing, even if the previous read said fresh.
       - name: Confirm both isolated D1 schemas are still empty
@@ -93,6 +99,7 @@ jobs:
           npx --yes wrangler@4 d1 execute ar3d-calling-shared-crm --remote --yes --config wrangler.jsonc --file migrations/crm/0006_campaign_drafts.sql
           npx --yes wrangler@4 d1 execute ar3d-calling-shared-crm --remote --yes --config wrangler.jsonc --file migrations/crm/0007_agent_safety.sql
           npx --yes wrangler@4 d1 execute ar3d-calling-shared-crm --remote --yes --config wrangler.jsonc --file migrations/crm/0008_customer_qualification.sql
+          npx --yes wrangler@4 d1 execute ar3d-calling-shared-crm --remote --yes --config wrangler.jsonc --file migrations/crm/0009_voicebot_review_queue.sql
       - name: Verify post-initialization schema before proceeding
         if: (github.event_name == 'push' && steps.schema.outputs.schema_state == 'fresh') || (github.event_name == 'workflow_dispatch' && inputs.operation == 'initialize')
         run: node scripts/main-cloudflare.mjs ready
