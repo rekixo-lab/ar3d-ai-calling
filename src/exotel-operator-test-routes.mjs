@@ -160,6 +160,16 @@ export async function handleExotelOperatorTest(req,env,user,{apiFetch=fetch,now=
   const mfaEnabled=!!mfa?.enabled_at;
   const cfg=operatorTestConfig(env);
   if(req.method==='GET'){
+    // Accessing call audit history, destination hints or flow details requires
+    // the SAME post-enrollment MFA proof as provider status checks. A legacy
+    // Super Admin session must not expose call metadata.
+    if(!mfaEnabled)return json({
+      mode:'operator_verified_number_only',configured:false,
+      missing:['current_mfa_session_required'],
+      mfaEnabled:false,recent:[],realCallsStartedByRead:0,
+      purpose:'one verified self-test only; no customers or campaigns',
+      voicebotFlowId:null,destinationLast4:null
+    });
     let recent=[];
     try{recent=await lastCalls(env.CONTROL_DB,user.id)}
     catch{return error('self_test_schema_not_provisioned',503)}
