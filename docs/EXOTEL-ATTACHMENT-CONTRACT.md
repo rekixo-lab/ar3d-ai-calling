@@ -97,6 +97,26 @@ without writing a D1 receipt or changing the CRM. Actual call/session keys
 are never permitted in these verification probes. This is NOT a general
 bypass for malformed real events.
 
+**Verified diagnostic, 20 November 2026:** Exotel's UI Test URL returned
+`validation: call reference mismatch`, even though the top-level ID fields,
+session state, trigger reason and network type passed validation, and the
+`events` validity flag was false. The official docs list both
+`external_id` and `metadata.call_sid`, but do **not** require that their
+values be equal; the equal values in the sample must not be treated as
+a real call contract. We now validate these two identifiers independently.
+Both are incorporated separately into HMAC-only receipt identity, with
+the distinct call-leg SID checked for mixing in offline review. We **do not**
+accept either one as tenant/lead proof.
+
+A successfully authenticated and otherwise valid `transcript_events`
+delivery with **zero recognized transcript turns** is now a no-op:
+HTTP 200 with no event receipt, CRM mutation, DND/consent update or call
+dispatch. Malformed transcript turn fields continue to fail. A successful
+Test URL is not evidence of production transcripts. Diagnostics additionally
+indicate the `events` shape as a fixed enum (`empty_array`,
+`nonempty_array`, `not_array`, `over_limit`, or `missing`)
+without exposing any event content or IDs.
+
 If an Exotel Test URL still returns `invalid_webhook_payload`, its
 authenticated HTTP 400 response lists only a fixed, PII-safe subset of
 present **field names**, plus a static validation category. This helps

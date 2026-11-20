@@ -151,7 +151,7 @@ function invalidPayloadDiagnostics(bytes,error){
     'session identity','session state','network type','event list',
     'event','transcript turn','turn sequence','turn status',
     'turn segments','speaker','timestamp','raw bytes','JSON','envelope',
-    'account','bot','metadata','call reference mismatch',
+    'account','bot','metadata','provider call reference',
     'transcript segment','duplicate event id in one delivery'
   ];
   const message=String(error?.message||'');
@@ -176,6 +176,14 @@ function invalidPayloadDiagnostics(bytes,error){
         network_type:['pstn','sip'].includes(obj.network_type),
         events:Array.isArray(obj.events)&&obj.events.length>0&&obj.events.length<=8
       };
+      outcome.events_shape=!Object.hasOwn(obj,'events')?'missing':
+        !Array.isArray(obj.events)?'not_array':
+        obj.events.length===0?'empty_array':
+        obj.events.length>8?'over_limit':'nonempty_array';
+      outcome.call_references_separate=
+        typeof obj.metadata?.call_sid==='string'&&
+        typeof obj.external_id==='string'&&
+        obj.metadata.call_sid!==obj.external_id;
       outcome.documentation_sample=isExactExotelDocumentationSample(bytes);
     }
   }catch{}
@@ -188,10 +196,11 @@ async function receiptHmac(token,domain,value){
   return hex(new Uint8Array(await crypto.subtle.sign('HMAC',key,bytes)));
 }
 async function makeReceipts(token,parsed,expectedKind,now){
-  const id=[parsed.accountId||'',parsed.callId,parsed.sessionId,
-    parsed.conversationId];
+  // Track external_id and call-leg SID independently as hashed metadata.
+  const id=[parsed.accountId||'',parsed.callId,parsed.providerCallSid||'',
+    parsed.sessionId,parsed.conversationId];
   const accountFingerprint=await receiptHmac(token,'account',parsed.accountId||'');
-  const callFingerprint=await receiptHmac(token,'call',id.slice(0,2));
+  const callFingerprint=await receiptHmac(token,'call',id.slice(0,3));
   const sessionFingerprint=await receiptHmac(token,'session',id);
   const conversationFingerprint=await receiptHmac(token,'conversation',
     [parsed.accountId||'',parsed.conversationId]);
@@ -300,9 +309,14 @@ export async function handleExotelVoicebotWebhookRequest(req,env){
     parsed=parseExotelVoicebotEvent(rawBytes);
     if(parsed.accountId&&parsed.accountId!==env.EXOTEL_ACCOUNT_SID)
       return fail(422,'account_mismatch');
-    if(kind==='transcript'&&
-       (parsed.state!=='session_in_progress'||parsed.events.length===0))
+    if(kind==='transcript'&&parsed.state!=='session_in_progress')
       return fail(422,'invalid_transcript_event');
+    // A fully authenticated and structurally valid delivery without any
+    // transcript turns has no customer statements to persist. Acknowledge
+    // as a NO-OP only: no D1 receipt, no CRM write, no call state change.
+    // Malformed transcript turns still fail in parseExotelVoicebotEvent.
+    if(kind==='transcript'&&parsed.events.length===0)
+      return response(exotelVoicebotAck());
     if(kind==='session_end'&&
        (parsed.state!=='session_end'||parsed.events.length!==0))
       return fail(422,'invalid_session_end');
