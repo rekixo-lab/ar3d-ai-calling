@@ -45,6 +45,7 @@ test('MFA Super Admin can view safe aggregate receipts without writing or callin
   assert.equal(data.metrics.possibleOptOutSignals,1);
   assert.equal(data.metrics.distinctSessions,1);
   assert.equal(data.webhookTokenConfigured,true);
+  assert.equal(data.sourceNetworkPolicy,'bearer_only_quarantine');
   assert.equal(data.sourceVerified,false);
   assert.equal(data.callToLeadLinked,false);
   assert.equal(data.crmWrites,0);
@@ -107,4 +108,27 @@ test('schema errors, untrusted counts and timestamps never leak provider or data
     assert.equal(fx.writes,0);
   }
   assert.equal((await handleExotelWebhookHealth(req(),{},user,{now})).status,503);
+});
+
+test('reports IP guard configuration without disclosing any approved CIDRs',async()=>{
+  for(const [config,mode] of [
+    ['8.8.8.0/24,1.1.1.1','cloudflare_ipv4_allowlist_enforced'],
+    ['8.8.8.8/16','invalid_allowlist_fail_closed']
+  ]){
+    const fx=fakeDb();
+    const r=await handleExotelWebhookHealth(req(),{
+      CONTROL_DB:fx.db,
+      EXOTEL_VOICEBOT_WEBHOOK_TOKEN:'a'.repeat(64),
+      EXOTEL_VOICEBOT_ALLOWED_SOURCE_IPV4_CIDRS:config
+    },user,{now});
+    assert.equal(r.status,200);
+    const out=await r.json();
+    assert.equal(out.sourceNetworkPolicy,mode);
+    assert.equal(out.sourceVerified,false);
+    assert.equal(out.callToLeadLinked,false);
+    assert.equal(out.crmWrites,0);
+    assert.ok(!JSON.stringify(out).includes(config));
+    assert.ok(!JSON.stringify(out).includes('8.8.8.0'));
+    assert.equal(fx.writes,0);
+  }
 });
