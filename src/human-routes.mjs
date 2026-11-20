@@ -4,6 +4,7 @@ import {handleVoicebotReviewRequest} from './voicebot-review-routes.mjs';
 import {handleFixedVoicePreviewRequest} from './fixed-voice-preview-routes.mjs';
 import {handleEngineeringRequest} from './engineering-routes.mjs';
 import {handleExotelOperatorTest} from './exotel-operator-test-routes.mjs';
+import {handleExotelOperatorStatusCheck} from './exotel-operator-status-check.mjs';
 import {handleTenantLifecycleRequest} from './tenant-lifecycle-routes.mjs';
 import {handleDataPortabilityRequest} from './data-portability-routes.mjs';
 import {handleAgentSettingsRequest} from './agent-settings-routes.mjs';
@@ -230,6 +231,8 @@ export async function handleHumanRequest(req,env){
     if(!user)return fail('sign in required',401);
     if(path==='/v1/human/mfa'||path==='/v1/human/mfa/setup'||path==='/v1/human/mfa/enable'||path==='/v1/human/mfa/recovery/regenerate')
       return await handleMfaSettings(req,env,user,method==='POST'?await payload(req):null);
+    const statusCheck=await handleExotelOperatorStatusCheck(req,env,user);
+    if(statusCheck)return statusCheck;
     const selfTest=await handleExotelOperatorTest(req,env,user);
     if(selfTest)return selfTest;
     const engineeringResponse=await handleEngineeringRequest(req,user,env);
