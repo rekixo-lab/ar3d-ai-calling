@@ -23,7 +23,8 @@ export function operatorTestConfig(env={}){
   if(!SID.test(string(env.EXOTEL_ACCOUNT_SID)))missing.push('account_sid');
   if(!CRED.test(string(env.EXOTEL_API_KEY))||
       string(env.EXOTEL_API_KEY).includes(':'))missing.push('api_key');
-  if(!CRED.test(string(env.EXOTEL_API_TOKEN)))missing.push('api_token');
+  if(!CRED.test(string(env.EXOTEL_API_TOKEN))||
+      string(env.EXOTEL_API_TOKEN).includes(':'))missing.push('api_token');
   if(!configuredExotelRegion(env))missing.push('region');
   if(!EXOPHONE.test(string(env.EXOTEL_CALLER_ID)))missing.push('caller_id');
   if(!FLOW.test(string(env.EXOTEL_VOICE_AI_FLOW_ID)))missing.push('voicebot_flow_id');
