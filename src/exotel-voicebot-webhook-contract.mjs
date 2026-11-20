@@ -48,8 +48,13 @@ export function parseExotelVoicebotEvent(raw){
   need(value.bot_id===undefined||typeof value.bot_id==='string'&&
     value.bot_id.length<=128,'bot');
   need(value.metadata===undefined||rec(value.metadata),'metadata');
+  // The vendor documents both external_id and metadata.call_sid, but their
+  // equality is shown in a sample, not specified as a required invariant.
+  // Real calls may expose a separate call-leg SID. Validate each independently,
+  // then correlate both against independently verified provider records before
+  // any tenant/lead or CRM operation. This parser grants NO source trust.
   if(value.metadata?.call_sid!==undefined&&value.metadata?.call_sid!=='')
-    need(value.metadata.call_sid===value.external_id,'call reference mismatch');
+    need(isId(value.metadata.call_sid),'provider call reference');
   safeIso(value.start_time);safeIso(value.end_time);
   need(Array.isArray(value.events)&&value.events.length<=8,'event list');
   const ids=new Set(),events=[];
@@ -82,7 +87,8 @@ export function parseExotelVoicebotEvent(raw){
   return Object.freeze({
     source:'untrusted_exotel_voicebot_webhook_payload',
     sessionId:value.session_id,conversationId:value.conversation_id,
-    callId:value.external_id,accountId:value.account_id||null,
+    callId:value.external_id,providerCallSid:value.metadata?.call_sid||null,
+    accountId:value.account_id||null,
     state:value.session_state,reason:value.trigger_reason,
     events:Object.freeze(events),
     sourceAuthenticated:false,leadMatched:false,crmWrites:0,
@@ -110,7 +116,9 @@ export function reviewExotelVoicebotEvents(deliveries,{
       'account identity mismatch');
     // Same CallSid and session alone do not guarantee all deliveries belong
     // to the same conversation or bot account. Never mix their question turns.
-    const identity=JSON.stringify([event.conversationId,event.accountId]);
+    const identity=JSON.stringify([
+      event.conversationId,event.accountId,event.providerCallSid
+    ]);
     if(deliveryIdentity!==null)need(deliveryIdentity===identity,
       'mixed conversation/account identity');
     else deliveryIdentity=identity;
