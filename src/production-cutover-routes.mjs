@@ -19,11 +19,12 @@ const REQUIRED=Object.freeze({
   }),
   crm:Object.freeze({
     tables:['leads','calls','lead_opt_out_events','lead_consent_evidence',
-      'voicebot_qualification_reviews'],
+      'voicebot_qualification_reviews','call_intent_proposals'],
     triggers:['trg_no_call_launch','trg_block_unverified_consent_update',
       'trg_block_unverified_consent_insert','trg_prevent_lead_opt_out_reversal',
       'trg_agents_block_active_insert','trg_agents_block_active_update',
-      'trg_voicebot_review_terminal','trg_voicebot_review_immutable']
+      'trg_voicebot_review_terminal','trg_voicebot_review_immutable',
+      'trg_call_intent_proposal_immutable','trg_call_intent_proposal_no_provider']
   })
 });
 const gate=(id,title,owner,status,action,requiredForPilot=true)=>
