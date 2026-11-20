@@ -71,9 +71,38 @@ export async function handleCampaignRequest(req,env,user){
       return json({candidates:rows.results,total:Number(count?.total||0),limit,offset});
     }
     if(method==='GET'&&match[2]==='readiness'){
-      const stats=await db.prepare("SELECT COUNT(*) AS total,COALESCE(SUM(CASE WHEN l.consent_status='denied' OR l.dnd_status='blocked' THEN 1 ELSE 0 END),0) AS blocked,COALESCE(SUM(CASE WHEN l.consent_status!='granted' OR l.dnd_status!='allowed' THEN 1 ELSE 0 END),0) AS unverified FROM call_campaign_candidates cc JOIN leads l ON l.tenant_id=cc.tenant_id AND l.id=cc.lead_id WHERE cc.tenant_id=? AND cc.campaign_id=?").bind(tid,campaignId).first();
-      return json({executionAllowed:false,campaignId,stats:{total:Number(stats?.total||0),blocked:Number(stats?.blocked||0),unverified:Number(stats?.unverified||0)},
-        reasons:['Telecom provider and caller number not approved','Independent consent and DND checks unavailable','Lawful call windows and opt-out sync not implemented']});
+      // Aggregate only. Do not expose candidate phone numbers, claim consent
+      // from an Excel import, or start a dial based on these observations.
+      const stats=await db.prepare(
+        "SELECT COUNT(*) AS total,"+
+        "COALESCE(SUM(CASE WHEN l.consent_status='denied' OR l.dnd_status='blocked' THEN 1 ELSE 0 END),0) AS blocked,"+
+        "COALESCE(SUM(CASE WHEN l.consent_status!='granted' OR l.dnd_status!='allowed' THEN 1 ELSE 0 END),0) AS unverified,"+
+        "COALESCE(SUM(CASE WHEN l.customer_segment='unclassified' THEN 1 ELSE 0 END),0) AS unclassified,"+
+        "COALESCE(SUM(CASE WHEN EXISTS(SELECT 1 FROM lead_opt_out_events e WHERE e.tenant_id=cc.tenant_id AND e.lead_id=cc.lead_id) THEN 1 ELSE 0 END),0) AS optedOut,"+
+        "COALESCE(SUM(CASE WHEN EXISTS(SELECT 1 FROM lead_consent_evidence ev WHERE ev.tenant_id=cc.tenant_id AND ev.lead_id=cc.lead_id AND ev.review_status='pending') THEN 1 ELSE 0 END),0) AS pendingEvidence "+
+        "FROM call_campaign_candidates cc JOIN leads l ON l.tenant_id=cc.tenant_id AND l.id=cc.lead_id WHERE cc.tenant_id=? AND cc.campaign_id=?"
+      ).bind(tid,campaignId).first();
+      const counts={
+        total:Number(stats?.total||0),
+        blocked:Number(stats?.blocked||0),
+        unverified:Number(stats?.unverified||0),
+        optedOut:Number(stats?.optedOut||0),
+        pendingEvidence:Number(stats?.pendingEvidence||0),
+        unclassified:Number(stats?.unclassified||0)
+      };
+      return json({executionAllowed:false,campaignId,stats:counts,
+        reasons:[
+          'Campaign dispatch and verified caller numbering are not enabled.',
+          'Consent evidence intake does not prove purpose-specific permission.',
+          'Independent provider DND verification, call-hour controls and opt-out synchronization are incomplete.',
+          'A verified telecom/AI disclosure and provider-approved budget policy is required.'
+        ],
+        nextActions:[
+          'Review opted-out and blocked candidate records; remove them from the draft.',
+          'Classify unclassified leads and review pending evidence without granting consent.',
+          'Obtain independent telecom DND and calling-purpose approval before any real launch.'
+        ],
+        notice:'Read-only tenant-scoped risk counts. This draft cannot start calls.'});
     }
     if(method==='POST'&&match[2]==='candidates'){
       if(Object.keys(d).some(k=>!['tenantId','leadIds'].includes(k))||!Array.isArray(d.leadIds)||
