@@ -1,6 +1,7 @@
 // Strictly read-only public smoke tests for the standalone AR3D Calling Worker.
 // No authenticated session, customer data, secret, POST or live telecom requests.
 import { fileURLToPath } from 'node:url';
+import {css as expectedCss} from '../src/app-assets.mjs';
 
 const PUBLIC_CUSTOM_HOST='aicalling.ar3dstudio.in';
 export function validateSmokeBase(raw){
@@ -22,7 +23,7 @@ export async function smoke(base,fetchFn=fetch){
     }],
     ['/app',200,'text/html',async r=>(await r.text()).includes('AR3D AI Calling')],
     ['/app/assets/style.css',200,'text/css',async r=>{
-      const css=await r.text();return css.includes('.sidebar .navitem{display:block;margin:0');
+      return (await r.text())===expectedCss;
     }],
     ['/app/assets/app.js',200,'text/javascript',async r=>{
       const js=await r.text();return js.includes('Test AI Conversation')&&js.includes('Sign out');
