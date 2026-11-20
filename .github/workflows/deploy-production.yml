@@ -67,6 +67,13 @@ jobs:
           else
             echo "::error::Unsupported operation"; exit 1
           fi
+      # Additive-only migration on previously verified Calling Control D1.
+      # Metadata-only webhook receipts. Never alters the existing provider_inbox,
+      # user/tenant tables or CRM call/consent denial triggers.
+      - name: Upgrade only the isolated Calling Control D1 Exotel webhook receipts
+        if: github.event_name == 'push' && steps.schema.outputs.schema_state == 'control_additive_upgrade'
+        run: |
+          npx --yes wrangler@4 d1 execute ar3d-calling-control --remote --yes --config wrangler.jsonc --file migrations/control/0008_exotel_voicebot_receipts.sql
       # Additive-only migration on previously verified Calling CRM schema.
       # No Platform/Engine resources; no lead/call/consent changes or trigger drops.
       - name: Upgrade only the isolated Calling CRM Voicebot review schema
@@ -88,6 +95,7 @@ jobs:
           npx --yes wrangler@4 d1 execute ar3d-calling-control --remote --yes --config wrangler.jsonc --file migrations/control/0005_mfa_recovery.sql
           npx --yes wrangler@4 d1 execute ar3d-calling-control --remote --yes --config wrangler.jsonc --file migrations/control/0006_tenant_lifecycle.sql
           npx --yes wrangler@4 d1 execute ar3d-calling-control --remote --yes --config wrangler.jsonc --file migrations/control/0007_provider_inbox.sql
+          npx --yes wrangler@4 d1 execute ar3d-calling-control --remote --yes --config wrangler.jsonc --file migrations/control/0008_exotel_voicebot_receipts.sql
       - name: Initialize NEW AR3D Calling Shared CRM D1 database
         if: (github.event_name == 'push' && steps.schema.outputs.schema_state == 'fresh') || (github.event_name == 'workflow_dispatch' && inputs.operation == 'initialize')
         run: |
