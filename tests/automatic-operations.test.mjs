@@ -159,6 +159,7 @@ test('Periodic monitor is secretless, GET-only and checks the exact Calling orig
     '/v1/human/engineering/voicebot-qualification',
     '/v1/human/leads/33333333-3333-4333-8333-333333333333/qualification',
     '/v1/human/voicebot-reviews',
+    '/v1/human/call-intent-proposals',
     '/v1/human/voice-preview'])
     content[path]=[401,'application/json',JSON.stringify({error:'sign in required'})];
   const seen=[];
@@ -168,7 +169,7 @@ test('Periodic monitor is secretless, GET-only and checks the exact Calling orig
     return new Response(body,{status:code,headers:{'Content-Type':type}});
   }});
   assert.equal(result.healthy,true);
-  assert.equal(seen.length,16);
+  assert.equal(seen.length,17);
   assert.ok(seen.every(([u,o])=>u.startsWith(ORIGIN+'/')&&
     o.method==='GET'&&o.redirect==='error'&&o.cache==='no-store'));
   const yaml=readFileSync('.github/workflows/monitor-production.yml','utf8');

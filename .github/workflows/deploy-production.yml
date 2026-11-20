@@ -94,6 +94,13 @@ jobs:
         if: github.event_name == 'push' && steps.schema.outputs.schema_state == 'crm_additive_upgrade'
         run: |
           npx --yes wrangler@4 d1 execute ar3d-calling-shared-crm --remote --yes --config wrangler.jsonc --file migrations/crm/0009_voicebot_review_queue.sql
+          npx --yes wrangler@4 d1 execute ar3d-calling-shared-crm --remote --yes --config wrangler.jsonc --file migrations/crm/0010_call_intent_proposals.sql
+      # Isolated Calling CRM v10: immutable blocked intent proposal records.
+      # Never touches leads, dial triggers, provider credentials or other apps.
+      - name: Upgrade isolated Calling CRM blocked intent proposals only
+        if: github.event_name == 'push' && steps.schema.outputs.schema_state == 'crm_call_intent_upgrade'
+        run: |
+          npx --yes wrangler@4 d1 execute ar3d-calling-shared-crm --remote --yes --config wrangler.jsonc --file migrations/crm/0010_call_intent_proposals.sql
       # Never auto-migrate partial or mixed schemas. Re-check the EMPTY state
       # immediately before writing, even if the previous read said fresh.
       - name: Confirm both isolated D1 schemas are still empty

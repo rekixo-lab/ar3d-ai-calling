@@ -13,6 +13,7 @@ import {handleAgentSettingsRequest} from './agent-settings-routes.mjs';
 import {handleAuditRequest} from './audit-routes.mjs';
 import {handleVisitStatusRequest} from './visit-status-routes.mjs';
 import {handleCampaignRequest} from './campaign-routes.mjs';
+import {handleCallIntentProposals} from './call-intent-proposals.mjs';
 import {handleProjectLinkRequest} from './project-link-routes.mjs';
 import {handleConsentRequest} from './consent-routes.mjs';
 import {reserveLoginAttempt} from './login-guard.mjs';
@@ -247,6 +248,8 @@ export async function handleHumanRequest(req,env){
     if(consentResponse)return consentResponse;
     const projectResponse=await handleProjectLinkRequest(req,env,user);
     if(projectResponse)return projectResponse;
+    const callIntentResponse=await handleCallIntentProposals(req,env,user);
+    if(callIntentResponse)return callIntentResponse;
     const campaignResponse=await handleCampaignRequest(req,env,user);
     if(campaignResponse)return campaignResponse;
     const visitResponse=await handleVisitStatusRequest(req,env,user);

@@ -95,6 +95,7 @@ function cloudflareMock({ controlTables=[],crmTables=[],controlName='ar3d-callin
         else if(sql.includes('call_campaign_drafts')) rows=['tenant_id','status','language_mode'].map(name=>({name}));
         else if(sql.includes('call_campaign_candidates')) rows=['tenant_id','campaign_id','lead_id'].map(name=>({name}));
         else if(sql.includes('voicebot_qualification_reviews')) rows=['tenant_id','lead_id','provider','status','survey_json','source_verified','mapping_verified','possible_opt_out'].map(name=>({name}));
+        else if(sql.includes('call_intent_proposals')) rows=['tenant_id','id','campaign_id','lead_id','purpose','state','created_by','created_at'].map(name=>({name}));
         else if(sql.includes('agents')) rows=['tenant_id','status','questions_json'].map(name=>({name}));
         else rows=['token_hash','expires_at'].map(name=>({name}));
       } else throw Error('Unexpected SQL');
@@ -241,5 +242,32 @@ test('isolated Control D1 status check evidence has exactly one reviewed additiv
     /missing columns/);
   assert.throws(()=>verifiedSchemaState({
     CONTROL_DB:'control_operator_status_upgrade',CRM_DB:'crm_additive_upgrade'
+  }),/mixed or invalid/);
+});
+
+test('Calling CRM v10 upgrade permits exactly one missing blocked-proposal table',async()=>{
+  const old=REQUIRED_TABLES.CRM_DB.filter(x=>x!=='call_intent_proposals');
+  assert.equal(checkTables(old,'CRM_DB','preflight'),'crm_call_intent_upgrade');
+  assert.throws(()=>checkTables(old,'CRM_DB','ready'),/missing tables/);
+  assert.throws(()=>checkTables(old.filter(x=>x!=='leads'),'CRM_DB','preflight'),/partial schema/);
+  assert.equal(verifiedSchemaState({
+    CONTROL_DB:'ready',CRM_DB:'crm_call_intent_upgrade'
+  }),'crm_call_intent_upgrade');
+  const retained=mockTriggers.filter(x=>!x.name.startsWith('trg_call_intent_'));
+  const checked=await inspectCloudflare({
+    credentials:getCredentials(env),mode:'preflight',template,
+    apiFetch:cloudflareMock({controlTables:REQUIRED_TABLES.CONTROL_DB,
+      crmTables:old,triggers:retained})
+  });
+  assert.deepEqual(checked.modes,{CONTROL_DB:'ready',CRM_DB:'crm_call_intent_upgrade'});
+  await assert.rejects(inspectCloudflare({
+    credentials:getCredentials(env),mode:'preflight',template,
+    apiFetch:cloudflareMock({controlTables:REQUIRED_TABLES.CONTROL_DB,
+      crmTables:old,triggers:retained.filter(x=>x.name!=='trg_no_call_launch')})
+  }),/safety trigger/);
+  assert.throws(()=>checkColumns(['tenant_id','id'],'CRM_DB','call_intent_proposals'),
+    /missing columns/);
+  assert.throws(()=>verifiedSchemaState({
+    CONTROL_DB:'control_operator_status_upgrade',CRM_DB:'crm_call_intent_upgrade'
   }),/mixed or invalid/);
 });
