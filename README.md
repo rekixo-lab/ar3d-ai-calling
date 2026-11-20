@@ -1,3 +1,15 @@
+## Exotel verified-result review queue (staged, not yet connected)
+
+The additive isolated CRM schema `voicebot_qualification_reviews` provides
+tenant-safe, immutable, staff-reviewed staging for future independently
+authenticated Exotel results. A Client Admin can inspect and apply reviewed
+property fields with lead revision checks; potential opt-outs cannot be
+dismissed before Do Not Call suppression is recorded. This is **not** a live
+vendor webhook or dialer, and no provider integration can create the
+review records yet. The preflight allows only the exact additive CRM v9
+migration after checking existing calling/consent guards and Cloudflare
+resource identities. See [Review Queue & Migration](docs/EXOTEL-REVIEW-QUEUE.md).
+
 ## 20 November 2026 — Exotel structured Voicebot qualification preflight
 
 Super Admin can now run **Test Voicebot Answers to CRM Review (offline)**.
