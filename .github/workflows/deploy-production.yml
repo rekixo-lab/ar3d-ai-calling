@@ -74,6 +74,13 @@ jobs:
         if: github.event_name == 'push' && steps.schema.outputs.schema_state == 'control_additive_upgrade'
         run: |
           npx --yes wrangler@4 d1 execute ar3d-calling-control --remote --yes --config wrangler.jsonc --file migrations/control/0008_exotel_voicebot_receipts.sql
+          npx --yes wrangler@4 d1 execute ar3d-calling-control --remote --yes --config wrangler.jsonc --file migrations/control/0009_operator_self_test_calls.sql
+      # Add exactly one operator self-test audit table in isolated Calling Control D1.
+      # No CRM writes, customer call enabling, Exotel dispatch or other projects.
+      - name: Upgrade isolated Calling Control D1 operator test audit
+        if: github.event_name == 'push' && steps.schema.outputs.schema_state == 'control_operator_test_upgrade'
+        run: |
+          npx --yes wrangler@4 d1 execute ar3d-calling-control --remote --yes --config wrangler.jsonc --file migrations/control/0009_operator_self_test_calls.sql
       # Additive-only migration on previously verified Calling CRM schema.
       # No Platform/Engine resources; no lead/call/consent changes or trigger drops.
       - name: Upgrade only the isolated Calling CRM Voicebot review schema
