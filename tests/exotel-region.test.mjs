@@ -45,6 +45,32 @@ test('newly connected account must provide region before any external API fetch'
     assert.equal(calls,0);
   }
 });
+test('seven-character Exotel SID reaches only the read-only regional account GET',async()=>{
+  let called=0;
+  const env={
+    EXOTEL_ACCOUNT_SID:'test123',
+    EXOTEL_API_KEY:account.apiKey,
+    EXOTEL_API_TOKEN:account.apiToken,
+    EXOTEL_REGION:'singapore'
+  };
+  const result=await probeExotelConnectivity(env,{apiFetch:async(url,opts)=>{
+    called++;
+    assert.equal(url,'https://api.exotel.com/v1/Accounts/test123/Calls.json?PageSize=1');
+    assert.equal(opts.method,'GET');
+    return Response.json({Calls:[]});
+  }});
+  assert.equal(result.configured,true);
+  assert.equal(result.verified,true);
+  assert.equal(result.apiRegionStatus,'configured');
+  assert.equal(called,1);
+  const invalid=await probeExotelConnectivity({...env,EXOTEL_REGION:'Singapore'},{
+    apiFetch:async()=>{throw Error('should not call invalid region')}
+  });
+  assert.equal(invalid.apiRegionStatus,'invalid');
+  assert.equal(invalid.verified,false);
+  assert.equal(invalid.outboundCallsEnabled,false);
+  assert.ok(!JSON.stringify(invalid).includes(account.apiToken));
+});
 test('Singapore Exotel account check is read-only and uses correct Singapore endpoint',async()=>{
   let seen;
   const env={

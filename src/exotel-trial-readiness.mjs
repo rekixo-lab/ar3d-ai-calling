@@ -4,6 +4,9 @@ import {fixedPropertyQuestions} from './fixed-property-survey.mjs';
 import {configuredExotelRegion} from './exotel-region.mjs';
 
 const c=v=>typeof v==='string'&&v.trim().length>=8;
+// Exotel account SIDs can legitimately be shorter than API credentials.
+// Match the provider's server-side read-only validator (4..128 ASCII chars).
+const validSid=v=>typeof v==='string'&&/^[A-Za-z0-9_-]{4,128}$/.test(v);
 const REQUIRED=['EXOTEL_ACCOUNT_SID','EXOTEL_API_KEY','EXOTEL_API_TOKEN'];
 function textFor(type,lang,field){
   const match=fixedPropertyQuestions(type,lang).find(q=>q.field===field);
@@ -57,15 +60,19 @@ export function managedVoicebotInstructions(){
 }
 export function exotelTrialReadiness(env={}){
   if(!env||typeof env!=='object')throw Error('environment required');
-  const credentials=Object.fromEntries(REQUIRED.map(k=>[k,c(env[k])]));
+  const credentials=Object.fromEntries(REQUIRED.map(k=>[
+    k,k==='EXOTEL_ACCOUNT_SID'?validSid(env[k]):c(env[k])]));
   const all=REQUIRED.every(k=>credentials[k]);
   const region=configuredExotelRegion(env);
+  const regionBindingPresent=typeof env.EXOTEL_REGION==='string'&&env.EXOTEL_REGION.length>0;
+  const apiRegionStatus=region?'configured':regionBindingPresent?'invalid':'missing';
   return Object.freeze({
     provider:'Exotel',
     purpose:'7 fixed property questions; customer name/mobile imported in CRM',
     mode:'trial_setup_only',
     credentialsPresent:Object.freeze(credentials),
     apiRegion:region,apiRegionConfigured:region!==null,
+    apiRegionStatus,
     accountReadyForReadOnlyCheck:all&&region!==null,
     accountApiConnectivityVerified:false,
     manualSteps:[
