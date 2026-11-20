@@ -116,7 +116,7 @@ test('no call/lead/CRM writes on malformed, wrong-account or unexpectedly large 
     {...event,account_id:'other-account'},
     {...event,session_id:'!'},
     {...event,session_state:'session_end'},
-    {...event,events:[]}
+    {...event,metadata:{call_sid:'!'}}
   ]){
     const r=await worker.fetch(request(bad),env);
     assert.ok([400,422].includes(r.status),String(r.status));
@@ -278,4 +278,56 @@ test('vendor validation categories and field flags are redacted and accurately i
     assert.ok(!JSON.stringify(info).includes(pii));
   }
   assert.equal(db.writes,0);
+});
+
+
+test('Exotel independent call leg reference is allowed but never treated as verified customer correlation',async()=>{
+  const db=memoryD1(),env=fixture(db);
+  const separate=clone(event);
+  separate.metadata.call_sid='CAindependentcallleg2026';
+  const r=await worker.fetch(request(separate),env);
+  assert.equal(r.status,200);
+  assert.equal(db.writes,1);
+  const receipt=[...db.rows.values()][0];
+  assert.equal(receipt.status,'quarantined');
+  for(const value of Object.values(receipt))
+    assert.ok(!String(value).includes('CAindependentcallleg2026'));
+  // The same Exotel event ID with a different call-leg SID is a distinct
+  // metadata identity, never combined with an existing tenant/lead.
+  const alternate=clone(separate);
+  alternate.metadata.call_sid='CAotherleg2026';
+  assert.equal((await worker.fetch(request(alternate),env)).status,200);
+  assert.equal(db.writes,2);
+});
+test('authenticated valid empty/nontranscript events are acknowledged as no-write delivery',async()=>{
+  const db=memoryD1(),env=fixture(db);
+  const empty=clone(event);
+  empty.events=[];
+  empty.metadata.call_sid='CAotherleg2026';
+  assert.equal((await worker.fetch(request(empty),env)).status,200);
+  const nonTranscript=clone(empty);
+  nonTranscript.events=[{event_id:'evt_no_transcript_2026',
+    event_type:'sentiment',event_data:{}}];
+  assert.equal((await worker.fetch(request(nonTranscript),env)).status,200);
+  assert.equal(db.writes,0);
+  assert.equal(db.reads,0);
+  assert.equal((await worker.fetch(request({...empty,events:'broken'}),env)).status,400);
+  const malformed=clone(event);
+  malformed.metadata.call_sid='CAotherleg2026';
+  malformed.events[0].event_data.transcripts[0].transcript_segments[0].speaker='admin';
+  assert.equal((await worker.fetch(request(malformed),env)).status,400);
+  assert.equal(db.writes,0);
+});
+test('Exotel diagnostics distinguish empty events vs malformed without disclosing ID values',async()=>{
+  const db=memoryD1(),env=fixture(db);
+  const malformed={...event,metadata:{call_sid:'!'},events:[]};
+  const res=await worker.fetch(request(malformed),env);
+  assert.equal(res.status,400);
+  const body=await res.json();
+  assert.equal(body.error,'invalid_webhook_payload');
+  assert.equal(body.validation,'provider call reference');
+  assert.equal(body.events_shape,'empty_array');
+  assert.equal(body.call_references_separate,true);
+  for(const sensitive of ['CAfictionalcall2026','919876543210','test123'])
+    assert.ok(!JSON.stringify(body).includes(sensitive));
 });
