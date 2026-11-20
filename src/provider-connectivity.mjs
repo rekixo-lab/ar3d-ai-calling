@@ -7,11 +7,15 @@ const FIELDS=Object.freeze(['EXOTEL_ACCOUNT_SID','EXOTEL_API_KEY','EXOTEL_API_TO
 export async function probeExotelConnectivity(env,{apiFetch=fetch}={}){
   if(!env||typeof env!=='object')throw Error('provider configuration missing');
   const region=configuredExotelRegion(env);
-  const present=FIELDS.every(k=>typeof env[k]==='string'&&
-     env[k].trim().length>=8);
+  const accountSid=env.EXOTEL_ACCOUNT_SID;
+  const present=typeof accountSid==='string'&&/^[A-Za-z0-9_-]{4,128}$/.test(accountSid)&&
+    ['EXOTEL_API_KEY','EXOTEL_API_TOKEN'].every(k=>typeof env[k]==='string'&&
+      env[k].trim().length>=8);
+  const regionSecretPresent=typeof env.EXOTEL_REGION==='string'&&env.EXOTEL_REGION.length>0;
+  const apiRegionStatus=region?'configured':regionSecretPresent?'invalid':'missing';
   if(!present||!region)return Object.freeze({
     provider:'exotel',configured:false,verified:false,
-    apiRegionConfigured:Boolean(region),apiRegion:region,
+    apiRegionConfigured:Boolean(region),apiRegion:region,apiRegionStatus,
     outboundCallsEnabled:false,voiceStreamingEnabled:false,
     note:'Set EXOTEL_REGION=india or singapore for the account region, plus EXOTEL_ACCOUNT_SID, EXOTEL_API_KEY and EXOTEL_API_TOKEN as private Worker secrets. No call is placed.'
   });
@@ -24,7 +28,7 @@ export async function probeExotelConnectivity(env,{apiFetch=fetch}={}){
     },{apiFetch});
     return Object.freeze({
       provider:'exotel',configured:true,verified:verified.accountLookupSucceeded===true,
-      apiRegionConfigured:true,apiRegion:region,
+      apiRegionConfigured:true,apiRegion:region,apiRegionStatus,
       outboundCallsEnabled:false,voiceStreamingEnabled:false,
       note:'Exotel read-only API reachable. Business approval, caller number, DND, voice transport and calling permissions remain independent.'
     });
