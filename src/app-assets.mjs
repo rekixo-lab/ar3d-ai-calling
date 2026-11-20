@@ -315,6 +315,10 @@ function engineeringPanel(main){
       webhookHealthOutput.replaceChildren(
         node('p',{class:'muted',text:
           'Webhook Bearer token: '+(r.webhookTokenConfigured?'configured':'not configured')+
+          ' | Source IP guard: '+
+          (r.sourceNetworkPolicy==='cloudflare_ipv4_allowlist_enforced'?'network-restricted (not vendor-verified)':
+            r.sourceNetworkPolicy==='invalid_allowlist_fail_closed'?'invalid config — callbacks blocked':
+            'not configured (Bearer-only quarantine)')+
           ' | Last saved event: '+(r.lastReceivedAt||'none')}),
         table(['Quarantined metadata (unexpired only)','Unique stored receipts'],[
           ['All events',m.uniqueReceipts],

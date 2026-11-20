@@ -1,5 +1,6 @@
 // Super Admin read-only operational telemetry for Exotel Voicebot webhook
 // quarantine receipts. Never resolves call/lead identity or reads transcripts.
+import {parseApprovedExotelCidrs} from './exotel-webhook-network-guard.mjs';
 const PATH='/v1/human/engineering/exotel-webhook-health';
 const HEADERS={'Cache-Control':'no-store','X-Content-Type-Options':'nosniff',
   'Referrer-Policy':'no-referrer','X-Frame-Options':'DENY'};
@@ -66,6 +67,10 @@ export async function handleExotelWebhookHealth(req,env,user,{now=Date.now()}={}
       mode:'read_only_quarantined_metadata',
       window:'unexpired_receipts_only',
       webhookTokenConfigured:TOKEN.test(String(env.EXOTEL_VOICEBOT_WEBHOOK_TOKEN||'')),
+      sourceNetworkPolicy:env.EXOTEL_VOICEBOT_ALLOWED_SOURCE_IPV4_CIDRS===undefined?
+        'bearer_only_quarantine':
+        parseApprovedExotelCidrs(env.EXOTEL_VOICEBOT_ALLOWED_SOURCE_IPV4_CIDRS)?
+          'cloudflare_ipv4_allowlist_enforced':'invalid_allowlist_fail_closed',
       metrics,lastReceivedAt:last||null,
       sourceVerified:false,callToLeadLinked:false,crmWrites:0,
       liveCallsStarted:0,recordingsFetched:0,

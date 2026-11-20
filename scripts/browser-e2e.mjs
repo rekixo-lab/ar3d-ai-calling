@@ -105,6 +105,7 @@ const server=http.createServer(async(req,res)=>{
     if(req.method==='GET'&&path==='/v1/human/engineering/exotel-webhook-health')
       return respond(res,200,{
         mode:'read_only_quarantined_metadata',window:'unexpired_receipts_only',
+        sourceNetworkPolicy:'cloudflare_ipv4_allowlist_enforced',
         webhookTokenConfigured:true,lastReceivedAt:'2026-11-20T12:20:00.000Z',
         metrics:{uniqueReceipts:3,transcriptReceipts:2,sessionEndReceipts:1,
           completedTurns:1,inProgressTurns:1,distinctSessions:1,
@@ -262,7 +263,8 @@ try{
     await page.getByText(/Session-end does NOT contain the full transcript/).waitFor();
     await page.getByRole('heading',{name:'Exotel Webhook Receipt Health (real saved metadata)'}).waitFor();
     await page.getByRole('button',{name:'Check saved Exotel webhooks (read-only)'}).click();
-    await page.getByText('Webhook Bearer token: configured | Last saved event: 2026-11-20T12:20:00.000Z').waitFor();
+    await page.getByText(/Source IP guard: network-restricted \(not vendor-verified\)/).waitFor();
+    await page.getByText(/Webhook Bearer token: configured \| Source IP guard: network-restricted \(not vendor-verified\) \| Last saved event: 2026-11-20T12:20:00\.000Z/).waitFor();
     await page.getByRole('row',{name:'Potential opt-out signals 1'}).waitFor();
     await page.getByText(/NOT all webhook attempts or verified provider-origin events/).waitFor();
 
