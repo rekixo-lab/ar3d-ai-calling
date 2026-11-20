@@ -78,7 +78,7 @@ export function makeMainConfig(template, credentials) {
     domainRoutes[0]?.pattern === 'aicalling.ar3dstudio.in' &&
     domainRoutes[0]?.custom_domain === true &&
     Object.keys(domainRoutes[0]).length === 2;
-  // Only the exact expired-auth cleanup cron may run in the Calling Worker.
+  // Only auth cleanup and the bounded, operator-approved campaign scheduler may run.
   // Reject arbitrary schedules or queue/event consumers targeting other services.
   const onlyAuthCron = template?.triggers &&
     Object.keys(template.triggers).length === 1 &&

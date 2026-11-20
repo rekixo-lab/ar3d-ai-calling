@@ -1,3 +1,4 @@
+import {resolveCrmDb} from './core.mjs';
 // Durable, opt-in Exotel Flow dispatcher. No browser-supplied numbers or SIDs.
 import {exotelApiBase,configuredExotelRegion} from './exotel-region.mjs';
 import {getExotelOperatorTestStatusReadOnly} from './exotel-readonly-verification.mjs';
@@ -104,8 +105,7 @@ export async function runCampaignCron(env,{now=Date.now(),apiFetch=fetch}={}){
  const rows=tenants.results||[],offset=rows.length?Math.floor(now/60000)%rows.length:0;
  for(const t of [...rows.slice(offset),...rows.slice(0,offset)]){
   // At most ten active/inflight tenants per invocation; rotate by minute.
-  const db=t.storage_mode==='shared'?env.CRM_DB:env[t.dedicated_binding];
-  if(!db)continue;
+  let db;try{db=resolveCrmDb(env,t)}catch{continue}
   const work=await db.prepare("SELECT id FROM calling_runs WHERE tenant_id=? AND state='running' UNION ALL SELECT id FROM calling_jobs WHERE tenant_id=? AND state='submitted' LIMIT 1").bind(t.id,t.id).first();
   if(!work)continue;
   try{await tickTenant(env,db,t.id,{apiFetch,now})}catch{console.error('AR3D campaign tenant processing unavailable')}processed++;
