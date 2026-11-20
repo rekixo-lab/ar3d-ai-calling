@@ -254,6 +254,36 @@ function engineeringPanel(main){
   card.append(title('Managed Exotel Voicebot — Transcript Webhook Checks','h3'),
     node('p',{class:'note',text:'Seven fixed-question transcripts: validates Exotel vendor-format turn events, reordered delivery, retries and opt-out flags offline. No real calls, customer data or CRM edits.'}),
     webhookCheck,webhookResults);
+  const webhookHealthOutput=div('stack');
+  const webhookHealthButton=btn('Check saved Exotel webhooks (read-only)',async()=>{
+    webhookHealthButton.disabled=true;
+    webhookHealthOutput.replaceChildren(node('p',{class:'muted',
+      text:'Reading safe Exotel webhook receipt counts from Control database...'}));
+    try{
+      const r=await api('/v1/human/engineering/exotel-webhook-health');
+      const m=r.metrics;
+      webhookHealthOutput.replaceChildren(
+        node('p',{class:'muted',text:
+          'Webhook Bearer token: '+(r.webhookTokenConfigured?'configured':'not configured')+
+          ' | Last saved event: '+(r.lastReceivedAt||'none')}),
+        table(['Quarantined metadata (unexpired only)','Unique stored receipts'],[
+          ['All events',m.uniqueReceipts],
+          ['Transcript events',m.transcriptReceipts],
+          ['Session end events',m.sessionEndReceipts],
+          ['Completed turns',m.completedTurns],
+          ['In-progress turns',m.inProgressTurns],
+          ['Distinct session fingerprints',m.distinctSessions],
+          ['Potential opt-out signals',m.possibleOptOutSignals]
+        ]),
+        node('p',{class:'note',text:
+          'These are unique saved Bearer-authenticated receipts, NOT all webhook attempts or verified provider-origin events. Exotel Test URL pings do not create receipts. A potential opt-out needs separate human investigation; this report has no caller identity or transcript. No CRM writes or calls are performed.'})
+      );
+    }catch(err){asError(err)}finally{webhookHealthButton.disabled=false}
+  },true);
+  card.append(title('Exotel Webhook Receipt Health (real saved metadata)','h3'),
+    node('p',{class:'note',text:
+      'See whether real webhook event metadata reached AR3D. Safe aggregate-only monitoring; it cannot identify a customer or confirm Exotel as the sender.'}),
+    webhookHealthButton,webhookHealthOutput);
   const qualificationCheckOutput=div('stack');
   const qualificationButton=btn('Test Voicebot Answers to CRM Review (offline)',async()=>{
     qualificationButton.disabled=true;
