@@ -157,3 +157,22 @@ test('opt-out result cannot be applied/dismissed until irreversible Do Not Call 
     assert.equal(db.prepare('SELECT COUNT(*) AS n FROM calls').get().n,0);
   }finally{db.close()}
 });
+
+test('malformed review JSON is HTTP 400, never a 503 or CRM mutation',async()=>{
+  const {db,wrapper}=realDb();
+  try{
+    const env={...scope,CRM_DB:wrapper};
+    const reviewId='bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+    const path='/v1/human/voicebot-reviews/'+reviewId+'/dismiss?tenantId='+tenant;
+    for(const raw of ['null','[]','{"tenantId":null}','{"tenantId":"x"', '{}']){
+      const response=await handleVoicebotReviewRequest(
+        new Request('https://fictional.invalid'+path,{
+          method:'POST',headers:{Origin:'https://fictional.invalid',
+            'Content-Type':'application/json'},body:raw
+        }),env,user);
+      assert.equal(response.status,400,raw);
+    }
+    assert.equal(db.prepare('SELECT COUNT(*) AS n FROM crm_audit_events').get().n,0);
+    assert.equal(db.prepare('SELECT COUNT(*) AS n FROM voicebot_qualification_reviews').get().n,0);
+  }finally{db.close()}
+});
