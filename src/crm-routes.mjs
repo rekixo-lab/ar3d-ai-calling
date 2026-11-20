@@ -98,7 +98,7 @@ export async function handleCrmRequest(req,env,user){
           row.customerSegment,row.plotSizePreference,row.visitDatePreference));
       // D1.batch is transactional: either the entire file succeeds or none is committed.
       statements.push(db.prepare(`INSERT INTO crm_audit_events(tenant_id,id,actor,action,target_id,created_at)
-        VALUES(?,?,'human:'||?,?,?)`).bind(tid,crypto.randomUUID(),user.id,isXlsx?'leads.xlsx_import':'leads.csv_import',String(rows.length),stamp));
+        VALUES(?,?,'human:'||?,?,?,?)`).bind(tid,crypto.randomUUID(),user.id,isXlsx?'leads.xlsx_import':'leads.csv_import',String(rows.length),stamp));
       const result=await db.batch(statements);
       const inserted=result.slice(0,rows.length).reduce((total,r)=>total+Number(r.meta?.changes||0),0);
       return json({processed:rows.length,inserted,skipped:rows.length-inserted,

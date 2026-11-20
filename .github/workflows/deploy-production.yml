@@ -101,6 +101,9 @@ jobs:
         if: github.event_name == 'push' && steps.schema.outputs.schema_state == 'crm_call_intent_upgrade'
         run: |
           npx --yes wrangler@4 d1 execute ar3d-calling-shared-crm --remote --yes --config wrangler.jsonc --file migrations/crm/0010_call_intent_proposals.sql
+      - name: Add isolated Calling campaign queue (dispatch remains opt-in)
+        if: github.event_name == 'push' && steps.schema.outputs.schema_state == 'crm_dispatch_upgrade'
+        run: npx --yes wrangler@4 d1 execute ar3d-calling-shared-crm --remote --yes --config wrangler.jsonc --file migrations/crm/0011_exotel_campaign_dispatch.sql
       # Never auto-migrate partial or mixed schemas. Re-check the EMPTY state
       # immediately before writing, even if the previous read said fresh.
       - name: Confirm both isolated D1 schemas are still empty
@@ -117,6 +120,8 @@ jobs:
           npx --yes wrangler@4 d1 execute ar3d-calling-control --remote --yes --config wrangler.jsonc --file migrations/control/0006_tenant_lifecycle.sql
           npx --yes wrangler@4 d1 execute ar3d-calling-control --remote --yes --config wrangler.jsonc --file migrations/control/0007_provider_inbox.sql
           npx --yes wrangler@4 d1 execute ar3d-calling-control --remote --yes --config wrangler.jsonc --file migrations/control/0008_exotel_voicebot_receipts.sql
+          npx --yes wrangler@4 d1 execute ar3d-calling-control --remote --yes --config wrangler.jsonc --file migrations/control/0009_operator_self_test_calls.sql
+          npx --yes wrangler@4 d1 execute ar3d-calling-control --remote --yes --config wrangler.jsonc --file migrations/control/0010_exotel_operator_status_checks.sql
       - name: Initialize NEW AR3D Calling Shared CRM D1 database
         if: (github.event_name == 'push' && steps.schema.outputs.schema_state == 'fresh') || (github.event_name == 'workflow_dispatch' && inputs.operation == 'initialize')
         run: |
@@ -129,6 +134,8 @@ jobs:
           npx --yes wrangler@4 d1 execute ar3d-calling-shared-crm --remote --yes --config wrangler.jsonc --file migrations/crm/0007_agent_safety.sql
           npx --yes wrangler@4 d1 execute ar3d-calling-shared-crm --remote --yes --config wrangler.jsonc --file migrations/crm/0008_customer_qualification.sql
           npx --yes wrangler@4 d1 execute ar3d-calling-shared-crm --remote --yes --config wrangler.jsonc --file migrations/crm/0009_voicebot_review_queue.sql
+          npx --yes wrangler@4 d1 execute ar3d-calling-shared-crm --remote --yes --config wrangler.jsonc --file migrations/crm/0010_call_intent_proposals.sql
+          npx --yes wrangler@4 d1 execute ar3d-calling-shared-crm --remote --yes --config wrangler.jsonc --file migrations/crm/0011_exotel_campaign_dispatch.sql
       - name: Verify post-initialization schema before proceeding
         if: (github.event_name == 'push' && steps.schema.outputs.schema_state == 'fresh') || (github.event_name == 'workflow_dispatch' && inputs.operation == 'initialize')
         run: node scripts/main-cloudflare.mjs ready

@@ -228,6 +228,7 @@ try{
     await page.getByPlaceholder('Minimum 12 characters').fill(TEST_PASSWORD);
     await page.getByRole('button',{name:'Sign in',exact:true}).click();
     await page.getByRole('heading',{name:'Super Admin',exact:true}).waitFor();
+    await page.getByText('Engineering tools and diagnostics',{exact:true}).click();
     await page.getByRole('heading',{name:'Production Readiness & Safe AI Calling Pilot'}).waitFor();
     await page.getByRole('heading',{name:'Operator Setup Checklist'}).waitFor();
     await page.getByRole('heading',{name:'Customer Production Launch — GO / NO-GO'}).waitFor();

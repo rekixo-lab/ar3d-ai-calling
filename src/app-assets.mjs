@@ -394,7 +394,7 @@ function engineeringPanel(main){
     }
   }).catch(asError);
 }
-function dashboard(){root.replaceChildren();const aside=div('sidebar',node('div',{class:'brand',text:'AR3D AI Calling'},node('small',{text:'MULTI-TENANT PLATFORM'})),div('navitem',state.me.superAdmin?'Super Admin':'Client Dashboard'),node('p',{class:'muted',text:state.me.email}),node('a',{href:'/app/simulator',class:'navitem',text:'Test AI Conversation'}),btn('Sign out',logout,true));const main=div('main',div('row between',title(state.me.superAdmin?'Super Admin':'Personal AI Calling','h1'),node('span',{class:'pill',text:'Engineering Pilot / Customer Calls Disabled'})),div('',node('div',{id:'notice-anchor'})));root.append(div('layout',aside,main));if(state.me.superAdmin){engineeringPanel(main);mfaPanel(main);superAdmin(main)}if(state.me.tenants.length)clientPanel(main)}
+function dashboard(){root.replaceChildren();const aside=div('sidebar',node('div',{class:'brand',text:'AR3D AI Calling'},node('small',{text:'MULTI-TENANT PLATFORM'})),div('navitem',state.me.superAdmin?'Super Admin':'Client Dashboard'),node('p',{class:'muted',text:state.me.email}),node('a',{href:'/app/simulator',class:'navitem',text:'Test AI Conversation'}),btn('Sign out',logout,true));const main=div('main',div('row between',title(state.me.superAdmin?'Super Admin':'Personal AI Calling','h1'),node('span',{class:'pill',text:'AR3D Client Platform'})),div('',node('div',{id:'notice-anchor'})));root.append(div('layout',aside,main));if(state.me.superAdmin){superAdmin(main);callingAdminPanel(main);mfaPanel(main);const advanced=node('details',{class:'card'},node('summary',{text:'Engineering tools and diagnostics'}));main.append(advanced);engineeringPanel(advanced)}if(state.me.tenants.length)clientPanel(main)}
 function showRecoveryCodes(target,codes){
   target.replaceChildren(node('p',{class:'success',text:'Save these one-time recovery codes now. Each works only once. They will not be displayed again.'}));
   const box=node('textarea',{class:'field',rows:'8',readonly:'readonly'});
@@ -493,11 +493,11 @@ actionForm.addEventListener('submit',async e=>{e.preventDefault();try{
 await inviteSection(main)}
 async function inviteSection(main){const previous=document.getElementById('invite-card');if(previous)previous.remove();const card=div('card');card.id='invite-card';card.append(title('Invite client admin','h2'),node('p',{class:'muted',text:'Invitation link shown once. Share privately with the intended client.'}));const select=node('select',{class:'field'},[node('option',{value:'',text:'Choose company'})]);const tenants=await api('/v1/human/tenants');tenants.tenants.forEach(t=>select.append(node('option',{value:t.id,text:t.display_name})));const email=input('email','email','client@builder.com');const role=node('select',{class:'field'},['client_admin','viewer'].map(x=>node('option',{value:x,text:x})));const f=node('form',{class:'formrow'},[lab('Company',select),lab('Client email',email),lab('Role',role),node('button',{type:'submit',class:'btn',text:'Create invitation'})]);f.addEventListener('submit',async e=>{e.preventDefault();try{const d=await api('/v1/human/invitations','POST',{tenantId:select.value,email:email.value,role:role.value});const share=node('input',{class:'field',value:d.inviteUrl,readonly:'readonly',style:'width:100%'});card.append(div('banner',node('p',{text:'Share this one-time link securely:'}),share));notice('Invitation generated for '+email.value)}catch(err){asError(err)}});card.append(f);main.append(card)}
 async function clientPanel(main){const panel=div('card',title('Personal CRM & AI Agent'));main.append(panel);const select=node('select',{class:'field'},state.me.tenants.map(t=>node('option',{value:t.id,text:t.name+' — '+t.plan})));const content=div('');panel.append(lab('Your company',select),content);select.addEventListener('change',()=>renderClient(select.value,content));await renderClient(select.value,content)}
-async function renderClient(id,content){content.replaceChildren(node('p',{class:'muted',text:'Loading client dashboard…'}));try{const d=await api('/v1/human/overview?tenantId='+encodeURIComponent(id));content.replaceChildren();const cards=div('cards',...[['Leads',d.metrics.leads],['Draft AI Agents',d.metrics.agents],['Calls',d.metrics.calls],['Site Visits',d.metrics.siteVisits]].map(([name,val])=>div('card metric',node('span',{class:'muted',text:name}),node('strong',{text:String(val)}))));content.append(cards);content.append(node('p',{class:'note',text:'Calling is not enabled. Imported and manually added leads remain consent/DND unknown until verified.'}));const leadCard=div('card',title('Leads','h3'),table(['Name','Mobile','Source','Consent'],d.leads.map(l=>[l.name,l.mobile,l.sourceType,l.consentStatus])));content.append(leadCard);const name=input('name','text','Customer name'),mobile=input('mobile','tel','9876543210');const leadForm=node('form',{class:'formrow'},[lab('Name',name),lab('Mobile',mobile),node('button',{class:'btn',type:'submit',text:'Add lead'})]);leadForm.addEventListener('submit',async e=>{e.preventDefault();try{await api('/v1/human/leads','POST',{tenantId:id,name:name.value,mobile:mobile.value});notice('Lead saved without calling consent');await renderClient(id,content)}catch(err){asError(err)}});if(d.role==='client_admin')leadCard.append(leadForm);const agentCard=div('card',title('AI Agents','h3'),table(['Name','Language','Status'],d.agents.map(a=>[a.displayName,a.languageMode,a.status])));content.append(agentCard);if(d.role==='client_admin'){const agentName=input('displayName','text','Sales Agent'),language=node('select',{class:'field'},['hi-en','hi','en'].map(x=>node('option',{value:x,text:x}))),q=node('textarea',{class:'field',placeholder:'One question per line',rows:4});const agentForm=node('form',{class:'stack'},[lab('AI Agent Name',agentName),lab('Language',language),lab('Questions (one per line)',q),node('button',{class:'btn',type:'submit',text:'Save draft AI Agent'})]);agentForm.addEventListener('submit',async e=>{e.preventDefault();try{await api('/v1/human/agents','POST',{tenantId:id,displayName:agentName.value,languageMode:language.value,questions:q.value.split('\n').map(s=>s.trim()).filter(Boolean)});notice('Draft AI Agent saved');await renderClient(id,content)}catch(err){asError(err)}});agentCard.append(agentForm);await agentEditor(id,agentCard)}await crmWorkflow(id,content,d.role);await planningPanels(id,content,d.role);await usageAndExport(id,content,d.role);if(d.role==='client_admin')await voicebotReviewPanel(id,content);if(d.role==='client_admin')await auditPanel(id,content)}catch(e){content.replaceChildren();asError(e)}}
+async function renderClient(id,content){content.replaceChildren(node('p',{class:'muted',text:'Loading client dashboard…'}));try{const d=await api('/v1/human/overview?tenantId='+encodeURIComponent(id));content.replaceChildren();const cards=div('cards',...[['Customers',d.metrics.leads],['Call attempts',d.metrics.calls],['Site Visits',d.metrics.siteVisits]].map(([name,val])=>div('card metric',node('span',{class:'muted',text:name}),node('strong',{text:String(val)}))));content.append(cards);content.append(node('p',{class:'note',text:'Upload customers, review a campaign, then start Exotel calling after Super Admin approval.'}));await crmWorkflow(id,content,d.role);await customerCallingPanel(id,content,d.role);const extra=node('details',{class:'card'},node('summary',{text:'Manual customer entry and agent drafts'}));content.append(extra);const leadCard=div('card',title('Leads','h3'),table(['Name','Mobile','Source','Consent'],d.leads.map(l=>[l.name,l.mobile,l.sourceType,l.consentStatus])));extra.append(leadCard);const name=input('name','text','Customer name'),mobile=input('mobile','tel','9876543210');const leadForm=node('form',{class:'formrow'},[lab('Name',name),lab('Mobile',mobile),node('button',{class:'btn',type:'submit',text:'Add lead'})]);leadForm.addEventListener('submit',async e=>{e.preventDefault();try{await api('/v1/human/leads','POST',{tenantId:id,name:name.value,mobile:mobile.value});notice('Lead saved without calling consent');await renderClient(id,content)}catch(err){asError(err)}});if(d.role==='client_admin')leadCard.append(leadForm);const agentCard=div('card',title('AI Agents','h3'),table(['Name','Language','Status'],d.agents.map(a=>[a.displayName,a.languageMode,a.status])));extra.append(agentCard);if(d.role==='client_admin'){const agentName=input('displayName','text','Sales Agent'),language=node('select',{class:'field'},['hi-en','hi','en'].map(x=>node('option',{value:x,text:x}))),q=node('textarea',{class:'field',placeholder:'One question per line',rows:4});const agentForm=node('form',{class:'stack'},[lab('AI Agent Name',agentName),lab('Language',language),lab('Questions (one per line)',q),node('button',{class:'btn',type:'submit',text:'Save draft AI Agent'})]);agentForm.addEventListener('submit',async e=>{e.preventDefault();try{await api('/v1/human/agents','POST',{tenantId:id,displayName:agentName.value,languageMode:language.value,questions:q.value.split('\n').map(s=>s.trim()).filter(Boolean)});notice('Draft AI Agent saved');await renderClient(id,content)}catch(err){asError(err)}});agentCard.append(agentForm);await agentEditor(id,agentCard)}const planning=node('details',{class:'card'},node('summary',{text:'Advanced campaign planning and project links'}));content.append(planning);await planningPanels(id,planning,d.role);const reports=node('details',{class:'card'},node('summary',{text:'Exports, answer reviews and audit history'}));content.append(reports);await usageAndExport(id,reports,d.role);if(d.role==='client_admin')await voicebotReviewPanel(id,reports);if(d.role==='client_admin')await auditPanel(id,reports)}catch(e){content.replaceChildren();asError(e)}}
 
 async function voicebotReviewPanel(tenantId,content){
   const card=div('card',title('Verified Exotel Voicebot Review Queue','h3'),
-    node('p',{class:'note',text:'Pending staff review of independently verified Exotel answers. A Bearer-protected Exotel webhook receipt quarantine exists; no verified call-to-lead mapping, automatic calls or CRM write from raw transcripts is enabled.'}));
+    node('p',{class:'note',text:'Pending staff review of independently verified Exotel answers. Speech answers are reviewed in Exotel. Automatic transcript import is not configured here.'}));
   content.append(card);
   try{
     const res=await api('/v1/human/voicebot-reviews?tenantId='+encodeURIComponent(tenantId));
@@ -547,6 +547,82 @@ async function voicebotReviewPanel(tenantId,content){
       card.append(itemCard);
     }
   }catch(e){card.append(node('p',{class:'err',text:'Voicebot review queue could not load.'}));asError(e)}
+}
+
+async function customerCallingPanel(tenantId,content,role){
+ const card=div('card',title('Exotel Customer Calling','h3'),node('p',{class:'note',text:'Excel import → campaign → Start. Calls continue in the background after closing this page. One call at a time per company; 09:00–20:00 India time. Super Admin must review company and customer permissions first.'}));
+ content.append(card);
+ const area=div('stack');card.append(area);
+ const pick=node('select',{class:'field','aria-label':'Calling campaign'});
+ async function refresh(){
+  const [data,campaigns]=await Promise.all([api('/v1/human/calling/state?tenantId='+tenantId),api('/v1/human/campaigns?tenantId='+tenantId)]);
+  const prior=pick.value;pick.replaceChildren(...campaigns.campaigns.map(c=>node('option',{value:c.id,text:c.name})));if(prior)pick.value=prior;
+  area.replaceChildren(node('p',{class:'note',text:!data.configuration.ready?'Exotel dispatch disabled: '+data.configuration.missing.join(', '):!data.policy?.enabled?'Super Admin company approval required.':'Daily call limit: '+data.policy.dailyLimit+' | Approval expires: '+data.policy.expiresAt}),
+   table(['Campaign','State'],data.runs.map(r=>[r.name,r.state])),
+   table(['Customer','Call state','Exotel status','Seconds','Details'],data.jobs.map(j=>[j.name,j.state,j.providerStatus,j.durationSeconds,j.errorCode])));
+ }
+ const refreshBtn=btn('Refresh call results',()=>refresh().catch(asError),true);
+ card.append(refreshBtn);
+ if(role==='client_admin'){
+  const name=input('callCampaignName','text','November follow-up');
+  const create=btn('Create campaign with first 200 CRM customers',async()=>{
+   create.disabled=true;
+   try{
+    if(!name.value.trim())throw Error('Enter a campaign name');
+    const first=await api('/v1/human/leads?tenantId='+tenantId+'&limit=100&offset=0');
+    const second=first.total>100?await api('/v1/human/leads?tenantId='+tenantId+'&limit=100&offset=100'):{leads:[]};
+    const ids=[...first.leads,...second.leads].map(l=>l.id);
+    if(!ids.length)throw Error('Upload your Excel file first');
+    const campaign=await api('/v1/human/campaigns','POST',{tenantId,name:name.value,languageMode:'hi-en',purpose:'property_information'});
+    let inserted=0;
+    for(let i=0;i<ids.length;i+=50){const r=await api('/v1/human/campaigns/'+campaign.id+'/candidates','POST',{tenantId,leadIds:ids.slice(i,i+50)});inserted+=r.inserted}
+    notice(inserted+' customers added. Review the campaign before Start.');await refresh();pick.value=campaign.id;
+   }catch(e){asError(e)}finally{create.disabled=false}
+  });
+  const start=btn('Start / Resume calling',async()=>{
+   if(!pick.value)return notice('Create a campaign first.',true);
+   if(!confirm('Start real Exotel calls to the approved customers in this campaign? This uses Exotel credits.'))return;
+   start.disabled=true;
+   try{const r=await api('/v1/human/calling/runs','POST',{tenantId,campaignId:pick.value,action:'start'});notice('Campaign '+r.state+'. Results refresh below.');await refresh()}catch(e){asError(e)}finally{start.disabled=false}
+  });
+  const pause=btn('Pause campaign',async()=>{try{await api('/v1/human/calling/runs','POST',{tenantId,campaignId:pick.value,action:'pause'});notice('Paused. A call already sent to Exotel may finish.');await refresh()}catch(e){asError(e)}},true);
+  card.append(div('formrow',lab('Campaign name',name),create),div('formrow',lab('Campaign',pick),start,pause));
+ }
+ try{await refresh()}catch(e){area.append(node('p',{class:'err',text:e.message}))}
+}
+async function callingAdminPanel(main){
+ const card=div('card',title('Client Calling Setup')),area=div('stack');main.append(card);
+ const company=node('select',{class:'field','aria-label':'Calling setup company'});
+ try{const d=await api('/v1/human/tenants');company.append(...d.tenants.map(t=>node('option',{value:t.id,text:t.display_name+' — '+t.status})))}catch(e){asError(e);return}
+ const flow=input('flowId','text','Exotel Voicebot Flow ID'),approval=input('approval','text','Exotel approval / account reference');
+ const days=input('days','number');days.value='7';days.min='1';days.max='30';
+ const limit=input('dailyLimit','number');limit.value='10';limit.min='1';limit.max='100';
+ const seconds=input('maxSeconds','number');seconds.value='120';seconds.min='30';seconds.max='600';
+ const enabled=node('input',{type:'checkbox','aria-label':'Enable company calling'});
+ const policyForm=node('form',{class:'stack'},[lab('Exotel Voicebot Flow ID',flow),lab('Provider approval reference',approval),div('formrow',lab('Approval days (1–30)',days),lab('Daily calls (1–100)',limit),lab('Maximum call seconds',seconds)),lab('Enable company calling',enabled),node('button',{class:'btn',type:'submit',text:'Save company calling approval'})]);
+ const consent=input('consent','text','Purpose-specific opt-in evidence reference'),dnd=input('dnd','text','Provider DND check reference');
+ const choices=div('stack');
+ const purpose=node('select',{class:'field'},['property_information','site_visit'].map(x=>node('option',{value:x,text:x})));
+ const clearanceForm=node('form',{class:'stack'},[title('Review customers for calling','h3'),node('p',{class:'note',text:'Select only customers covered by the consent evidence and current provider DND check. Excel upload alone does not supply these checks. Opted-out customers cannot be approved.'}),lab('Purpose',purpose),lab('Consent evidence reference',consent),lab('DND verification reference',dnd),choices,node('button',{class:'btn',type:'submit',text:'Approve selected customers'})]);
+ const status=div('');
+ const expires=()=>{const n=Number(days.value);if(!Number.isInteger(n)||n<1||n>30)throw Error('Approval days must be 1–30');return new Date(Date.now()+n*86400000).toISOString()};
+ policyForm.addEventListener('submit',async e=>{e.preventDefault();try{await api('/v1/human/calling/policy','POST',{tenantId:company.value,enabled:enabled.checked,flowId:flow.value,approvalReference:approval.value,expiresAt:expires(),dailyLimit:Number(limit.value),maxSeconds:Number(seconds.value)});notice('Company approval saved.');await refresh()}catch(e){asError(e)}});
+ clearanceForm.addEventListener('submit',async e=>{e.preventDefault();try{const leadIds=[...choices.querySelectorAll('input:checked')].map(x=>x.value);const r=await api('/v1/human/calling/clearances','POST',{tenantId:company.value,leadIds,purpose:purpose.value,consentReference:consent.value,dndReference:dnd.value,expiresAt:expires()});notice(r.reviewed+' customer approvals saved.');await refresh()}catch(e){asError(e)}});
+ async function refresh(){
+  choices.replaceChildren();status.replaceChildren();
+  if(!company.value)return;
+  try{
+   const [p,c]=await Promise.all([api('/v1/human/calling/policy?tenantId='+company.value),api('/v1/human/calling/clearances?tenantId='+company.value)]);
+   flow.value=p.policy?.flowId||'';approval.value=p.policy?.approvalReference||'';enabled.checked=!!p.policy?.enabled;
+   limit.value=String(p.policy?.dailyLimit||10);seconds.value=String(p.policy?.maxSeconds||120);
+   status.append(node('p',{class:'note',text:p.configuration.ready?'Exotel customer dispatcher configured.':p.configuration.missing.join(', ')}));
+   for(const l of c.leads){const checkbox=node('input',{type:'checkbox',value:l.id});if(l.consentStatus==='denied'||l.dndStatus==='blocked')checkbox.disabled=true;choices.append(lab(l.name+' — '+l.id.slice(0,8),checkbox))}
+   status.append(table(['Customer','Purpose','Approval expires'],c.clearances.map(x=>[x.name,x.purpose,x.expiresAt])));
+  }catch(e){status.append(node('p',{class:'err',text:e.message+' — use a current Super Admin MFA login.'}))}
+ }
+ company.addEventListener('change',()=>refresh().catch(asError));
+ card.append(lab('Client company',company),btn('Load calling setup',()=>refresh().catch(asError),true),area);
+ area.append(policyForm,clearanceForm,status);await refresh();
 }
 
 async function planningPanels(tenantId,content,role){
@@ -781,7 +857,7 @@ async function auditPanel(tenantId,content){
 
 async function usageAndExport(tenantId,content,role){
   const card=div('card',title('CRM Usage & Data Portability','h3'),
-    node('p',{class:'note',text:'Record counts only. No paid minutes, billing or real calls are activated.'}));
+    node('p',{class:'note',text:'CRM record counts and private customer exports. Call charges are managed in Exotel.'}));
   content.append(card);
   const usage=await api('/v1/human/usage?tenantId='+encodeURIComponent(tenantId));
   const m=usage.crmStats;
@@ -816,6 +892,7 @@ async function crmWorkflow(tenantId,content,role){
   workflow.append(node('p',{class:'note',text:'Excel .xlsx या CSV UTF-8 अपलोड करें (अधिकतम 200 leads)। Import से calling consent नहीं मिलता; consent/DND unknown रहेगा।'}));
   content.append(workflow);
   if(editable){
+    const template=btn('Download customer Excel template (CSV)',()=>{const href=URL.createObjectURL(new Blob(['Name,Mobile\r\n'],{type:'text/csv;charset=utf-8'}));const a=node('a',{href,download:'ar3d-customer-template.csv'});document.body.append(a);a.click();a.remove();URL.revokeObjectURL(href)},true);workflow.append(template);
     const picker=node('input',{class:'field',type:'file',accept:'.csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}),previewBox=div(''),csvBox=div('formrow',lab('Excel .xlsx or CSV file',picker));
     let importData=null;
     async function makeImportPayload(file){

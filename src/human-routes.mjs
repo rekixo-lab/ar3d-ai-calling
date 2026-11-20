@@ -1,3 +1,4 @@
+import {handleCallingRequest} from './calling-routes.mjs';
 import {handleCrmRequest} from './crm-routes.mjs';
 import {handlePropertyQualificationRequest} from './property-qualification-routes.mjs';
 import {handleVoicebotReviewRequest} from './voicebot-review-routes.mjs';
@@ -175,7 +176,7 @@ async function overview(req,env,user){
   const [leads,agents,calls,visits,leadRows,agentRows]=await Promise.all([
     db.prepare('SELECT COUNT(*) AS n FROM leads WHERE tenant_id=?').bind(tid).first(),
     db.prepare('SELECT COUNT(*) AS n FROM agents WHERE tenant_id=?').bind(tid).first(),
-    db.prepare('SELECT COUNT(*) AS n FROM calls WHERE tenant_id=?').bind(tid).first(),
+    db.prepare('SELECT (SELECT COUNT(*) FROM calls WHERE tenant_id=?)+(SELECT COUNT(*) FROM calling_jobs WHERE tenant_id=? AND reserved_at IS NOT NULL) AS n').bind(tid,tid).first(),
     db.prepare('SELECT COUNT(*) AS n FROM site_visits WHERE tenant_id=?').bind(tid).first(),
     db.prepare('SELECT name,mobile_e164 AS mobile,source_type AS sourceType,consent_status AS consentStatus FROM leads WHERE tenant_id=? ORDER BY created_at DESC LIMIT 30').bind(tid).all(),
     db.prepare('SELECT display_name AS displayName,language_mode AS languageMode,status FROM agents WHERE tenant_id=? ORDER BY created_at DESC LIMIT 30').bind(tid).all()
@@ -234,6 +235,8 @@ export async function handleHumanRequest(req,env){
     if(!user)return fail('sign in required',401);
     if(path==='/v1/human/mfa'||path==='/v1/human/mfa/setup'||path==='/v1/human/mfa/enable'||path==='/v1/human/mfa/recovery/regenerate')
       return await handleMfaSettings(req,env,user,method==='POST'?await payload(req):null);
+    const calling=await handleCallingRequest(req,env,user);
+    if(calling)return calling;
     const statusCheck=await handleExotelOperatorStatusCheck(req,env,user);
     if(statusCheck)return statusCheck;
     const webhookHealth=await handleExotelWebhookHealth(req,env,user);

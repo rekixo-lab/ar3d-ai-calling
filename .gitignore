@@ -6,3 +6,7 @@ wrangler.jsonc
 *.log
 
 wrangler.*.jsonc
+
+# Local acceptance evidence and Python caches
+artifacts/
+__pycache__/

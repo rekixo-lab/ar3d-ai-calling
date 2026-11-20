@@ -44,7 +44,7 @@ test('Cloudflare scheduled cleanup uses four auth tables and isolated Exotel rec
 });
 test('Unknown schedules and DBs fail closed before touching customer data',async()=>{
   const f=dbFixture();
-  await assert.rejects(worker.scheduled({cron:'* * * * *',scheduledTime:NOW},f.env),/unknown/);
+  await assert.rejects(worker.scheduled({cron:'*/2 * * * *',scheduledTime:NOW},f.env),/unknown/);
   await assert.rejects(pruneExpiredAuth(f.env,{cron:'every minute',now:NOW}),/unauthorized/);
   await assert.rejects(pruneExpiredAuth({}, {now:NOW}),/unauthorized/);
   await assert.rejects(pruneExpiredAuth(f.env,{now:-2}),/unauthorized/);
