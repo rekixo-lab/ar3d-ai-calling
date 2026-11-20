@@ -60,7 +60,7 @@ export async function handleCallIntentProposals(req,env,user){
         return fail('query_not_supported');
       const rawLimit=url.searchParams.get('limit')??'25';
       const rawOffset=url.searchParams.get('offset')??'0';
-      if(!/^[1-9][0-9]?$|^50$/.test(rawLimit)||
+      if(!/^(?:[1-9]|[1-4][0-9]|50)$/.test(rawLimit)||
          !/^(0|[1-9][0-9]{0,5})$/.test(rawOffset)||
          Number(rawOffset)>100000)return fail('invalid_pagination');
       const limit=Number(rawLimit),offset=Number(rawOffset);
