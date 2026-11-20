@@ -74,10 +74,22 @@ needed for production auto-CRM saves. No traffic should be allocated to
 v2 until those gates pass.
 
 The Exotel UI **Test URL** may send a synthetic body instead of a valid
-live event. Its failure with HTTP 400/422 does not by itself imply an
-authentication failure. Do not remove Bearer validation to satisfy a
-provider UI test; use a provider-confirmed, non-customer sample and
-read-only observability to troubleshoot.
+live event (not specified in the public webhook contract). The endpoint
+now accepts tiny **explicitly marked test/ping/verification JSON objects**
+ONLY after a valid Bearer token has been authenticated, acknowledging them
+without writing a D1 receipt or changing the CRM. Actual call/session keys
+are never permitted in these verification probes. This is NOT a general
+bypass for malformed real events.
+
+If an Exotel Test URL still returns `invalid_webhook_payload`, its
+authenticated HTTP 400 response lists only a fixed, PII-safe subset of
+present **field names**, plus a static validation category. This helps
+identify the undocumented test JSON format without echoing field values,
+tokens, names, transcripts or customer numbers. Never turn off Bearer
+authentication to make Exotel testing pass. Inspect the response and
+adjust only after the actual test shape is verified with vendor docs or
+an approved sample. A test URL 200 is connectivity-only, not proof of a
+genuine call, CRM delivery or any compliance approval.
 
 ## Code attachment map
 
