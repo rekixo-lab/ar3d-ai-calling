@@ -76,6 +76,19 @@ const server=http.createServer(async(req,res)=>{
       return respond(res,200,{...exotelTrialReadiness({}),managedVoicebotPrompt:managedVoicebotInstructions()});
     if(req.method==='GET'&&path==='/v1/human/engineering/own-sip-setup')
       return respond(res,200,ownSipSetup());
+    if(req.method==='GET'&&path==='/v1/human/engineering/exotel-self-test')
+      return respond(res,200,{
+        mode:'operator_verified_number_only',configured:false,
+        missing:['operator_explicit_opt_in'],mfaEnabled:true,
+        voicebotFlowId:null,destinationLast4:null,realCallsStartedByRead:0,
+        recent:[{id:'00112233-4455-4677-8899-aabbccddeeff',state:'submitted',
+          createdAt:'2026-11-20T12:00:00.000Z',errorCode:null,checkState:null,
+          webhookCandidate:{state:'candidate_only',uniqueReceipts:2,
+            transcriptEvents:1,sessionEnds:1,completedTurns:1,
+            uniqueSessions:1,possibleOptOutEvents:0,
+            lastReceivedAt:'2026-11-20T12:10:00.000Z',
+            sourceAuthenticated:false,leadMatched:false,canUpdateCrm:false}}]
+      });
     if(req.method==='GET'&&path==='/v1/human/engineering/exotel-webhook-health')
       return respond(res,200,{
         mode:'read_only_quarantined_metadata',window:'unexpired_receipts_only',
@@ -204,6 +217,9 @@ try{
     await page.getByRole('heading',{name:'Production Readiness & Safe AI Calling Pilot'}).waitFor();
     await page.getByRole('heading',{name:'Operator Setup Checklist'}).waitFor();
     await page.getByRole('heading',{name:'Exotel Trial Setup — What Is Ready?'}).waitFor();
+    await page.getByText(/Potential Exotel webhook matches \(hashed metadata only\): 2 unique events/).waitFor();
+    await page.getByText(/Candidate only: the webhook external_id must equal/).waitFor();
+
     await page.getByRole('heading',{name:'Our Own Calling Engine — No Exotel Required'}).waitFor();
     await page.getByText(/Asterisk local-only lab: source ready/).waitFor();
     await page.getByRole('button',{name:'Copy 7-question Exotel Voicebot instructions'}).waitFor();
