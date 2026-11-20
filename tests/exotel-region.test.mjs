@@ -90,7 +90,7 @@ test('Singapore Exotel account check is read-only and uses correct Singapore end
   assert.equal(seen.url,
     'https://api.exotel.com/v1/Accounts/fictional_account/Calls.json?PageSize=1');
   assert.equal(seen.opts.method,'GET');
-  assert.equal(seen.opts.redirect,'error');
+  assert.equal(seen.opts.redirect,'manual');
   assert.ok(!JSON.stringify(result).includes(account.apiKey));
   assert.ok(!JSON.stringify(result).includes(account.apiToken));
 });
