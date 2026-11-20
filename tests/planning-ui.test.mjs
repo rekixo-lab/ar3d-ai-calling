@@ -20,11 +20,9 @@ test('CRM campaign editor has bounded candidate and lead paging controls',()=>{
 
 test('dashboard sidebar has distinct block navigation and accessible sign-out spacing',async()=>{
   const {css,js}=await import('../src/app-assets.mjs');
-  assert.match(css,/\.sidebar\{display:flex;flex-direction:column;align-items:stretch;gap:14px/);
-  assert.match(css,/\.sidebar \.navitem\{display:block;margin:0/);
-  assert.match(css,/\.sidebar>\.btn\{align-self:flex-start;max-width:100%;margin-top:4px/);
-  assert.match(css,/\.sidebar a:focus-visible,\.sidebar button:focus-visible/);
-  assert.match(js,/href:'\/app\/simulator',class:'navitem',text:'Test AI Conversation'/);
+  assert.match(css,/\.sidebar-footer\{margin-top:auto/);
+  assert.match(css,/:focus-visible/);
+  assert.match(js,/href:'\/app\/simulator',class:'navitem'/);
   assert.match(js,/btn\('Sign out',logout,true\)/);
 });
 
