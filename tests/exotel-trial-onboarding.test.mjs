@@ -47,10 +47,15 @@ test('readiness reports presence only, never falsely reports permission to dial 
   const creds={
     EXOTEL_ACCOUNT_SID:'fictional_account_12345',
     EXOTEL_API_KEY:'testing_key_super_secret_0123456789',
-    EXOTEL_API_TOKEN:'testing_token_super_secret_9876543210'
+    EXOTEL_API_TOKEN:'testing_token_super_secret_9876543210',
+    EXOTEL_REGION:'singapore'
   };
   const ok=exotelTrialReadiness(creds);
+  assert.equal(ok.apiRegion,'singapore');
+  assert.equal(ok.apiRegionConfigured,true);
   assert.equal(ok.accountReadyForReadOnlyCheck,true);
+  assert.equal(exotelTrialReadiness({...creds,EXOTEL_REGION:'invalid'}).accountReadyForReadOnlyCheck,false);
+  assert.equal(exotelTrialReadiness({...creds,EXOTEL_REGION:undefined}).accountReadyForReadOnlyCheck,false);
   assert.equal(ok.accountApiConnectivityVerified,false);
   assert.equal(ok.canPlaceRealCalls,false);
   assert.equal(ok.canAutoSaveProviderTranscript,false);
