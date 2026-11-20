@@ -142,9 +142,14 @@ export async function handleExotelOperatorTest(req,env,user,{apiFetch=fetch,now=
   if(user?.globalRole!=='super_admin')return error('forbidden',403);
   if(!env?.CONTROL_DB?.prepare)return error('control_database_unavailable',503);
   if(!['GET','POST'].includes(req.method))return error('method_not_allowed',405);
+  // MFA must have happened as part of THIS login: old sessions that
+  // predate enrollment are not strong enough to initiate even a test call.
   const mfa=await env.CONTROL_DB.prepare(
-    'SELECT enabled_at FROM human_mfa_settings WHERE user_id=? AND enabled_at IS NOT NULL'
-  ).bind(user.id).first();
+    'SELECT m.enabled_at FROM human_mfa_settings m JOIN human_sessions s '+
+    'ON s.user_id=m.user_id WHERE m.user_id=? AND s.token_hash=? '+
+    'AND m.enabled_at IS NOT NULL AND s.created_at>=m.enabled_at '+
+    'AND s.revoked_at IS NULL AND s.expires_at>? LIMIT 1'
+  ).bind(user.id,user.token_hash,now).first();
   const mfaEnabled=!!mfa?.enabled_at;
   const cfg=operatorTestConfig(env);
   if(req.method==='GET'){
