@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {operatorTestConfig,makeOperatorTestRequest,validateOperatorTestResult,
   handleExotelOperatorTest} from '../src/exotel-operator-test-routes.mjs';
 
-const user={id:'123e4567-e89b-42d3-a456-426614174000',globalRole:'super_admin'};
+const user={id:'123e4567-e89b-42d3-a456-426614174000',globalRole:'super_admin',token_hash:'b'.repeat(64)};
 const envBase=Object.freeze({
   EXOTEL_OPERATOR_TEST_ENABLED:'enabled',
   EXOTEL_ACCOUNT_SID:'rekixo1',
@@ -21,14 +21,15 @@ const req=(method='GET',body=null)=>new Request(
 );
 const confirm={confirm:'CALL_MY_VERIFIED_NUMBER_ONCE'};
 class MockDb{
-  constructor(){this.mfa=true;this.entries=[];this.writes=0}
+  constructor(){this.mfa=true;this.oldSession=false;this.entries=[];this.writes=0}
   prepare(sql){
     const db=this;
     return {bind(...params){
       return {
         async first(){
           if(sql.includes('human_mfa_settings'))
-            return db.mfa?{enabled_at:'2026-11-20T09:00:00Z'}:null;
+            return db.mfa&&!db.oldSession&&params[1]===user.token_hash?
+              {enabled_at:'2026-11-20T09:00:00Z'}:null;
           throw Error('unknown first '+sql)
         },
         async all(){
@@ -92,6 +93,10 @@ test('only super-admin MFA signed-in actor can launch; forged target is rejected
   assert.equal((await handleExotelOperatorTest(req('POST',confirm),env,user,
     {apiFetch,now:at})).status,403);
   db.mfa=true;
+  db.oldSession=true;
+  assert.equal((await handleExotelOperatorTest(req('POST',confirm),env,user,
+    {apiFetch,now:at})).status,403);
+  db.oldSession=false;
   assert.equal((await handleExotelOperatorTest(req('POST',
     {...confirm,mobile:'+919999999999'}),env,user,{apiFetch,now:at})).status,400);
   assert.equal(called,0);assert.equal(db.writes,0);
