@@ -20,6 +20,7 @@ function responseCode(response){
   if(status===403)return 'http_403';
   if(status===404)return 'http_404';
   if(status===429)return 'http_429';
+  if(Number.isInteger(status)&&status>=300&&status<400)return 'http_redirect_rejected';
   if(Number.isInteger(status)&&status>=500&&status<600)return 'http_5xx';
   return 'unexpected_http_status';
 }
@@ -45,7 +46,10 @@ async function boundedProviderGet(url,auth,apiFetch){
   try {
     response=await apiFetch(url,{
       method:'GET',headers:{Authorization:authorization,Accept:'application/json'},
-      redirect:'error',cache:'no-store',signal:AbortSignal.timeout(7000)
+      // Cloudflare Workers does NOT implement redirect:'error' (throws
+      // TypeError before any network request). 'manual' is supported.
+      // Any 3xx is rejected below, so Authorization is never forwarded.
+      redirect:'manual',cache:'no-store',signal:AbortSignal.timeout(7000)
     });
   } catch {throw safeProviderError('transport_unavailable','Exotel read-only lookup transport unavailable')}
   if(!response||response.status!==200)throw safeProviderError(
