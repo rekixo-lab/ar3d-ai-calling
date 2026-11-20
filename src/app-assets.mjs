@@ -175,7 +175,7 @@ function engineeringPanel(main){
       }
       webhookResults.replaceChildren(
         table(['Offline case','Turns','Replays ignored','Opt-out flag'],checks),
-        node('p',{class:'note',text:'Only fictional events were tested. Session-end does NOT contain the full transcript. Real webhook authentication, call/lead matching and automatic CRM save remain disabled.'})
+        node('p',{class:'note',text:'Only fictional events were tested. Session-end does NOT contain the full transcript. This offline fixture does not authenticate provider callbacks. Production callbacks go to a separate Bearer-protected, metadata-only quarantine; call/lead matching and automatic CRM save remain disabled.'})
       );
     }catch(err){asError(err)}finally{webhookCheck.disabled=false}
   },true);
@@ -198,7 +198,7 @@ function engineeringPanel(main){
       }
       qualificationCheckOutput.replaceChildren(
         table(['Synthetic transcript','Review state','Type','Budget INR'],summaries),
-        node('p',{class:'note',text:'These are provisional fields only. No real Exotel webhook is authenticated; no opt-out, lead, CRM, call or site visit is modified.'})
+        node('p',{class:'note',text:'These are provisional fields only. This offline fixture does not authenticate vendor callbacks. Live bearer quarantine records only metadata; no lead, opt-out, CRM, call or site visit is modified.'})
       );
     }catch(err){asError(err)}finally{qualificationButton.disabled=false}
   },true);
@@ -341,7 +341,7 @@ async function renderClient(id,content){content.replaceChildren(node('p',{class:
 
 async function voicebotReviewPanel(tenantId,content){
   const card=div('card',title('Verified Exotel Voicebot Review Queue','h3'),
-    node('p',{class:'note',text:'Pending staff review of independently verified Exotel answers. No public provider webhook, automatic calls or CRM write from raw transcripts is enabled.'}));
+    node('p',{class:'note',text:'Pending staff review of independently verified Exotel answers. A Bearer-protected Exotel webhook receipt quarantine exists; no verified call-to-lead mapping, automatic calls or CRM write from raw transcripts is enabled.'}));
   content.append(card);
   try{
     const res=await api('/v1/human/voicebot-reviews?tenantId='+encodeURIComponent(tenantId));

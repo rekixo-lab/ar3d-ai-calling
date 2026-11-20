@@ -40,14 +40,38 @@ export async function pruneExpiredAuth(env,{now=Date.now(),cron=AUTH_MAINTENANCE
   });
 }
 
+// Privacy-safe automatic deletion of the metadata-only Exotel webhook receipts.
+// This uses the existing isolated Calling Control D1 cron and exactly one
+// allowlisted table. No raw transcripts/phone numbers are stored to begin with.
+export async function pruneExpiredExotelWebhookReceipts(env,{
+  now=Date.now(),cron=AUTH_MAINTENANCE_CRON
+}={}){
+  if(cron!==AUTH_MAINTENANCE_CRON||!Number.isSafeInteger(now)||now<0||
+     !env?.CONTROL_DB?.prepare)
+    throw Error('unauthorized Exotel metadata retention event');
+  const result=await env.CONTROL_DB.prepare(
+    'DELETE FROM exotel_voicebot_event_receipts WHERE receipt_key IN ('+
+    'SELECT receipt_key FROM exotel_voicebot_event_receipts '+
+    'WHERE expires_at<=? ORDER BY expires_at LIMIT ?)'
+  ).bind(now,AUTH_MAINTENANCE_LIMIT).run();
+  const changes=result?.meta?.changes;
+  if(!Number.isSafeInteger(changes)||changes<0||changes>AUTH_MAINTENANCE_LIMIT)
+    throw Error('unconfirmed Exotel receipt retention cleanup');
+  return changes;
+}
 export async function handleCallingCron(controller,env){
   if(controller?.cron!==AUTH_MAINTENANCE_CRON)
     throw Error('unknown Calling Worker cron expression');
+  const timestamp=controller?.scheduledTime??Date.now();
   const result=await pruneExpiredAuth(env,{
-    now:controller?.scheduledTime??Date.now(),cron:controller.cron
+    now:timestamp,cron:controller.cron
   });
-  // Safe, numeric operational log only. Do not log untrusted event objects.
-  console.log('AR3D AI Calling expired-auth cleanup: tables='+
-    result.tablesChecked+' rows='+result.rowsDeleted);
-  return result;
+  const webhookReceiptsDeleted=await pruneExpiredExotelWebhookReceipts(env,{
+    now:timestamp,cron:controller.cron
+  });
+  // Safe numeric counters only; never log event IDs, phones or transcript data.
+  console.log('AR3D AI Calling control metadata cleanup: auth_tables='+
+    result.tablesChecked+' auth_rows='+result.rowsDeleted+
+    ' expired_webhook_receipts='+webhookReceiptsDeleted);
+  return Object.freeze({...result,webhookReceiptsDeleted});
 }

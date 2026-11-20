@@ -15,7 +15,7 @@ export const REQUIRED_TABLES = Object.freeze({
   CONTROL_DB: Object.freeze([
     'tenants','tenant_keys','project_links','tenant_numbers','tenant_audit_events',
     'human_users','tenant_memberships','human_sessions','human_invitations',
-    'human_login_limits','human_bootstrap_claim','human_ip_login_limits','human_mfa_settings','human_mfa_challenges','human_mfa_recovery_codes','provider_event_inbox',
+    'human_login_limits','human_bootstrap_claim','human_ip_login_limits','human_mfa_settings','human_mfa_challenges','human_mfa_recovery_codes','provider_event_inbox','exotel_voicebot_event_receipts',
   ]),
   CRM_DB: Object.freeze([
     'leads','agents','calls','site_visits','crm_audit_events',
@@ -30,6 +30,7 @@ export const REQUIRED_COLUMNS = Object.freeze({
     human_mfa_settings: Object.freeze(['user_id','recovery_generation_id','enabled_at']),
     human_mfa_recovery_codes: Object.freeze(['user_id','code_hash','used_at']),
     provider_event_inbox: Object.freeze(['tenant_id','provider','event_id','status']),
+    exotel_voicebot_event_receipts: Object.freeze(['receipt_key','account_fingerprint','session_fingerprint','call_fingerprint','conversation_fingerprint','event_fingerprint','payload_digest','event_kind','turn_status','possible_opt_out','status','received_at','expires_at']),
     human_ip_login_limits: Object.freeze(['ip_hash','attempt_count','blocked_until']),
   }),
   CRM_DB: Object.freeze({
@@ -146,6 +147,9 @@ export function checkTables(tables, binding, mode) {
     // Only one specifically reviewed ADDITIVE table may be absent on an
     // existing CRM D1. Every original table and calling safety trigger must
     // already exist; unknown partial schemas still fail closed.
+    if (binding === 'CONTROL_DB' && missing.length === 1 &&
+        missing[0] === 'exotel_voicebot_event_receipts')
+      return 'control_additive_upgrade';
     if (binding === 'CRM_DB' && missing.length === 1 &&
         missing[0] === 'voicebot_qualification_reviews')
       return 'crm_additive_upgrade';
@@ -189,13 +193,15 @@ export async function inspectCloudflare({ credentials, mode, apiFetch = fetch, t
     const names = rows.map(x => x.name);
     const state = checkTables(names, binding, mode);
     modes[binding] = state;
-    if (state === 'ready' || state === 'crm_additive_upgrade') {
+    if (state === 'ready' || state === 'crm_additive_upgrade' ||
+        state === 'control_additive_upgrade') {
       if (binding === 'CRM_DB') {
         const triggers = await query(id, "SELECT name,sql FROM sqlite_master WHERE type='trigger' AND name LIKE 'trg_%'");
         checkSafetyTriggers(triggers,{allowAdditiveUpgrade:state === 'crm_additive_upgrade'});
       }
       for (const table of Object.keys(REQUIRED_COLUMNS[binding])) {
         if (state === 'crm_additive_upgrade' && table === 'voicebot_qualification_reviews')continue;
+        if (state === 'control_additive_upgrade' && table === 'exotel_voicebot_event_receipts')continue;
         const columns = await query(id, 'PRAGMA table_info(' + table + ')');
         checkColumns(columns.map(x => x.name), binding, table);
       }
@@ -209,7 +215,8 @@ export async function inspectCloudflare({ credentials, mode, apiFetch = fetch, t
     throw Error('Main R2 bucket is missing or belongs to an unexpected resource.');
   // Preflight rejects a mixed state. This stops accidental double-initialize.
   if (mode === 'preflight' && modes.CONTROL_DB !== modes.CRM_DB &&
-      !(modes.CONTROL_DB === 'ready' && modes.CRM_DB === 'crm_additive_upgrade'))
+      !(modes.CONTROL_DB === 'ready' && modes.CRM_DB === 'crm_additive_upgrade') &&
+      !(modes.CONTROL_DB === 'control_additive_upgrade' && modes.CRM_DB === 'ready'))
     throw Error('D1 databases have mixed initialized/empty states; manual reconciliation required.');
   return { config, modes };
 }
@@ -219,6 +226,8 @@ export async function inspectCloudflare({ credentials, mode, apiFetch = fetch, t
 export function verifiedSchemaState(modes) {
   if (modes?.CONTROL_DB === 'ready' && modes?.CRM_DB === 'crm_additive_upgrade')
     return 'crm_additive_upgrade';
+  if (modes?.CONTROL_DB === 'control_additive_upgrade' && modes?.CRM_DB === 'ready')
+    return 'control_additive_upgrade';
   if (!modes || !['fresh','ready'].includes(modes.CONTROL_DB) ||
       modes.CONTROL_DB !== modes.CRM_DB)
     throw Error('Refusing automated deployment: D1 schema states are mixed or invalid.');
