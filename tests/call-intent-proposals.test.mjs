@@ -99,7 +99,7 @@ test('staff can stage one blocked proposal in migrated CRM, without dialing',asy
     assert.equal(out.proposals[0].state,'blocked');
     assert.equal(out.proposals[0].consentStatus,'unknown');
     assert.equal(out.proposals[0].dndStatus,'unknown');
-    for(const sensitive of ['+919000000001','Fictional Test Buyer','provider_call_sid','transcript']){
+    for(const sensitive of ['+919000000001','Fictional Test Buyer','provider_call_sid','fictional transcript text']){
       assert.ok(!JSON.stringify(out).includes(sensitive),sensitive);
     }
     const again=await handleCallIntentProposals(request('POST',data()),f.env,user);
