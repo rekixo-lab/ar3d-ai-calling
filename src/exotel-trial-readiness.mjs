@@ -1,6 +1,7 @@
 // Operator-only Exotel trial setup, intentionally read-only. It is NOT a
 // provider authorization, callback registration, voice gateway or dialer.
 import {fixedPropertyQuestions} from './fixed-property-survey.mjs';
+import {configuredExotelRegion} from './exotel-region.mjs';
 
 const c=v=>typeof v==='string'&&v.trim().length>=8;
 const REQUIRED=['EXOTEL_ACCOUNT_SID','EXOTEL_API_KEY','EXOTEL_API_TOKEN'];
@@ -58,12 +59,14 @@ export function exotelTrialReadiness(env={}){
   if(!env||typeof env!=='object')throw Error('environment required');
   const credentials=Object.fromEntries(REQUIRED.map(k=>[k,c(env[k])]));
   const all=REQUIRED.every(k=>credentials[k]);
+  const region=configuredExotelRegion(env);
   return Object.freeze({
     provider:'Exotel',
     purpose:'7 fixed property questions; customer name/mobile imported in CRM',
     mode:'trial_setup_only',
     credentialsPresent:Object.freeze(credentials),
-    accountReadyForReadOnlyCheck:all,
+    apiRegion:region,apiRegionConfigured:region!==null,
+    accountReadyForReadOnlyCheck:all&&region!==null,
     accountApiConnectivityVerified:false,
     manualSteps:[
       {id:'account',title:'Create company Exotel trial account',owner:'operator',verification:'Check your Exotel portal'},
@@ -72,7 +75,7 @@ export function exotelTrialReadiness(env={}){
       {id:'caller_id',title:'Confirm eligible ExoPhone/Caller ID, KYC, voice traffic type and rules for real-estate trials',owner:'provider',verification:'Written provider confirmation'},
       {id:'consent',title:'Before real-customer campaigns verify purpose-specific consent, DND and opt-outs',owner:'business',verification:'Independent evidence'},
       {id:'multi_tenant',title:'Obtain written agreement for serving multiple builders and assigning their caller numbers',owner:'business',verification:'Provider written approval'},
-      {id:'api_secrets',title:'Set Account SID, API Key and API Token as private Cloudflare Worker secrets',owner:'operator',verification:'Server-side GET check, never paste secrets in browser'}
+      {id:'api_secrets',title:'Set EXOTEL_REGION=singapore for my.exotel.com (or india for verified Mumbai account), plus Account SID, API Key and API Token as private Worker secrets',owner:'operator',verification:'Server-side GET check with matching region; never paste secrets in browser'}
     ],
     engineeringRemaining:[
       'Choose the provider-managed Voicebot path if the trial permits a phone test and verified transcript/CRM export, otherwise a real WSS + STT/TTS gateway must be built.',

@@ -93,7 +93,7 @@ function engineeringPanel(main){
     try{
       const result=await api('/v1/human/engineering/provider-connectivity','POST',{});
       connectionSummary.replaceChildren(
-        node('p',{class:result.verified?'success':'note',text:'Exotel API: '+(result.verified?'Connection verified':'Not verified')+' | Real dialing: disabled'}),
+        node('p',{class:result.verified?'success':'note',text:'Exotel API: '+(result.verified?'Connection verified':'Not verified')+' | Region: '+(result.apiRegion||'not configured')+' | Real dialing: disabled'}),
         node('p',{class:'note',text:result.note})
       );
     }catch(err){asError(err)}finally{connectionButton.disabled=false}
@@ -123,6 +123,7 @@ function engineeringPanel(main){
   api('/v1/human/engineering/exotel-trial-setup').then(result=>{
     const creds=result.credentialsPresent||{};
     const credentials=div('stack',
+      node('p',{class:'muted',text:'Exotel account API region: '+(result.apiRegion||'not configured')+' (my.exotel.com usually means singapore)'}),
       node('p',{class:'muted',text:'Private Worker secret bindings only (values never displayed):'}));
     for(const [name,present] of Object.entries(creds)){
       credentials.append(node('p',{class:present?'success':'muted',

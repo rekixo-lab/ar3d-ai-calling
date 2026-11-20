@@ -1,10 +1,10 @@
-// Exotel India Voice AI Connect contract prepared against official docs.
+// Exotel regional Voice AI Connect contract prepared against official docs.
 // Pure contract builder and UNTRUSTED callback shape parser ONLY.
 // There is no fetch(), no API Basic Auth, no keys and NO network execution.
 //
 // https://developer.exotel.com/docs/agentstream/connect-voice-ai
 // https://developer.exotel.com/docs/references/authentication
-const TARGET='https://api.in.exotel.com';
+import {exotelApiBase} from './exotel-region.mjs';
 const number=/^\+91[6-9][0-9]{9}$/;
 const sid=/^[A-Za-z0-9_-]{4,64}$/;
 // A legitimate ExoPhone cannot be only plus signs or contain repeated '+'.
@@ -26,12 +26,13 @@ const validHttps=v=>{
 };
 export function buildExotelVoiceAiContract(raw){
   if(!raw||typeof raw!=='object'||Array.isArray(raw)||
-     Object.keys(raw).some(k=>!['accountSid','from','callerId','streamUrl','statusCallback','customField'].includes(k))||
+     Object.keys(raw).some(k=>!['accountSid','from','callerId','streamUrl','statusCallback','customField','region'].includes(k))||
      !sid.test(raw.accountSid)||!number.test(raw.from)||
      !caller.test(raw.callerId)||!validWss(raw.streamUrl)||
      (raw.statusCallback!==undefined&&!validHttps(raw.statusCallback))||
      (raw.customField!==undefined&&(!key.test(raw.customField))))
     throw Error('invalid Exotel Voice AI contract');
+  const target=exotelApiBase(raw.region??'india');
   const fields={
     From:raw.from,CallerId:raw.callerId,StreamUrl:raw.streamUrl,
     StreamType:'bidirectional',Record:'false'
@@ -42,7 +43,7 @@ export function buildExotelVoiceAiContract(raw){
   }
   if(raw.customField!==undefined)fields.CustomField=raw.customField;
   return Object.freeze({
-    method:'POST',endpoint:TARGET+'/v1/Accounts/'+raw.accountSid+'/Calls/connect',
+    method:'POST',endpoint:target+'/v1/Accounts/'+raw.accountSid+'/Calls/connect',
     encoding:'multipart/form-data',fields:Object.freeze(fields),
     executionAllowed:false,transportRegistered:false,headersAttached:false,
     notice:'Validated Exotel contract only. No API token, no HTTP request, no approved caller ID and no live dialer.'

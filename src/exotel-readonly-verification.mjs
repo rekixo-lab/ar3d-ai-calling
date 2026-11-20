@@ -2,6 +2,7 @@
 // Validates Exotel's own HTTPS Call Details response for an existing authorized
 // correlation only; not a signature for the incoming webhook nor a consent grant.
 // https://developer.exotel.com/docs/voice-v1/api-reference/call-details
+import {exotelApiBase} from './exotel-region.mjs';
 const SID=/^[a-zA-Z0-9_-]{4,128}$/;
 const CRED=/^[\x21-\x7e]{8,256}$/;
 const VALID_STATUS=new Set(['queued','in-progress','completed','failed','busy','no-answer']);
@@ -11,13 +12,16 @@ function credentials(input){
   if(!input||typeof input!=='object'||Array.isArray(input)||
      !validateString(input.accountSid,SID)||!validateString(input.apiKey,CRED)||
      !validateString(input.apiToken,CRED)||input.apiKey.includes(':')||
-     input.apiToken.includes(':')||Object.keys(input).some(x=>!['accountSid','apiKey','apiToken'].includes(x)))
+     input.apiToken.includes(':')||Object.keys(input).some(x=>!['accountSid','apiKey','apiToken','region'].includes(x)))
     throw Error('Exotel credentials are missing or invalid');
+  // Region is optional only for backward-compatible pure test clients; the
+  // deployed connectivity adapter requires it explicitly to prevent wrong-host
+  // API lookups for newly connected accounts.
+  exotelApiBase(input.region??'india');
   return input;
 }
-function urlFor(accountSid,suffix){
-  // Host is fixed to the documented India regional endpoint; no SSRF inputs.
-  return 'https://api.in.exotel.com/v1/Accounts/'+accountSid+'/'+suffix;
+function urlFor(accountSid,suffix,region){
+  return exotelApiBase(region)+'/v1/Accounts/'+accountSid+'/'+suffix;
 }
 async function boundedProviderGet(url,auth,apiFetch){
   const authorization='Basic '+btoa(auth.apiKey+':'+auth.apiToken);
@@ -53,7 +57,7 @@ async function boundedProviderGet(url,auth,apiFetch){
 }
 export async function checkExotelAccountReadOnly(auth,{apiFetch=fetch}={}){
   const c=credentials(auth);
-  const data=await boundedProviderGet(urlFor(c.accountSid,'Calls.json?PageSize=1'),c,apiFetch);
+  const data=await boundedProviderGet(urlFor(c.accountSid,'Calls.json?PageSize=1',c.region??'india'),c,apiFetch);
   if(!Array.isArray(data.Calls))throw Error('Exotel account response schema mismatch');
   return Object.freeze({
     provider:'exotel',reachable:true,accountLookupSucceeded:true,
@@ -70,7 +74,7 @@ export async function verifyExotelExistingCallReadOnly(auth,expected,{apiFetch=f
      expected.direction!=='outbound-api'||
      !validateString(expected.callerId,/^[+0-9]{6,20}$/))
     throw Error('invalid expected Exotel call context');
-  const url=urlFor(c.accountSid,'Calls/'+expected.callSid+'.json?details=true');
+  const url=urlFor(c.accountSid,'Calls/'+expected.callSid+'.json?details=true',c.region??'india');
   const body=await boundedProviderGet(url,c,apiFetch);
   const record=body.Call;
   if(!record||typeof record!=='object'||Array.isArray(record)||
