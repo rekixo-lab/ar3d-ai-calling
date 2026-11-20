@@ -35,7 +35,7 @@ test('real Exotel account GET is bounded, read-only, India host fixed, no PII/se
   const [url,opts]=s.requests[0];
   assert.equal(url,'https://api.in.exotel.com/v1/Accounts/fictional_account/Calls.json?PageSize=1');
   assert.equal(opts.method,'GET');
-  assert.equal(opts.redirect,'error');
+  assert.equal(opts.redirect,'manual');
   assert.equal(opts.cache,'no-store');
   assert.equal(opts.headers.Accept,'application/json');
   assert.ok(opts.headers.Authorization.startsWith('Basic '));
