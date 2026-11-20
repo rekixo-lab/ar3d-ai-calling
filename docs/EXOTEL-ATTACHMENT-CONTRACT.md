@@ -74,6 +74,22 @@ needed for production auto-CRM saves. No traffic should be allocated to
 v2 until those gates pass.
 
 The Exotel UI **Test URL** may send a synthetic body instead of a valid
+live event (not specified in the public webhook contract). A real UI test
+confirmed a full set of documented top-level fields, but some values or
+nested structures did not satisfy the production call validator. The Worker
+also recognizes the **exact placeholder example published in official Exotel
+VoiceBot Webhook docs** as a no-write connectivity sample, ONLY after Bearer
+authentication. Other fake/malformed call envelopes continue to be rejected.
+
+When a Test URL still returns HTTP 400, the private authenticated response
+now reports a fixed validation category (including account, metadata,
+call-reference mismatch, transcript segment, etc.) plus boolean format
+checks for the main session/network/event fields; **never** raw values.
+This is intentionally diagnostic rather than blindly accepting malformed
+production callbacks. The operator can share a screenshot of the response
+without any auth values; leave real traffic and CRM writes off.
+
+The Exotel UI **Test URL** may send a synthetic body instead of a valid
 live event (not specified in the public webhook contract). The endpoint
 now accepts tiny **explicitly marked test/ping/verification JSON objects**
 ONLY after a valid Bearer token has been authenticated, acknowledging them
