@@ -58,12 +58,12 @@ export async function stageVerifiedVoicebotReview(db,{
   ]);
   const inserted=Number(rows[0]?.meta?.changes||0)===1;
   const row=await db.prepare([
-    'SELECT id,lead_id AS leadId,delivery_digest AS digest,',
+    'SELECT id,lead_id AS leadId,provider_account_hash AS accountHash,delivery_digest AS digest,',
     'survey_json AS surveyJson,possible_opt_out AS possibleOptOut,status',
     'FROM voicebot_qualification_reviews',
     "WHERE tenant_id=? AND provider='exotel' AND call_reference=? LIMIT 1"
   ].join(' ')).bind(tenantId,callReference).first();
-  need(row&&row.leadId===leadId&&row.digest===deliveryDigest&&
+  need(row&&row.leadId===leadId&&row.accountHash===accountHash&&row.digest===deliveryDigest&&
     row.surveyJson===surveyJson&&Number(row.possibleOptOut)===(possibleOptOut?1:0),
     'conflicting delivery or missing registered lead');
   if(!inserted)need(row.status==='pending','event already finalized');

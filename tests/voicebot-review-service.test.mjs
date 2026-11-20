@@ -51,7 +51,7 @@ function fakeDb(){
                 throw Error('unrecognized fake read');
               const [tenant,call]=args;
               const row=rows.get(tenant+'|'+call);
-              return row?{id:row.id,leadId:row.leadId,digest:row.digest,
+              return row?{id:row.id,leadId:row.leadId,accountHash:row.accountHash,digest:row.digest,
                 surveyJson:row.surveyJson,possibleOptOut:row.possibleOptOut,status:row.status}:null;
             }
           };
