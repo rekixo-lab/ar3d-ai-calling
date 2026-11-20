@@ -13,7 +13,7 @@ function req(path,method='GET',data,origin=true){
       ...(data?{'content-type':'application/json'}:{})},
     body:data?JSON.stringify(data):undefined});
 }
-function stub(role='client_admin',leadFound=true){
+function stub(role='client_admin',leadFound=true,{optedOut=false,pendingEvidence=1,consent='unknown',dnd='unknown'}={}){
   const log=[];
   const CONTROL_DB={prepare(sql){return {bind(...params){log.push({sql,params,db:'control'});return {
     async first(){
@@ -24,8 +24,13 @@ function stub(role='client_admin',leadFound=true){
     }
   }}}}};
   const CRM_DB={prepare(sql){return {bind(...params){log.push({sql,params,db:'crm'});return {
-    async first(){if(sql.includes('FROM leads WHERE'))return leadFound?
-      {id:lead,consent_status:'unknown',dnd_status:'unknown'}:null;return null},
+    async first(){
+      if(sql.includes('FROM leads WHERE'))return leadFound?
+        {id:lead,consent_status:consent,dnd_status:dnd,customer_segment:'unknown_contact'}:null;
+      if(sql.includes('FROM lead_opt_out_events'))return {total:optedOut?1:0};
+      if(sql.includes('FROM lead_consent_evidence'))return {total:pendingEvidence};
+      return null
+    },
     async all(){return {results:[{id:'evidence1',reviewStatus:'pending',reference:'form-1234'}]}}
   }}}},async batch(statements){return statements.map(()=>({meta:{changes:1}}))}};
   return {env:{CONTROL_DB,CRM_DB},log};
@@ -72,7 +77,11 @@ test('call readiness always blocked while provider verification unavailable, inc
   const res=await worker.fetch(req(ready+'?tenantId='+tenant),env);
   assert.equal(res.status,200);
   const d=await res.json();
-  assert.equal(d.eligible,false);assert.equal(d.reasons.length,3);
+  assert.equal(d.eligible,false);
+  assert.equal(d.executionAllowed,false);
+  assert.ok(d.reasons.length>=4);
+  assert.equal(d.pendingEvidenceCount,1);
+  assert.equal(d.customerSegment,'unknown_contact');
   assert.equal((await worker.fetch(req(ready,'POST',{tenantId:tenant}),stub().env)).status,405);
   assert.equal((await worker.fetch(req(ready+'?tenantId='+other),stub().env)).status,403);
 });
@@ -81,4 +90,30 @@ test('no consent route allows a missing session to submit data',async()=>{
   const unauthorized=new Request('https://example.test'+path,{method:'POST',headers:{origin:'https://example.test',
     'content-type':'application/json'},body:JSON.stringify(body)});
   assert.equal((await worker.fetch(unauthorized,env)).status,401);
+});
+
+test('blocked/opted-out leads and pending evidence are explicit read-only blockers',async()=>{
+  const f=stub('viewer',true,{optedOut:true,pendingEvidence:2,consent:'denied',dnd:'blocked'});
+  const res=await worker.fetch(req(ready+'?tenantId='+tenant),f.env);
+  assert.equal(res.status,200);
+  const result=await res.json();
+  assert.equal(result.eligible,false);
+  assert.equal(result.executionAllowed,false);
+  assert.equal(result.optOutRecorded,true);
+  assert.equal(result.pendingEvidenceCount,2);
+  assert.ok(result.reasons.some(x=>x.includes('opt-out')));
+  assert.ok(result.reasons.some(x=>x.includes('DND')));
+  assert.ok(!f.log.some(x=>/UPDATE leads|INSERT INTO calls|UPDATE call_campaign/.test(x.sql)));
+  assert.ok(f.log.filter(x=>x.db==='crm').every(x=>x.params.includes(tenant)));
+});
+test('even no pending evidence and no opt-out cannot grant live call permission',async()=>{
+  const f=stub('viewer',true,{optedOut:false,pendingEvidence:0,consent:'unknown',dnd:'unknown'});
+  const res=await worker.fetch(req(ready+'?tenantId='+tenant),f.env);
+  const result=await res.json();
+  assert.equal(result.eligible,false);
+  assert.equal(result.executionAllowed,false);
+  assert.equal(result.optOutRecorded,false);
+  assert.equal(result.pendingEvidenceCount,0);
+  assert.ok(result.reasons.some(x=>x.includes('No pending')));
+  assert.ok(result.reasons.some(x=>x.includes('consent')));
 });

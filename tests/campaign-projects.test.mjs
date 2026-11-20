@@ -24,7 +24,7 @@ function stub(role='client_admin',hasCampaign=true){
     async first(){
       if(sql.includes('FROM call_campaign_drafts WHERE'))return hasCampaign?
         {id:campaign,name:'Trial',status:'draft',languageMode:'hi-en',purpose:'site_visit'}:null;
-      if(sql.includes('FROM call_campaign_candidates cc'))return {total:3,blocked:1};
+      if(sql.includes('FROM call_campaign_candidates cc'))return {total:3,blocked:1,unverified:3,optedOut:1,pendingEvidence:2,unclassified:1};
       return null;
     },
     async all(){return {results:[]}}
@@ -67,6 +67,10 @@ test('campaign readiness always blocks execution and protects foreign tenant',as
   const res=await worker.fetch(req(url),stub('viewer').env),v=await res.json();
   assert.equal(res.status,200);assert.equal(v.executionAllowed,false);
   assert.equal(v.stats.total,3);assert.equal(v.stats.blocked,1);
+  assert.equal(v.stats.optedOut,1);assert.equal(v.stats.unverified,3);
+  assert.equal(v.stats.pendingEvidence,2);assert.equal(v.stats.unclassified,1);
+  assert.ok(v.reasons.length>=3);
+  assert.ok(v.nextActions.some(x=>x.includes('opted-out')));
   assert.equal((await worker.fetch(req('/v1/human/campaigns/'+campaign+'/readiness?tenantId='+other),stub().env)).status,403);
   assert.equal((await worker.fetch(req('/v1/human/campaigns/'+campaign+'/readiness?tenantId='+tenant),stub('client_admin',false).env)).status,404);
 });
@@ -102,4 +106,18 @@ test('human bootstrap token cannot authorize machine admin; separate secret work
     body:JSON.stringify({slug:'demo-client',displayName:'Demo Client'})}),
     {ADMIN_BOOTSTRAP_TOKEN:boot,ADMIN_API_TOKEN:machine,CONTROL_DB:db});
   assert.equal(authorized.status,201);assert.ok(written.some(x=>x.includes('INSERT INTO tenants')));
+});
+
+test('readiness aggregation is tenant-scoped and cannot change or place a call',async()=>{
+  const f=stub('viewer'),url='/v1/human/campaigns/'+campaign+'/readiness?tenantId='+tenant;
+  const res=await worker.fetch(req(url),f.env);
+  assert.equal(res.status,200);
+  assert.equal((await res.json()).executionAllowed,false);
+  const q=f.log.find(x=>x.sql.includes('FROM call_campaign_candidates cc')&&x.sql.includes('optedOut'));
+  assert.ok(q);
+  assert.ok(q.sql.includes('lead_opt_out_events'));
+  assert.ok(q.sql.includes('lead_consent_evidence'));
+  assert.ok(q.sql.includes('cc.tenant_id=? AND cc.campaign_id=?'));
+  assert.deepEqual(q.params,[tenant,campaign]);
+  assert.ok(!f.log.some(x=>/INSERT INTO calls|UPDATE leads/.test(x.sql)));
 });
