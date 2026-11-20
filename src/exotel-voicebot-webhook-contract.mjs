@@ -100,13 +100,20 @@ export function reviewExotelVoicebotEvents(deliveries,{
   need(isId(expectedCallId)&&isId(expectedSessionId),'expected call identity');
   if(expectedAccountId!==undefined)need(isId(expectedAccountId),'expected account');
   const eventIds=new Map(),completed=new Map(),seenStates=new Set();
-  let ignoredProgress=0,duplicateEvents=0;
+  let ignoredProgress=0,duplicateEvents=0,possibleProgressOptOut=false;
+  let deliveryIdentity=null;
   for(const raw of deliveries){
     const event=parseExotelVoicebotEvent(raw);
     need(event.callId===expectedCallId&&event.sessionId===expectedSessionId,
       'call identity mismatch');
     if(expectedAccountId!==undefined)need(event.accountId===expectedAccountId,
       'account identity mismatch');
+    // Same CallSid and session alone do not guarantee all deliveries belong
+    // to the same conversation or bot account. Never mix their question turns.
+    const identity=JSON.stringify([event.conversationId,event.accountId]);
+    if(deliveryIdentity!==null)need(deliveryIdentity===identity,
+      'mixed conversation/account identity');
+    else deliveryIdentity=identity;
     seenStates.add(event.state);
     for(const item of event.events){
       const fingerprint=JSON.stringify([item.sequence,item.status,item.segments]);
@@ -116,7 +123,14 @@ export function reviewExotelVoicebotEvents(deliveries,{
         duplicateEvents++;continue;
       }
       eventIds.set(item.eventId,fingerprint);
-      if(item.status!=='completed'){ignoredProgress++;continue}
+      if(item.status!=='completed'){
+        ignoredProgress++;
+        // A provisional "do not call" may be revised, but never silently
+        // lose a safety signal merely because Exotel omitted a final turn.
+        if(item.segments.some(seg=>(seg.speaker==='user'||seg.speaker==='customer')&&
+          OPT_OUT.test(seg.text))) possibleProgressOptOut=true;
+        continue;
+      }
       const previous=completed.get(item.sequence);
       if(previous!==undefined){
         need(previous===JSON.stringify(item.segments),
@@ -127,18 +141,19 @@ export function reviewExotelVoicebotEvents(deliveries,{
     }
   }
   const sorted=[...completed].sort((a,b)=>a[0]-b[0]);
+  const completedSequenceContinuous=sorted.every(([number],i)=>number===i+1);
   const answerTexts=sorted.flatMap(([,raw])=>JSON.parse(raw))
     .filter(x=>x.speaker==='user'||x.speaker==='customer')
     .map(x=>x.text);
   // Never return transcript words, account IDs, session IDs, phone numbers,
   // CRM customer details or potentially sensitive event metadata to UI.
-  const optOutReviewNeeded=answerTexts.some(t=>OPT_OUT.test(t));
+  const optOutReviewNeeded=possibleProgressOptOut||answerTexts.some(t=>OPT_OUT.test(t));
   return Object.freeze({
     provider:'exotel',mode:'offline_contract_review_only',
     completedTurns:sorted.length,customerAnswerSegments:answerTexts.length,
     nonfinalTurnsIgnored:ignoredProgress,duplicateEventsIgnored:duplicateEvents,
     seenSessionEnd:seenStates.has('session_end'),
-    optOutReviewNeeded,
+    completedSequenceContinuous,optOutReviewNeeded,
     completeSevenQuestionSurveyVerified:false,
     humanReviewRequired:true,identityVerifiedWithExotel:false,
     providerWebhookAuthenticated:false,recipientConsentVerified:false,

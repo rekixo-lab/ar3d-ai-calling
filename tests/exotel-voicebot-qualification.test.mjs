@@ -62,3 +62,24 @@ test('only bounded allowed scenarios, language and clock are accepted',()=>{
     language:'hi',now:NOW
   }),/delivery count/);
 });
+
+test('missing completed first sequence cannot silently become seven valid CRM answers',()=>{
+  const result=runVoicebotQualificationFixture('missing_first_sequence',{now:NOW});
+  assert.equal(result.customerAnswers,7);
+  assert.equal(result.completedSequenceContinuous,false);
+  assert.equal(result.status,'needs_human_review');
+  assert.equal(result.crmWrites,0);
+  assert.equal(result.realCallsStarted,0);
+});
+test('a matching session/call but different Exotel conversation is rejected',()=>{
+  assert.throws(()=>runVoicebotQualificationFixture('mixed_conversation',{now:NOW}),
+    /mixed conversation\/account identity/);
+});
+test('potential Do Not Call in interim recognition still requires verified suppression',()=>{
+  const result=runVoicebotQualificationFixture('progress_opt_out',{now:NOW});
+  assert.equal(result.optOutReviewNeeded,true);
+  assert.equal(result.status,'opt_out_needs_verification');
+  assert.equal(result.provisionalSurvey,null);
+  assert.equal(result.crmWrites,0);
+  assert.equal(result.consentVerified,false);
+});

@@ -53,6 +53,7 @@ export function compileVoicebotQualification(deliveries,{
     duplicateEventsIgnored:review.duplicateEventsIgnored,
     nonfinalTurnsIgnored:review.nonfinalTurnsIgnored,
     sessionEndReceived:review.seenSessionEnd,
+    completedSequenceContinuous:review.completedSequenceContinuous,
     optOutReviewNeeded:review.optOutReviewNeeded
   };
   if(review.optOutReviewNeeded){
@@ -70,7 +71,8 @@ export function compileVoicebotQualification(deliveries,{
     if(result.action==='repeat'||result.action==='human_review')break;
   }
   const finished=result.state.status==='completed';
-  const clean=finished&&review.seenSessionEnd&&used===answers.length&&
+  const clean=finished&&review.seenSessionEnd&&review.completedSequenceContinuous&&
+    used===answers.length&&
     (answers.length===6||answers.length===7);
   const status=clean?'provisional_review_ready':'needs_human_review';
   // No raw transcript, customer phone, account ID, CallSid or webhook metadata
@@ -102,7 +104,8 @@ export function runVoicebotQualificationFixture(scenario='plot_complete',{
   now=Date.now()
 }={}){
   requireValid(['plot_complete','flat_complete','not_interested',
-    'out_of_order','retry_duplicate','opt_out','incomplete','conflict'].includes(scenario),
+    'out_of_order','retry_duplicate','opt_out','incomplete','conflict',
+    'missing_first_sequence','mixed_conversation','progress_opt_out'].includes(scenario),
     'scenario');
   const sid='fictional-session-2026',call='CAfictionalvoicebot2026',
     account='fictional-account-2026';
@@ -138,6 +141,22 @@ export function runVoicebotQualificationFixture(scenario='plot_complete',{
   if(scenario==='opt_out')
     events[3].events[0].event_data.transcripts[0].transcript_segments[1].text='कॉल मत करना';
   if(scenario==='incomplete')events.pop();
+  if(scenario==='missing_first_sequence'){
+    for(const delivery of events){
+      if(delivery.events.length)
+        delivery.events[0].event_data.transcripts[0].sequence+=1;
+    }
+  }
+  if(scenario==='mixed_conversation')
+    events[2].conversation_id='fictional-different-conversation-2026';
+  if(scenario==='progress_opt_out')
+    events.unshift({...base,events:[{
+      event_type:'transcript',event_id:'fictional-progress-urgent-optout',
+      event_data:{transcripts:[{
+        sequence:1,status:'inprogress',
+        transcript_segments:[{speaker:'user',text:'कॉल मत करना'}]
+      }]}
+    }]});
   if(scenario==='conflict'){
     const replay=JSON.parse(JSON.stringify(events[1]));
     replay.events[0].event_id='fictional-conflicting-event';
