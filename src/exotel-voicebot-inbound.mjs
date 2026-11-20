@@ -3,6 +3,7 @@
 // no tenant/lead guess, no consent changes or CRM writes.
 // Vendor wire contract: https://docs.exotel.com/intelligent-voice-agents/voicebot-webhooks
 import {parseExotelVoicebotEvent,exotelVoicebotAck} from './exotel-voicebot-webhook-contract.mjs';
+import {checkExotelWebhookNetwork} from './exotel-webhook-network-guard.mjs';
 
 const ROOT='/v1/provider/exotel/voicebot/';
 const PATHS=Object.freeze({
@@ -294,6 +295,12 @@ export async function handleExotelVoicebotWebhookRequest(req,env){
   if(!await tokenIsValid(env.EXOTEL_VOICEBOT_WEBHOOK_TOKEN,
     req.headers.get('authorization')))
     return fail(401,'unauthorized');
+  // Optional vendor-approved source CIDR allowlist. Configuring any value
+  // switches to fail-closed enforcement: reject malformed config/missing IP.
+  // Valid bearer+IP is still only quarantined, never sent to CRM.
+  const network=checkExotelWebhookNetwork(req,env);
+  if(network.state==='invalid_allowlist')return fail(503,'webhook_network_configuration_invalid');
+  if(network.state==='not_allowlisted')return fail(403,'webhook_source_not_allowed');
   if(req.headers.get('content-type')?.split(';')[0].trim().toLowerCase()!=='application/json')
     return fail(415,'json_required');
   if(!env?.CONTROL_DB?.prepare||!env.CONTROL_DB.batch)
