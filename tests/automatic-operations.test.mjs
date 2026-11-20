@@ -1,3 +1,4 @@
+import {css} from '../src/app-assets.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
@@ -147,7 +148,7 @@ test('Periodic monitor is secretless, GET-only and checks the exact Calling orig
   const content={
     '/health':[200,'application/json',JSON.stringify({service:'AR3D AI Calling',status:'foundation'})],
     '/app':[200,'text/html','<html>AR3D AI Calling</html>'],
-    '/app/assets/style.css':[200,'text/css','.sidebar .navitem{display:block;margin:0'],
+    '/app/assets/style.css':[200,'text/css',css],
     '/app/assets/app.js':[200,'text/javascript','Test AI Conversation Sign out']
   };
   for(const path of ['/v1/human/me','/v1/human/engineering/status',
