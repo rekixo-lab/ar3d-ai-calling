@@ -50,7 +50,7 @@ function inviteView(token){root.replaceChildren();const email=input('email','ema
 async function logout(){try{await api('/v1/human/logout','POST',{})}finally{state.me=null;login()}}
 function engineeringPanel(main){
   const card=div('card',title('Production Readiness & Safe AI Calling Pilot'));
-  const status=div('stack',node('p',{class:'muted',text:'Engineering-only. No telecom provider, real calls or payments are connected.'}));
+  const status=div('stack',node('p',{class:'muted',text:'Engineering pilot. Exotel account may be connected; customer campaign dialing and payments remain blocked.'}));
   const summary=div('stack');
   const launch=btn('Run 100 Synthetic Calls (no dialing)',async()=>{
     launch.disabled=true;summary.replaceChildren(node('p',{class:'muted',text:'Running local-in-Worker mock conversation tests...'}));
@@ -84,7 +84,7 @@ function engineeringPanel(main){
   });
   card.append(status,launch,summary,
     title('Telecom Provider Integration — Mock Validation','h3'),
-    node('p',{class:'note',text:'Exotel API contract only; no provider account, verified callback, audio stream or live calls are connected.'}),
+    node('p',{class:'note',text:'This button runs a simulated provider contract check; it does not send real calls.'}),
     providerLaunch,providerSummary);
   const connectionSummary=div('stack');
   const connectionButton=btn('Check Exotel Connection (read-only)',async()=>{
@@ -103,6 +103,48 @@ function engineeringPanel(main){
   card.append(title('Exotel Account Connectivity (read-only)','h3'),
     node('p',{class:'note',text:'Uses server-side Exotel credentials only after you add them. Never places calls or exposes keys.'}),
     connectionButton,connectionSummary);
+  const operatorPanel=div('stack',
+    node('p',{class:'note',text:'Software-initiated Exotel Voicebot test: only the one verified phone set privately on the Worker. OFF by default. Never calls Excel leads or runs campaigns. A real test may consume Exotel credits.'}));
+  const operatorStatus=node('p',{class:'muted',text:'Checking trial setup...'});
+  const operatorHistory=div('stack');
+  const operatorDial=btn('Call my verified test phone once',async()=>{
+    if(!confirm('Start ONE real outgoing Exotel Voicebot call to your privately configured verified test number? This may use trial credits. No customer will be called.'))return;
+    operatorDial.disabled=true;
+    try{
+      const data=await api('/v1/human/engineering/exotel-self-test','POST',
+        {confirm:'CALL_MY_VERIFIED_NUMBER_ONCE'});
+      operatorHistory.prepend(node('p',{class:'success',
+        text:'Exotel request: '+data.state+'. The call may ring your verified phone. Request ID: '+data.requestId}));
+    }catch(err){asError(err)}
+    finally{operatorDial.disabled=false;loadOperatorTest()}
+  },true);
+  async function loadOperatorTest(){
+    try{
+      const r=await api('/v1/human/engineering/exotel-self-test');
+      operatorStatus.textContent='Test dispatch: '+(r.configured?'Configured':'Blocked')+
+        ' | Current login MFA: '+(r.mfaEnabled?'Verified':'Sign out and sign in with authenticator')+
+        ' | Flow: '+(r.voicebotFlowId||'not configured')+
+        ' | Verified destination ending: '+(r.destinationLast4||'not configured');
+      operatorDial.disabled=!r.configured||!r.mfaEnabled;
+      operatorHistory.replaceChildren();
+      for(const item of r.recent||[]){
+        operatorHistory.append(node('p',{class:'muted',
+          text:item.createdAt+' — '+item.state+' — '+item.id+
+            (item.errorCode?' ('+item.errorCode+')':'')}));
+      }
+      if(!r.configured)operatorHistory.append(node('p',{class:'note',
+        text:'Operator setup missing: '+r.missing.join(', ')+
+          '. Store the verified test destination and explicit approval only in private Cloudflare Secrets.'}));
+    }catch(err){
+      operatorDial.disabled=true;
+      operatorStatus.textContent='Operator test status unavailable; dialing disabled.';
+    }
+  }
+  operatorDial.disabled=true;
+  operatorPanel.append(operatorStatus,operatorDial,operatorHistory);
+  card.append(title('AR3D Software → Exotel: One Verified Outgoing Voice Test','h3'),
+    operatorPanel);
+  loadOperatorTest();
   const ownSipPanel=div('stack',node('p',{class:'note',
     text:'Yes, we can operate our own Asterisk PBX. A 140 caller number ALONE cannot place calls: an authorized telemarketing SIP Trunk and always-on PBX host are required. The lab has NO outbound routes.'}));
   card.append(title('Our Own Calling Engine — No Exotel Required','h3'),ownSipPanel);
@@ -153,7 +195,7 @@ function engineeringPanel(main){
     const docs=node('a',{href:result.managedVoicebotTrialDocs,target:'_blank',rel:'noopener noreferrer',
       text:'Official Exotel Managed Voicebot Guide'});
     trialSetup.replaceChildren(
-      node('p',{class:'note',text:'Live calls: disabled | Provider transcript auto-save: disabled | Browser preview: ready'}),
+      node('p',{class:'note',text:'Customer campaigns: disabled | Operator-only self-test requires separate approval | Provider transcript auto-save: disabled'}),
       credentials,
       title('Manual setup (company/Exotel)','h3'),pending,
       title('Still needs engineering after approved account/voice access','h3'),codeTasks,
@@ -238,7 +280,7 @@ function engineeringPanel(main){
     }
   }).catch(asError);
 }
-function dashboard(){root.replaceChildren();const aside=div('sidebar',node('div',{class:'brand',text:'AR3D AI Calling'},node('small',{text:'MULTI-TENANT PLATFORM'})),div('navitem',state.me.superAdmin?'Super Admin':'Client Dashboard'),node('p',{class:'muted',text:state.me.email}),node('a',{href:'/app/simulator',class:'navitem',text:'Test AI Conversation'}),btn('Sign out',logout,true));const main=div('main',div('row between',title(state.me.superAdmin?'Super Admin':'Personal AI Calling','h1'),node('span',{class:'pill',text:'Development / No live calls'})),div('',node('div',{id:'notice-anchor'})));root.append(div('layout',aside,main));if(state.me.superAdmin){engineeringPanel(main);mfaPanel(main);superAdmin(main)}if(state.me.tenants.length)clientPanel(main)}
+function dashboard(){root.replaceChildren();const aside=div('sidebar',node('div',{class:'brand',text:'AR3D AI Calling'},node('small',{text:'MULTI-TENANT PLATFORM'})),div('navitem',state.me.superAdmin?'Super Admin':'Client Dashboard'),node('p',{class:'muted',text:state.me.email}),node('a',{href:'/app/simulator',class:'navitem',text:'Test AI Conversation'}),btn('Sign out',logout,true));const main=div('main',div('row between',title(state.me.superAdmin?'Super Admin':'Personal AI Calling','h1'),node('span',{class:'pill',text:'Engineering Pilot / Customer Calls Disabled'})),div('',node('div',{id:'notice-anchor'})));root.append(div('layout',aside,main));if(state.me.superAdmin){engineeringPanel(main);mfaPanel(main);superAdmin(main)}if(state.me.tenants.length)clientPanel(main)}
 function showRecoveryCodes(target,codes){
   target.replaceChildren(node('p',{class:'success',text:'Save these one-time recovery codes now. Each works only once. They will not be displayed again.'}));
   const box=node('textarea',{class:'field',rows:'8',readonly:'readonly'});

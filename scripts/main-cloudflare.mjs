@@ -15,7 +15,7 @@ export const REQUIRED_TABLES = Object.freeze({
   CONTROL_DB: Object.freeze([
     'tenants','tenant_keys','project_links','tenant_numbers','tenant_audit_events',
     'human_users','tenant_memberships','human_sessions','human_invitations',
-    'human_login_limits','human_bootstrap_claim','human_ip_login_limits','human_mfa_settings','human_mfa_challenges','human_mfa_recovery_codes','provider_event_inbox','exotel_voicebot_event_receipts',
+    'human_login_limits','human_bootstrap_claim','human_ip_login_limits','human_mfa_settings','human_mfa_challenges','human_mfa_recovery_codes','provider_event_inbox','exotel_voicebot_event_receipts','exotel_operator_test_calls',
   ]),
   CRM_DB: Object.freeze([
     'leads','agents','calls','site_visits','crm_audit_events',
@@ -32,6 +32,7 @@ export const REQUIRED_COLUMNS = Object.freeze({
     provider_event_inbox: Object.freeze(['tenant_id','provider','event_id','status']),
     exotel_voicebot_event_receipts: Object.freeze(['receipt_key','account_fingerprint','session_fingerprint','call_fingerprint','conversation_fingerprint','event_fingerprint','payload_digest','event_kind','turn_status','possible_opt_out','status','received_at','expires_at']),
     human_ip_login_limits: Object.freeze(['ip_hash','attempt_count','blocked_until']),
+    exotel_operator_test_calls: Object.freeze(['id','actor_user_id','rate_slot','provider_call_sid','state','error_code','created_at','updated_at']),
   }),
   CRM_DB: Object.freeze({
     leads: Object.freeze(['tenant_id','consent_status','dnd_status','interest_status','followup_at',
@@ -150,6 +151,9 @@ export function checkTables(tables, binding, mode) {
     if (binding === 'CONTROL_DB' && missing.length === 1 &&
         missing[0] === 'exotel_voicebot_event_receipts')
       return 'control_additive_upgrade';
+    if (binding === 'CONTROL_DB' && missing.length === 1 &&
+        missing[0] === 'exotel_operator_test_calls')
+      return 'control_operator_test_upgrade';
     if (binding === 'CRM_DB' && missing.length === 1 &&
         missing[0] === 'voicebot_qualification_reviews')
       return 'crm_additive_upgrade';
@@ -194,7 +198,8 @@ export async function inspectCloudflare({ credentials, mode, apiFetch = fetch, t
     const state = checkTables(names, binding, mode);
     modes[binding] = state;
     if (state === 'ready' || state === 'crm_additive_upgrade' ||
-        state === 'control_additive_upgrade') {
+        state === 'control_additive_upgrade' ||
+        state === 'control_operator_test_upgrade') {
       if (binding === 'CRM_DB') {
         const triggers = await query(id, "SELECT name,sql FROM sqlite_master WHERE type='trigger' AND name LIKE 'trg_%'");
         checkSafetyTriggers(triggers,{allowAdditiveUpgrade:state === 'crm_additive_upgrade'});
@@ -202,6 +207,7 @@ export async function inspectCloudflare({ credentials, mode, apiFetch = fetch, t
       for (const table of Object.keys(REQUIRED_COLUMNS[binding])) {
         if (state === 'crm_additive_upgrade' && table === 'voicebot_qualification_reviews')continue;
         if (state === 'control_additive_upgrade' && table === 'exotel_voicebot_event_receipts')continue;
+        if (state === 'control_operator_test_upgrade' && table === 'exotel_operator_test_calls')continue;
         const columns = await query(id, 'PRAGMA table_info(' + table + ')');
         checkColumns(columns.map(x => x.name), binding, table);
       }
@@ -216,7 +222,8 @@ export async function inspectCloudflare({ credentials, mode, apiFetch = fetch, t
   // Preflight rejects a mixed state. This stops accidental double-initialize.
   if (mode === 'preflight' && modes.CONTROL_DB !== modes.CRM_DB &&
       !(modes.CONTROL_DB === 'ready' && modes.CRM_DB === 'crm_additive_upgrade') &&
-      !(modes.CONTROL_DB === 'control_additive_upgrade' && modes.CRM_DB === 'ready'))
+      !(modes.CONTROL_DB === 'control_additive_upgrade' && modes.CRM_DB === 'ready') &&
+      !(modes.CONTROL_DB === 'control_operator_test_upgrade' && modes.CRM_DB === 'ready'))
     throw Error('D1 databases have mixed initialized/empty states; manual reconciliation required.');
   return { config, modes };
 }
@@ -228,6 +235,8 @@ export function verifiedSchemaState(modes) {
     return 'crm_additive_upgrade';
   if (modes?.CONTROL_DB === 'control_additive_upgrade' && modes?.CRM_DB === 'ready')
     return 'control_additive_upgrade';
+  if (modes?.CONTROL_DB === 'control_operator_test_upgrade' && modes?.CRM_DB === 'ready')
+    return 'control_operator_test_upgrade';
   if (!modes || !['fresh','ready'].includes(modes.CONTROL_DB) ||
       modes.CONTROL_DB !== modes.CRM_DB)
     throw Error('Refusing automated deployment: D1 schema states are mixed or invalid.');

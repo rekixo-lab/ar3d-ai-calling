@@ -87,6 +87,7 @@ function cloudflareMock({ controlTables=[],crmTables=[],controlName='ar3d-callin
         else if(sql.includes('human_mfa_recovery_codes')) rows=['user_id','code_hash','used_at'].map(name=>({name}));
         else if(sql.includes('provider_event_inbox')) rows=['tenant_id','provider','event_id','status'].map(name=>({name}));
         else if(sql.includes('exotel_voicebot_event_receipts')) rows=['receipt_key','account_fingerprint','session_fingerprint','call_fingerprint','conversation_fingerprint','event_fingerprint','payload_digest','event_kind','turn_status','possible_opt_out','status','received_at','expires_at'].map(name=>({name}));
+        else if(sql.includes('exotel_operator_test_calls')) rows=['id','actor_user_id','rate_slot','provider_call_sid','state','error_code','created_at','updated_at'].map(name=>({name}));
         else if(sql.includes('human_ip_login_limits')) rows=['ip_hash','attempt_count','blocked_until'].map(name=>({name}));
         else if(sql.includes('lead_opt_out_events')) rows=['tenant_id','lead_id','source','created_at'].map(name=>({name}));
         else if(sql.includes('lead_consent_evidence')) rows=['tenant_id','lead_id','review_status','submitted_by'].map(name=>({name}));
@@ -196,4 +197,26 @@ test('preflight allows ONLY the isolated Control D1 Exotel receipts additive upg
     })
   }),/mixed/);
   assert.throws(()=>checkColumns(['receipt_key'],'CONTROL_DB','exotel_voicebot_event_receipts'),/missing columns/);
+});
+
+test('isolated Control D1 operator self-test additive migration allows only exactly one absent table',async()=>{
+  const old=REQUIRED_TABLES.CONTROL_DB.filter(t=>t!=='exotel_operator_test_calls');
+  assert.equal(checkTables(old,'CONTROL_DB','preflight'),'control_operator_test_upgrade');
+  assert.throws(()=>checkTables(old,'CONTROL_DB','ready'),/missing tables/);
+  assert.throws(()=>checkTables(old.filter(t=>t!=='human_sessions'),'CONTROL_DB','preflight'),/partial schema/);
+  assert.equal(verifiedSchemaState({
+    CONTROL_DB:'control_operator_test_upgrade',CRM_DB:'ready'
+  }),'control_operator_test_upgrade');
+  const result=await inspectCloudflare({
+    credentials:getCredentials(env),mode:'preflight',template,
+    apiFetch:cloudflareMock({controlTables:old,crmTables:REQUIRED_TABLES.CRM_DB})
+  });
+  assert.deepEqual(result.modes,{
+    CONTROL_DB:'control_operator_test_upgrade',CRM_DB:'ready'
+  });
+  assert.throws(()=>checkColumns(['id','state'],'CONTROL_DB','exotel_operator_test_calls'),
+    /missing columns/);
+  assert.throws(()=>verifiedSchemaState({
+    CONTROL_DB:'control_operator_test_upgrade',CRM_DB:'crm_additive_upgrade'
+  }),/mixed or invalid/);
 });
