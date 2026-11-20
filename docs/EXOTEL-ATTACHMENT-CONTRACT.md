@@ -27,11 +27,65 @@ GitHub, chat, screenshots, URLs or browser configuration.
 7. Use Super Admin -> Test Voicebot Answers to CRM Review (offline) to check
    synthetic seven-field mapping, conflict/retry handling and opt-out review.
 
+## Exotel Voicebot webhook attachment (v2 paused; no live calls)
+
+The Exotel Voice Agents UI offers Bearer authentication for each webhook.
+Use a **separate** 64-hex token generated with `openssl rand -hex 32`,
+stored as a private **production Secret** named
+`EXOTEL_VOICEBOT_WEBHOOK_TOKEN` in the isolated `ar3d-ai-calling`
+Cloudflare Worker. Do not reuse `EXOTEL_API_TOKEN`, display bearer
+tokens in screenshots or include them in webhook URLs.
+
+After the additive Control D1 migration is verified and the new Worker
+passes CI/deployment, the **Transcript Events** configuration is:
+
+- Webhook URL: `https://aicalling.ar3dstudio.in/v1/provider/exotel/voicebot/transcript-events`
+- Authentication: `Bearer`
+- Bearer token: use the SAME private 64-hex token already bound to Worker
+- Timeout: 10 seconds (provider UI offers 1–30 seconds)
+- Max retry: 2
+- Retry interval: 2 seconds (provider UI offers 1–5 seconds)
+- Optional Headers: leave blank
+
+The separately supported **Session End** URL is
+`https://aicalling.ar3dstudio.in/v1/provider/exotel/voicebot/session-end`
+with the same dedicated Bearer token. Configure session-end only after
+verifying receipt testing and account/voice permissions.
+
+These routes accept **only** Exotel's documented JSON event format,
+require exact header authentication before parsing, reject unexpected
+Origin, mismatched account ID, invalid oversized bodies and conflicting
+event replays. Each accepted vendor event produces a private, immutable
+30-day-expiring **HMAC receipt only** in isolated Control D1. The existing
+6-hour Worker cron deletes expired receipts in bounded batches. The
+response uses Exotel's official `{"http_code":200,"response":{"data":{}}}`
+acknowledgment for accepted events.
+
+**Important limits:** A valid Bearer token authenticates a delivery to
+our endpoint; it does not prove the call was made by our platform or
+establish tenant/lead identity. The endpoint deliberately does not store
+raw transcripts, phone numbers or callback bodies, does not auto-update
+the CRM or DND, never dispatches calls, and does not authorize billable
+usage. In particular, a conversational opt-out is marked as an
+unattributed metadata review signal, **not** a confirmed phone-level DND
+change. A later independently verified call ledger, approved caller IDs,
+tenant-lead mapping and encrypted consented transcript storage are still
+needed for production auto-CRM saves. No traffic should be allocated to
+v2 until those gates pass.
+
+The Exotel UI **Test URL** may send a synthetic body instead of a valid
+live event. Its failure with HTTP 400/422 does not by itself imply an
+authentication failure. Do not remove Bearer validation to satisfy a
+provider UI test; use a provider-confirmed, non-customer sample and
+read-only observability to troubleshoot.
+
 ## Code attachment map
 
 - Account read-only probe: src/provider-connectivity.mjs
 - Seven-question managed-bot prompt: src/exotel-trial-readiness.mjs
 - Official per-turn webhook event parser: src/exotel-voicebot-webhook-contract.mjs
+- Production Bearer inbound quarantine: src/exotel-voicebot-inbound.mjs
+- Isolated immutable D1 receipt schema: migrations/control/0008_exotel_voicebot_receipts.sql
 - Provisional seven-field survey mapper: src/exotel-voicebot-qualification.mjs
 - Staff-reviewed CRM form: src/property-qualification-routes.mjs
 - AgentStream PCM: src/exotel-media-protocol.mjs
@@ -43,7 +97,7 @@ GitHub, chat, screenshots, URLs or browser configuration.
 
 Provider callbacks may be retried or arrive out of order. Session-end does
 NOT carry all transcript turns. We validate documented formats offline, but
-no authenticated real webhook route is registered. No durable, provider-
+an authenticated quarantine-only webhook route is implemented. No durable, provider-
 authenticated call-to-tenant-to-lead correlation, outbound dial execution,
 verified consent/DND, commercial recording flow or automatic CRM save exists.
 
