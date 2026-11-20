@@ -1,3 +1,16 @@
+## 20 November 2026 — Exotel structured Voicebot qualification preflight
+
+Super Admin can now run **Test Voicebot Answers to CRM Review (offline)**.
+The isolated Worker parses documented Exotel per-turn transcript events into
+provisional fixed Hindi/English property qualification fields. The tests cover
+Plot/Flat, six-turn not-interested, out-of-order events, exact retries,
+conflicting sequences, session-end and possible opt-out. No webhook is exposed,
+no calls are placed and no CRM/consent/visit records are modified. This does
+not make Exotel account secrets alone sufficient for launch.
+
+Detailed account attachment and provider gates:
+[Exotel Attachment Contract](docs/EXOTEL-ATTACHMENT-CONTRACT.md).
+
 ## Active 48-hour execution runbook
 
 Operator/developer handoff: [48H-SPRINT.md](docs/48H-SPRINT.md). Target is an isolated synthetic-data-tested CRM and AI demo MVP, not a promise of live telecom KYC approval. First admin creation helper: python3 scripts/bootstrap-main.py https://ar3d-ai-calling.<workers-subdomain>.workers.dev (interactive private token/password prompts).
