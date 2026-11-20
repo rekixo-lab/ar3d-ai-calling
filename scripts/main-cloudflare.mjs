@@ -19,7 +19,7 @@ export const REQUIRED_TABLES = Object.freeze({
   ]),
   CRM_DB: Object.freeze([
     'leads','agents','calls','site_visits','crm_audit_events',
-    'lead_notes','conversation_simulations','lead_opt_out_events','lead_consent_evidence','call_campaign_drafts','call_campaign_candidates','voicebot_qualification_reviews','call_intent_proposals',
+    'lead_notes','conversation_simulations','lead_opt_out_events','lead_consent_evidence','call_campaign_drafts','call_campaign_candidates','voicebot_qualification_reviews','call_intent_proposals','calling_policies','calling_clearances','calling_runs','calling_jobs',
   ]),
 });
 export const REQUIRED_COLUMNS = Object.freeze({
@@ -45,6 +45,10 @@ export const REQUIRED_COLUMNS = Object.freeze({
     call_campaign_candidates: Object.freeze(['tenant_id','campaign_id','lead_id']),
     agents: Object.freeze(['tenant_id','status','questions_json']),
     voicebot_qualification_reviews: Object.freeze(['tenant_id','lead_id','provider','status','survey_json','source_verified','mapping_verified','possible_opt_out']),
+    calling_policies: Object.freeze(['tenant_id','enabled','flow_id','expires_at','daily_limit','max_seconds']),
+    calling_clearances: Object.freeze(['tenant_id','lead_id','purpose','expires_at']),
+    calling_runs: Object.freeze(['tenant_id','id','campaign_id','state']),
+    calling_jobs: Object.freeze(['tenant_id','id','run_id','lead_id','state','provider_call_sid','reserved_at']),
     call_intent_proposals: Object.freeze(['tenant_id','id','campaign_id','lead_id','purpose','state','created_by','created_at']),
   }),
 });
@@ -79,8 +83,9 @@ export function makeMainConfig(template, credentials) {
   const onlyAuthCron = template?.triggers &&
     Object.keys(template.triggers).length === 1 &&
     Array.isArray(template.triggers.crons) &&
-    template.triggers.crons.length === 1 &&
-    template.triggers.crons[0] === '0 */6 * * *';
+    template.triggers.crons.length === 2 &&
+    template.triggers.crons[0] === '0 */6 * * *' &&
+    template.triggers.crons[1] === '* * * * *';
   if (template?.name !== 'ar3d-ai-calling' || template.main !== './src/index.mjs' ||
       template.route || !onlyCallingDomain || !onlyAuthCron || template.services ||
       !Array.isArray(template.d1_databases) || template.d1_databases.length !== 2 ||
@@ -144,6 +149,8 @@ export function checkTables(tables, binding, mode) {
     return 'fresh';
   }
   const missing = expected.filter(name => !present.has(name));
+  const dispatchTables=['calling_policies','calling_clearances','calling_runs','calling_jobs'];
+  if(mode==='preflight'&&binding==='CRM_DB'&&missing.length===4&&dispatchTables.every(x=>missing.includes(x)))return 'crm_dispatch_upgrade';
   if (mode === 'ready') {
     if (missing.length) throw Error(D1_NAME[binding] + ' missing tables: ' + missing.join(', '));
     return 'ready';
@@ -208,7 +215,7 @@ export async function inspectCloudflare({ credentials, mode, apiFetch = fetch, t
     const names = rows.map(x => x.name);
     const state = checkTables(names, binding, mode);
     modes[binding] = state;
-    if (state === 'ready' || state === 'crm_additive_upgrade' ||
+    if (state === 'crm_dispatch_upgrade' || state === 'ready' || state === 'crm_additive_upgrade' ||
         state === 'crm_call_intent_upgrade' ||
         state === 'control_additive_upgrade' ||
         state === 'control_operator_test_upgrade' ||
@@ -221,6 +228,7 @@ export async function inspectCloudflare({ credentials, mode, apiFetch = fetch, t
         });
       }
       for (const table of Object.keys(REQUIRED_COLUMNS[binding])) {
+        if(state==='crm_dispatch_upgrade'&&table.startsWith('calling_'))continue;
         if (state === 'crm_additive_upgrade' && table === 'voicebot_qualification_reviews')continue;
         if (state === 'crm_call_intent_upgrade' && table === 'call_intent_proposals')continue;
         if (state === 'control_additive_upgrade' && table === 'exotel_voicebot_event_receipts')continue;
@@ -239,6 +247,7 @@ export async function inspectCloudflare({ credentials, mode, apiFetch = fetch, t
     throw Error('Main R2 bucket is missing or belongs to an unexpected resource.');
   // Preflight rejects a mixed state. This stops accidental double-initialize.
   if (mode === 'preflight' && modes.CONTROL_DB !== modes.CRM_DB &&
+      !(modes.CONTROL_DB === 'ready' && modes.CRM_DB === 'crm_dispatch_upgrade') &&
       !(modes.CONTROL_DB === 'ready' && modes.CRM_DB === 'crm_additive_upgrade') &&
       !(modes.CONTROL_DB === 'ready' && modes.CRM_DB === 'crm_call_intent_upgrade') &&
       !(modes.CONTROL_DB === 'control_additive_upgrade' && modes.CRM_DB === 'ready') &&
@@ -251,6 +260,7 @@ export async function inspectCloudflare({ credentials, mode, apiFetch = fetch, t
 // A single clean state is mandatory for unattended deployment. Mixed/partial
 // schemas are NEVER safe to automatically initialize or deploy.
 export function verifiedSchemaState(modes) {
+  if(modes?.CONTROL_DB==='ready'&&modes?.CRM_DB==='crm_dispatch_upgrade')return 'crm_dispatch_upgrade';
   if (modes?.CONTROL_DB === 'ready' && modes?.CRM_DB === 'crm_additive_upgrade')
     return 'crm_additive_upgrade';
   if (modes?.CONTROL_DB === 'ready' && modes?.CRM_DB === 'crm_call_intent_upgrade')

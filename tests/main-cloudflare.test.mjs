@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  REQUIRED_TABLES, REQUIRED_SAFETY_TRIGGERS, getCredentials, makeMainConfig, checkTables, checkColumns, checkSafetyTriggers, inspectCloudflare, verifiedSchemaState,
+  REQUIRED_COLUMNS, REQUIRED_TABLES, REQUIRED_SAFETY_TRIGGERS, getCredentials, makeMainConfig, checkTables, checkColumns, checkSafetyTriggers, inspectCloudflare, verifiedSchemaState,
 } from '../scripts/main-cloudflare.mjs';
 
 const env = {
@@ -13,7 +13,7 @@ const env = {
 const template = {
   name:'ar3d-ai-calling', main:'./src/index.mjs', workers_dev:false,
   routes:[{pattern:'aicalling.ar3dstudio.in',custom_domain:true}],
-  triggers:{crons:['0 */6 * * *']},
+  triggers:{crons:['0 */6 * * *','* * * * *']},
   d1_databases:[
     {binding:'CONTROL_DB',database_name:'ar3d-calling-control',database_id:'PLACEHOLDER'},
     {binding:'CRM_DB',database_name:'ar3d-calling-shared-crm',database_id:'PLACEHOLDER'},
@@ -34,7 +34,7 @@ test('config binds only main Calling resources and exact approved custom domain'
   assert.equal(config.d1_databases[0].database_id, env.CONTROL_DB_ID);
   assert.equal(config.r2_buckets[0].bucket_name,'ar3d-calling-recordings');
   assert.deepEqual(config.routes,[{pattern:'aicalling.ar3dstudio.in',custom_domain:true}]);
-  assert.deepEqual(config.triggers,{crons:['0 */6 * * *']});
+  assert.deepEqual(config.triggers,{crons:['0 */6 * * *','* * * * *']});
 });
 test('rejects existing production Cloudflare routes and wrong database/bucket names', () => {
   assert.throws(() => makeMainConfig({...template,routes:[{pattern:'admin.rekixo.com/*'}]},getCredentials(env)), /Unsafe/);
@@ -43,8 +43,8 @@ test('rejects existing production Cloudflare routes and wrong database/bucket na
   assert.throws(() => makeMainConfig({...template,routes:[{pattern:'aicalling.ar3dstudio.in',custom_domain:true,zone_name:'ar3dstudio.in'}]},getCredentials(env)), /Unsafe/);
   assert.throws(() => makeMainConfig({...template,routes:[]},getCredentials(env)), /Unsafe/);
   assert.throws(() => makeMainConfig({...template,triggers:{crons:['* * * * *']}},getCredentials(env)), /Unsafe/);
-  assert.throws(() => makeMainConfig({...template,triggers:{crons:['0 */6 * * *','* * * * *']}},getCredentials(env)), /Unsafe/);
-  assert.throws(() => makeMainConfig({...template,triggers:{crons:['0 */6 * * *'],queues:['other']}},getCredentials(env)), /Unsafe/);
+  assert.throws(() => makeMainConfig({...template,triggers:{crons:['0 */6 * * *','* * * * *','*/2 * * * *']}},getCredentials(env)), /Unsafe/);
+  assert.throws(() => makeMainConfig({...template,triggers:{crons:['0 */6 * * *','* * * * *'],queues:['other']}},getCredentials(env)), /Unsafe/);
   assert.throws(() => makeMainConfig({...template,triggers:undefined},getCredentials(env)), /Unsafe/);
   assert.throws(() => makeMainConfig({...template,d1_databases:[{...template.d1_databases[0],database_name:'tiyansh-production'},template.d1_databases[1]]},getCredentials(env)), /Unexpected/);
   assert.throws(() => makeMainConfig({...template,r2_buckets:[{binding:'RECORDINGS',bucket_name:'rekixo-3d-assets'}]},getCredentials(env)), /Wrong/);
@@ -96,6 +96,7 @@ function cloudflareMock({ controlTables=[],crmTables=[],controlName='ar3d-callin
         else if(sql.includes('call_campaign_candidates')) rows=['tenant_id','campaign_id','lead_id'].map(name=>({name}));
         else if(sql.includes('voicebot_qualification_reviews')) rows=['tenant_id','lead_id','provider','status','survey_json','source_verified','mapping_verified','possible_opt_out'].map(name=>({name}));
         else if(sql.includes('call_intent_proposals')) rows=['tenant_id','id','campaign_id','lead_id','purpose','state','created_by','created_at'].map(name=>({name}));
+        else if(sql.includes('calling_')) {const t=sql.match(/PRAGMA table_info\(([^)]+)\)/)[1];rows=REQUIRED_COLUMNS.CRM_DB[t].map(name=>({name}));}
         else if(sql.includes('agents')) rows=['tenant_id','status','questions_json'].map(name=>({name}));
         else rows=['token_hash','expires_at'].map(name=>({name}));
       } else throw Error('Unexpected SQL');
@@ -270,4 +271,14 @@ test('Calling CRM v10 upgrade permits exactly one missing blocked-proposal table
   assert.throws(()=>verifiedSchemaState({
     CONTROL_DB:'control_operator_status_upgrade',CRM_DB:'crm_call_intent_upgrade'
   }),/mixed or invalid/);
+});
+test('campaign dispatch upgrade requires exactly four missing tables on the complete v10 baseline',async()=>{
+ const added=['calling_policies','calling_clearances','calling_runs','calling_jobs'];
+ const old=REQUIRED_TABLES.CRM_DB.filter(x=>!added.includes(x));
+ assert.equal(checkTables(old,'CRM_DB','preflight'),'crm_dispatch_upgrade');
+ assert.equal(verifiedSchemaState({CONTROL_DB:'ready',CRM_DB:'crm_dispatch_upgrade'}),'crm_dispatch_upgrade');
+ assert.throws(()=>checkTables([...old,'calling_policies'],'CRM_DB','preflight'),/partial/);
+ assert.throws(()=>checkTables(old.filter(x=>x!=='leads'),'CRM_DB','preflight'),/partial/);
+ const result=await inspectCloudflare({credentials:getCredentials(env),mode:'preflight',template,apiFetch:cloudflareMock({controlTables:REQUIRED_TABLES.CONTROL_DB,crmTables:old})});
+ assert.equal(result.modes.CRM_DB,'crm_dispatch_upgrade');
 });

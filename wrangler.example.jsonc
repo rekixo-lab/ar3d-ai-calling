@@ -30,7 +30,11 @@
   ],
   "triggers": {
     "crons": [
-      "0 */6 * * *"
+      "0 */6 * * *",
+      "* * * * *"
     ]
+  },
+  "vars": {
+    "EXOTEL_CUSTOMER_CAMPAIGNS_ENABLED": "enabled"
   }
 }

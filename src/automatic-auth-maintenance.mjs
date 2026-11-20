@@ -1,3 +1,4 @@
+import {CAMPAIGN_CRON,runCampaignCron} from './campaign-dispatch.mjs';
 // Live-safe, fixed-policy security maintenance for the isolated Calling
 // Control D1. Runs ONLY from a Cloudflare Cron Trigger. No client, CRM,
 // recording, consent, opt-out, lead or billing records are deleted.
@@ -60,6 +61,7 @@ export async function pruneExpiredExotelWebhookReceipts(env,{
   return changes;
 }
 export async function handleCallingCron(controller,env){
+  if(controller?.cron===CAMPAIGN_CRON)return runCampaignCron(env,{now:controller.scheduledTime??Date.now()});
   if(controller?.cron!==AUTH_MAINTENANCE_CRON)
     throw Error('unknown Calling Worker cron expression');
   const timestamp=controller?.scheduledTime??Date.now();
