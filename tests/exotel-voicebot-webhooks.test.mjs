@@ -110,8 +110,19 @@ test('strict session correlation, duplicate protection and malformed payloads fa
     {...payload,external_id:'CAothercallref'},
     {...payload,session_id:'another-session-ref'},
     {...payload,account_id:'another-account-ref'},
-    {...payload,metadata:{call_sid:'CAanothercallref'}}
   ])assert.throws(()=>reviewExotelVoicebotEvents([bad],opts),/invalid/);
+  const separateLeg={...payload,metadata:{call_sid:'CAanothercallref'}};
+  const parsedSeparateLeg=parseExotelVoicebotEvent(separateLeg);
+  assert.equal(parsedSeparateLeg.callId,callId);
+  assert.equal(parsedSeparateLeg.providerCallSid,'CAanothercallref');
+  const legReview=reviewExotelVoicebotEvents([separateLeg],opts);
+  assert.equal(legReview.identityVerifiedWithExotel,false);
+  assert.equal(legReview.crmWrites,0);
+  assert.throws(()=>reviewExotelVoicebotEvents([payload,separateLeg],opts),
+    /mixed conversation\/account identity/);
+  assert.throws(()=>parseExotelVoicebotEvent({
+    ...payload,metadata:{call_sid:'!'}
+  }),/provider call reference/);
   const dup=mutated(payload);
   dup.events[0].event_data.transcripts[0].transcript_segments[1].text='Different';
   assert.throws(()=>reviewExotelVoicebotEvents([payload,dup],opts),/conflicting/);
