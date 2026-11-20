@@ -114,3 +114,47 @@ export async function verifyExotelExistingCallReadOnly(auth,expected,{apiFetch=f
     note:'Read-only provider status independently fetched; no callback authenticity, customer consent, ledger or charging authority follows.'
   });
 }
+
+/**
+ * Verify a previously AR3D-registered single operator test CallSid against
+ * Exotel's HTTPS Call Details endpoint. No customer/CRM writes, no billing.
+ * Unlike verifyExotelExistingCallReadOnly, status is discovered, not
+ * asserted by a client. CallSid must come only from our private Control D1.
+ */
+export async function getExotelOperatorTestStatusReadOnly(auth,known,{
+  apiFetch=fetch
+}={}){
+  const c=credentials(auth);
+  if(!known||typeof known!=='object'||Array.isArray(known)||
+     Object.keys(known).some(k=>!['callSid','callerId'].includes(k))||
+     !validateString(known.callSid,SID)||
+     !validateString(known.callerId,/^\+?[0-9]{6,19}$/))
+    throw Error('invalid registered operator call reference');
+  const body=await boundedProviderGet(
+    urlFor(c.accountSid,'Calls/'+known.callSid+'.json?details=true',
+      c.region??'india'),c,apiFetch);
+  const record=body.Call;
+  if(!record||typeof record!=='object'||Array.isArray(record)||
+     record.Sid!==known.callSid||
+     record.AccountSid!==c.accountSid||
+     record.PhoneNumberSid!==known.callerId||
+     record.Direction!=='outbound-api'||!VALID_STATUS.has(record.Status))
+    throw safeProviderError('provider_mismatch','Exotel operator call identity mismatch');
+  const raw=record.Duration;
+  let durationSeconds=null;
+  if(raw!==null&&raw!==undefined&&raw!==''){
+    if(!((typeof raw==='string'&&/^\d{1,5}$/.test(raw))||
+         Number.isSafeInteger(raw)))
+      throw safeProviderError('provider_mismatch','Exotel operator call duration invalid');
+    durationSeconds=Number(raw);
+    if(!Number.isSafeInteger(durationSeconds)||durationSeconds<0||
+       durationSeconds>14400)
+      throw safeProviderError('provider_mismatch','Exotel operator call duration outside bound');
+  }
+  // Do NOT return Exotel To/From, RecordingUrl, Price, provider raw body,
+  // tenant IDs or account credentials to browser/audit/logs.
+  return Object.freeze({provider:'exotel',status:record.Status,
+    durationSeconds,providerIdentityVerified:true,
+    existingRegisteredCallOnly:true,outboundCallsInitiated:0,
+    customerLeadsModified:0,providerInvoiceConfirmed:false});
+}

@@ -33,10 +33,11 @@ class MockDb{
           throw Error('unknown first '+sql)
         },
         async all(){
-          if(sql.includes('SELECT id,state,error_code AS errorCode'))
+          if(sql.includes('SELECT t.id,t.state,t.error_code AS errorCode'))
             return {results:db.entries.filter(r=>r.actor===params[0]).map(r=>({
               id:r.id,state:r.state,errorCode:r.code||null,
-              createdAt:r.createdAt
+              createdAt:r.createdAt,checkState:null,providerStatus:null,
+              durationSeconds:null,checkError:null,checkedAt:null
             })).reverse().slice(0,5)};
           throw Error('unknown all')
         },

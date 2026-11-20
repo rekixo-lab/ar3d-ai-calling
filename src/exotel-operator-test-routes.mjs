@@ -130,9 +130,15 @@ async function finalize(db,id,state,{sid=null,code=null}={}){
 }
 async function lastCalls(db,userId){
   const result=await db.prepare(
-    'SELECT id,state,error_code AS errorCode,created_at AS createdAt FROM '+
-    'exotel_operator_test_calls WHERE actor_user_id=? '+
-    'ORDER BY created_at DESC LIMIT 5'
+    'SELECT t.id,t.state,t.error_code AS errorCode,t.created_at AS createdAt, '+
+    'sc.state AS checkState,sc.provider_status AS providerStatus, '+
+    'sc.duration_seconds AS durationSeconds,sc.error_code AS checkError, '+
+    'sc.created_at AS checkedAt '+
+    'FROM exotel_operator_test_calls t '+
+    'LEFT JOIN exotel_operator_status_checks sc ON sc.id=('+
+    'SELECT c.id FROM exotel_operator_status_checks c '+
+    'WHERE c.call_request_id=t.id ORDER BY c.created_at DESC LIMIT 1) '+
+    'WHERE t.actor_user_id=? ORDER BY t.created_at DESC LIMIT 5'
   ).bind(userId).all();
   return result.results||[];
 }
