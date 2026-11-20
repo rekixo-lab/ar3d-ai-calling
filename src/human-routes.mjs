@@ -1,5 +1,6 @@
 import {handleCrmRequest} from './crm-routes.mjs';
 import {handlePropertyQualificationRequest} from './property-qualification-routes.mjs';
+import {handleVoicebotReviewRequest} from './voicebot-review-routes.mjs';
 import {handleFixedVoicePreviewRequest} from './fixed-voice-preview-routes.mjs';
 import {handleEngineeringRequest} from './engineering-routes.mjs';
 import {handleTenantLifecycleRequest} from './tenant-lifecycle-routes.mjs';
@@ -246,6 +247,8 @@ export async function handleHumanRequest(req,env){
     if(dataResponse)return dataResponse;
     const voicePreviewResponse=await handleFixedVoicePreviewRequest(req);
     if(voicePreviewResponse)return voicePreviewResponse;
+    const voicebotReviewResponse=await handleVoicebotReviewRequest(req,env,user);
+    if(voicebotReviewResponse)return voicebotReviewResponse;
     const qualificationResponse=await handlePropertyQualificationRequest(req,env,user);
     if(qualificationResponse)return qualificationResponse;
     const crmResponse=await handleCrmRequest(req,env,user);

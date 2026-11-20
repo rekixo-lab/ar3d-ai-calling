@@ -334,7 +334,61 @@ actionForm.addEventListener('submit',async e=>{e.preventDefault();try{
 await inviteSection(main)}
 async function inviteSection(main){const previous=document.getElementById('invite-card');if(previous)previous.remove();const card=div('card');card.id='invite-card';card.append(title('Invite client admin','h2'),node('p',{class:'muted',text:'Invitation link shown once. Share privately with the intended client.'}));const select=node('select',{class:'field'},[node('option',{value:'',text:'Choose company'})]);const tenants=await api('/v1/human/tenants');tenants.tenants.forEach(t=>select.append(node('option',{value:t.id,text:t.display_name})));const email=input('email','email','client@builder.com');const role=node('select',{class:'field'},['client_admin','viewer'].map(x=>node('option',{value:x,text:x})));const f=node('form',{class:'formrow'},[lab('Company',select),lab('Client email',email),lab('Role',role),node('button',{type:'submit',class:'btn',text:'Create invitation'})]);f.addEventListener('submit',async e=>{e.preventDefault();try{const d=await api('/v1/human/invitations','POST',{tenantId:select.value,email:email.value,role:role.value});const share=node('input',{class:'field',value:d.inviteUrl,readonly:'readonly',style:'width:100%'});card.append(div('banner',node('p',{text:'Share this one-time link securely:'}),share));notice('Invitation generated for '+email.value)}catch(err){asError(err)}});card.append(f);main.append(card)}
 async function clientPanel(main){const panel=div('card',title('Personal CRM & AI Agent'));main.append(panel);const select=node('select',{class:'field'},state.me.tenants.map(t=>node('option',{value:t.id,text:t.name+' — '+t.plan})));const content=div('');panel.append(lab('Your company',select),content);select.addEventListener('change',()=>renderClient(select.value,content));await renderClient(select.value,content)}
-async function renderClient(id,content){content.replaceChildren(node('p',{class:'muted',text:'Loading client dashboard…'}));try{const d=await api('/v1/human/overview?tenantId='+encodeURIComponent(id));content.replaceChildren();const cards=div('cards',...[['Leads',d.metrics.leads],['Draft AI Agents',d.metrics.agents],['Calls',d.metrics.calls],['Site Visits',d.metrics.siteVisits]].map(([name,val])=>div('card metric',node('span',{class:'muted',text:name}),node('strong',{text:String(val)}))));content.append(cards);content.append(node('p',{class:'note',text:'Calling is not enabled. Imported and manually added leads remain consent/DND unknown until verified.'}));const leadCard=div('card',title('Leads','h3'),table(['Name','Mobile','Source','Consent'],d.leads.map(l=>[l.name,l.mobile,l.sourceType,l.consentStatus])));content.append(leadCard);const name=input('name','text','Customer name'),mobile=input('mobile','tel','9876543210');const leadForm=node('form',{class:'formrow'},[lab('Name',name),lab('Mobile',mobile),node('button',{class:'btn',type:'submit',text:'Add lead'})]);leadForm.addEventListener('submit',async e=>{e.preventDefault();try{await api('/v1/human/leads','POST',{tenantId:id,name:name.value,mobile:mobile.value});notice('Lead saved without calling consent');await renderClient(id,content)}catch(err){asError(err)}});if(d.role==='client_admin')leadCard.append(leadForm);const agentCard=div('card',title('AI Agents','h3'),table(['Name','Language','Status'],d.agents.map(a=>[a.displayName,a.languageMode,a.status])));content.append(agentCard);if(d.role==='client_admin'){const agentName=input('displayName','text','Sales Agent'),language=node('select',{class:'field'},['hi-en','hi','en'].map(x=>node('option',{value:x,text:x}))),q=node('textarea',{class:'field',placeholder:'One question per line',rows:4});const agentForm=node('form',{class:'stack'},[lab('AI Agent Name',agentName),lab('Language',language),lab('Questions (one per line)',q),node('button',{class:'btn',type:'submit',text:'Save draft AI Agent'})]);agentForm.addEventListener('submit',async e=>{e.preventDefault();try{await api('/v1/human/agents','POST',{tenantId:id,displayName:agentName.value,languageMode:language.value,questions:q.value.split('\n').map(s=>s.trim()).filter(Boolean)});notice('Draft AI Agent saved');await renderClient(id,content)}catch(err){asError(err)}});agentCard.append(agentForm);await agentEditor(id,agentCard)}await crmWorkflow(id,content,d.role);await planningPanels(id,content,d.role);await usageAndExport(id,content,d.role);if(d.role==='client_admin')await auditPanel(id,content)}catch(e){content.replaceChildren();asError(e)}}
+async function renderClient(id,content){content.replaceChildren(node('p',{class:'muted',text:'Loading client dashboard…'}));try{const d=await api('/v1/human/overview?tenantId='+encodeURIComponent(id));content.replaceChildren();const cards=div('cards',...[['Leads',d.metrics.leads],['Draft AI Agents',d.metrics.agents],['Calls',d.metrics.calls],['Site Visits',d.metrics.siteVisits]].map(([name,val])=>div('card metric',node('span',{class:'muted',text:name}),node('strong',{text:String(val)}))));content.append(cards);content.append(node('p',{class:'note',text:'Calling is not enabled. Imported and manually added leads remain consent/DND unknown until verified.'}));const leadCard=div('card',title('Leads','h3'),table(['Name','Mobile','Source','Consent'],d.leads.map(l=>[l.name,l.mobile,l.sourceType,l.consentStatus])));content.append(leadCard);const name=input('name','text','Customer name'),mobile=input('mobile','tel','9876543210');const leadForm=node('form',{class:'formrow'},[lab('Name',name),lab('Mobile',mobile),node('button',{class:'btn',type:'submit',text:'Add lead'})]);leadForm.addEventListener('submit',async e=>{e.preventDefault();try{await api('/v1/human/leads','POST',{tenantId:id,name:name.value,mobile:mobile.value});notice('Lead saved without calling consent');await renderClient(id,content)}catch(err){asError(err)}});if(d.role==='client_admin')leadCard.append(leadForm);const agentCard=div('card',title('AI Agents','h3'),table(['Name','Language','Status'],d.agents.map(a=>[a.displayName,a.languageMode,a.status])));content.append(agentCard);if(d.role==='client_admin'){const agentName=input('displayName','text','Sales Agent'),language=node('select',{class:'field'},['hi-en','hi','en'].map(x=>node('option',{value:x,text:x}))),q=node('textarea',{class:'field',placeholder:'One question per line',rows:4});const agentForm=node('form',{class:'stack'},[lab('AI Agent Name',agentName),lab('Language',language),lab('Questions (one per line)',q),node('button',{class:'btn',type:'submit',text:'Save draft AI Agent'})]);agentForm.addEventListener('submit',async e=>{e.preventDefault();try{await api('/v1/human/agents','POST',{tenantId:id,displayName:agentName.value,languageMode:language.value,questions:q.value.split('\n').map(s=>s.trim()).filter(Boolean)});notice('Draft AI Agent saved');await renderClient(id,content)}catch(err){asError(err)}});agentCard.append(agentForm);await agentEditor(id,agentCard)}await crmWorkflow(id,content,d.role);await planningPanels(id,content,d.role);await usageAndExport(id,content,d.role);if(d.role==='client_admin')await voicebotReviewPanel(id,content);if(d.role==='client_admin')await auditPanel(id,content)}catch(e){content.replaceChildren();asError(e)}}
+
+async function voicebotReviewPanel(tenantId,content){
+  const card=div('card',title('Verified Exotel Voicebot Review Queue','h3'),
+    node('p',{class:'note',text:'Pending staff review of independently verified Exotel answers. No public provider webhook, automatic calls or CRM write from raw transcripts is enabled.'}));
+  content.append(card);
+  try{
+    const res=await api('/v1/human/voicebot-reviews?tenantId='+encodeURIComponent(tenantId));
+    if(!res.reviews.length){
+      card.append(node('p',{class:'muted',text:'No verified Voicebot reviews yet. Exotel account/callback approval remains pending.'}));
+      return;
+    }
+    for(const item of res.reviews){
+      const survey=item.provisionalSurvey;
+      const info=div('stack',
+        node('p',{text:'Lead reference: '+item.leadId+' | Status: '+item.status}),
+        node('p',{class:'muted',text:item.possibleOptOut?
+          'Possible Do Not Call request — verify and use the separate CRM suppression action.':
+          'Type: '+(survey?.propertyType||'?')+' | City: '+(survey?.location||'?')+
+          ' | Size: '+(survey?.size||'?')+' | Budget INR: '+(survey?.budgetInr??'?')+
+          ' | Interest: '+(survey?.interest||'?')+' | Visit preference: '+(survey?.visitDate||'none')}));
+      const itemCard=div('card',info);
+      if(item.status==='pending'){
+        const buttons=div('formrow');
+        if(!item.possibleOptOut){
+          const apply=btn('Apply staff-reviewed answers',async()=>{
+            apply.disabled=true;
+            try{
+              await api('/v1/human/voicebot-reviews/'+encodeURIComponent(item.id)+'/apply','POST',{
+                tenantId,expectedUpdatedAt:item.leadUpdatedAt,acknowledged:true});
+              notice('Reviewed Voicebot answers applied. No call or site visit was created.');
+              await renderClient(tenantId,content);
+            }catch(e){asError(e)}finally{apply.disabled=false}
+          },true);
+          buttons.append(apply);
+        }
+        if(item.possibleOptOut&&!item.suppressionConfirmed){
+          buttons.append(node('p',{class:'note',text:'Possible opt-out: use the lead Do Not Call action and verify suppression before closing this review.'}));
+        }else{
+          const dismiss=btn('Dismiss review',async()=>{
+            dismiss.disabled=true;
+            try{
+              await api('/v1/human/voicebot-reviews/'+encodeURIComponent(item.id)+'/dismiss','POST',{tenantId});
+              notice('Review dismissed without changing CRM.');
+              await renderClient(tenantId,content);
+            }catch(e){asError(e)}finally{dismiss.disabled=false}
+          },true);
+          buttons.append(dismiss);
+        }
+        itemCard.append(buttons);
+      }
+      card.append(itemCard);
+    }
+  }catch(e){card.append(node('p',{class:'err',text:'Voicebot review queue could not load.'}));asError(e)}
+}
 
 async function planningPanels(tenantId,content,role){
   const editable=role==='client_admin';
