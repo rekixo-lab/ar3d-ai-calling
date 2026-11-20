@@ -41,11 +41,16 @@ export async function handleVoicebotReviewRequest(req,env,user){
   if((path===LIST&&req.method!=='GET')||
      (match&&req.method!=='POST'))return fail('method not allowed',405);
   try{
-    const input=req.method==='POST'?await body(req):null;
-    if(input&&(!input||typeof input!=='object'||Array.isArray(input)||
-      Object.keys(input).some(k=>!['tenantId','expectedUpdatedAt','acknowledged'].includes(k))))
-      return fail('invalid review request');
-    const tenantId=input?.tenantId??url.searchParams.get('tenantId');
+    let input=null;
+    if(req.method==='POST'){
+      try{input=await body(req)}
+      catch{return fail('invalid or oversized review JSON',400)}
+      if(!input||typeof input!=='object'||Array.isArray(input)||
+         Object.keys(input).some(k=>!['tenantId','expectedUpdatedAt','acknowledged'].includes(k))||
+         typeof input.tenantId!=='string')
+        return fail('invalid review request');
+    }
+    const tenantId=req.method==='POST'?input.tenantId:url.searchParams.get('tenantId');
     if(!UUID.test(tenantId))return fail('invalid tenant id');
     // Viewing a provider-derived property survey requires Client Admin rights.
     const member=await requireMembership(env.CONTROL_DB,user,tenantId,true);
@@ -111,8 +116,14 @@ export async function handleVoicebotReviewRequest(req,env,user){
          !(record.consentStatus==='denied'&&record.dndStatus==='blocked'))
         return fail('verified Do Not Call suppression is required before dismissing possible opt-out',409);
       const updates=await db.batch([
-        db.prepare("UPDATE voicebot_qualification_reviews SET status='dismissed',reviewed_by=?,reviewed_at=? WHERE tenant_id=? AND id=? AND status='pending'")
-          .bind(user.id,at,tid,id),
+        db.prepare([
+          "UPDATE voicebot_qualification_reviews SET status='dismissed',reviewed_by=?,reviewed_at=?",
+          "WHERE tenant_id=? AND id=? AND status='pending'",
+          "AND (possible_opt_out=0 OR EXISTS(SELECT 1 FROM leads WHERE",
+          "leads.tenant_id=voicebot_qualification_reviews.tenant_id",
+          "AND leads.id=voicebot_qualification_reviews.lead_id",
+          "AND leads.consent_status='denied' AND leads.dnd_status='blocked'))"
+        ].join(' ')).bind(user.id,at,tid,id),
         db.prepare([
           'INSERT INTO crm_audit_events(tenant_id,id,actor,action,target_id,created_at)',
           "SELECT ?,?,'human:'||?,'voicebot.review_dismissed',id,?",
