@@ -9,7 +9,10 @@ GitHub, chat, screenshots, URLs or browser configuration.
 1. Verify the legal business/KYC owner, India account, Account SID, API access,
    and actual enabled products: Managed Voicebot, AgentStream, campaigns,
    outbound telephony and transcript/webhook API.
-2. Set EXOTEL_ACCOUNT_SID, EXOTEL_API_KEY, EXOTEL_API_TOKEN as private
+2. Confirm the Exotel account region. `my.exotel.com` normally indicates
+   `singapore` (`api.exotel.com`); a Mumbai account uses `india`
+   (`api.in.exotel.com`). Set `EXOTEL_REGION` to the verified region.
+   Set EXOTEL_ACCOUNT_SID, EXOTEL_API_KEY and EXOTEL_API_TOKEN as private
    Cloudflare Secrets for Worker ar3d-ai-calling, not as browser JavaScript.
 3. From signed-in Super Admin, use Check Exotel Connection (read-only).
    This does not launch any calls or approve the caller identity.
