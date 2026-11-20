@@ -1,4 +1,5 @@
 import {handleHumanRequest} from './human-routes.mjs';
+import {handleExotelVoicebotWebhookRequest} from './exotel-voicebot-inbound.mjs';
 import {handleCallingCron} from './automatic-auth-maintenance.mjs';
 import {
   checkSlug,checkName,checkStorageMode,normalizeIndianPhone,
@@ -166,6 +167,8 @@ export default {
   async fetch(req,env){
     const path=new URL(req.url).pathname;
     if(path==='/health'&&isGet(req))return json({service:'AR3D AI Calling',status:'foundation'});
+    const voicebotWebhook=await handleExotelVoicebotWebhookRequest(req,env);
+    if(voicebotWebhook)return voicebotWebhook;
     const humanResponse=await handleHumanRequest(req,env);
     if(humanResponse)return humanResponse;
     if(!env.CONTROL_DB)return fail('control DB missing',503);
