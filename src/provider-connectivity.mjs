@@ -3,7 +3,6 @@
 // Never logs, persists, returns or forwards secrets/client call data.
 import {checkExotelAccountReadOnly} from './exotel-readonly-verification.mjs';
 import {configuredExotelRegion} from './exotel-region.mjs';
-const FIELDS=Object.freeze(['EXOTEL_ACCOUNT_SID','EXOTEL_API_KEY','EXOTEL_API_TOKEN']);
 export async function probeExotelConnectivity(env,{apiFetch=fetch}={}){
   if(!env||typeof env!=='object')throw Error('provider configuration missing');
   const region=configuredExotelRegion(env);
@@ -36,7 +35,7 @@ export async function probeExotelConnectivity(env,{apiFetch=fetch}={}){
     // Never return raw Exotel HTTP body or thrown errors to the browser.
     return Object.freeze({
       provider:'exotel',configured:true,verified:false,
-      apiRegionConfigured:true,apiRegion:region,
+      apiRegionConfigured:true,apiRegion:region,apiRegionStatus,
       outboundCallsEnabled:false,voiceStreamingEnabled:false,
       note:'Exotel read-only account check unsuccessful. Review account, permissions and key scope privately.'
     });
