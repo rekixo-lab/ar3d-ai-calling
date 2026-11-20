@@ -262,8 +262,8 @@ try{
     await page.getByText('opt out',{exact:true}).waitFor();
     await page.getByText(/Session-end does NOT contain the full transcript/).waitFor();
     await page.getByRole('heading',{name:'Exotel Webhook Receipt Health (real saved metadata)'}).waitFor();
-    await page.getByText(/Source IP guard: network-restricted \(not vendor-verified\)/).waitFor();
     await page.getByRole('button',{name:'Check saved Exotel webhooks (read-only)'}).click();
+    await page.getByText(/Source IP guard: network-restricted \(not vendor-verified\)/).waitFor();
     await page.getByText('Webhook Bearer token: configured | Last saved event: 2026-11-20T12:20:00.000Z').waitFor();
     await page.getByRole('row',{name:'Potential opt-out signals 1'}).waitFor();
     await page.getByText(/NOT all webhook attempts or verified provider-origin events/).waitFor();
