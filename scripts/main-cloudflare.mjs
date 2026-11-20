@@ -19,7 +19,7 @@ export const REQUIRED_TABLES = Object.freeze({
   ]),
   CRM_DB: Object.freeze([
     'leads','agents','calls','site_visits','crm_audit_events',
-    'lead_notes','conversation_simulations','lead_opt_out_events','lead_consent_evidence','call_campaign_drafts','call_campaign_candidates','voicebot_qualification_reviews',
+    'lead_notes','conversation_simulations','lead_opt_out_events','lead_consent_evidence','call_campaign_drafts','call_campaign_candidates','voicebot_qualification_reviews','call_intent_proposals',
   ]),
 });
 export const REQUIRED_COLUMNS = Object.freeze({
@@ -45,6 +45,7 @@ export const REQUIRED_COLUMNS = Object.freeze({
     call_campaign_candidates: Object.freeze(['tenant_id','campaign_id','lead_id']),
     agents: Object.freeze(['tenant_id','status','questions_json']),
     voicebot_qualification_reviews: Object.freeze(['tenant_id','lead_id','provider','status','survey_json','source_verified','mapping_verified','possible_opt_out']),
+    call_intent_proposals: Object.freeze(['tenant_id','id','campaign_id','lead_id','purpose','state','created_by','created_at']),
   }),
 });
 const accountPattern = /^[a-f0-9]{32}$/i;
@@ -118,13 +119,16 @@ export const REQUIRED_SAFETY_TRIGGERS = Object.freeze({
   trg_agents_block_active_update: ['before update of status on agents','raise(abort'],
   trg_voicebot_review_terminal: ['before update of status on voicebot_qualification_reviews','raise(abort'],
   trg_voicebot_review_immutable: ['before update of tenant_id','voicebot_qualification_reviews','raise(abort'],
+  trg_call_intent_proposal_immutable: ['before update on call_intent_proposals','raise(abort'],
+  trg_call_intent_proposal_no_provider: ['before insert on call_intent_proposals','raise(abort'],
 });
-export function checkSafetyTriggers(records,{allowAdditiveUpgrade=false}={}) {
+export function checkSafetyTriggers(records,{allowAdditiveUpgrade=false,allowCallIntentUpgrade=false}={}) {
   if (!Array.isArray(records)) throw Error('Invalid CRM trigger inspection result.');
   const triggers = new Map(records.map(row => [row?.name, String(row?.sql || '')
     .toLowerCase().replace(/\s+/g, ' ').trim()]));
   for (const [name, signatures] of Object.entries(REQUIRED_SAFETY_TRIGGERS)) {
     if (allowAdditiveUpgrade && name.startsWith('trg_voicebot_review_')) continue;
+    if (allowCallIntentUpgrade && name.startsWith('trg_call_intent_')) continue;
     const sql = triggers.get(name);
     if (!sql || signatures.some(signature => !sql.includes(signature)))
       throw Error('CRM safety trigger missing or invalid: ' + name + '. Deployment refused.');
@@ -161,6 +165,9 @@ export function checkTables(tables, binding, mode) {
     if (binding === 'CRM_DB' && missing.length === 1 &&
         missing[0] === 'voicebot_qualification_reviews')
       return 'crm_additive_upgrade';
+    if (binding === 'CRM_DB' && missing.length === 1 &&
+        missing[0] === 'call_intent_proposals')
+      return 'crm_call_intent_upgrade';
     if (missing.length) throw Error(D1_NAME[binding] + ' has partial schema; inspect manually: ' + missing.join(', '));
     return 'ready';
   }
@@ -202,15 +209,20 @@ export async function inspectCloudflare({ credentials, mode, apiFetch = fetch, t
     const state = checkTables(names, binding, mode);
     modes[binding] = state;
     if (state === 'ready' || state === 'crm_additive_upgrade' ||
+        state === 'crm_call_intent_upgrade' ||
         state === 'control_additive_upgrade' ||
         state === 'control_operator_test_upgrade' ||
         state === 'control_operator_status_upgrade') {
       if (binding === 'CRM_DB') {
         const triggers = await query(id, "SELECT name,sql FROM sqlite_master WHERE type='trigger' AND name LIKE 'trg_%'");
-        checkSafetyTriggers(triggers,{allowAdditiveUpgrade:state === 'crm_additive_upgrade'});
+        checkSafetyTriggers(triggers,{
+          allowAdditiveUpgrade:state === 'crm_additive_upgrade',
+          allowCallIntentUpgrade:state === 'crm_call_intent_upgrade'
+        });
       }
       for (const table of Object.keys(REQUIRED_COLUMNS[binding])) {
         if (state === 'crm_additive_upgrade' && table === 'voicebot_qualification_reviews')continue;
+        if (state === 'crm_call_intent_upgrade' && table === 'call_intent_proposals')continue;
         if (state === 'control_additive_upgrade' && table === 'exotel_voicebot_event_receipts')continue;
         if (state === 'control_operator_test_upgrade' && table === 'exotel_operator_test_calls')continue;
         if (state === 'control_operator_status_upgrade' && table === 'exotel_operator_status_checks')continue;
@@ -228,6 +240,7 @@ export async function inspectCloudflare({ credentials, mode, apiFetch = fetch, t
   // Preflight rejects a mixed state. This stops accidental double-initialize.
   if (mode === 'preflight' && modes.CONTROL_DB !== modes.CRM_DB &&
       !(modes.CONTROL_DB === 'ready' && modes.CRM_DB === 'crm_additive_upgrade') &&
+      !(modes.CONTROL_DB === 'ready' && modes.CRM_DB === 'crm_call_intent_upgrade') &&
       !(modes.CONTROL_DB === 'control_additive_upgrade' && modes.CRM_DB === 'ready') &&
       !(modes.CONTROL_DB === 'control_operator_test_upgrade' && modes.CRM_DB === 'ready') &&
       !(modes.CONTROL_DB === 'control_operator_status_upgrade' && modes.CRM_DB === 'ready'))
@@ -240,6 +253,8 @@ export async function inspectCloudflare({ credentials, mode, apiFetch = fetch, t
 export function verifiedSchemaState(modes) {
   if (modes?.CONTROL_DB === 'ready' && modes?.CRM_DB === 'crm_additive_upgrade')
     return 'crm_additive_upgrade';
+  if (modes?.CONTROL_DB === 'ready' && modes?.CRM_DB === 'crm_call_intent_upgrade')
+    return 'crm_call_intent_upgrade';
   if (modes?.CONTROL_DB === 'control_additive_upgrade' && modes?.CRM_DB === 'ready')
     return 'control_additive_upgrade';
   if (modes?.CONTROL_DB === 'control_operator_test_upgrade' && modes?.CRM_DB === 'ready')
