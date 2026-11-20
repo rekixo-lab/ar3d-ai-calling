@@ -199,7 +199,7 @@ try{
     await page.getByRole('button',{name:'Copy 7-question Exotel Voicebot instructions'}).waitFor();
     await page.getByText('Missing: EXOTEL_API_TOKEN').waitFor();
     await page.getByRole('button',{name:'Check Exotel Connection (read-only)'}).click();
-    await page.getByText('Exotel API: Not verified | Region: not configured | Real dialing: disabled').waitFor();
+    await page.getByText('Exotel API: Not verified | Region: not configured (missing) | Real dialing: disabled').waitFor();
     const nav=page.getByRole('link',{name:'Test AI Conversation'});
     const signout=page.getByRole('button',{name:'Sign out'});
     await nav.waitFor();await signout.waitFor();
