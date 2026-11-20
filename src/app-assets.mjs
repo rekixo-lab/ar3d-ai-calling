@@ -179,6 +179,29 @@ function engineeringPanel(main){
   card.append(title('Managed Exotel Voicebot — Transcript Webhook Checks','h3'),
     node('p',{class:'note',text:'Seven fixed-question transcripts: validates Exotel vendor-format turn events, reordered delivery, retries and opt-out flags offline. No real calls, customer data or CRM edits.'}),
     webhookCheck,webhookResults);
+  const qualificationCheckOutput=div('stack');
+  const qualificationButton=btn('Test Voicebot Answers to CRM Review (offline)',async()=>{
+    qualificationButton.disabled=true;
+    qualificationCheckOutput.replaceChildren(node('p',{class:'muted',text:'Reconstructing fictional Exotel turns into reviewed property fields...'}));
+    try{
+      const summaries=[];
+      for(const scenario of ['plot_complete','flat_complete','not_interested','out_of_order','retry_duplicate','opt_out','incomplete']){
+        const r=await api('/v1/human/engineering/voicebot-qualification','POST',{scenario});
+        if(r.crmWrites!==0||r.realCallsStarted!==0||r.sourceAuthenticated||r.consentVerified||!r.humanReviewRequired)
+          throw Error('Unsafe provider qualification response');
+        summaries.push([scenario.replaceAll('_',' '),r.status,
+          r.provisionalSurvey?.propertyType||'—',
+          r.provisionalSurvey?.budgetInr==null?'—':String(r.provisionalSurvey.budgetInr)]);
+      }
+      qualificationCheckOutput.replaceChildren(
+        table(['Synthetic transcript','Review state','Type','Budget INR'],summaries),
+        node('p',{class:'note',text:'These are provisional fields only. No real Exotel webhook is authenticated; no opt-out, lead, CRM, call or site visit is modified.'})
+      );
+    }catch(err){asError(err)}finally{qualificationButton.disabled=false}
+  },true);
+  card.append(title('Voicebot Answers to CRM Review — Preflight','h3'),
+    node('p',{class:'note',text:'Parses Exotel-style completed turns into the seven fixed property fields. Catches retries, reversed event order, refusal and missing session-end before any live integration.'}),
+    qualificationButton,qualificationCheckOutput);
   const mediaOutput=div('stack');
   const mediaTest=btn('Test 100 PCM Audio Frames (offline)',async()=>{
     mediaTest.disabled=true;
