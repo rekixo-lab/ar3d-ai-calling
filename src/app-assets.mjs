@@ -370,15 +370,19 @@ async function voicebotReviewPanel(tenantId,content){
           },true);
           buttons.append(apply);
         }
-        const dismiss=btn('Dismiss review',async()=>{
-          dismiss.disabled=true;
-          try{
-            await api('/v1/human/voicebot-reviews/'+encodeURIComponent(item.id)+'/dismiss','POST',{tenantId});
-            notice(item.possibleOptOut?'Review dismissed. Verify Do Not Call separately.':'Review dismissed without changing CRM.');
-            await renderClient(tenantId,content);
-          }catch(e){asError(e)}finally{dismiss.disabled=false}
-        },true);
-        buttons.append(dismiss);
+        if(item.possibleOptOut&&!item.suppressionConfirmed){
+          buttons.append(node('p',{class:'note',text:'Possible opt-out: use the lead Do Not Call action and verify suppression before closing this review.'}));
+        }else{
+          const dismiss=btn('Dismiss review',async()=>{
+            dismiss.disabled=true;
+            try{
+              await api('/v1/human/voicebot-reviews/'+encodeURIComponent(item.id)+'/dismiss','POST',{tenantId});
+              notice('Review dismissed without changing CRM.');
+              await renderClient(tenantId,content);
+            }catch(e){asError(e)}finally{dismiss.disabled=false}
+          },true);
+          buttons.append(dismiss);
+        }
         itemCard.append(buttons);
       }
       card.append(itemCard);
