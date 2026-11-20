@@ -62,7 +62,8 @@ test('Maintenance never requires providers, payments or extra operator secrets',
 const exotelEnv={
   EXOTEL_ACCOUNT_SID:'fictional_account',
   EXOTEL_API_KEY:'synthetic_private_api_key_123',
-  EXOTEL_API_TOKEN:'synthetic_private_api_token_123'
+  EXOTEL_API_TOKEN:'synthetic_private_api_token_123',
+  EXOTEL_REGION:'india'
 };
 test('Exotel connectivity without secrets is ready for manual config but makes no network calls',async()=>{
   let called=0;
