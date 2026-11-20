@@ -3,7 +3,7 @@
 // A trusted vendor adapter must obtain independent evidence before calling.
 import {normalizePropertySurvey} from './fixed-property-survey.mjs';
 import {sha256hex} from './core.mjs';
-const UUID=/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
+const UUID=/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
 const CALL=/^CA[A-Za-z0-9_-]{10,78}$/;
 const ACCOUNT=/^[a-zA-Z0-9_-]{4,128}$/;
 const SHA=/^[a-f0-9]{64}$/i;
