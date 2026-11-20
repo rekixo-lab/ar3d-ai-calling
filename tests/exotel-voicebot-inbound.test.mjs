@@ -189,7 +189,7 @@ test('test marker cannot disguise real calls or malformed transcript payloads',a
     {test:false},
     {event:'sample_transcript'},
     {message:'test'},
-    {...event,test:true,session_id:'INVALID'},
+    {...event,test:true,session_id:'!'},
     {test:true,description:'x'.repeat(2000)}
   ]){
     const r=await worker.fetch(request(bad),env);
