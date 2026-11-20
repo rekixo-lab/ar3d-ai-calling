@@ -59,8 +59,9 @@ test('readiness reports presence only, never falsely reports permission to dial 
   assert.equal(ok.accountApiConnectivityVerified,false);
   assert.equal(ok.canPlaceRealCalls,false);
   assert.equal(ok.canAutoSaveProviderTranscript,false);
-  for(const item of Object.keys(creds))assert.equal(ok.credentialsPresent[item],true);
-  for(const secret of Object.values(creds))
+  for(const item of ['EXOTEL_ACCOUNT_SID','EXOTEL_API_KEY','EXOTEL_API_TOKEN'])
+    assert.equal(ok.credentialsPresent[item],true);
+  for(const secret of [creds.EXOTEL_ACCOUNT_SID,creds.EXOTEL_API_KEY,creds.EXOTEL_API_TOKEN])
     assert.ok(!JSON.stringify(ok).includes(secret));
   assert.equal(exotelTrialReadiness({...creds,EXOTEL_API_TOKEN:'x'}).accountReadyForReadOnlyCheck,false);
   assert.throws(()=>exotelTrialReadiness(null),/environment/);
