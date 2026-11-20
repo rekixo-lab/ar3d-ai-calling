@@ -264,7 +264,7 @@ try{
     await page.getByRole('heading',{name:'Exotel Webhook Receipt Health (real saved metadata)'}).waitFor();
     await page.getByRole('button',{name:'Check saved Exotel webhooks (read-only)'}).click();
     await page.getByText(/Source IP guard: network-restricted \(not vendor-verified\)/).waitFor();
-    await page.getByText('Webhook Bearer token: configured | Last saved event: 2026-11-20T12:20:00.000Z').waitFor();
+    await page.getByText(/Webhook Bearer token: configured \| Source IP guard: network-restricted \(not vendor-verified\) \| Last saved event: 2026-11-20T12:20:00\.000Z/).waitFor();
     await page.getByRole('row',{name:'Potential opt-out signals 1'}).waitFor();
     await page.getByText(/NOT all webhook attempts or verified provider-origin events/).waitFor();
 
