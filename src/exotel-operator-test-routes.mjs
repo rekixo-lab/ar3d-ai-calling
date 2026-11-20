@@ -131,10 +131,10 @@ async function finalize(db,id,state,{sid=null,code=null}={}){
 }
 async function lastCalls(db,userId){
   const result=await db.prepare(
-    'SELECT t.id,t.state,t.provider_call_sid AS providerCallSid, t.error_code AS errorCode,t.created_at AS createdAt, '+
+    'SELECT t.id,t.state,t.error_code AS errorCode,t.created_at AS createdAt, '+
     'sc.state AS checkState,sc.provider_status AS providerStatus, '+
     'sc.duration_seconds AS durationSeconds,sc.error_code AS checkError, '+
-    'sc.created_at AS checkedAt '+
+    'sc.created_at AS checkedAt, t.provider_call_sid AS providerCallSid '+
     'FROM exotel_operator_test_calls t '+
     'LEFT JOIN exotel_operator_status_checks sc ON sc.id=('+
     'SELECT c.id FROM exotel_operator_status_checks c '+
