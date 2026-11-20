@@ -6,6 +6,7 @@ import {handleEngineeringRequest} from './engineering-routes.mjs';
 import {handleExotelOperatorTest} from './exotel-operator-test-routes.mjs';
 import {handleExotelOperatorStatusCheck} from './exotel-operator-status-check.mjs';
 import {handleExotelWebhookHealth} from './exotel-webhook-health.mjs';
+import {handleProductionCutover} from './production-cutover-routes.mjs';
 import {handleTenantLifecycleRequest} from './tenant-lifecycle-routes.mjs';
 import {handleDataPortabilityRequest} from './data-portability-routes.mjs';
 import {handleAgentSettingsRequest} from './agent-settings-routes.mjs';
@@ -236,6 +237,8 @@ export async function handleHumanRequest(req,env){
     if(statusCheck)return statusCheck;
     const webhookHealth=await handleExotelWebhookHealth(req,env,user);
     if(webhookHealth)return webhookHealth;
+    const cutover=await handleProductionCutover(req,env,user);
+    if(cutover)return cutover;
     const selfTest=await handleExotelOperatorTest(req,env,user);
     if(selfTest)return selfTest;
     const engineeringResponse=await handleEngineeringRequest(req,user,env);
