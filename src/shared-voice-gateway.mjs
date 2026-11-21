@@ -27,7 +27,7 @@ export async function reviewUnknownGateway(env,runtime,{fetcher=fetch}={}){
   providerReadable:false,latestVersion:null,stableVersion:null,
   latestVersionUsesRecordedGuard:null,stableVersionUsesRecordedGuard:null,
   guardAssistantReadable:null,guardAssistantStableVersion:null,
-  guardAssistantFinalized:null,guardAssistantReadError:null,
+  guardAssistantFinalized:null,guardAssistantReadError:null,guardVersionContract:null,
   recommendation:'Stop. Review the actual Exotel Voicebot versions and account state before any provider update, rollout or call. Never retry Prepare.'
  };
  // A guard ID is written to D1 immediately after provider creation, before
@@ -48,6 +48,18 @@ export async function reviewUnknownGateway(env,runtime,{fetcher=fetch}={}){
       if((saved?.id||saved?.assistant_id)!==savedGuard)
        output.guardAssistantReadError='guard_version_identity_mismatch';
       else{
+       // Exotel can return the requested version with root-level fields
+       // while preserving a separate latest_version. Return fixed boolean
+       // presence indicators only, never names, instructions, IDs or payload.
+       output.guardVersionContract={
+        responseHasRootAgents:Array.isArray(saved.agents),
+        responseHasVersionedAgents:Array.isArray(saved.versions?.[stable]?.agents),
+        responseHasAssistantConfigAgents:Array.isArray(saved.assistant_config?.agents),
+        responseHasRootVersionTag:version(saved.version),
+        responseVersionMatchesRequested:saved.version===stable,
+        responseLatestMatchesRequested:saved.latest_version===stable,
+        responseStableMatchesRequested:saved.stable_version===stable
+       };
        const config=assistantVersionConfig(saved,stable);
        if(config?.agents?.length===1){
         // Exact prompt verification happens server-side; never return the
