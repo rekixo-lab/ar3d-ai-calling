@@ -8,7 +8,7 @@ const template='66666666-6666-4666-8666-666666666666';
 const prompt='You are the AR3D call routing guard. Client context is unavailable. Say in Hindi that the connection could not be loaded and politely end. Do not discuss company, project, pricing or customer information. Never ask survey questions.';
 const req=(confirmation='REPAIR_ONLY_SHARED_GUARD_NO_CALLS')=>new Request('https://app.example.invalid/v1/human/voice-gateway',{method:'POST',headers:{'Content-Type':'application/json',Origin:'https://app.example.invalid'},body:JSON.stringify({action:'recover',confirmation})});
 const unknown=f=>f.c.db.prepare("INSERT INTO shared_voice_gateway(id,bot_id,flow_id,template_assistant_id,template_version,guard_assistant_id,gateway_version,state,error_code,updated_by,updated_at) VALUES(1,?,?,?,?,?,NULL,'unknown','provider_write_unknown','admin',?)").run(bot,'1393135',template,'v1',guard,at);
-function provider({failAfterGuardWrite=false,alreadySafe=false,changedBot=false,unsafeTemplate=false,persistGuardBeforeFailure=false}={}){
+function provider({failAfterGuardWrite=false,alreadySafe=false,changedBot=false,unsafeTemplate=false,persistGuardBeforeFailure=false,providerDropsSavedAgents=false,versionMapDiffers=false}={}){
  let writes=[],reads=[],guardStable='v2',botLatest=changedBot?'v3':'v2',versionedGuard=null;
  const fetcher=async(raw,opts)=>{
   const u=new URL(raw),path=u.pathname,ver=u.searchParams.get('version'),method=opts.method;
@@ -44,14 +44,21 @@ function provider({failAfterGuardWrite=false,alreadySafe=false,changedBot=false,
    if(ver===guardStable&&guardStable==='v3')return Response.json({response:{
     id:guard,version:'v3',latest_version:'v3',stable_version:'v3',
     instruction:versionedGuard.instruction,llm_config:versionedGuard.llm_config,
-    agents:versionedGuard.agents
+    agents:providerDropsSavedAgents||versionMapDiffers?[]:versionedGuard.agents
+   }});
+   if(ver==='stable')return Response.json({response:{
+    id:guard,version:guardStable,latest_version:guardStable,stable_version:guardStable,
+    instruction:versionedGuard?.instruction||'draft',
+    agents:providerDropsSavedAgents?[]:versionedGuard?.agents||[]
    }});
    if(ver==='v2')return Response.json({response:{
     id:guard,latest_version:'v2',stable_version:'v2',
     ...(alreadySafe?{instruction:prompt,agents:[{instruction:prompt,tools:[],mcp_tools:[]}]}:
       {instruction:'draft',agents:[]})
    }});
-   return Response.json({response:{id:guard,stable_version:guardStable,latest_version:guardStable}});
+   return Response.json({response:{id:guard,stable_version:guardStable,latest_version:guardStable,
+    ...(versionMapDiffers&&guardStable==='v3'?{versions:{v3:{instruction:prompt,agents:versionedGuard.agents}}}:{})
+   }});
   }
   if(path.endsWith('/voicebots/'+bot)){
    if(ver==='v2')return Response.json({response:{id:bot,version:'v2',stable_version:'v2',assistant_config:{id:template,version:'v1'}}});
@@ -159,7 +166,8 @@ test('uncertain Guard POST that never persisted can be reconciled without writin
   const res=await handleVoiceGatewayRequest(readRepairReq(),f.env,admin,{now,fetcher:p.fetcher});
   assert.equal(res.status,200,await res.clone().text());
   const body=await res.json();
-  assert.equal(body.outcome,'guard_still_has_zero_agents');
+  assert.equal(body.outcome,'guard_zero_agents_confirmed_multiple_reads');
+  assert.equal(body.guard.evidence.stableAliasRootCount,'zero');
   assert.equal(body.writeOperationsAllowed,false);
   assert.equal(body.guard.stable.agentCount,'zero');
   assert.equal(body.sharedVoicebot.unchangedAndPaused,true);
@@ -188,6 +196,42 @@ test('provider-saved Guard v3 after timeout is detected as verified, without sta
   assert.equal(p.writes.length,1);
  }finally{f.close()}
 });
+
+test('provider accepts stable v3 but saves empty agents: exact and stable-alias GETs agree (no writes in review)',async()=>{
+ const f=fixture();try{
+  unknown(f);const p=provider({failAfterGuardWrite:true,persistGuardBeforeFailure:true,providerDropsSavedAgents:true});
+  assert.equal((await handleVoiceGatewayRequest(req(),f.env,admin,{now,fetcher:p.fetcher})).status,503);
+  const before=p.writes.length;
+  const res=await handleVoiceGatewayRequest(readRepairReq(),f.env,admin,{now,fetcher:p.fetcher});
+  assert.equal(res.status,200);
+  const d=await res.json();
+  assert.equal(d.outcome,'guard_zero_agents_confirmed_multiple_reads');
+  assert.equal(d.guard.stableVersion,'v3');
+  assert.equal(d.guard.evidence.stableAliasRootCount,'zero');
+  assert.equal(d.guard.evidence.overviewVersionMapCount,'absent');
+  assert.equal(d.sharedVoicebot.unchangedAndPaused,true);
+  assert.equal(p.writes.length,before);
+  assert.equal(d.writeOperationsAllowed,false);
+ }finally{f.close()}
+});
+test('Exotel version-map and stable alias expose a stored agent while exact v3 reports zero: fail closed',async()=>{
+ const f=fixture();try{
+  unknown(f);const p=provider({failAfterGuardWrite:true,persistGuardBeforeFailure:true,versionMapDiffers:true});
+  assert.equal((await handleVoiceGatewayRequest(req(),f.env,admin,{now,fetcher:p.fetcher})).status,503);
+  const before=p.writes.length;
+  const res=await handleVoiceGatewayRequest(readRepairReq(),f.env,admin,{now,fetcher:p.fetcher});
+  assert.equal(res.status,200);
+  const d=await res.json();
+  assert.equal(d.outcome,'guard_response_shape_conflict_stop');
+  assert.equal(d.guard.evidence.overviewVersionMapCount,'one');
+  assert.equal(d.guard.evidence.stableAliasRootCount,'one');
+  assert.equal(d.guard.stable.agentCount,'zero');
+  assert.equal(d.guard.evidence.responseShapeConflict,true);
+  assert.equal(p.writes.length,before);
+  assert.equal(d.writeOperationsAllowed,false);
+ }finally{f.close()}
+});
+
 test('repair review requires guard_repair_unknown and cannot read providers for other states',async()=>{
  const f=fixture();try{
   unknown(f);const p=provider();
