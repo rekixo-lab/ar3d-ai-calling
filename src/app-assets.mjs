@@ -1115,6 +1115,12 @@ async function voiceGatewayPanel(main){
      ['Guard assistant accessible via Exotel',flag(d.guardAssistantReadable)],
      ['Guard stable version',d.guardAssistantStableVersion||'Not confirmed'],
      ['Guard successfully finalized',flag(d.guardAssistantFinalized)],
+     ['Guard version has top-level agents',flag(d.guardVersionContract?.responseHasRootAgents)],
+     ['Guard version has version-map agents',flag(d.guardVersionContract?.responseHasVersionedAgents)],
+     ['Guard version has assistant-config agents',flag(d.guardVersionContract?.responseHasAssistantConfigAgents)],
+     ['Guard explicit version matches v2',flag(d.guardVersionContract?.responseVersionMatchesRequested)],
+     ['Guard latest version matches v2',flag(d.guardVersionContract?.responseLatestMatchesRequested)],
+     ['Guard stable version matches v2',flag(d.guardVersionContract?.responseStableMatchesRequested)],
      ['Gateway version recorded',d.gatewayVersionRecorded||'No'],
      ['Exotel read succeeded',flag(d.providerReadable)],
      ['Exotel latest version',d.latestVersion||'Unknown'],
@@ -1122,7 +1128,9 @@ async function voiceGatewayPanel(main){
      ['Latest version matches AR3D guard',flag(d.latestVersionUsesRecordedGuard)],
      ['Stable version matches AR3D guard',flag(d.stableVersionUsesRecordedGuard)]
     ]),
-    node('p',{class:'note',text:d.guardAssistantFinalized===true
+    node('p',{class:'note',text:d.guardAssistantReadError==='guard_version_not_confirmed'&&d.guardVersionContract?.responseHasRootAgents===true
+     ?'Exotel returned an agent list but the version label does not match AR3D\'s strict version check. This may be a response-format mismatch; no changes have been made.'
+     :d.guardAssistantFinalized===true
      ?'Guard assistant is verified, but the Exotel Voicebot has not adopted it. The bot-version creation or confirmation stage needs investigation.'
      :d.guardAssistantReadable===false
       ?'A guard ID was recorded, but Exotel did not confirm the guard assistant. Do not recreate it automatically.'
