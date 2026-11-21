@@ -194,6 +194,79 @@ export async function previewUnknownSharedGatewayRecovery(env,runtime,{fetcher=f
  }catch{return blocked('provider_read_preflight_unavailable')}
 }
 
+
+/**
+ * Reconcile an uncertain first Guard-repair write using ONLY provider GETs.
+ * Never changes Exotel, the caller's DB row, traffic, or registered calls.
+ * A green observation is NOT permission to retry the rejected recovery action.
+ * Never return full prompts, agent configs, credentials, or resource IDs.
+ */
+export async function inspectUnknownGuardRepair(env,runtime,{fetcher=fetch}={}){
+ if(!runtime||runtime.state!=='unknown'||runtime.error_code!=='guard_repair_unknown'||
+    !uuid(runtime.guard_assistant_id)||!uuid(runtime.bot_id)||
+    !uuid(runtime.template_assistant_id)||runtime.gateway_version!=null)
+  throw Error('guard_repair_review_requires_uncertain_state');
+ const blocked=reason=>({outcome:reason,writeOperationsAllowed:false});
+ const opts={fetcher},botPath='/voicebots/'+runtime.bot_id,guardPath='/assistants/'+runtime.guard_assistant_id;
+ try{
+  const bot=unwrapVoicebot(await voicebotRequest(env,botPath,opts));
+  const stableBot=version(bot.stable_version)?bot.stable_version:null;
+  const latestBot=version(bot.latest_version)?bot.latest_version:null;
+  const traffic=bot.traffic_allocation||{};
+  const botTrafficSafe=(bot.id||bot.bot_id)===runtime.bot_id&&stableBot!=null&&
+   latestBot===stableBot&&traffic[stableBot]===100&&
+   Object.entries(traffic).every(([v,pct])=>v===stableBot||Number(pct)===0);
+  let sourceBotMatches=false;
+  if(botTrafficSafe){
+   const source=unwrapVoicebot(await voicebotRequest(env,botPath+'?version='+stableBot,opts));
+   sourceBotMatches=(source.id||source.bot_id)===runtime.bot_id&&
+    (source.assistant_config?.id||source.assistant_config?.assistant_id)===runtime.template_assistant_id;
+  }
+  const botReport={stableVersion:stableBot,latestVersion:latestBot,
+   unchangedAndPaused:botTrafficSafe&&sourceBotMatches};
+  if(!botReport.unchangedAndPaused)
+   return {...blocked('shared_voicebot_changed_stop'),sharedVoicebot:botReport};
+  const guard=unwrapVoicebot(await voicebotRequest(env,guardPath,opts));
+  if((guard.id||guard.assistant_id)!==runtime.guard_assistant_id)
+   return {...blocked('recorded_guard_identity_changed'),sharedVoicebot:botReport};
+  const latest=version(guard.latest_version)?guard.latest_version:null;
+  const stable=version(guard.stable_version)?guard.stable_version:null;
+  if(!latest||!stable)return {...blocked('guard_version_unavailable'),
+   sharedVoicebot:botReport,guard:{stableVersion:stable,latestVersion:latest}};
+  // Read latest and stable independently if different, never trust a v3 label
+  // alone. The existing exact content+tool guard verifier remains authoritative.
+  const inspect=async v=>{
+   const data=unwrapVoicebot(await voicebotRequest(env,guardPath+'?version='+v,opts));
+   if((data.id||data.assistant_id)!==runtime.guard_assistant_id)return null;
+   const cfg=assistantVersionConfig(data,v);
+   const agents=cfg?.agents;
+   const empty=x=>x==null||(typeof x==='object'&&Object.keys(x).length===0);
+   const toolFree=cfg&&Array.isArray(agents)&&agents.length===1&&
+    [cfg.tools,cfg.mcp_servers,agents[0]?.tools,agents[0]?.mcp_tools,agents[0]?.sub_agents].every(empty);
+   return {
+    selectedVersion:v,
+    agentCount:!Array.isArray(agents)?'absent':agents.length===0?'zero':agents.length===1?'one':'multiple',
+    rootInstructionMatches:typeof cfg?.instruction==='string'?cfg.instruction===GUARD_PROMPT:null,
+    agentInstructionMatches:agents?.length===1?agents[0]?.instruction===GUARD_PROMPT:null,
+    noAgentTools:toolFree===true,
+    stableVersionMatch:data.stable_version===v,
+    strictGuardVerified:validRoutingGuard(data,runtime.guard_assistant_id,v)
+   };
+  };
+  const latestReport=await inspect(latest);
+  const stableReport=latest===stable?latestReport:await inspect(stable);
+  if(!latestReport||!stableReport)return {...blocked('guard_version_identity_changed'),
+   sharedVoicebot:botReport,guard:{stableVersion:stable,latestVersion:latest}};
+  let outcome='guard_not_verified_stop';
+  if(latest!==stable)outcome='guard_latest_differs_from_stable_stop';
+  else if(stableReport.strictGuardVerified)outcome='saved_guard_verified_bot_not_staged';
+  else if(stableReport.agentCount==='zero')outcome='guard_still_has_zero_agents';
+  return {outcome,writeOperationsAllowed:false,sharedVoicebot:botReport,
+   guard:{stableVersion:stable,latestVersion:latest,
+    latest:latestReport,stable:stableReport}};
+ }catch{return blocked('provider_read_failed_stop')}
+}
+
 // Confirm that a fallback cannot answer with client information or call tools.
 // A version label alone is insufficient: require precisely one verified agent
 // and the approved root + agent instruction. Never expose those instructions.
