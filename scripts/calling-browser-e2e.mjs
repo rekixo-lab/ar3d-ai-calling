@@ -94,6 +94,18 @@ try{
  assert.equal(f.c.db.prepare('SELECT COUNT(*) AS n FROM company_profile_versions').get().n,1);
  assert.equal(f.c.db.prepare('SELECT COUNT(*) AS n FROM calling_script_versions').get().n,1);
  assert.equal(f.c.db.prepare('SELECT COUNT(*) AS n FROM calling_agent_publications').get().n,0);
+ // Update ONLY one approved price; don't rewrite the script or publish.
+ await adminPage.getByPlaceholder('Approved price or range').fill('14-19 lakh');
+ adminPage.once('dialog',dialog=>dialog.accept());
+ await adminPage.getByRole('button',{name:'Save price change (draft only)'}).click();
+ await adminPage.getByText(/Approved price saved as a new company version/).waitFor();
+ assert.equal(f.c.db.prepare('SELECT COUNT(*) AS n FROM company_profile_versions').get().n,2);
+ assert.equal(f.c.db.prepare('SELECT COUNT(*) AS n FROM calling_script_versions').get().n,1);
+ assert.equal(f.c.db.prepare('SELECT COUNT(*) AS n FROM calling_agent_publications').get().n,0);
+ const latestPricing=JSON.parse(f.c.db.prepare('SELECT config_json FROM company_profile_versions WHERE tenant_id=? ORDER BY revision DESC LIMIT 1').get(tid).config_json).pricing;
+ assert.equal(latestPricing,'14-19 lakh');
+ const generatedScript=JSON.parse(f.c.db.prepare('SELECT config_json FROM calling_script_versions WHERE tenant_id=? ORDER BY revision DESC LIMIT 1').get(tid).config_json);
+ assert.ok(!JSON.stringify(generatedScript).includes('12-18 lakh'));
  await adminPage.getByRole('heading',{name:'AI Questions & Answers',exact:true}).waitFor();
  await adminPage.getByRole('button',{name:'Publish AI agent for calls'}).waitFor();
  await adminPage.locator('[name=company-companyName]').fill('Fictional Builder');
