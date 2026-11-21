@@ -23,7 +23,7 @@ async function freshAdmin(db,user,now){
  return !!await db.prepare('SELECT m.enabled_at FROM human_mfa_settings m JOIN human_sessions s ON s.user_id=m.user_id WHERE m.user_id=? AND s.token_hash=? AND m.enabled_at IS NOT NULL AND s.created_at>=m.enabled_at AND s.revoked_at IS NULL AND s.expires_at>? LIMIT 1')
   .bind(user.id,user.token_hash,now).first();
 }
-const printable=x=>typeof x==='string'&&!/[\u0000-\u001f\u007f]/u.test(x);
+const printable=x=>typeof x==='string'&&!/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/u.test(x);
 export async function handleCompanyChangeRequests(req,env,user,{now=Date.now()}={}){
  const path=new URL(req.url).pathname,action=path.match(/^\/v1\/human\/company-change-requests\/([a-f0-9-]{36})\/resolve$/i);
  if(path!==ROOT&&!action)return null;
