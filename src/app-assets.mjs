@@ -1029,7 +1029,7 @@ async function scriptAdminPanel(main){
 async function voiceGatewayPanel(main){
  const card=div('card stack',title('Shared Calling Gateway','h3')),status=node('p',{class:'note',text:'Checking shared calling connection…'}),result=div('stack');main.append(card);card.append(status);
  const bot=input('gatewayBotId','text','Shared Voicebot UUID'),flow=input('gatewayFlowId','text','Shared Exotel flow ID'),authTemplate=input('gatewayAuthTemplate','text','Existing authenticated webhook bot UUID');
- const flowConfirmed=node('input',{type:'checkbox','aria-label':'I verified the copied Exotel Flow targets the shared Voicebot'});
+ const flowConfirmed=node('input',{type:'checkbox','aria-label':'I verified in Exotel that the copied Flow targets this shared Voicebot'});
  let inspectedBotId=null;
  for(const control of [bot,flow,authTemplate])control.addEventListener('input',()=>{inspectedBotId=null;flowConfirmed.checked=false});
  const form=node('form',{class:'stack'},[
