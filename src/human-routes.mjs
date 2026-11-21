@@ -109,7 +109,7 @@ async function login(req,env){
 async function acceptInvitation(req,env){
   const d=await payload(req),email=validEmail(d.email),token=String(d.token||'');
   if(!/^[a-f0-9]{64}$/.test(token))return fail('invalid or expired invitation',401);
-  validPassword(d.password);
+  validPassword(d.password,8);
   const db=env.CONTROL_DB,digest=await sha256hex(token),timestamp=Date.now();
   const invite=await db.prepare(`SELECT i.tenant_id,i.email,i.role FROM human_invitations i
     JOIN tenants t ON t.id=i.tenant_id WHERE i.token_hash=? AND i.redeemed_at IS NULL
@@ -120,7 +120,7 @@ async function acceptInvitation(req,env){
   if(user&&user.status!=='active')return fail('account unavailable',403);
   const id=user?.id||crypto.randomUUID(),date=now();
   const statements=[];
-  if(!user){const p=await makePassword(d.password);
+  if(!user){const p=await makePassword(d.password,8);
     statements.push(db.prepare('INSERT INTO human_users(id,email,password_salt,password_hash,password_iterations,created_at,updated_at) VALUES(?,?,?,?,?,?,?)').bind(id,email,p.salt,p.hash,p.iterations,date,date));
   }
   statements.push(db.prepare(`UPDATE human_invitations SET redeemed_at=? WHERE token_hash=? AND redeemed_at IS NULL AND expires_at>?`).bind(date,digest,timestamp));
