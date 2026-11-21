@@ -434,13 +434,45 @@ function engineeringPanel(main){
 }
 function dashboard(){
  root.replaceChildren();const admin=state.me.superAdmin;
- const nav=(label,name,target,active=false)=>node('a',{href:'#'+target,class:'navitem'+(active?' active':''),onclick:e=>{e.preventDefault();document.querySelectorAll('.sidebar a[href^="#"]').forEach(n=>n.classList.remove('active'));e.currentTarget.classList.add('active');const el=document.getElementById(target);if(!admin&&state.clientSetTab){const tab=target==='customer-workflow'?'customers':target==='customer-calling'?'calling':target==='client-ai'?'company':target==='client-reports'?'results':null;if(tab)state.clientSetTab(tab)}if(el){if(el.tagName==='DETAILS')el.open=true;el.scrollIntoView({behavior:matchMedia('(prefers-reduced-motion: reduce)').matches?'instant':'smooth',block:'start'})}}},[icon(name),node('span',{text:label})]);
- const aside=div('sidebar',div('brand',div('brand-mark',icon('spark')),node('div',{},['AR3D',node('small',{text:'AI CALLING WORKSPACE'})])),node('div',{class:'nav-caption',text:'WORKSPACE'}),nav(admin?'Overview':'Dashboard','grid','workspace-top',true),nav(admin?'Clients':'Customers','users',admin?'clients-panel':'customer-workflow'),nav(admin?'Settings':'Calling','phone',admin?'platform-settings':'customer-calling'),node('div',{class:'nav-caption',text:'MANAGEMENT'}));
- if(admin)aside.append(nav('Client access','mail','client-access'),nav('Security','shield','platform-settings'));
+ function reveal(target){
+  const el=document.getElementById(target);if(!el){notice('Section is loading. Retry shortly.',true);return}
+  for(let p=el;p;p=p.parentElement)if(p.tagName==='DETAILS')p.open=true;
+  el.scrollIntoView({behavior:matchMedia('(prefers-reduced-motion: reduce)').matches?'instant':'smooth',block:'start'});
+ }
+ const nav=(label,name,target,active=false)=>node('a',{href:'#'+target,class:'navitem'+(active?' active':''),onclick:e=>{
+  e.preventDefault();document.querySelectorAll('.sidebar a[href^="#"]').forEach(n=>n.classList.remove('active'));e.currentTarget.classList.add('active');
+  if(!admin&&state.clientSetTab){const tab=target==='customer-workflow'?'customers':target==='customer-calling'?'calling':target==='client-ai'?'company':target==='client-reports'?'results':null;if(tab)state.clientSetTab(tab)}
+  reveal(target);
+ }},[icon(name),node('span',{text:label})]);
+ const aside=div('sidebar',div('brand',div('brand-mark',icon('spark')),node('div',{},['AR3D',node('small',{text:'AI CALLING WORKSPACE'})])),node('div',{class:'nav-caption',text:'WORKSPACE'}),nav(admin?'Overview':'Dashboard','grid','workspace-top',true),nav(admin?'Clients':'Customers','users',admin?'clients-panel':'customer-workflow'));
+ if(admin)aside.append(nav('AI Setup','spark','ai-setup'),nav('Calling Setup','phone','platform-settings'));
+ else aside.append(nav('Calling','phone','customer-calling'));
+ aside.append(node('div',{class:'nav-caption',text:'MANAGEMENT'}));
+ if(admin)aside.append(nav('Client access','mail','client-access'),nav('Security','shield','security-section'));
  else aside.append(nav('Company / AI','spark','client-ai'),nav('Results & activity','file','client-reports'));
  aside.append(div('sidebar-footer',div('account',div('avatar',node('span',{text:state.me.email.slice(0,2).toUpperCase()})),div('account-copy',node('strong',{text:admin?'Administrator':'Client workspace'}),node('p',{text:state.me.email}))),btn('Sign out',logout,true)));
- const main=div('main',div('topbar',div('',node('div',{class:'eyebrow',text:'WORKSPACE / '+(admin?'OVERVIEW':'DASHBOARD')}),title(admin?'Super Admin':'Personal AI Calling','h1'),node('p',{class:'page-description',text:admin?'Manage your clients, calling and workspace access.':'Your customers, conversations and campaigns. All in one place.'})),div('topbar-right',node('span',{class:'pill'},[node('span',{class:'status-dot'}),'AR3D Client Platform']),div('avatar',node('span',{text:state.me.email.slice(0,2).toUpperCase()})))),div('',node('div',{id:'notice-anchor'})));main.id='workspace-top';root.append(div('layout',aside,main));
- if(admin){const grid=div('admin-grid');main.append(grid);superAdmin(grid);const settings=node('details',{class:'card',id:'platform-settings'},node('summary',{text:'Workspace settings'})),settingsGrid=div('admin-grid');main.append(settings);settings.append(settingsGrid);callingAdminPanel(settingsGrid);mfaPanel(settingsGrid);const advanced=node('details',{class:'stack'},node('summary',{text:'Engineering tools and diagnostics'}));settings.append(advanced);engineeringPanel(advanced);voiceGatewayPanel(advanced)}
+ const main=div('main',div('topbar',div('',node('div',{class:'eyebrow',text:'WORKSPACE / '+(admin?'OVERVIEW':'DASHBOARD')}),title(admin?'Super Admin':'Personal AI Calling','h1'),node('p',{class:'page-description',text:admin?'Clients → AI → Exotel Gateway → Calling approval.':'Your customers, conversations and campaigns. All in one place.'})),div('topbar-right',node('span',{class:'pill'},[node('span',{class:'status-dot'}),'AR3D Client Platform']),div('avatar',node('span',{text:state.me.email.slice(0,2).toUpperCase()})))),div('',node('div',{id:'notice-anchor'})));main.id='workspace-top';root.append(div('layout',aside,main));
+ if(admin){
+  const guide=div('card',title('Simple Setup — Next Step','h2')),status=node('p',{class:'note',text:'Checking Shared Gateway…'});
+  guide.append(status,div('formrow',
+   btn('1. Shared Gateway',()=>reveal('gateway-panel')),
+   btn('2. Publish AI',()=>reveal('conversation-setup'),true),
+   btn('3. Calling Approval',()=>reveal('calling-setup'),true)));
+  main.append(guide);
+  api('/v1/human/voice-gateway').then(r=>{
+   status.textContent=r.gateway?.state==='ready'?'Shared Gateway ready. Review AI publication and calling approvals.'
+    :r.gateway?'Shared Gateway: '+r.gateway.state+'. Finish verification before client calls.'
+    :'Next: Exotel Flow saved. Open Shared Gateway, then click Inspect gateway contract. No calls yet.';
+  }).catch(()=>{status.textContent='Shared Gateway status unavailable. Check it before calling.'});
+  const grid=div('admin-grid');main.append(grid);superAdmin(grid);
+  const settings=node('details',{class:'card',id:'platform-settings'},node('summary',{text:'3. Calling & Exotel Setup'}));main.append(settings);
+  voiceGatewayPanel(settings);
+  const approvals=node('details',{class:'card',id:'approval-section'},node('summary',{text:'Customer Calling Approval — after gateway verification'}));
+  settings.append(approvals);callingAdminPanel(approvals);
+  const security=node('details',{class:'card',id:'security-section'},node('summary',{text:'Account Security & Recovery'}));settings.append(security);mfaPanel(security);
+  const advanced=node('details',{class:'card',id:'engineering-advanced'},node('summary',{text:'Advanced developer diagnostics (optional)'}));settings.append(advanced);
+  advanced.addEventListener('toggle',()=>{if(advanced.open&&!advanced.dataset.loaded){advanced.dataset.loaded='1';engineeringPanel(advanced)}});
+ }
  if(state.me.tenants.length)clientPanel(main);
 }
 function showRecoveryCodes(target,codes){
