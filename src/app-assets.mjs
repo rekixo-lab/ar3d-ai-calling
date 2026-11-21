@@ -691,8 +691,10 @@ async function clientCompanySummary(tenantId,content,role,companyName=''){
  if(role==='client_admin'){
   const message=node('textarea',{class:'field',rows:3,placeholder:'Example: Update our Raipur plot price from 12 lakh to 14 lakh.'});
   message.maxLength=1200;message.minLength=15;
-  const form=node('form',{class:'stack'},lab('What should AR3D update?',message),
-   node('button',{class:'btn',type:'submit',text:'Send change request'}));
+  const form=node('form',{class:'stack'},[
+   lab('What should AR3D update?',message),
+   node('button',{class:'btn',type:'submit',text:'Send change request'})
+  ]);
   form.addEventListener('submit',async e=>{
    e.preventDefault();
    const send=form.querySelector('button[type=submit]');send.disabled=true;
