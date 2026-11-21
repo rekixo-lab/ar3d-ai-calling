@@ -68,7 +68,7 @@ test('preview is read-only; explicit approved digest creates both private immuta
   assert.equal(JSON.parse(script.config_json).name,'Plot Sales · Master v1');
   assert.equal(script.provider_state,'draft');
   assert.equal(f.c.db.prepare('SELECT COUNT(*) AS n FROM calling_agent_publications').get().n,0);
-  assert.equal(f.c.db.prepare('SELECT COUNT(*) AS n FROM calling_policies').get?.()?.n??0,0);
+  assert.equal(f.r.db.prepare('SELECT COUNT(*) AS n FROM calling_policies').get().n,0);
   assert.equal(f.r.db.prepare('SELECT COUNT(*) AS n FROM calls').get().n,0);
   assert.equal(f.r.db.prepare('SELECT COUNT(*) AS n FROM calling_jobs').get().n,0);
   assert.throws(()=>f.c.db.prepare('UPDATE company_profile_versions SET config_json=?').run('{}'),/immutable/);
