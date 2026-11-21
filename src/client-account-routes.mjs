@@ -55,7 +55,7 @@ export async function handleClientAccountRequest(req,env,user){
     if(!['trial','active'].includes(tenant.status)||tenant.storage_mode!=='shared')
       return fail('existing client is unavailable or uses advanced storage',409);
     const contact=await db.prepare('SELECT email FROM client_account_contacts WHERE tenant_id=?').bind(tenant.id).first();
-    if(contact&&contact.email.toLowerCase()!==email)return fail('client already has a different primary contact; review access settings',409);
+    if(contact)return fail('client primary contact is already registered; use the existing invitation/access manager',409);
     const member=await db.prepare('SELECT m.user_id FROM tenant_memberships m JOIN human_users u ON u.id=m.user_id WHERE m.tenant_id=? AND u.email=? AND m.status=?')
       .bind(tenant.id,email,'active').first();
     if(member)return fail('client already has login access',409);
@@ -69,8 +69,7 @@ export async function handleClientAccountRequest(req,env,user){
         .bind(tenant.id,tenant.slug,displayName,at,at));
     }
     actions.push(db.prepare(`INSERT INTO client_account_contacts(tenant_id,email,mobile_e164,created_by,created_at,updated_at)
-      VALUES(?,?,?,?,?,?) ON CONFLICT(tenant_id) DO UPDATE SET mobile_e164=excluded.mobile_e164,
-      updated_at=excluded.updated_at WHERE client_account_contacts.email=excluded.email`)
+      VALUES(?,?,?,?,?,?)`)
       .bind(tenant.id,email,mobile,user.id,at,at));
     actions.push(db.prepare('INSERT INTO human_invitations(token_hash,tenant_id,email,role,expires_at,created_by,created_at) VALUES(?,?,?,\'client_admin\',?,?,?)')
       .bind(digest,tenant.id,email,expiry,user.id,at));
