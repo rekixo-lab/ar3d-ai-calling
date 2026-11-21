@@ -101,6 +101,9 @@ jobs:
         if: github.event_name == 'push' && steps.schema.outputs.schema_state == 'crm_call_intent_upgrade'
         run: |
           npx --yes wrangler@4 d1 execute ar3d-calling-shared-crm --remote --yes --config wrangler.jsonc --file migrations/crm/0010_call_intent_proposals.sql
+      - name: Add dedicated client agent publications
+        if: github.event_name == 'push' && steps.schema.outputs.schema_state == 'control_publication_upgrade'
+        run: npx --yes wrangler@4 d1 execute ar3d-calling-control --remote --yes --config wrangler.jsonc --file migrations/control/0013_agent_publications.sql
       - name: Add versioned company business profiles
         if: github.event_name == 'push' && steps.schema.outputs.schema_state == 'control_profile_upgrade'
         run: npx --yes wrangler@4 d1 execute ar3d-calling-control --remote --yes --config wrangler.jsonc --file migrations/control/0012_company_profiles.sql
@@ -130,6 +133,7 @@ jobs:
           npx --yes wrangler@4 d1 execute ar3d-calling-control --remote --yes --config wrangler.jsonc --file migrations/control/0010_exotel_operator_status_checks.sql
           npx --yes wrangler@4 d1 execute ar3d-calling-control --remote --yes --config wrangler.jsonc --file migrations/control/0011_calling_scripts.sql
           npx --yes wrangler@4 d1 execute ar3d-calling-control --remote --yes --config wrangler.jsonc --file migrations/control/0012_company_profiles.sql
+          npx --yes wrangler@4 d1 execute ar3d-calling-control --remote --yes --config wrangler.jsonc --file migrations/control/0013_agent_publications.sql
       - name: Initialize NEW AR3D Calling Shared CRM D1 database
         if: (github.event_name == 'push' && steps.schema.outputs.schema_state == 'fresh') || (github.event_name == 'workflow_dispatch' && inputs.operation == 'initialize')
         run: |

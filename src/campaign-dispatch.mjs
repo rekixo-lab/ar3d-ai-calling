@@ -3,6 +3,8 @@ import {resolveCrmDb} from './core.mjs';
 import {exotelApiBase,configuredExotelRegion} from './exotel-region.mjs';
 import {getExotelOperatorTestStatusReadOnly} from './exotel-readonly-verification.mjs';
 import {validateOperatorTestResult} from './exotel-operator-test-routes.mjs';
+import {requirePublishedAgent} from './published-agent.mjs';
+import {registerVoiceCall} from './shared-voice-gateway.mjs';
 export const CAMPAIGN_CRON='* * * * *';
 const SID=/^[A-Za-z0-9_-]{4,128}$/;
 export function campaignConfig(env){
@@ -71,6 +73,7 @@ export async function tickTenant(env,db,tid,{apiFetch=fetch,now=Date.now()}={}){
  if(!campaignConfig(env).ready||!inCallingWindow(now))return {state:'disabled_or_outside_hours'};
  const policy=await db.prepare('SELECT * FROM calling_policies WHERE tenant_id=? AND enabled=1 AND expires_at>?').bind(tid,at).first();
  if(!policy)return {state:'approval_required'};
+ let preparedAgent;try{preparedAgent=await requirePublishedAgent(env,tid,policy.flow_id,{fetcher:apiFetch})}catch{return {state:'agent_publication_required'}}
  // Snapshot destination only at reservation; eligibility is rechecked atomically below.
  const job=await db.prepare("SELECT j.*,l.mobile_e164 AS destination,c.purpose FROM calling_jobs j JOIN calling_runs r ON r.tenant_id=j.tenant_id AND r.id=j.run_id JOIN call_campaign_drafts c ON c.tenant_id=r.tenant_id AND c.id=r.campaign_id JOIN leads l ON l.tenant_id=j.tenant_id AND l.id=j.lead_id WHERE j.tenant_id=? AND j.state='queued' AND r.state='running' ORDER BY j.created_at,j.id LIMIT 1").bind(tid).first();
  if(!job){await db.prepare("UPDATE calling_runs SET state='completed',updated_at=? WHERE tenant_id=? AND state='running' AND NOT EXISTS(SELECT 1 FROM calling_jobs j WHERE j.tenant_id=calling_runs.tenant_id AND j.run_id=calling_runs.id AND j.state IN('queued','reserved','submitted','unknown'))").bind(at,tid).run();return {state:'idle'}}
@@ -83,6 +86,7 @@ export async function tickTenant(env,db,tid,{apiFetch=fetch,now=Date.now()}={}){
  .bind(at,at,env.EXOTEL_ACCOUNT_SID,env.EXOTEL_CALLER_ID,policy.flow_id,job.destination,tid,job.id,tid,at,policy.updated_at,tid,job.lead_id,job.purpose,at,job.destination,tid,tid,dayStart,policy.daily_limit).run();
  if(Number(reserved.meta?.changes)!==1)return {state:'quota_or_concurrent_change'};
  // No exception from this point is ever retried; reservation survives process death.
+ let acceptedSid=null;
  try{
   await audit(db,tid,'calling.reserved',job.id,at);
   const response=await apiFetch(campaignRequest(env,job,policy),{signal:AbortSignal.timeout(9000),redirect:'manual'});
@@ -90,10 +94,12 @@ export async function tickTenant(env,db,tid,{apiFetch=fetch,now=Date.now()}={}){
    await finish(db,job,'failed',at,'provider_http_'+response.status);return {state:'failed'};
   }
   const call=validateOperatorTestResult(await boundedResult(response),env.EXOTEL_CALLER_ID);
+  acceptedSid=call.providerCallSid;
+  if(preparedAgent?.publication)await registerVoiceCall(env,{tenantId:tid,publicationId:preparedAgent.publication.id,jobId:job.id,callSid:acceptedSid,now});
   await finish(db,job,'submitted',at,null,call.providerCallSid,call.status);
   return {state:'submitted'};
  }catch{
-  try{await finish(db,job,'unknown',at,'provider_outcome_uncertain')}catch{}
+  try{await finish(db,job,'unknown',at,'provider_outcome_uncertain',acceptedSid)}catch{}
   return {state:'unknown'};
  }
 }

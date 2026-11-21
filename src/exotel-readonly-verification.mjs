@@ -2,6 +2,7 @@
 // Validates Exotel's own HTTPS Call Details response for an existing authorized
 // correlation only; not a signature for the incoming webhook nor a consent grant.
 // https://developer.exotel.com/docs/voice-v1/api-reference/call-details
+import {normalizeIndianPhone} from './core.mjs';
 import {exotelApiBase} from './exotel-region.mjs';
 const SID=/^[a-zA-Z0-9_-]{4,128}$/;
 const CRED=/^[\x21-\x7e]{8,256}$/;
@@ -126,7 +127,7 @@ export async function getExotelOperatorTestStatusReadOnly(auth,known,{
 }={}){
   const c=credentials(auth);
   if(!known||typeof known!=='object'||Array.isArray(known)||
-     Object.keys(known).some(k=>!['callSid','callerId'].includes(k))||
+     Object.keys(known).some(k=>!['callSid','callerId','destination'].includes(k))||
      !validateString(known.callSid,SID)||
      !validateString(known.callerId,/^\+?[0-9]{6,19}$/))
     throw Error('invalid registered operator call reference');
@@ -140,6 +141,13 @@ export async function getExotelOperatorTestStatusReadOnly(auth,known,{
      record.PhoneNumberSid!==known.callerId||
      record.Direction!=='outbound-api'||!VALID_STATUS.has(record.Status))
     throw safeProviderError('provider_mismatch','Exotel operator call identity mismatch');
+  if(known.destination!==undefined){
+    let from=String(record.From||'').replace(/[\s\-()]/g,'');
+    if(/^0[6-9]\d{9}$/.test(from))from=from.slice(1);
+    if(/^91[6-9]\d{9}$/.test(from))from='+'+from;
+    let normalized;try{normalized=normalizeIndianPhone(from)}catch{throw safeProviderError('provider_mismatch','Exotel registered destination mismatch')}
+    if(normalized!==known.destination)throw safeProviderError('provider_mismatch','Exotel registered destination mismatch');
+  }
   const raw=record.Duration;
   let durationSeconds=null;
   if(raw!==null&&raw!==undefined&&raw!==''){

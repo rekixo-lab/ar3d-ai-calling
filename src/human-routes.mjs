@@ -1,4 +1,5 @@
 import {handleCallingRequest} from './calling-routes.mjs';
+import {handleVoiceGatewayRequest} from './voice-gateway-routes.mjs';
 import {handleCompanyProfile} from './company-profile.mjs';
 import {handleCallingScripts} from './calling-script-routes.mjs';
 import {handleCrmRequest} from './crm-routes.mjs';
@@ -237,6 +238,8 @@ export async function handleHumanRequest(req,env){
     if(!user)return fail('sign in required',401);
     if(path==='/v1/human/mfa'||path==='/v1/human/mfa/setup'||path==='/v1/human/mfa/enable'||path==='/v1/human/mfa/recovery/regenerate')
       return await handleMfaSettings(req,env,user,method==='POST'?await payload(req):null);
+    const gateway=await handleVoiceGatewayRequest(req,env,user);
+    if(gateway)return gateway;
     const profile=await handleCompanyProfile(req,env,user);
     if(profile)return profile;
     const scripts=await handleCallingScripts(req,env,user);

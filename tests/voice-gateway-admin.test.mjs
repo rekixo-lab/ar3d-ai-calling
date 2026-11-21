@@ -1,0 +1,13 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {fixture,admin,client,now} from './helpers/calling-fixture.mjs';
+import {handleVoiceGatewayRequest} from '../src/voice-gateway-routes.mjs';
+const bot='44444444-4444-4444-8444-444444444444';
+const req=(data,method='POST')=>new Request('https://app.example.invalid/v1/human/voice-gateway',{method,headers:{Origin:'https://app.example.invalid','Content-Type':'application/json'},...(method==='POST'?{body:JSON.stringify(data)}:{})});
+test('gateway setup is current-MFA admin only and diagnostic reads expose structure, never secret values',async()=>{const f=fixture();try{
+ let reads=0,writes=0;const fetcher=async(url,init)=>{if(init.method==='GET')reads++;else writes++;return Response.json({response:{id:bot,stable_version:'v1',webhook_config:{session_end:{url:'https://private.example.invalid/end',auth_config:{token:'never-print-this-token'}}},assistant_config:{id:'private-assistant',llm_config:{decrypted_auth_config:{api_key:'never-print-this-key'}}}}})};
+ assert.equal((await handleVoiceGatewayRequest(req({action:'inspect',botId:bot}),f.env,client,{now,fetcher})).status,403);
+ assert.equal((await handleVoiceGatewayRequest(req({action:'inspect',botId:bot}),f.env,{...admin,token_hash:'bad'},{now,fetcher})).status,403);
+ assert.equal(reads,0);const r=await handleVoiceGatewayRequest(req({action:'inspect',botId:bot}),f.env,admin,{now,fetcher});assert.equal(r.status,200);const text=await r.text();assert.ok(text.includes('webhook_config'));assert.ok(!text.includes('never-print-this'));assert.ok(!text.includes('private.example'));assert.ok(!text.includes('private-assistant'));assert.equal(writes,0);assert.equal(reads,2);
+ assert.equal((await handleVoiceGatewayRequest(req({},'GET'),f.env,admin,{now})).status,200);
+}finally{f.close()}});

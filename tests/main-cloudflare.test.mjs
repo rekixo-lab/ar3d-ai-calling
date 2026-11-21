@@ -107,6 +107,9 @@ function cloudflareMock({ controlTables=[],crmTables=[],controlName='ar3d-callin
         else if(sql.includes('voicebot_qualification_reviews')) rows=['tenant_id','lead_id','provider','status','survey_json','source_verified','mapping_verified','possible_opt_out'].map(name=>({name}));
         else if(sql.includes('call_intent_proposals')) rows=['tenant_id','id','campaign_id','lead_id','purpose','state','created_by','created_at'].map(name=>({name}));
         else if(sql.includes('company_profile_versions')) rows=REQUIRED_COLUMNS.CONTROL_DB.company_profile_versions.map(name=>({name}));
+        else if(sql.includes('shared_voice_gateway')) rows=REQUIRED_COLUMNS.CONTROL_DB.shared_voice_gateway.map(name=>({name}));
+        else if(sql.includes('voice_call_routes')) rows=REQUIRED_COLUMNS.CONTROL_DB.voice_call_routes.map(name=>({name}));
+        else if(sql.includes('calling_agent_')) {const t=sql.match(/PRAGMA table_info\(([^)]+)\)/)[1];rows=REQUIRED_COLUMNS.CONTROL_DB[t].map(name=>({name}));}
         else if(sql.includes('calling_script_')) {const t=sql.match(/PRAGMA table_info\(([^)]+)\)/)[1];rows=REQUIRED_COLUMNS.CONTROL_DB[t].map(name=>({name}));}
         else if(sql.includes('calling_')) {const t=sql.match(/PRAGMA table_info\(([^)]+)\)/)[1];rows=REQUIRED_COLUMNS.CRM_DB[t].map(name=>({name}));}
         else if(sql.includes('agents')) rows=['tenant_id','status','questions_json'].map(name=>({name}));
@@ -302,4 +305,12 @@ test('company profile upgrade requires complete prior Control schema and preserv
  assert.throws(()=>checkTables(old,'CONTROL_DB','ready'),/missing tables/);
  const result=await inspectCloudflare({credentials:getCredentials(env),mode:'preflight',template,apiFetch:cloudflareMock({controlTables:old,crmTables:REQUIRED_TABLES.CRM_DB})});
  assert.equal(result.modes.CONTROL_DB,'control_profile_upgrade');
+});
+test('agent publication upgrade requires exactly three missing tables on the complete profile baseline',async()=>{
+ const added=['calling_agent_publications','shared_voice_gateway','voice_call_routes'];const old=REQUIRED_TABLES.CONTROL_DB.filter(x=>!added.includes(x));
+ assert.equal(checkTables(old,'CONTROL_DB','preflight'),'control_publication_upgrade');
+ assert.equal(verifiedSchemaState({CONTROL_DB:'control_publication_upgrade',CRM_DB:'ready'}),'control_publication_upgrade');
+ assert.throws(()=>checkTables(old.filter(x=>x!=='company_profile_versions'),'CONTROL_DB','preflight'),/partial/);
+ assert.throws(()=>checkTables([...old,added[0]],'CONTROL_DB','preflight'),/partial/);
+ const result=await inspectCloudflare({credentials:getCredentials(env),mode:'preflight',template,apiFetch:cloudflareMock({controlTables:old,crmTables:REQUIRED_TABLES.CRM_DB})});assert.equal(result.modes.CONTROL_DB,'control_publication_upgrade');
 });

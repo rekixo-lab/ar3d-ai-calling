@@ -149,7 +149,7 @@ test('Periodic monitor is secretless, GET-only and checks the exact Calling orig
     '/health':[200,'application/json',JSON.stringify({service:'AR3D AI Calling',status:'foundation'})],
     '/app':[200,'text/html','<html>AR3D AI Calling</html>'],
     '/app/assets/style.css':[200,'text/css',css],
-    '/app/assets/app.js':[200,'text/javascript','Test AI Conversation Sign out']
+    '/app/assets/app.js':[200,'text/javascript','Workspace settings Sign out']
   };
   for(const path of ['/v1/human/me','/v1/human/engineering/status',
     '/v1/human/engineering/provider-pilot','/v1/human/engineering/media-protocol',

@@ -5,6 +5,8 @@
 import {exotelApiBase,configuredExotelRegion} from './exotel-region.mjs';
 import {inspectOperatorWebhookCandidates} from './exotel-operator-webhook-correlation.mjs';
 
+import {requirePublishedAgent} from './published-agent.mjs';
+import {readSharedGateway,registerVoiceCall} from './shared-voice-gateway.mjs';
 const PATH='/v1/human/engineering/exotel-self-test';
 const E164=/^\+91[6-9][0-9]{9}$/;
 const SID=/^[A-Za-z0-9_-]{4,128}$/;
@@ -50,7 +52,8 @@ async function readBody(req){
   for(const chunk of parts){bytes.set(chunk,pos);pos+=chunk.length}
   const obj=JSON.parse(new TextDecoder('utf-8',{fatal:true}).decode(bytes));
   if(!obj||Array.isArray(obj)||typeof obj!=='object')throw Error('invalid self-test request');
-  if(Object.keys(obj).length===1&&obj.confirm===ACK)return {retryOf:null};
+  if(Object.keys(obj).length===1&&obj.confirm===ACK)return {retryOf:null,publishedTenantId:null};
+  if(Object.keys(obj).length===2&&obj.confirm===ACK&&UUID.test(obj.publishedTenantId||''))return {retryOf:null,publishedTenantId:obj.publishedTenantId};
   if(Object.keys(obj).length===2&&obj.confirm===RETRY_ACK&&UUID.test(obj.failedRequestId||''))return {retryOf:obj.failedRequestId};
   throw Error('invalid self-test request');
 }
@@ -219,12 +222,22 @@ export async function handleExotelOperatorTest(req,env,user,{apiFetch=fetch,now=
   if(!cfg.ready)return error('self_test_disabled_or_unconfigured',503);
   let confirmation;
   try{confirmation=await readBody(req)}catch{return error('explicit_confirmation_required',400)}
+  let gatewayTest=null,requestEnv=env;
+  if(confirmation.publishedTenantId){
+    try{
+      const gateway=await readSharedGateway(env);
+      if(!gateway||!['staged','ready'].includes(gateway.state))return error('shared_gateway_setup_required',409);
+      gatewayTest=await requirePublishedAgent(env,confirmation.publishedTenantId,gateway.flow_id,{fetcher:apiFetch,allowStaged:true});
+      if(!gatewayTest?.publication)return error('published_client_agent_required',409);
+      requestEnv={...env,EXOTEL_VOICE_AI_FLOW_ID:gateway.flow_id};
+    }catch{return error('verify_shared_gateway_and_publish_client_first',409)}
+  }
   let attempt;
   try{attempt=confirmation.retryOf?await reserveReviewedRetry(env.CONTROL_DB,user.id,confirmation.retryOf,now):await reserve(env.CONTROL_DB,user.id,now,operatorTestDailyLimit(env,now))}
   catch{return error('self_test_reservation_unavailable',503)}
   if(!attempt)return error('self_test_rate_limited',429);
   try{
-    const request=makeOperatorTestRequest(env);
+    const request=makeOperatorTestRequest(requestEnv);
     let result;
     try{
       result=await apiFetch(request,{signal:AbortSignal.timeout(9000),
@@ -249,8 +262,10 @@ export async function handleExotelOperatorTest(req,env,user,{apiFetch=fetch,now=
         notice:'Provider may have started a call. Do not retry.'},502);
     }
     await finalize(env.CONTROL_DB,attempt.id,'submitted',{sid:parsed.providerCallSid});
+    let routingRegistered=null;
+    if(gatewayTest){try{await registerVoiceCall(env,{tenantId:confirmation.publishedTenantId,publicationId:gatewayTest.publication.id,operatorRequestId:attempt.id,callSid:parsed.providerCallSid,now});routingRegistered=true}catch{routingRegistered=false}}
     return json({requestId:attempt.id,state:'submitted',
-      providerStatus:parsed.status,realCallsRequested:1,
+      providerStatus:parsed.status,realCallsRequested:1,routingRegistered,
       crmUpdated:false,consentChanged:false,recordingRequested:false},202);
   }catch{
     // Reservation was created; never retry on an unknown execution result.

@@ -339,3 +339,4 @@ export async function handleExotelVoicebotWebhookRequest(req,env){
   // Exact vendor-compatible success response; no customer data echoed.
   return response(exotelVoicebotAck());
 }
+export {tokenIsValid as verifyExotelWebhookToken,readBounded as readBoundedExotelWebhook};
