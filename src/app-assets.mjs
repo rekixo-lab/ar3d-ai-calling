@@ -606,7 +606,7 @@ async function superAdmin(main){
   }catch(err){asError(err)}
   finally{submit.disabled=false}
  });
- panel.append(title('Create client access','h3'),f,inviteResult);
+ panel.append(node('details',{class:'card'},[node('summary',{text:'Create / invite a new client'}),f,inviteResult]));
 const accessCard=div('card access-card',title('Tenant Access: Suspend / Resume','h3'),
   node('p',{class:'note',text:'Suspension immediately blocks the company CRM and API keys. Resume restores its prior status, not a paid subscription.'}));
 const management=node('details',{class:'card client-directory',id:'client-access'},node('summary',{text:'Client access and invitations'}));main.append(management);management.append(accessCard);
@@ -635,7 +635,12 @@ actionForm.addEventListener('submit',async e=>{e.preventDefault();try{
   notice('Tenant '+result.status+'. This is not a payment transaction.');
   reason.value='';await refresh();await refreshAccess();
 }catch(err){asError(err)}});
-await inviteSection(management);await scriptAdminPanel(main);await adminCompanyChangesPanel(main)}
+await inviteSection(management);
+ const ai=node('details',{class:'card client-directory',id:'ai-setup'},node('summary',{text:'2. Client AI Setup & Publish'}));
+ main.append(ai);await scriptAdminPanel(ai);
+ const requests=node('details',{class:'card',id:'company-requests'},node('summary',{text:'Client change requests (optional)'}));
+ ai.append(requests);await adminCompanyChangesPanel(requests);
+}
 async function inviteSection(main){const previous=document.getElementById('invite-card');if(previous)previous.remove();const card=div('card invite-card');card.id='invite-card';card.append(title('Invite client admin','h2'),node('p',{class:'muted',text:'Invitation link shown once. Share privately with the intended client.'}));const select=node('select',{class:'field'},[node('option',{value:'',text:'Choose company'})]);const tenants=await api('/v1/human/tenants');tenants.tenants.forEach(t=>select.append(node('option',{value:t.id,text:t.display_name})));const email=input('email','email','client@builder.com');const role=node('select',{class:'field'},['client_admin','viewer'].map(x=>node('option',{value:x,text:x})));const f=node('form',{class:'formrow'},[lab('Company',select),lab('Client email',email),lab('Role',role),node('button',{type:'submit',class:'btn',text:'Create invitation'})]);f.addEventListener('submit',async e=>{e.preventDefault();try{const d=await api('/v1/human/invitations','POST',{tenantId:select.value,email:email.value,role:role.value});const share=node('input',{class:'field',value:d.inviteUrl,readonly:'readonly',style:'width:100%'});card.append(div('banner',node('p',{text:'Share this one-time link securely:'}),share));notice('Invitation generated for '+email.value)}catch(err){asError(err)}});card.append(f);main.append(card)}
 async function adminCompanyChangesPanel(main){
  const card=div('card client-directory',title('Client Change Requests','h3'),
@@ -925,7 +930,9 @@ async function aiQuickSetupWizard(tenantId,content,refreshEditors,tenantLabel=''
      await refreshEditors();
     }catch(e){asError(e);update.disabled=false}
    });
-   card.append(div('formrow',lab('Quick update: Approved price',priceField),update));
+   const optional=node('details',{},node('summary',{text:'Optional: change approved price only'}));
+   optional.append(div('formrow',lab('Quick update: Approved price',priceField),update));
+   card.append(optional);
   }
   return true;
  }
@@ -1047,7 +1054,28 @@ async function scriptAdminPanel(main){
    const hasExisting=await aiQuickSetupWizard(tenantId,stage,()=>load(),label);
    if(generation!==loadGeneration||company.value!==tenantId)return;
    const advanced=node('details',{class:'card'},node('summary',{text:'Advanced: Company Knowledge & AI Questions'}));
-   advanced.open=hasExisting;
+   advanced.open=false;
+   if(hasExisting){
+    const inline=node('p',{class:'note',text:'AI questions are saved. First prepare Shared Gateway, then publish. Publishing does not call any customer.'});
+    const publish=btn('Publish this client AI',async()=>{
+     publish.disabled=true;
+     try{
+      const d=await api('/v1/human/calling-scripts?tenantId='+encodeURIComponent(tenantId));
+      const v=d.versions[0];if(!v)throw Error('No saved AI script. Open Advanced to edit.');
+      const published=d.publication?.state==='ready'&&d.publication.scriptRevision===v.revision&&d.publication.profileRevision===d.profileRevision;
+      if(published){inline.textContent='Latest approved AI is already published.';return}
+      const result=await api('/v1/human/calling-scripts/publish','POST',{tenantId,id:v.id,profileRevision:d.profileRevision});
+      inline.textContent=result.notice||'AI publish completed.';
+      notice(result.notice||'AI publish completed.');await load();
+     }catch(e){
+      inline.textContent=e.message==='shared_gateway_setup_required'
+       ?'Shared Gateway not ready: open Calling Setup → Shared Gateway → Inspect gateway contract.'
+       :'Publish is not complete: '+e.message;
+      asError(e);
+     }finally{publish.disabled=false}
+    });
+    stage.append(div('formrow',publish),inline);
+   }
    area.append(stage,advanced);
    await callingScriptEditor(tenantId,advanced,true,label);
   }catch(e){if(generation===loadGeneration)asError(e)}
@@ -1059,7 +1087,7 @@ async function scriptAdminPanel(main){
  await refreshCompanies();
 }
 async function voiceGatewayPanel(main){
- const card=div('card stack',title('Shared Calling Gateway','h3')),status=node('p',{class:'note',text:'Checking shared calling connection…'}),result=div('stack');main.append(card);card.append(status);
+ const card=div('card stack',title('Shared Calling Gateway','h3')),status=node('p',{class:'note',text:'Checking shared calling connection…'}),result=div('stack');card.id='gateway-panel';main.append(card);card.append(status);
  const bot=input('gatewayBotId','text','Shared Voicebot UUID'),flow=input('gatewayFlowId','text','Shared Exotel flow ID'),authTemplate=input('gatewayAuthTemplate','text','Existing authenticated webhook bot UUID');
  const flowConfirmed=node('input',{type:'checkbox','aria-label':'I verified in Exotel that the copied Flow targets this shared Voicebot'});
  let inspectedBotId=null;
