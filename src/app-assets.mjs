@@ -1132,6 +1132,10 @@ async function voiceGatewayPanel(main){
      ['Guard version has top-level agents',flag(d.guardVersionContract?.responseHasRootAgents)],
      ['Guard version has version-map agents',flag(d.guardVersionContract?.responseHasVersionedAgents)],
      ['Guard version has assistant-config agents',flag(d.guardVersionContract?.responseHasAssistantConfigAgents)],
+     ['Root agent count',d.guardVersionContract?.responseRootAgentCount||'Not confirmed'],
+     ['Selected version agent count',d.guardVersionContract?.responseSelectedAgentCount||'Not confirmed'],
+     ['Guard root safety instruction',flag(d.guardVersionContract?.rootInstructionMatchesGuard)],
+     ['Guard agent safety instruction',flag(d.guardVersionContract?.agentInstructionMatchesGuard)],
      ['Guard explicit version matches v2',flag(d.guardVersionContract?.responseVersionMatchesRequested)],
      ['Guard latest version matches v2',flag(d.guardVersionContract?.responseLatestMatchesRequested)],
      ['Guard stable version matches v2',flag(d.guardVersionContract?.responseStableMatchesRequested)],
@@ -1143,7 +1147,7 @@ async function voiceGatewayPanel(main){
      ['Stable version matches AR3D guard',flag(d.stableVersionUsesRecordedGuard)]
     ]),
     node('p',{class:'note',text:d.guardAssistantReadError==='guard_version_not_confirmed'&&d.guardVersionContract?.responseHasRootAgents===true
-     ?'Exotel returned an agent list but the version label does not match AR3D\'s strict version check. This may be a response-format mismatch; no changes have been made.'
+     ?'Exotel returned an agent-list field, but the selected guard version has not been verified as exactly one safe agent. Check the agent counts and safety-instruction flags above. A missing version label alone does not explain the failure; no changes have been made.'
      :d.guardAssistantFinalized===true
      ?'Guard assistant is verified, but the Exotel Voicebot has not adopted it. The bot-version creation or confirmation stage needs investigation.'
      :d.guardAssistantReadable===false
