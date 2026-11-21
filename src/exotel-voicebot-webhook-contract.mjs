@@ -88,7 +88,7 @@ export function parseExotelVoicebotEvent(raw){
     source:'untrusted_exotel_voicebot_webhook_payload',
     sessionId:value.session_id,conversationId:value.conversation_id,
     callId:value.external_id,providerCallSid:value.metadata?.call_sid||null,
-    accountId:value.account_id||null,
+    accountId:value.account_id||null,botId:value.bot_id||null,
     state:value.session_state,reason:value.trigger_reason,
     events:Object.freeze(events),
     sourceAuthenticated:false,leadMatched:false,crmWrites:0,
