@@ -1102,6 +1102,20 @@ async function voiceGatewayPanel(main){
   lab('I verified in Exotel that the copied Flow targets this shared Voicebot',flowConfirmed),
   node('button',{class:'btn',type:'submit',text:'Prepare shared calling connection'})
  ]);
+ const repairButton=btn('Repair saved Guard & stage Gateway (no calls)',async()=>{
+  if(!confirm('Repair the saved AR3D routing guard ONLY if required and create a PAUSED new Shared Voicebot version? This can create Exotel versions, but will NOT make calls, change the old working Bot, or roll out traffic. Any uncertain result stops without retry.'))return;
+  repairButton.disabled=true;
+  try{
+   const r=await api('/v1/human/voice-gateway','POST',
+    {action:'recover',confirmation:'REPAIR_ONLY_SHARED_GUARD_NO_CALLS'});
+   result.replaceChildren(node('p',{class:'success',text:r.notice}));
+   notice('Shared gateway candidate staged: '+r.version+'. No calls or traffic rollout.');
+  }catch(e){
+   asError(e);
+   result.replaceChildren(node('p',{class:'err',text:
+    'Automatic repair did not complete. Do NOT retry this action. The new provider state may be partial. Details: '+e.message}));
+  }finally{await refresh().catch(asError)}
+ },true);repairButton.disabled=true;
  const reviewButton=btn('Review failed setup (read-only)',async()=>{
   reviewButton.disabled=true;
   try{
@@ -1154,7 +1168,7 @@ async function voiceGatewayPanel(main){
    if(r.knownAuthTemplateBotId)authTemplate.value=r.knownAuthTemplateBotId;
    form.querySelector('button[type=submit]').disabled=true;
    if(r.gateway.state==='unknown'){
-    status.textContent='SETUP NEEDS REVIEW — Provider may have partial changes. Do NOT retry Prepare, Connect, Verify or test calling. Status: unknown'+(r.gateway.errorCode?' ('+r.gateway.errorCode+')':'')+'.';
+    status.textContent='SETUP NEEDS REVIEW — No calls. The old Prepare/Connect/Verify buttons are blocked. Only the explicitly confirmed, one-time Guard repair may stage a paused candidate. Status: unknown'+(r.gateway.errorCode?' ('+r.gateway.errorCode+')':'')+'.';
     status.className='note err';
    }else status.className='note';
   }else if(r.suggestedGateway){
@@ -1162,6 +1176,7 @@ async function voiceGatewayPanel(main){
    form.querySelector('button[type=submit]').disabled=false;status.className='note';
   }
   reviewButton.disabled=r.gateway?.state!=='unknown';
+  repairButton.disabled=!(r.gateway?.state==='unknown'&&r.gateway.errorCode==='provider_write_unknown');
   const unsafe=['Connect authenticated session router','Verify shared gateway rollout',
    'Test published client on my verified phone'];
   for(const button of card.querySelectorAll('button'))
@@ -1194,7 +1209,7 @@ async function voiceGatewayPanel(main){
  });
  card.append(form,div('formrow',btn('Refresh saved gateway status (read-only)',async()=>{
    try{await refresh();notice('Gateway status refreshed; no Exotel changes or calls made.')}catch(e){asError(e)}
- },true),reviewButton,btn('Inspect gateway contract',async()=>{
+ },true),reviewButton,repairButton,btn('Inspect gateway contract',async()=>{
    inspectedBotId=null;
    try{
     const r=await api('/v1/human/voice-gateway','POST',{action:'inspect',botId:bot.value});
