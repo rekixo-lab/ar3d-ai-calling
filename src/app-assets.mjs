@@ -1093,7 +1093,7 @@ async function voiceGatewayPanel(main){
  const card=div('card stack',title('Shared Calling Gateway','h3')),status=node('p',{class:'note',text:'Checking shared calling connection…'}),result=div('stack');card.id='gateway-panel';main.append(card);card.append(status);
  const bot=input('gatewayBotId','text','Shared Voicebot UUID'),flow=input('gatewayFlowId','text','Shared Exotel flow ID'),authTemplate=input('gatewayAuthTemplate','text','Existing authenticated webhook bot UUID');
  const flowConfirmed=node('input',{type:'checkbox','aria-label':'I verified in Exotel that the copied Flow targets this shared Voicebot'});
- let inspectedBotId=null;
+ let inspectedBotId=null,repairReady=false;
  for(const control of [bot,flow,authTemplate])control.addEventListener('input',()=>{inspectedBotId=null;flowConfirmed.checked=false});
  const form=node('form',{class:'stack'},[
   node('p',{class:'muted',text:'One-time platform connection. IDs from your earlier Exotel setup are prefilled automatically when no gateway exists. New clients will share this gateway with isolated company assistants. The old working bot and flow stay untouched.'}),
@@ -1104,7 +1104,7 @@ async function voiceGatewayPanel(main){
  ]);
  const repairButton=btn('Repair saved Guard & stage Gateway (no calls)',async()=>{
   if(!confirm('Repair the saved AR3D routing guard ONLY if required and create a PAUSED new Shared Voicebot version? This can create Exotel versions, but will NOT make calls, change the old working Bot, or roll out traffic. Any uncertain result stops without retry.'))return;
-  repairButton.disabled=true;
+  repairReady=false;repairButton.disabled=true;
   try{
    const r=await api('/v1/human/voice-gateway','POST',
     {action:'recover',confirmation:'REPAIR_ONLY_SHARED_GUARD_NO_CALLS'});
@@ -1116,6 +1116,33 @@ async function voiceGatewayPanel(main){
     'Automatic repair did not complete. Do NOT retry this action. The new provider state may be partial. Details: '+e.message}));
   }finally{await refresh().catch(asError)}
  },true);repairButton.disabled=true;
+ const previewButton=btn('Check repair prerequisites (read-only)',async()=>{
+  repairReady=false;repairButton.disabled=true;previewButton.disabled=true;
+  try{
+   const r=await api('/v1/human/voice-gateway','POST',{action:'repair-preview'});
+   repairReady=r.eligible===true;
+   const reason={
+    saved_gateway_not_repairable:'The recorded setup is not eligible for the one-time repair.',
+    shared_voicebot_version_or_traffic_changed:'The shared Voicebot versions or traffic have changed; inspect in Exotel.',
+    shared_voicebot_template_changed:'The shared Voicebot no longer points to the saved source template.',
+    saved_guard_version_changed:'The recorded Guard version has changed; inspect in Exotel.',
+    saved_guard_identity_changed:'The saved Guard identity could not be confirmed.',
+    saved_template_not_safe_for_guard_repair:'The saved source template is missing its required single agent or has tools; do not repair automatically.',
+    provider_read_preflight_unavailable:'Exotel read-only preflight could not finish. Do not attempt a provider write.'
+   };
+   result.replaceChildren(
+    node('p',{class:repairReady?'success':'err',text:repairReady?
+     'Read-only prerequisites passed. Repair is now enabled for ONE confirmed attempt. Exotel versions may be written; no calls or traffic rollout.':(reason[r.reason]||'Repair is blocked; inspect the provider account without changing anything.')}),
+    node('p',{class:'note',text:repairReady?
+     (r.plan==='repair_saved_guard_then_stage_paused_bot'?
+      'Expected plan: repair the already saved Guard, verify its single safe agent, then stage a paused Shared Voicebot version.':
+      'Expected plan: the saved Guard is verified; stage only the paused Shared Voicebot version.')+
+      ' A preview cannot guarantee that Exotel will accept or complete the write.' :
+     'No Exotel or database changes were made. Do not click Repair, Prepare, Connect, Verify or Test Call.'})
+   );
+  }catch(e){asError(e)}
+  finally{previewButton.disabled=false;repairButton.disabled=!repairReady}
+ },true);previewButton.disabled=true;
  const reviewButton=btn('Review failed setup (read-only)',async()=>{
   reviewButton.disabled=true;
   try{
@@ -1172,7 +1199,7 @@ async function voiceGatewayPanel(main){
    if(r.knownAuthTemplateBotId)authTemplate.value=r.knownAuthTemplateBotId;
    form.querySelector('button[type=submit]').disabled=true;
    if(r.gateway.state==='unknown'){
-    status.textContent='SETUP NEEDS REVIEW — No calls. The old Prepare/Connect/Verify buttons are blocked. Only the explicitly confirmed, one-time Guard repair may stage a paused candidate. Status: unknown'+(r.gateway.errorCode?' ('+r.gateway.errorCode+')':'')+'.';
+    status.textContent='SETUP NEEDS REVIEW — No calls. The old Prepare/Connect/Verify buttons are blocked. First run Check repair prerequisites (read-only), then consider the one-time paused Guard repair. Status: unknown'+(r.gateway.errorCode?' ('+r.gateway.errorCode+')':'')+'.';
     status.className='note err';
    }else status.className='note';
   }else if(r.suggestedGateway){
@@ -1180,7 +1207,10 @@ async function voiceGatewayPanel(main){
    form.querySelector('button[type=submit]').disabled=false;status.className='note';
   }
   reviewButton.disabled=r.gateway?.state!=='unknown';
-  repairButton.disabled=!(r.gateway?.state==='unknown'&&r.gateway.errorCode==='provider_write_unknown');
+  const repairable=r.gateway?.state==='unknown'&&r.gateway.errorCode==='provider_write_unknown';
+  if(!repairable)repairReady=false;
+  previewButton.disabled=!repairable;
+  repairButton.disabled=!(repairable&&repairReady);
   const unsafe=['Connect authenticated session router','Verify shared gateway rollout',
    'Test published client on my verified phone'];
   for(const button of card.querySelectorAll('button'))
@@ -1213,7 +1243,7 @@ async function voiceGatewayPanel(main){
  });
  card.append(form,div('formrow',btn('Refresh saved gateway status (read-only)',async()=>{
    try{await refresh();notice('Gateway status refreshed; no Exotel changes or calls made.')}catch(e){asError(e)}
- },true),reviewButton,repairButton,btn('Inspect gateway contract',async()=>{
+ },true),reviewButton,previewButton,repairButton,btn('Inspect gateway contract',async()=>{
    inspectedBotId=null;
    try{
     const r=await api('/v1/human/voice-gateway','POST',{action:'inspect',botId:bot.value});

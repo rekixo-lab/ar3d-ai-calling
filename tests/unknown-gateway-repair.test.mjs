@@ -8,7 +8,7 @@ const template='66666666-6666-4666-8666-666666666666';
 const prompt='You are the AR3D call routing guard. Client context is unavailable. Say in Hindi that the connection could not be loaded and politely end. Do not discuss company, project, pricing or customer information. Never ask survey questions.';
 const req=(confirmation='REPAIR_ONLY_SHARED_GUARD_NO_CALLS')=>new Request('https://app.example.invalid/v1/human/voice-gateway',{method:'POST',headers:{'Content-Type':'application/json',Origin:'https://app.example.invalid'},body:JSON.stringify({action:'recover',confirmation})});
 const unknown=f=>f.c.db.prepare("INSERT INTO shared_voice_gateway(id,bot_id,flow_id,template_assistant_id,template_version,guard_assistant_id,gateway_version,state,error_code,updated_by,updated_at) VALUES(1,?,?,?,?,?,NULL,'unknown','provider_write_unknown','admin',?)").run(bot,'1393135',template,'v1',guard,at);
-function provider({failAfterGuardWrite=false,alreadySafe=false,changedBot=false}={}){
+function provider({failAfterGuardWrite=false,alreadySafe=false,changedBot=false,unsafeTemplate=false}={}){
  let writes=[],reads=[],guardStable='v2',botLatest=changedBot?'v3':'v2',versionedGuard=null;
  const fetcher=async(raw,opts)=>{
   const u=new URL(raw),path=u.pathname,ver=u.searchParams.get('version'),method=opts.method;
@@ -37,7 +37,7 @@ function provider({failAfterGuardWrite=false,alreadySafe=false,changedBot=false}
   assert.equal(method,'GET');reads.push(path+u.search);
   if(path.endsWith('/assistants/'+template)&&ver==='v1')return Response.json({response:{
    id:template,version:'v1',latest_version:'v1',stable_version:'v1',
-   instruction:'safe template',llm_config:{model_id:'m1'},agents:[{id:template,instruction:'template script',tools:[],mcp_tools:[]}]
+   instruction:'safe template',llm_config:{model_id:'m1'},agents:unsafeTemplate?[]:[{id:template,instruction:'template script',tools:[],mcp_tools:[]}]
   }});
   if(path.endsWith('/assistants/'+guard)){
    if(ver===guardStable&&guardStable==='v3')return Response.json({response:{
@@ -62,6 +62,44 @@ function provider({failAfterGuardWrite=false,alreadySafe=false,changedBot=false}
  };
  return {fetcher,writes,reads};
 }
+
+const previewReq=()=>new Request('https://app.example.invalid/v1/human/voice-gateway',{method:'POST',
+ headers:{'Content-Type':'application/json',Origin:'https://app.example.invalid'},
+ body:JSON.stringify({action:'repair-preview'})});
+test('zero-agent Guard v2 read-only preview confirms stored template is reusable without any writes',async()=>{
+ const f=fixture();try{
+  unknown(f);const p=provider();
+  const before=f.c.db.prepare('SELECT state,guard_assistant_id,gateway_version,error_code FROM shared_voice_gateway WHERE id=1').get();
+  assert.equal((await handleVoiceGatewayRequest(previewReq(),f.env,client,{now,fetcher:p.fetcher})).status,403);
+  assert.equal((await handleVoiceGatewayRequest(previewReq(),f.env,{...admin,token_hash:'bad'},{now,fetcher:p.fetcher})).status,403);
+  assert.equal(p.reads.length,0);
+  const res=await handleVoiceGatewayRequest(previewReq(),f.env,admin,{now,fetcher:p.fetcher});
+  assert.equal(res.status,200);
+  const data=await res.json();
+  assert.deepEqual(data,{eligible:true,reason:'preflight_checks_passed',
+   plan:'repair_saved_guard_then_stage_paused_bot'});
+  assert.equal(p.writes.length,0);
+  assert.equal(p.reads.length,5);
+  assert.deepEqual({...f.c.db.prepare('SELECT state,guard_assistant_id,gateway_version,error_code FROM shared_voice_gateway WHERE id=1').get()},{...before});
+  assert.equal(f.c.db.prepare('SELECT COUNT(*) AS n FROM voice_call_routes').get().n,0);
+ }finally{f.close()}
+});
+test('read-only repair preview refuses changed Voicebot or unsafe source template',async()=>{
+ for(const mode of ['changedBot','unsafeTemplate']){
+  const f=fixture();try{
+   unknown(f);const p=provider({changedBot:mode==='changedBot',unsafeTemplate:mode==='unsafeTemplate'});
+   const res=await handleVoiceGatewayRequest(previewReq(),f.env,admin,{now,fetcher:p.fetcher});
+   assert.equal(res.status,200);
+   const d=await res.json();
+   assert.equal(d.eligible,false);
+   assert.equal(d.reason,mode==='changedBot'?'shared_voicebot_version_or_traffic_changed':'saved_template_not_safe_for_guard_repair');
+   assert.equal(d.plan,null);
+   assert.equal(p.writes.length,0);
+   assert.equal(f.c.db.prepare('SELECT state FROM shared_voice_gateway WHERE id=1').get().state,'unknown');
+  }finally{f.close()}
+ }
+});
+
 test('one confirmed repair reuses the same guard, stages only paused shared bot version and remains non-calling',async()=>{
  const f=fixture();try{
   unknown(f);const p=provider();

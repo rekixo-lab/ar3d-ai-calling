@@ -142,6 +142,58 @@ export async function inspectGatewayConfiguration(env,botId,{fetcher=fetch}={}){
  let legacy;try{legacy=unwrapVoicebot(await voicebotRequest(env,'/voicebots/'+botId,{fetcher,apiVersion:'v1'}))}catch{return {botId,assistantShape,modernKeys:Object.keys(modern||{}),modernShape:shape(modern),legacyAvailable:false}}
  return {botId,assistantShape,modernKeys:Object.keys(modern||{}),modernShape:shape(modern),legacyAvailable:true,legacyKeys:Object.keys(legacy||{}),legacyShape:shape(legacy),callDurationLimit:{enabled:legacy.enable_call_threshold===true,seconds:Number.isInteger(legacy.call_duration_threshold_sec)&&legacy.call_duration_threshold_sec>=0&&legacy.call_duration_threshold_sec<=14400?legacy.call_duration_threshold_sec:null},webhookTimers:webhookTimers(legacy.webhook_config),webhookShape:shape(legacy.webhook_config,-2),hookTriggerModes:Object.fromEntries(Object.entries(legacy.webhook_config||{}).filter(([,v])=>v&&typeof v==='object').map(([k,v])=>[k,typeof v.trigger_mode==='string'&&/^[a-z0-9_-]{1,32}$/i.test(v.trigger_mode)?v.trigger_mode:null])),hookAuthenticationMatchesAr3d:JSON.stringify(legacy.webhook_config||{}).includes(env.EXOTEL_VOICEBOT_WEBHOOK_TOKEN||'__no_token_configured__')};
 }
+
+/**
+ * Strictly read-only preview of the ALREADY RECORDED failed shared Gateway.
+ * This is advisory and NEVER authorizes rollout or telephony. The mutating
+ * recovery function repeats all checks against fresh provider state.
+ * Return fixed, non-secret reason codes, never configs, prompts, tokens or IDs.
+ */
+export async function previewUnknownSharedGatewayRecovery(env,runtime,{fetcher=fetch}={}){
+ const blocked=reason=>({eligible:false,reason,plan:null});
+ if(!runtime||runtime.state!=='unknown'||runtime.error_code!=='provider_write_unknown'||
+    !uuid(runtime.guard_assistant_id)||!uuid(runtime.template_assistant_id)||
+    !version(runtime.template_version)||runtime.gateway_version!=null||
+    runtime.bot_id!=='66cbf4f6-a52d-4df0-abf0-db5e3b365836'||
+    runtime.flow_id!=='1393135')
+  return blocked('saved_gateway_not_repairable');
+ const options={fetcher},botPath='/voicebots/'+runtime.bot_id,guardPath='/assistants/'+runtime.guard_assistant_id;
+ try{
+  const bot=unwrapVoicebot(await voicebotRequest(env,botPath,options));
+  const stable=bot.stable_version;
+  if((bot.id||bot.bot_id)!==runtime.bot_id||!version(stable)||
+     bot.latest_version!==stable||bot.traffic_allocation?.[stable]!==100||
+     Object.entries(bot.traffic_allocation||{}).some(([v,n])=>v!==stable&&Number(n)>0))
+   return blocked('shared_voicebot_version_or_traffic_changed');
+  const sourceBot=unwrapVoicebot(await voicebotRequest(env,botPath+'?version='+stable,options));
+  if((sourceBot.id||sourceBot.bot_id)!==runtime.bot_id||
+     (sourceBot.assistant_config?.id||sourceBot.assistant_config?.assistant_id)!==runtime.template_assistant_id)
+   return blocked('shared_voicebot_template_changed');
+  const guard=unwrapVoicebot(await voicebotRequest(env,guardPath,options));
+  const guardVersion=guard.stable_version;
+  if((guard.id||guard.assistant_id)!==runtime.guard_assistant_id||
+     !version(guardVersion)||guard.latest_version!==guardVersion)
+   return blocked('saved_guard_version_changed');
+  const selected=unwrapVoicebot(await voicebotRequest(env,guardPath+'?version='+guardVersion,options));
+  if((selected.id||selected.assistant_id)!==runtime.guard_assistant_id)
+   return blocked('saved_guard_identity_changed');
+  if(validRoutingGuard(selected,runtime.guard_assistant_id,guardVersion))
+   return {eligible:true,reason:'preflight_checks_passed',plan:'stage_paused_bot_only'};
+  // Only the original saved single-agent, no-tools template can repair this
+  // Guard. Never trust the incomplete Guard's agents or modify the source.
+  const raw=unwrapVoicebot(await voicebotRequest(env,
+   '/assistants/'+runtime.template_assistant_id+'?version='+runtime.template_version,options));
+  const template=assistantVersionConfig(raw,runtime.template_version);
+  const empty=x=>x==null||(typeof x==='object'&&Object.keys(x).length===0);
+  if((raw.id||raw.assistant_id)!==runtime.template_assistant_id||
+     !template||!Array.isArray(template.agents)||template.agents.length!==1||
+     ![template.tools,template.mcp_servers,template.agents[0].tools,
+       template.agents[0].mcp_tools,template.agents[0].sub_agents].every(empty))
+   return blocked('saved_template_not_safe_for_guard_repair');
+  return {eligible:true,reason:'preflight_checks_passed',plan:'repair_saved_guard_then_stage_paused_bot'};
+ }catch{return blocked('provider_read_preflight_unavailable')}
+}
+
 // Confirm that a fallback cannot answer with client information or call tools.
 // A version label alone is insufficient: require precisely one verified agent
 // and the approved root + agent instruction. Never expose those instructions.
