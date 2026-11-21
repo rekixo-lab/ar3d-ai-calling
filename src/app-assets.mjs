@@ -1112,6 +1112,9 @@ async function voiceGatewayPanel(main){
     table(['Check','Result'],[
      ['Saved status',d.savedState],
      ['AR3D guard assistant recorded',flag(d.guardAssistantRecorded)],
+     ['Guard assistant accessible via Exotel',flag(d.guardAssistantReadable)],
+     ['Guard stable version',d.guardAssistantStableVersion||'Not confirmed'],
+     ['Guard successfully finalized',flag(d.guardAssistantFinalized)],
      ['Gateway version recorded',d.gatewayVersionRecorded||'No'],
      ['Exotel read succeeded',flag(d.providerReadable)],
      ['Exotel latest version',d.latestVersion||'Unknown'],
@@ -1119,8 +1122,16 @@ async function voiceGatewayPanel(main){
      ['Latest version matches AR3D guard',flag(d.latestVersionUsesRecordedGuard)],
      ['Stable version matches AR3D guard',flag(d.stableVersionUsesRecordedGuard)]
     ]),
+    node('p',{class:'note',text:d.guardAssistantFinalized===true
+     ?'Guard assistant is verified, but the Exotel Voicebot has not adopted it. The bot-version creation or confirmation stage needs investigation.'
+     :d.guardAssistantReadable===false
+      ?'A guard ID was recorded, but Exotel did not confirm the guard assistant. Do not recreate it automatically.'
+      :d.guardAssistantFinalized===false
+       ?'The guard assistant was not confirmed as finalized. The guard-version stage needs investigation.'
+       :'The guard finalization stage is not fully verified. Do not guess or retry provider writes.'}),
     node('p',{class:'err',text:'STOP: '+d.recommendation+
-     (d.providerError?' Provider check: '+d.providerError:'')}
+     (d.providerError?' Provider check: '+d.providerError:'')+
+     (d.guardAssistantReadError?' Guard check: '+d.guardAssistantReadError:'')}
     ));
   }catch(e){asError(e)}
   finally{await refresh().catch(asError)}
