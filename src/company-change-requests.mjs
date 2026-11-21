@@ -60,7 +60,7 @@ export async function handleCompanyChangeRequests(req,env,user,{now=Date.now()}=
    const result=await db.batch([
     db.prepare("UPDATE company_change_requests SET status=?,handled_by=?,handled_at=?,resolution_note=? WHERE tenant_id=? AND id=? AND status='pending'")
      .bind(d.status,user.id,at,note||null,d.tenantId,action[1]),
-    db.prepare("INSERT INTO tenant_audit_events(id,tenant_id,actor,action,target_id,detail_json,created_at) SELECT ?,?,'human:'||?,'company.request_'||?,id,?,? FROM company_change_requests WHERE tenant_id=? AND id=? AND handled_at=? AND handled_by=?")
+    db.prepare("INSERT INTO tenant_audit_events(id,tenant_id,actor,action,target_id,detail_json,created_at) SELECT ?,?,'human:'||?,'company.request_'||?,id,?,? FROM company_change_requests WHERE tenant_id=? AND id=? AND handled_at=? AND handled_by=? AND changes()=1")
      .bind(crypto.randomUUID(),d.tenantId,user.id,d.status,JSON.stringify({note:note.slice(0,150)}),at,d.tenantId,action[1],at,user.id)
    ]);
    return Number(result[0]?.meta?.changes)===1&&Number(result[1]?.meta?.changes)===1?
