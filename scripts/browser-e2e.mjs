@@ -229,8 +229,10 @@ try{
     await page.getByPlaceholder('Enter your password').fill(TEST_PASSWORD);
     await page.getByRole('button',{name:'Sign in',exact:true}).click();
     await page.getByRole('heading',{name:'Super Admin',exact:true}).waitFor();
-    await page.getByText('Workspace settings',{exact:true}).click();
-    await page.getByText('Engineering tools and diagnostics',{exact:true}).click();
+    await page.getByRole('heading',{name:'Simple Setup — Next Step'}).waitFor();
+    assert.equal(await page.getByRole('heading',{name:'Production Readiness & Safe AI Calling Pilot'}).count(),0);
+    await page.getByText('3. Calling & Exotel Setup',{exact:true}).click();
+    await page.getByText('Advanced developer diagnostics (optional)',{exact:true}).click();
     await page.getByRole('heading',{name:'Production Readiness & Safe AI Calling Pilot'}).waitFor();
     await page.getByRole('heading',{name:'Operator Setup Checklist'}).waitFor();
     await page.getByRole('heading',{name:'Customer Production Launch — GO / NO-GO'}).waitFor();
