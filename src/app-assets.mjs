@@ -500,7 +500,14 @@ async function superAdmin(main){
       ['Active clients',d.tenants.filter(t=>t.status==='active').length,'phone'],
       ['Team members',d.tenants.reduce((n,t)=>n+Number(t.member_count||0),0),'shield']
     ].map(([label,value,symbol])=>div('card metric',div('metric-symbol',icon(symbol)),node('span',{class:'muted',text:label}),node('strong',{text:String(value)})))),
-    table(['Company','Contact email','Mobile','Status','Members'],d.tenants.map(t=>[t.display_name,t.contact_email||'—',t.contact_mobile||'—',t.status,t.member_count]))
+    table(['Company','Contact email','Mobile','Status','Members'],d.tenants.map(t=>[t.display_name,t.contact_email||'—',t.contact_mobile||'—',t.status,t.member_count])),
+    title('Client usage (verified Calling records)','h3'),
+    table(['Company','Customers','Excel imports','Reserved attempts','Provider accepted','Completed + duration','Recorded seconds','Uncertain'],d.tenants.map(t=>{
+      const x=t.usage;return [t.display_name,x?.customers??'—',x?.uploads??'—',x?.reservedAttempts??'—',
+        x?.providerAccepted??'—',x?.providerCompletedWithDuration??'—',x?.completedSeconds??'—',x?.uncertain??'—'];
+    })),
+    node('p',{class:'note',text:d.reportingUnavailable?'Calling CRM reporting is temporarily unavailable; blank values are unknown.':
+      'Completed + duration is verified provider status evidence only—not proof that AI answers or a transcript were saved. Dedicated-storage usage shows — until separately verified.'})
    );
    if(existing){
     const old=existing.value;

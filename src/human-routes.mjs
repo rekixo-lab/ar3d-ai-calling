@@ -1,6 +1,7 @@
 import {handleCallingRequest} from './calling-routes.mjs';
 import {handleVoiceGatewayRequest} from './voice-gateway-routes.mjs';
 import {handleClientAccountRequest} from './client-account-routes.mjs';
+import {enrichAdminTenantsWithUsage} from './admin-usage.mjs';
 import {handleCompanyProfile} from './company-profile.mjs';
 import {handleCallingScripts} from './calling-script-routes.mjs';
 import {handleCrmRequest} from './crm-routes.mjs';
@@ -142,12 +143,19 @@ async function logout(req,env){
   if(/^[a-f0-9]{64}$/.test(token))await env.CONTROL_DB.prepare('UPDATE human_sessions SET revoked_at=? WHERE token_hash=?').bind(now(),await sha256hex(token)).run();
   return response({ok:true},200,{'Set-Cookie':cookieFor('',0)});
 }
-async function listTenants(db){
+async function listTenants(env){
+  const db=env.CONTROL_DB;
   const rows=await db.prepare(`SELECT t.id,t.slug,t.display_name,t.plan_code,t.storage_mode,t.status,
     c.email AS contact_email,c.mobile_e164 AS contact_mobile,
     (SELECT COUNT(*) FROM tenant_memberships m WHERE m.tenant_id=t.id AND m.status='active') AS member_count
     FROM tenants t LEFT JOIN client_account_contacts c ON c.tenant_id=t.id ORDER BY t.created_at DESC LIMIT 100`).all();
-  return response({tenants:rows.results});
+  try{
+    const enriched=await enrichAdminTenantsWithUsage(env,rows.results);
+    return response({tenants:enriched,reportingUnavailable:!env.CRM_DB});
+  }catch(e){
+    console.error('Calling Super Admin reporting unavailable',e);
+    return response({tenants:rows.results.map(t=>({...t,usage:null,usageAvailable:false})),reportingUnavailable:true});
+  }
 }
 async function createTenant(req,db,user){
   const d=await payload(req),slug=checkSlug(d.slug),name=checkName(d.displayName);
@@ -291,7 +299,7 @@ export async function handleHumanRequest(req,env){
     if(lifecycle)return lifecycle;
     if(path==='/v1/human/tenants'){
       if(user.globalRole!=='super_admin')return fail('forbidden',403);
-      if(method==='GET')return await listTenants(env.CONTROL_DB);
+      if(method==='GET')return await listTenants(env);
       if(method==='POST')return await createTenant(req,env.CONTROL_DB,user);
     }
     if(path==='/v1/human/invitations'&&method==='POST')return await invite(req,env.CONTROL_DB,user);
