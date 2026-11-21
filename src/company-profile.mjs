@@ -34,10 +34,11 @@ export async function handleCompanyProfile(req,env,user,{now=Date.now()}={}){
   if(admin){
    if(!await db.prepare('SELECT m.enabled_at FROM human_mfa_settings m JOIN human_sessions s ON s.user_id=m.user_id WHERE m.user_id=? AND s.token_hash=? AND m.enabled_at IS NOT NULL AND s.created_at>=m.enabled_at AND s.revoked_at IS NULL AND s.expires_at>? LIMIT 1').bind(user.id,user.token_hash,now).first())return fail('current_super_admin_mfa_required',403);
    if(!await db.prepare("SELECT id FROM tenants WHERE id=? AND status IN('trial','active')").bind(data.tenantId).first())return fail('tenant_unavailable',404);
-  }else if(!await requireMembership(db,user,data.tenantId,req.method==='POST'))return fail('forbidden',403);
+  }else if(!await requireMembership(db,user,data.tenantId,false))return fail('forbidden',403);
+  if(req.method==='POST'&&!admin)return fail('super_admin_required',403);
   if(req.method==='GET'){
    const row=await db.prepare('SELECT revision,config_json,created_at AS savedAt FROM company_profile_versions WHERE tenant_id=? ORDER BY revision DESC LIMIT 1').bind(data.tenantId).first();
-   return json({revision:row?.revision||0,profile:row?JSON.parse(row.config_json):emptyCompanyProfile(),savedAt:row?.savedAt||null,canEdit:admin||!!await requireMembership(db,user,data.tenantId,true)});
+   return json({revision:row?.revision||0,profile:row?JSON.parse(row.config_json):emptyCompanyProfile(),savedAt:row?.savedAt||null,canEdit:admin});
   }
   if(Object.keys(data).some(k=>!['tenantId','baseRevision','profile'].includes(k))||!Number.isInteger(data.baseRevision)||data.baseRevision<0)return fail('invalid_revision');
   const profile=validateCompanyProfile(data.profile),revision=data.baseRevision+1;
