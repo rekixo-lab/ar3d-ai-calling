@@ -61,11 +61,16 @@ export async function reviewUnknownGateway(env,runtime,{fetcher=fetch}={}){
         responseStableMatchesRequested:saved.stable_version===stable
        };
        const config=assistantVersionConfig(saved,stable);
+       const count=agents=>!Array.isArray(agents)?'absent':agents.length===0?'zero':agents.length===1?'one':'multiple';
+       // Safe classifications only: never expose agent contents, instructions or credentials.
+       output.guardVersionContract.responseRootAgentCount=count(saved.agents);
+       output.guardVersionContract.responseSelectedAgentCount=count(config?.agents);
+       output.guardVersionContract.rootInstructionMatchesGuard=typeof config?.instruction==='string'?config.instruction===GUARD_PROMPT:null;
+       output.guardVersionContract.agentInstructionMatchesGuard=config?.agents?.length===1?config.agents[0]?.instruction===GUARD_PROMPT:null;
        if(config?.agents?.length===1){
         // Exact prompt verification happens server-side; never return the
         // instructions, assistant/agent config, models or credentials.
-        output.guardAssistantFinalized=saved.stable_version===stable&&
-         config.agents[0].instruction===GUARD_PROMPT;
+        output.guardAssistantFinalized=validRoutingGuard(saved,savedGuard,stable);
        }else output.guardAssistantReadError='guard_version_not_confirmed';
       }
      }catch{output.guardAssistantReadError='guard_version_read_unavailable'}
