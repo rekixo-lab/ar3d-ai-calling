@@ -7,7 +7,7 @@ import {requirePublishedAgent} from '../../src/published-agent.mjs';
 export const gatewayBot='44444444-4444-4444-8444-444444444444',templateAssistant='55555555-5555-4555-8555-555555555555',guardAssistant='66666666-6666-4666-8666-666666666666';
 export const publicationRequest=(action,data)=>new Request('https://app.example.invalid/v1/human/calling-scripts/'+action,{method:'POST',headers:{Origin:'https://app.example.invalid','Content-Type':'application/json'},body:JSON.stringify({tenantId:tid,...data})});
 export async function setupPublication(f){
- const r=await handleCallingScripts(publicationRequest('versions',{baseRevision:0,config:defaultScript()}),f.env,client,{now});assert.equal(r.status,201);const script=await r.json();
+ const r=await handleCallingScripts(publicationRequest('versions',{baseRevision:0,config:defaultScript()}),f.env,admin,{now});assert.equal(r.status,201);const script=await r.json();
  f.c.db.prepare('INSERT INTO company_profile_versions VALUES(?,?,?,?,?)').run(tid,1,JSON.stringify({...emptyCompanyProfile(),companyName:'Demo Builder',projects:'Demo Heights',pricing:'20 lakh onwards'}),client.id,at);
  f.c.db.prepare("INSERT INTO shared_voice_gateway(id,bot_id,flow_id,template_assistant_id,template_version,guard_assistant_id,gateway_version,state,updated_by,updated_at) VALUES(1,?,?,?,'v1',?,'v2','ready',?,?)").run(gatewayBot,'123456',templateAssistant,guardAssistant,admin.id,at);
  f.env.EXOTEL_REQUIRE_PUBLISHED_AGENT='enabled';f.env.EXOTEL_VOICEBOT_WEBHOOK_TOKEN='a'.repeat(64);
@@ -30,4 +30,4 @@ export function publicationProvider({uncertain=false,mismatch=false,unstableCrea
   return Response.json({response:{id,latest_version:a.version,stable_version:a.stable,llm_config:a.llm,agents:[{id:'published',tools:[],llm_config:a.llm,instruction:mismatch?'wrong prompt':a.prompt}]}});
  }};
 }
-export async function publishForTest(f,script,p){const r=await handleCallingScripts(publicationRequest('publish',{id:script.id,profileRevision:1}),f.env,client,{now,fetcher:p.fetcher});assert.equal(r.status,200,await r.clone().text());return r.json()}
+export async function publishForTest(f,script,p){const r=await handleCallingScripts(publicationRequest('publish',{id:script.id,profileRevision:1}),f.env,admin,{now,fetcher:p.fetcher});assert.equal(r.status,200,await r.clone().text());return r.json()}
