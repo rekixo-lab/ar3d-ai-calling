@@ -1106,8 +1106,18 @@ async function voiceGatewayPanel(main){
   status.textContent=r.gateway?'Shared connection: '+r.gateway.state+' · Flow '+r.gateway.flowId+
    (r.gateway.version?' · '+r.gateway.version:'')+(r.gateway.errorCode?' · '+r.gateway.errorCode:''):
    'Shared connection needs one-time setup · known IDs prefilled';
-  if(r.gateway){bot.value=r.gateway.botId;flow.value=r.gateway.flowId;form.querySelector('button[type=submit]').disabled=true}
-  else if(r.suggestedGateway){bot.value=r.suggestedGateway.botId;flow.value=r.suggestedGateway.flowId;authTemplate.value=r.suggestedGateway.authTemplateBotId}
+  if(r.gateway){
+   bot.value=r.gateway.botId;flow.value=r.gateway.flowId;
+   form.querySelector('button[type=submit]').disabled=true;
+   if(r.gateway.state==='unknown'){
+    status.textContent='SETUP NEEDS REVIEW — Provider may have partial changes. Do NOT retry Prepare, Connect, Verify or test calling. Status: unknown'+(r.gateway.errorCode?' ('+r.gateway.errorCode+')':'')+'.';
+    status.className='note err';
+   }else status.className='note';
+  }else if(r.suggestedGateway){
+   bot.value=r.suggestedGateway.botId;flow.value=r.suggestedGateway.flowId;authTemplate.value=r.suggestedGateway.authTemplateBotId;
+   form.querySelector('button[type=submit]').disabled=false;status.className='note';
+  }
+  return r;
  }
  form.addEventListener('submit',async e=>{
   e.preventDefault();
@@ -1120,16 +1130,31 @@ async function voiceGatewayPanel(main){
     botId:bot.value,flowId:flow.value,authTemplateBotId:authTemplate.value,flowTargetConfirmed:true});
    result.replaceChildren(node('p',{class:'note',text:r.notice}));
    await refresh();
-  }catch(e){asError(e);submit.disabled=false}
+  }catch(e){
+   asError(e);
+   // Re-read the persisted gateway state: provider writes may have partially
+   // succeeded. Never automatically re-run a mutating Exotel request.
+   try{
+    const snapshot=await refresh();
+    if(snapshot.gateway?.state==='unknown')result.replaceChildren(node('p',{class:'err',text:'Provider changes are uncertain. Do not retry gateway setup or calls. Review the saved gateway version and Exotel rollout first.'}));
+   }catch{
+    result.replaceChildren(node('p',{class:'err',text:'Saved gateway state could not be read. Do not retry provider-changing actions until it has been reviewed.'}));
+   }
+   if(!form.querySelector('button[type=submit]').disabled)submit.disabled=false;
+  }
  });
- card.append(form,div('formrow',btn('Inspect gateway contract',async()=>{
+ card.append(form,div('formrow',btn('Refresh saved gateway status (read-only)',async()=>{
+   try{await refresh();notice('Gateway status refreshed; no Exotel changes or calls made.')}catch(e){asError(e)}
+ },true),btn('Inspect gateway contract',async()=>{
    inspectedBotId=null;
    try{
     const r=await api('/v1/human/voice-gateway','POST',{action:'inspect',botId:bot.value});
     if(r.botId!==bot.value||!r.legacyAvailable)throw Error('Exotel bot configuration could not be verified. Do not prepare the gateway.');
     inspectedBotId=bot.value;
-    result.replaceChildren(node('p',{class:'success',text:'Read-only Exotel bot inspection completed. The copied Flow target still needs separate verification in Exotel.'}),
-      node('pre',{class:'note',text:JSON.stringify(r,null,2)}));
+    const advanced=node('details',{},node('summary',{text:'Technical inspection details (advanced)'}));
+    advanced.append(node('pre',{class:'note',text:JSON.stringify(r,null,2)}));
+    result.replaceChildren(node('p',{class:'success',text:'Read-only bot inspection succeeded. Legacy bot contract found: '+(r.legacyAvailable?'yes':'no')+'. Call duration limit: '+(r.callDurationLimit?.seconds??'unknown')+' seconds.'}),
+     node('p',{class:'note',text:'The new bot\'s webhook authentication is '+(r.hookAuthenticationMatchesAr3d?'detected':'not detected yet')+'. This inspection does not verify whether gateway preparation succeeded. Use Refresh saved gateway status.'}),advanced);
    }catch(e){asError(e)}
   },true),btn('Connect authenticated session router',async()=>{try{const r=await api('/v1/human/voice-gateway','POST',{action:'connect',authTemplateBotId:authTemplate.value});result.replaceChildren(node('p',{class:'note',text:r.notice}));await refresh()}catch(e){asError(e)}},true),btn('Verify shared gateway rollout',async()=>{try{const r=await api('/v1/human/voice-gateway','POST',{action:'verify'});result.replaceChildren(node('p',{class:'note',text:r.notice}));await refresh()}catch(e){asError(e)}},true)),result);
  const company=node('select',{class:'field','aria-label':'Gateway test company'});try{const r=await api('/v1/human/tenants');company.append(...r.tenants.filter(t=>['trial','active'].includes(t.status)).map(t=>node('option',{value:t.id,text:t.display_name})))}catch(e){asError(e)}
