@@ -82,7 +82,7 @@ export async function handleCallingCron(controller,env){
   const webhookReceiptsDeleted=await pruneExpiredExotelWebhookReceipts(env,{
     now:timestamp,cron:controller.cron
   });
-  const verifiedTurnsDeleted=await pruneVerifiedVoicebotTurns(env,{now:timestamp});
+  const verifiedTurnsDeleted=env.CRM_DB?.prepare?await pruneVerifiedVoicebotTurns(env,{now:timestamp}):0;
   // Safe numeric counters only; never log event IDs, phones or transcript data.
   console.log('AR3D AI Calling control metadata cleanup: auth_tables='+
     result.tablesChecked+' auth_rows='+result.rowsDeleted+
