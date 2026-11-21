@@ -1,7 +1,7 @@
 import {requireMembership,mutationOriginAllowed} from './human-auth.mjs';
 import {parseJsonBody} from './core.mjs';
 import {defaultScript,validateScript,compileScript} from './calling-script-core.mjs';
-import {scriptProviderConfiguration,stageScript} from './calling-script-provider.mjs';
+import {scriptProviderConfiguration,stageScript,probeScriptProvider} from './calling-script-provider.mjs';
 const BASE='/v1/human/calling-scripts';
 const UUID=/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
 const json=(data,status=200)=>Response.json(data,{status,headers:{'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'}});
@@ -19,8 +19,8 @@ export async function handleCallingScripts(req,env,user,{now=Date.now(),fetcher=
  if(path!==BASE&&!path.startsWith(BASE+'/'))return null;
  const action=path===BASE?'versions':path.slice(BASE.length+1),db=env.CONTROL_DB;
  const fail=(error,status=400)=>json({error},status);
- if(!['versions','binding','stage'].includes(action))return fail('not_found',404);
- if(!['GET','POST'].includes(req.method)||action==='stage'&&req.method!=='POST')return fail('method_not_allowed',405);
+ if(!['versions','binding','stage','probe'].includes(action))return fail('not_found',404);
+ if(!['GET','POST'].includes(req.method)||['stage','probe'].includes(action)&&req.method!=='POST')return fail('method_not_allowed',405);
  if(req.method==='POST'&&!mutationOriginAllowed(req))return fail('same_origin_required',403);
  try{
   const d=req.method==='POST'?await read(req):Object.fromEntries(url.searchParams);
@@ -31,6 +31,10 @@ export async function handleCallingScripts(req,env,user,{now=Date.now(),fetcher=
   else if(!await requireMembership(db,user,d.tenantId,req.method==='POST'))return fail('forbidden',403);
   if(action!=='versions'&&!isAdmin)return fail('super_admin_required',403);
   const tid=d.tenantId,at=new Date(now).toISOString();
+  if(action==='probe'){
+   if(Object.keys(d).some(k=>!['tenantId','botId'].includes(k))||!UUID.test(d.botId||''))return fail('invalid_bot');
+   try{return json(await probeScriptProvider(env,d.botId,{fetcher}))}catch(e){return fail(String(e.message),502)}
+  }
   if(action==='versions'&&req.method==='GET'){
    const rows=await db.prepare('SELECT id,revision,config_json,provider_state AS providerState,provider_version AS providerVersion,error_code AS errorCode,created_at AS createdAt,synced_at AS syncedAt FROM calling_script_versions WHERE tenant_id=? ORDER BY revision DESC LIMIT 50').bind(tid).all();
    return json({versions:rows.results.map(({config_json,...r})=>({...r,config:JSON.parse(config_json)})),defaults:defaultScript(),canEdit:isAdmin||!!await requireMembership(db,user,tid,true),canStage:isAdmin,notice:'Saved scripts require Exotel version sync and a verified rollout before they affect calls.'});

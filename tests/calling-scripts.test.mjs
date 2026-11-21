@@ -3,7 +3,16 @@ import assert from 'node:assert/strict';
 import {fixture,tid,admin,client,now} from './helpers/calling-fixture.mjs';
 import {handleCallingScripts} from '../src/calling-script-routes.mjs';
 import {defaultScript,compileScript} from '../src/calling-script-core.mjs';
+import {scriptProviderConfiguration} from '../src/calling-script-provider.mjs';
 const botId='44444444-4444-4444-8444-444444444444',assistantId='55555555-5555-4555-8555-555555555555';
+test('read-only provider probe tests existing credentials, returns only whitelisted IDs and never mutates',async()=>{const f=fixture();try{
+ let count=0;
+ const fetcher=async(url,init)=>{count++;assert.equal(init.method,'GET');assert.ok(url.endsWith('/voicebots/'+botId));return Response.json({bot_id:botId,version:'v4',assistant_config:{assistant_id:assistantId,version:'v2',secret:'must-not-return'},webhook_token:'must-not-return'})};
+ const result=await call(f,'probe',{botId},admin,'POST',{fetcher});assert.equal(result.status,200);const data=await result.json();assert.equal(data.accessVerified,true);assert.equal(data.assistantCandidates[0].assistantId,assistantId);assert.ok(!JSON.stringify(data).includes('must-not-return'));assert.equal(count,1);
+ assert.equal((await call(f,'probe',{botId},client,'POST',{fetcher})).status,403);assert.equal(count,1);
+ const denied=await call(f,'probe',{botId},admin,'POST',{fetcher:async()=>new Response('denied',{status:403})});assert.equal((await denied.json()).error,'voicebot_management_access_denied');
+ f.env.EXOTEL_VOICEBOT_ACCOUNT_ID='dedicated';assert.equal(scriptProviderConfiguration(f.env).ready,false);assert.equal(scriptProviderConfiguration(f.env).credentialSource,'voicebot_api');
+}finally{f.close()}});
 const call=(f,action='',d={},user=client,method='POST',options={})=>handleCallingScripts(new Request('https://app.example.invalid/v1/human/calling-scripts'+(action?'/'+action:'')+(method==='GET'?'?tenantId='+tid:''),{method,headers:{Origin:'https://app.example.invalid','Content-Type':'application/json'},...(method==='POST'?{body:JSON.stringify({tenantId:tid,...d})}:{})}),f.env,user,{now,...options});
 async function save(f,config=defaultScript(),baseRevision=0){const r=await call(f,'',{config,baseRevision});assert.equal(r.status,201,await r.clone().text());return r.json()}
 async function connect(f){f.env.EXOTEL_VOICEBOT_ACCOUNT_ID='fictional';f.env.EXOTEL_VOICEBOT_API_KEY='secret-key';f.env.EXOTEL_VOICEBOT_API_TOKEN='secret-token';assert.equal((await call(f,'binding',{botId,assistantId,sourceVersion:'v2'},admin)).status,200)}
@@ -25,7 +34,7 @@ test('tenant boundaries, viewer permissions, current admin MFA and same origin e
  assert.equal((await call(f,'',{config:{...defaultScript(),questions:[]},baseRevision:0})).status,400);
 }finally{f.close()}});
 test('missing dedicated credentials makes no provider requests, binding cannot be shared',async()=>{const f=fixture();try{
- const v=await save(f);await call(f,'binding',{botId,assistantId,sourceVersion:'v2'},admin);
+ delete f.env.EXOTEL_API_TOKEN;const v=await save(f);await call(f,'binding',{botId,assistantId,sourceVersion:'v2'},admin);
  let n=0;assert.equal((await call(f,'stage',{id:v.id},admin,'POST',{fetcher:async()=>{n++;throw Error()}})).status,503);assert.equal(n,0);
  f.c.db.prepare("INSERT INTO tenants(id,slug,display_name,plan_code,storage_mode,status,created_at,updated_at) VALUES(?,'other','Other','starter','shared','active','now','now')").run(botId);
  assert.equal((await call(f,'binding',{tenantId:botId,botId,assistantId,sourceVersion:'v2'},admin)).status,409);
