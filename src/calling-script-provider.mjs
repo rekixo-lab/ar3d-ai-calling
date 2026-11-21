@@ -138,7 +138,7 @@ export async function createVerifiedRoutingGuard(env,runtime,prompt,{fetcher=fet
   await onCreated(assistantId);
   const overview=unwrap(await request(env,base+assistantId,opts));
   const seedVersion=overview?.latest_version||overview?.version;
-  if(!/^v[1-9]\\d{0,8}$/.test(seedVersion||'')||
+  if(!/^v[1-9][0-9]{0,8}$/.test(seedVersion||'')||
      (overview.id||overview.assistant_id)!==assistantId)
    throw Error('guard_seed_version_unknown');
   const seed=unwrap(await request(env,base+assistantId+'?version='+seedVersion,opts));
@@ -167,7 +167,7 @@ export async function createVerifiedRoutingGuard(env,runtime,prompt,{fetcher=fet
    data:{agents:[seedConfig.agents[0]]}
   }}));
   const stableVersion=saved?.version||saved?.latest_version;
-  if(!/^v[1-9]\\d{0,8}$/.test(stableVersion||'')||stableVersion===seedVersion)
+  if(!/^v[1-9][0-9]{0,8}$/.test(stableVersion||'')||stableVersion===seedVersion)
    throw Error('guard_seed_version_write_unknown');
   const check=unwrap(await request(env,base+assistantId+'?version='+stableVersion,opts));
   if(check.stable_version!==stableVersion||
