@@ -27,6 +27,8 @@ test('new client account atomically creates shared tenant, contact and one priva
   const d=await r.json();
   assert.equal(d.existingTenant,false);
   assert.equal(d.access,'invitation_pending');
+  assert.equal(d.aiDraftReady,true);
+  assert.equal(d.aiPublished,false);
   assert.match(d.inviteUrl,/^https:\/\/calling\.example\.test\/app#invite=[a-f0-9]{64}$/);
   const company=f.c.db.prepare('SELECT * FROM tenants WHERE id=?').get(d.id);
   assert.equal(company.slug,'north-builder');
@@ -37,6 +39,16 @@ test('new client account atomically creates shared tenant, contact and one priva
   const invite=f.c.db.prepare('SELECT * FROM human_invitations WHERE tenant_id=?').get(d.id);
   assert.equal(invite.role,'client_admin');
   assert.notEqual(invite.token_hash,d.inviteUrl.split('#invite=')[1]);
+  const defaultProfile=f.c.db.prepare('SELECT * FROM company_profile_versions WHERE tenant_id=?').get(d.id);
+  const defaultScript=f.c.db.prepare('SELECT * FROM calling_script_versions WHERE tenant_id=?').get(d.id);
+  assert.equal(defaultProfile.revision,1);
+  assert.equal(JSON.parse(defaultProfile.config_json).companyName,'North Builder');
+  assert.equal(JSON.parse(defaultProfile.config_json).pricing,'');
+  assert.equal(JSON.parse(defaultProfile.config_json).projects,'');
+  assert.equal(JSON.parse(defaultScript.config_json).questions.length,7);
+  assert.equal(defaultScript.provider_state,'draft');
+  assert.equal(f.c.db.prepare('SELECT COUNT(*) AS n FROM calling_agent_publications WHERE tenant_id=?').get(d.id).n,0);
+  assert.equal(f.r.db.prepare('SELECT COUNT(*) AS n FROM calling_jobs WHERE tenant_id=?').get(d.id).n,0);
   assert.equal(f.c.db.prepare('SELECT COUNT(*) AS n FROM human_users WHERE email=?').get(email).n,0);
   assert.equal(f.c.db.prepare('SELECT COUNT(*) AS n FROM tenant_memberships WHERE tenant_id=?').get(d.id).n,0);
   assert.equal(f.c.db.prepare('SELECT COUNT(*) AS n FROM tenant_audit_events WHERE tenant_id=?').get(d.id).n,1);
@@ -56,6 +68,9 @@ test('existing company is reused, never duplicated, when creating first login in
   const d=await r.json();
   assert.equal(d.id,tid);
   assert.equal(d.existingTenant,true);
+  assert.equal(d.aiDraftReady,false);
+  assert.equal(f.c.db.prepare('SELECT COUNT(*) AS n FROM company_profile_versions WHERE tenant_id=?').get(tid).n,0);
+  assert.equal(f.c.db.prepare('SELECT COUNT(*) AS n FROM calling_script_versions WHERE tenant_id=?').get(tid).n,0);
   assert.equal(f.c.db.prepare('SELECT COUNT(*) AS n FROM tenants').get().n,before);
   assert.equal(f.c.db.prepare('SELECT email FROM client_account_contacts WHERE tenant_id=?').get(tid).email,'firstowner@example.test');
  }finally{f.close()}
