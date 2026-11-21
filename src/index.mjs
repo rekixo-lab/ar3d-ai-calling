@@ -1,4 +1,5 @@
 import {handleHumanRequest} from './human-routes.mjs';
+import {handleVoiceGatewaySession} from './voice-gateway-session.mjs';
 import {handleExotelVoicebotWebhookRequest} from './exotel-voicebot-inbound.mjs';
 import {handleCallingCron} from './automatic-auth-maintenance.mjs';
 import {
@@ -167,6 +168,8 @@ export default {
   async fetch(req,env){
     const path=new URL(req.url).pathname;
     if(path==='/health'&&isGet(req))return json({service:'AR3D AI Calling',status:'foundation'});
+    const gatewaySession=await handleVoiceGatewaySession(req,env);
+    if(gatewaySession)return gatewaySession;
     const voicebotWebhook=await handleExotelVoicebotWebhookRequest(req,env);
     if(voicebotWebhook)return voicebotWebhook;
     const humanResponse=await handleHumanRequest(req,env);

@@ -33,6 +33,11 @@ try{
  await page.goto(origin+'/app');await page.getByRole('heading',{name:'Exotel Customer Calling',exact:true}).waitFor();
  await page.getByRole('button',{name:'Download customer Excel template (CSV)',exact:true}).waitFor();
  await page.getByRole('heading',{name:'AI Questions & Answers',exact:true}).waitFor();
+ await page.getByLabel('Company name',{exact:true}).fill('Fictional Builder '+viewport.width);
+ await page.getByRole('button',{name:'Save company information',exact:true}).click();
+ await page.getByText('Company information saved',{exact:true}).waitFor();
+ assert.equal(JSON.parse(f.c.db.prepare('SELECT config_json FROM company_profile_versions WHERE tenant_id=? ORDER BY revision DESC LIMIT 1').get(tid).config_json).companyName,'Fictional Builder '+viewport.width);
+
  await page.locator('[name=scriptName]').fill('Survey '+viewport.width);
  await page.getByLabel('Call questions',{exact:true}).fill('आपका बजट क्या है?\nआप कब विजिट करना चाहते हैं?');
  await page.getByLabel('Conversation rules',{exact:true}).fill('पहले बजट पूछें, फिर सुविधाजनक समय पूछें।');
@@ -71,14 +76,9 @@ try{
   await route.fulfill({contentType:'application/json',body:JSON.stringify(post?{state:'submitted',requestId:'fictional-operator-request'}:{configured:true,mfaEnabled:true,recent:[],voicebotFlowId:'123456',destinationLast4:'0001'})});
  });
  await adminPage.goto(origin+'/app');
+ await adminPage.getByText('Workspace settings',{exact:true}).click();
  await adminPage.getByRole('heading',{name:'Client Calling Setup',exact:true}).waitFor();
  await adminPage.getByRole('heading',{name:'Questions & Conversation Logic',exact:true}).waitFor();
- await adminPage.getByText('Exotel connection',{exact:true}).click();
- await adminPage.getByLabel('Voicebot ID',{exact:true}).fill('44444444-4444-4444-8444-444444444444');
- await adminPage.getByLabel('Dedicated assistant ID',{exact:true}).fill('55555555-5555-4555-8555-555555555555');
- await adminPage.getByLabel('Exact assistant source version',{exact:true}).fill('v2');
- await adminPage.getByRole('button',{name:'Save Exotel script connection',exact:true}).click();
- await adminPage.getByText('Exotel script connection saved.',{exact:true}).waitFor();
 
  await adminPage.getByLabel('Exotel Voicebot Flow ID',{exact:true}).fill('123456');
  await adminPage.getByLabel('Provider approval reference',{exact:true}).fill('browser-reviewed-provider-reference');

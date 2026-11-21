@@ -66,6 +66,7 @@ const server=http.createServer(async(req,res)=>{
         'Set-Cookie':'sandbox_session=; Path=/; HttpOnly; Max-Age=0'
       });
     if(!authenticated)return respond(res,401,{error:'sign in required'});
+    if(req.method==='GET'&&path==='/v1/human/voice-gateway')return respond(res,200,{gateway:null});
     if(req.method==='GET'&&path==='/v1/human/mfa')
       return respond(res,200,{enabled:false,configured:true});
     if(req.method==='GET'&&path==='/v1/human/tenants')
@@ -228,6 +229,7 @@ try{
     await page.getByPlaceholder('Minimum 12 characters').fill(TEST_PASSWORD);
     await page.getByRole('button',{name:'Sign in',exact:true}).click();
     await page.getByRole('heading',{name:'Super Admin',exact:true}).waitFor();
+    await page.getByText('Workspace settings',{exact:true}).click();
     await page.getByText('Engineering tools and diagnostics',{exact:true}).click();
     await page.getByRole('heading',{name:'Production Readiness & Safe AI Calling Pilot'}).waitFor();
     await page.getByRole('heading',{name:'Operator Setup Checklist'}).waitFor();
@@ -246,7 +248,7 @@ try{
     await page.getByText('Missing: EXOTEL_API_TOKEN').waitFor();
     await page.getByRole('button',{name:'Check Exotel Connection (read-only)'}).click();
     await page.getByText('Exotel API: Not verified | Region: not configured (missing) | Real dialing: disabled').waitFor();
-    const nav=page.getByRole('link',{name:'Test AI Conversation'});
+    const nav=page.getByRole('link',{name:'Security',exact:true});
     const signout=page.getByRole('button',{name:'Sign out'});
     await nav.waitFor();await signout.waitFor();
     const navBox=await nav.boundingBox(),logoutBox=await signout.boundingBox();

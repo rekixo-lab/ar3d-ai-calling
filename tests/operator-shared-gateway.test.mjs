@@ -1,0 +1,15 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {fixture,admin,tid,now} from './helpers/calling-fixture.mjs';
+import {setupPublication,publicationProvider,publishForTest} from './helpers/publication-fixture.mjs';
+import {handleExotelOperatorTest} from '../src/exotel-operator-test-routes.mjs';
+const request=data=>new Request('https://app.example.invalid/v1/human/engineering/exotel-self-test',{method:'POST',headers:{Origin:'https://app.example.invalid','Content-Type':'application/json'},body:JSON.stringify(data)});
+test('shared gateway QA keeps the fixed private verified phone and audits one mapped operator call',async()=>{const f=fixture();try{const script=await setupPublication(f),p=publicationProvider();await publishForTest(f,script,p);
+ Object.assign(f.env,{EXOTEL_OPERATOR_TEST_ENABLED:'enabled',EXOTEL_VOICE_AI_FLOW_ID:'999999',EXOTEL_VERIFIED_TEST_NUMBER:'+919000000001'});
+ f.c.db.prepare("UPDATE shared_voice_gateway SET state='staged'").run();let calls=0;
+ const apiFetch=async(input,options)=>{if(input instanceof Request){calls++;const data=new URLSearchParams(await input.text());assert.equal(data.get('From'),f.env.EXOTEL_VERIFIED_TEST_NUMBER);assert.equal(data.get('Url'),'http://my.exotel.com/'+f.env.EXOTEL_ACCOUNT_SID+'/exoml/start_voice/123456');return Response.json({Call:{Sid:'CAgatewayoperatortest',Status:'queued',Direction:'outbound-api',PhoneNumberSid:f.env.EXOTEL_CALLER_ID}})}return p.fetcher(input,options)};
+ const response=await handleExotelOperatorTest(request({confirm:'CALL_MY_VERIFIED_NUMBER_ONCE',publishedTenantId:tid}),f.env,admin,{now,apiFetch});assert.equal(response.status,202,await response.clone().text());const result=await response.json();assert.equal(result.routingRegistered,true);assert.equal(calls,1);
+ const route=f.c.db.prepare('SELECT * FROM voice_call_routes').get();assert.equal(route.tenant_id,tid);assert.equal(route.operator_request_id,result.requestId);assert.equal(route.job_id,null);assert.ok(!JSON.stringify(route).includes('9000000001'));assert.ok(!JSON.stringify(route).includes('CAgatewayoperatortest'));
+ assert.equal(f.c.db.prepare('SELECT state FROM exotel_operator_test_calls').get().state,'submitted');
+ const denied=await handleExotelOperatorTest(request({confirm:'CALL_MY_VERIFIED_NUMBER_ONCE',publishedTenantId:tid,phone:'+919000000002'}),f.env,admin,{now,apiFetch});assert.equal(denied.status,400);assert.equal(calls,1);
+}finally{f.close()}});

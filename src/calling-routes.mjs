@@ -1,6 +1,8 @@
 import {requireMembership,mutationOriginAllowed} from './human-auth.mjs';
 import {resolveCrmDb,parseJsonBody} from './core.mjs';
 import {campaignConfig} from './campaign-dispatch.mjs';
+import {requirePublishedAgent} from './published-agent.mjs';
+import {readSharedGateway} from './shared-voice-gateway.mjs';
 const BASE='/v1/human/calling';
 const UUID=/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
 const json=(data,status=200)=>Response.json(data,{status,headers:{'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'}});
@@ -24,7 +26,7 @@ async function audit(db,tid,user,action,target,at){
  await db.prepare("INSERT INTO crm_audit_events(tenant_id,id,actor,action,target_id,created_at) VALUES(?,?,'human:'||?,?,?,?)")
  .bind(tid,crypto.randomUUID(),user.id,action,target,at).run();
 }
-export async function handleCallingRequest(req,env,user,{now=Date.now()}={}){
+export async function handleCallingRequest(req,env,user,{now=Date.now(),fetcher=fetch}={}){
  const url=new URL(req.url),path=url.pathname;
  if(!path.startsWith(BASE+'/'))return null;
  const action=path.slice(BASE.length+1);
@@ -50,6 +52,10 @@ export async function handleCallingRequest(req,env,user,{now=Date.now()}={}){
    if(Object.keys(d).some(k=>!['tenantId','enabled','flowId','approvalReference','expiresAt','dailyLimit','maxSeconds'].includes(k))||
     typeof d.enabled!=='boolean'||!/^[1-9]\d{0,11}$/.test(d.flowId||'')||!reference(d.approvalReference)||!expiry(d.expiresAt,now)||
     !Number.isInteger(d.dailyLimit)||d.dailyLimit<1||d.dailyLimit>100||!Number.isInteger(d.maxSeconds)||d.maxSeconds<30||d.maxSeconds>600)return fail('invalid_policy');
+   if(d.enabled&&env.EXOTEL_REQUIRE_PUBLISHED_AGENT==='enabled'){
+    const gateway=await readSharedGateway(env);
+    if(!gateway||gateway.state!=='ready'||gateway.flow_id!==d.flowId)return fail('verified_shared_calling_gateway_required',409);
+   }
    await db.batch([
     db.prepare('INSERT INTO calling_policies(tenant_id,enabled,flow_id,approval_reference,expires_at,daily_limit,max_seconds,updated_by,updated_at) VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT(tenant_id) DO UPDATE SET enabled=excluded.enabled,flow_id=excluded.flow_id,approval_reference=excluded.approval_reference,expires_at=excluded.expires_at,daily_limit=excluded.daily_limit,max_seconds=excluded.max_seconds,updated_by=excluded.updated_by,updated_at=excluded.updated_at')
     .bind(tid,Number(d.enabled),d.flowId,d.approvalReference,d.expiresAt,d.dailyLimit,d.maxSeconds,user.id,at),
@@ -94,8 +100,9 @@ export async function handleCallingRequest(req,env,user,{now=Date.now()}={}){
   }
   if(member.status!=='active')return fail('super_admin_must_activate_tenant',409);
   if(!campaignConfig(env).ready)return fail('exotel_customer_campaigns_unconfigured',503);
-  const policy=await db.prepare('SELECT tenant_id FROM calling_policies WHERE tenant_id=? AND enabled=1 AND expires_at>?').bind(tid,at).first();
+  const policy=await db.prepare('SELECT tenant_id,flow_id FROM calling_policies WHERE tenant_id=? AND enabled=1 AND expires_at>?').bind(tid,at).first();
   if(!policy)return fail('super_admin_calling_approval_required',409);
+  try{await requirePublishedAgent(env,tid,policy.flow_id,{fetcher})}catch(e){return fail(e.message,409)}
   const count=await db.prepare('SELECT COUNT(*) AS n FROM call_campaign_candidates WHERE tenant_id=? AND campaign_id=?').bind(tid,d.campaignId).first();
   if(!count||count.n<1||count.n>200)return fail('campaign_requires_1_to_200_customers',409);
   const id=crypto.randomUUID();
