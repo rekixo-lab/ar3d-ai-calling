@@ -487,7 +487,65 @@ async function mfaPanel(main){
     section.append(start);
   }catch(err){asError(err)}
 }
-async function superAdmin(main){const panel=div('card client-directory',title('Subscription Clients'));panel.id='clients-panel';main.append(panel);const list=div('');panel.append(list);async function refresh(){try{const d=await api('/v1/human/tenants');list.replaceChildren(div('cards',...[["Total clients",d.tenants.length,'users'],["Active clients",d.tenants.filter(t=>t.status==='active').length,'phone'],["Team members",d.tenants.reduce((n,t)=>n+Number(t.member_count||0),0),'shield']].map(([label,value,symbol])=>div('card metric',div('metric-symbol',icon(symbol)),node('span',{class:'muted',text:label}),node('strong',{text:String(value)})))),table(['Client','Plan','Storage','Status','Members'],d.tenants.map(t=>[t.display_name,t.plan_code,t.storage_mode,t.status,t.member_count])))}catch(e){asError(e)}}await refresh();const name=input('name','text','Builder company'),slug=input('slug','text','builder-company');const plan=node('select',{class:'field',name:'plan'},['starter','growth','enterprise'].map(p=>node('option',{value:p,text:p})));const mode=node('select',{class:'field'},['shared','dedicated'].map(p=>node('option',{value:p,text:p})));const f=node('form',{class:'formrow'},[lab('Company',name),lab('Slug',slug),lab('Subscription plan',plan),lab('Storage',mode),node('button',{class:'btn',type:'submit',text:'Add client'})]);f.addEventListener('submit',async e=>{e.preventDefault();try{const d=await api('/v1/human/tenants','POST',{displayName:name.value,slug:slug.value,plan:plan.value,storageMode:mode.value});notice('Client created: '+d.slug);f.reset();await refresh();await inviteSection(management)}catch(err){asError(err)}});panel.append(title('Create client','h3'),f);
+async function superAdmin(main){
+ const panel=div('card client-directory',title('Clients'));panel.id='clients-panel';main.append(panel);
+ const list=div('');panel.append(list);
+ let existing=null,tenantRowsAll=[];
+ async function refresh(){
+  try{
+   const d=await api('/v1/human/tenants');tenantRowsAll=d.tenants;
+   list.replaceChildren(
+    div('cards',...[
+      ['Total clients',d.tenants.length,'users'],
+      ['Active clients',d.tenants.filter(t=>t.status==='active').length,'phone'],
+      ['Team members',d.tenants.reduce((n,t)=>n+Number(t.member_count||0),0),'shield']
+    ].map(([label,value,symbol])=>div('card metric',div('metric-symbol',icon(symbol)),node('span',{class:'muted',text:label}),node('strong',{text:String(value)})))),
+    table(['Company','Contact email','Mobile','Status','Members'],d.tenants.map(t=>[t.display_name,t.contact_email||'—',t.contact_mobile||'—',t.status,t.member_count]))
+   );
+   if(existing){
+    const old=existing.value;
+    existing.replaceChildren(node('option',{value:'',text:'New company or automatically match by name'}),
+      ...d.tenants.filter(t=>t.status==='trial'||t.status==='active').map(t=>node('option',{value:t.id,text:t.display_name})));
+    if(d.tenants.some(t=>t.id===old))existing.value=old;
+   }
+  }catch(e){asError(e)}
+ }
+ await refresh();
+ const name=input('company','text','Builder company name');
+ const email=input('contactEmail','email','client@builder.com');
+ const mobile=input('mobile','tel','10-digit Indian mobile');
+ existing=node('select',{class:'field'},[node('option',{value:'',text:'New company or automatically match by name'}),
+  ...tenantRowsAll.filter(t=>t.status==='trial'||t.status==='active').map(t=>node('option',{value:t.id,text:t.display_name}))]);
+ existing.addEventListener('change',()=>{const t=tenantRowsAll.find(t=>t.id===existing.value);if(t)name.value=t.display_name});
+ const advanced=node('details',{},[node('summary',{text:'Link to an existing company instead'}),lab('Existing company',existing)]);
+ const f=node('form',{class:'stack'},[
+  div('formrow',lab('Company name',name),lab('Client email',email),lab('Client mobile',mobile)),
+  advanced,
+  node('button',{class:'btn',type:'submit',text:'Create client invitation'})
+ ]);
+ const inviteResult=div('');
+ f.addEventListener('submit',async e=>{
+  e.preventDefault();
+  const matched=tenantRowsAll.find(t=>t.id===existing.value)||
+   tenantRowsAll.find(t=>t.display_name.toLowerCase()===name.value.trim().toLowerCase());
+  const action=matched?'Link to existing '+matched.display_name:'Create a new company';
+  if(!confirm(action+' and generate a private invitation for '+email.value+'? No email or password will be sent automatically.'))return;
+  const submit=f.querySelector('button[type=submit]');submit.disabled=true;
+  try{
+   const body={displayName:name.value,email:email.value,mobile:mobile.value};
+   if(existing.value)body.tenantId=existing.value;
+   const d=await api('/v1/human/client-accounts','POST',body);
+   inviteResult.replaceChildren(div('banner',
+    node('strong',{text:d.existingTenant?'Existing company linked':'New company created'}),
+    node('p',{text:'Invitation is not sent automatically. Copy this private one-time link and share it only with the intended client. The client chooses their own password.'}),
+    node('input',{class:'field',value:d.inviteUrl,readonly:'readonly','aria-label':'Private client invitation link'})
+   ));
+   notice('Invitation prepared; client account activates after invitation acceptance.');
+   f.reset();await refresh();await refreshAccess();
+  }catch(err){asError(err)}
+  finally{submit.disabled=false}
+ });
+ panel.append(title('Create client access','h3'),f,inviteResult);
 const accessCard=div('card access-card',title('Tenant Access: Suspend / Resume','h3'),
   node('p',{class:'note',text:'Suspension immediately blocks the company CRM and API keys. Resume restores its prior status, not a paid subscription.'}));
 const management=node('details',{class:'card client-directory',id:'client-access'},node('summary',{text:'Client access and invitations'}));main.append(management);management.append(accessCard);
