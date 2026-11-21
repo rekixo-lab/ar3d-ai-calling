@@ -81,7 +81,7 @@ try{
  // Company knowledge and script editing are now Admin-only, under Clients.
  await adminPage.getByRole('heading',{name:'Client Company & AI Setup',exact:true}).waitFor();
  await adminPage.getByRole('heading',{name:'AI Questions & Answers',exact:true}).waitFor();
- await adminPage.getByLabel('Company name',{exact:true}).fill('Fictional Builder');
+ await adminPage.locator('[name=company-companyName]').fill('Fictional Builder');
  await adminPage.getByRole('button',{name:'Save company information',exact:true}).click();
  await adminPage.getByText('Company information saved',{exact:true}).waitFor();
  await adminPage.locator('[name=scriptName]').fill('Admin approved script');
