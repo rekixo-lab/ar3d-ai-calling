@@ -1154,6 +1154,8 @@ async function voiceGatewayPanel(main){
     guard_version_identity_changed:'The selected Guard version identity could not be confirmed.',
     guard_latest_differs_from_stable_stop:'Guard latest and stable versions differ; a Guard version may have been created without being finalized.',
     saved_guard_verified_bot_not_staged:'The recorded Guard now has exactly one verified safe agent, but Shared Voicebot staging did not complete. Do not retry Repair; a separately reviewed continuation is needed.',
+    paused_candidate_verified_but_gateway_locked_stop:'A PAUSED Shared Voicebot candidate and its Guard appear correct by read-only checks. Gateway remains LOCKED. Do not retry or roll out; audited manual reconciliation is required.',
+    paused_candidate_guard_unverified_stop:'A paused Shared Voicebot candidate exists, but its Guard binding or safety contract is NOT verified. Do not retry or roll out.',
     guard_still_has_zero_agents:'The exact version reports zero agents. Do not retry.',
     guard_zero_agents_confirmed_multiple_reads:'The Guard has version v3 but multiple Exotel read-only views report zero agents. The previous write did not leave a verifiable agent. Do not retry.',
     guard_agent_presence_not_confirmed:'Exotel returned an empty selected agent list, but other version views did not confirm the agent count. Do not retry.',
@@ -1181,6 +1183,9 @@ async function voiceGatewayPanel(main){
      ['Shared Voicebot stable version',d.sharedVoicebot?.stableVersion||'Unknown'],
      ['Shared Voicebot latest version',d.sharedVoicebot?.latestVersion||'Unknown'],
      ['Shared Voicebot unchanged at 100% stable',val(d.sharedVoicebot?.unchangedAndPaused)],
+     ['Shared Voicebot stable traffic preserved',val(d.sharedVoicebot?.stableTrafficPreserved)],
+     ['Paused Bot candidate exists',val(d.sharedVoicebot?.pausedCandidatePresent)],
+     ['Paused candidate references verified Guard',val(d.sharedVoicebot?.pausedCandidateReferencesGuard)],
      ['Any provider writes authorized', 'No']
     ]),
     node('p',{class:'note',text:'This inspection NEVER retries an Exotel write, calls a customer, unlocks the gateway or authorizes staging/rollout. Save this report for review.'})
@@ -1278,7 +1283,7 @@ async function voiceGatewayPanel(main){
   if(!repairable)repairReady=false;
   previewButton.disabled=!repairable;
   repairButton.disabled=!(repairable&&repairReady);
-  reconcileButton.disabled=!(r.gateway?.state==='unknown'&&['guard_repair_unknown','guard_agent_fix_unknown'].includes(r.gateway.errorCode));
+  reconcileButton.disabled=!(r.gateway?.state==='unknown'&&['guard_repair_unknown','guard_agent_fix_unknown','bot_agent_fix_unknown'].includes(r.gateway.errorCode));
   agentOnlyButton.disabled=!(r.gateway?.state==='unknown'&&r.gateway.errorCode==='guard_repair_unknown');
   const unsafe=['Connect authenticated session router','Verify shared gateway rollout',
    'Test published client on my verified phone'];
