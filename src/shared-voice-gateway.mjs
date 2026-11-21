@@ -581,7 +581,7 @@ export async function prepareSharedGateway(env,{botId,flowId,authTemplateBotId,a
  try{
   const runtime={template_assistant_id:templateId,template_version:templateVersion};
   const guard=await createVerifiedRoutingGuard(env,runtime,GUARD_PROMPT,{fetcher,onCreated:async id=>{await db.prepare('UPDATE shared_voice_gateway SET guard_assistant_id=? WHERE id=1').bind(id).run()}});
-  const assistant_config={...bot.assistant_config,id:guard.assistantId,version:null};delete assistant_config.assistant_id;delete assistant_config.assistant_version;
+  const assistant_config={...bot.assistant_config,id:guard.assistantId,version:guard.version};delete assistant_config.assistant_id;delete assistant_config.assistant_version;
   const result=unwrapVoicebot(await voicebotRequest(env,'/voicebots/'+botId+'/versions',{...options,method:'POST',body:{
    source_version:stable,mark_as_stable:'false',
    version_description:'Paused AR3D shared gateway; no live calls',
