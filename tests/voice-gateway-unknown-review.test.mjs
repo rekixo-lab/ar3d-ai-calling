@@ -29,7 +29,7 @@ test('unknown gateway review reads provider versions without any Exotel or D1 mu
    if(u.pathname.includes('/assistants/')){
     const prompt='You are the AR3D call routing guard. Client context is unavailable. Say in Hindi that the connection could not be loaded and politely end. Do not discuss company, project, pricing or customer information. Never ask survey questions.';
     return Response.json({response:v==='v2'
-     ?{id:guard,version:'v2',stable_version:'v2',agents:[{instruction:prompt}],credentials:'never-leak-secret'}
+     ?{id:guard,version:'v2',stable_version:'v2',instruction:prompt,agents:[{instruction:prompt}],credentials:'never-leak-secret'}
      :{id:guard,latest_version:'v2',stable_version:'v2',credentials:'never-leak-secret'}});
    }
    const result=v==='v3'?{id:bot,version:'v3',assistant_config:{id:guard},credentials:'never-leak-secret'}:
@@ -50,6 +50,10 @@ test('unknown gateway review reads provider versions without any Exotel or D1 mu
   assert.equal(d.guardAssistantReadable,true);
   assert.equal(d.guardAssistantStableVersion,'v2');
   assert.equal(d.guardAssistantFinalized,true);
+  assert.equal(d.guardVersionContract.responseRootAgentCount,'one');
+  assert.equal(d.guardVersionContract.responseSelectedAgentCount,'one');
+  assert.equal(d.guardVersionContract.rootInstructionMatchesGuard,true);
+  assert.equal(d.guardVersionContract.agentInstructionMatchesGuard,true);
   assert.equal(d.gatewayVersionRecorded,null);
   assert.equal(d.latestVersion,'v3');assert.equal(d.stableVersion,'v2');
   assert.equal(d.providerReadable,true);
@@ -107,12 +111,48 @@ test('guard read-only inspection reports version-field mismatch without exposing
   assert.equal(d.guardAssistantFinalized,null);
   assert.equal(d.guardAssistantReadError,'guard_version_not_confirmed');
   assert.equal(d.guardVersionContract.responseHasRootAgents,true);
+  assert.equal(d.guardVersionContract.responseRootAgentCount,'one');
+  assert.equal(d.guardVersionContract.responseSelectedAgentCount,'absent');
+  assert.equal(d.guardVersionContract.rootInstructionMatchesGuard,null);
+  assert.equal(d.guardVersionContract.agentInstructionMatchesGuard,null);
   assert.equal(d.guardVersionContract.responseHasVersionedAgents,false);
   assert.equal(d.guardVersionContract.responseVersionMatchesRequested,false);
   assert.equal(d.guardVersionContract.responseLatestMatchesRequested,false);
   assert.equal(d.guardVersionContract.responseStableMatchesRequested,true);
   assert.ok(!serialized.includes('sensitive guard instructions'));
   assert.equal(d.savedState,'unknown');assert.equal(mutations,0);assert.equal(reads,4);
+  assert.equal(f.c.db.prepare('SELECT state FROM shared_voice_gateway WHERE id=1').get().state,'unknown');
+ }finally{f.close()}
+});
+
+test('stable v2 with a root agents field but zero agents is not finalized or misclassified as a version-label failure',async()=>{
+ const f=fixture();try{
+  unknown(f);let reads=0,writes=0;
+  const fetcher=async(url,init)=>{
+   reads++;if(init.method!=='GET')writes++;
+   const u=new URL(url),v=u.searchParams.get('version');
+   if(u.pathname.includes('/assistants/'))return Response.json({response:v==='v2'
+    ?{id:guard,stable_version:'v2',latest_version:'v2',instruction:'unverified secret',agents:[]}
+    :{id:guard,stable_version:'v2',latest_version:'v2'}});
+   return Response.json({response:v
+    ?{id:bot,version:'v2',assistant_config:{id:template}}
+    :{id:bot,stable_version:'v2',latest_version:'v2'}});
+  };
+  const res=await handleVoiceGatewayRequest(req(),f.env,admin,{now,fetcher});
+  assert.equal(res.status,200);
+  const raw=await res.text(),d=JSON.parse(raw);
+  assert.equal(d.guardAssistantFinalized,null);
+  assert.equal(d.guardAssistantReadError,'guard_version_not_confirmed');
+  assert.equal(d.guardVersionContract.responseHasRootAgents,true);
+  assert.equal(d.guardVersionContract.responseRootAgentCount,'zero');
+  assert.equal(d.guardVersionContract.responseSelectedAgentCount,'zero');
+  assert.equal(d.guardVersionContract.rootInstructionMatchesGuard,false);
+  assert.equal(d.guardVersionContract.agentInstructionMatchesGuard,null);
+  assert.equal(d.guardVersionContract.responseVersionMatchesRequested,false);
+  assert.equal(d.guardVersionContract.responseLatestMatchesRequested,true);
+  assert.equal(d.guardVersionContract.responseStableMatchesRequested,true);
+  assert.ok(!raw.includes('unverified secret'));
+  assert.equal(reads,4);assert.equal(writes,0);
   assert.equal(f.c.db.prepare('SELECT state FROM shared_voice_gateway WHERE id=1').get().state,'unknown');
  }finally{f.close()}
 });
