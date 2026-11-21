@@ -3,6 +3,7 @@ import {handleVoiceGatewayRequest} from './voice-gateway-routes.mjs';
 import {handleClientAccountRequest} from './client-account-routes.mjs';
 import {enrichAdminTenantsWithUsage} from './admin-usage.mjs';
 import {handleCompanyProfile} from './company-profile.mjs';
+import {handleCompanyChangeRequests} from './company-change-requests.mjs';
 import {handleCallingScripts} from './calling-script-routes.mjs';
 import {handleCrmRequest} from './crm-routes.mjs';
 import {handlePropertyQualificationRequest} from './property-qualification-routes.mjs';
@@ -254,6 +255,8 @@ export async function handleHumanRequest(req,env){
     if(gateway)return gateway;
     const profile=await handleCompanyProfile(req,env,user);
     if(profile)return profile;
+    const changes=await handleCompanyChangeRequests(req,env,user);
+    if(changes)return changes;
     const scripts=await handleCallingScripts(req,env,user);
     if(scripts)return scripts;
     const calling=await handleCallingRequest(req,env,user);
