@@ -461,6 +461,7 @@ function dashboard(){
   main.append(guide);
   api('/v1/human/voice-gateway').then(r=>{
    status.textContent=r.gateway?.state==='ready'?'Shared Gateway ready. Review AI publication and calling approvals.'
+    :r.gateway?.state==='unknown'?'Shared Gateway setup failed with uncertain provider changes. Open Calling Setup → Review failed setup (read-only). Do NOT retry.'
     :r.gateway?'Shared Gateway: '+r.gateway.state+'. Finish verification before client calls.'
     :'Next: Exotel Flow saved. Open Shared Gateway, then click Inspect gateway contract. No calls yet.';
   }).catch(()=>{status.textContent='Shared Gateway status unavailable. Check it before calling.'});
@@ -1101,6 +1102,29 @@ async function voiceGatewayPanel(main){
   lab('I verified in Exotel that the copied Flow targets this shared Voicebot',flowConfirmed),
   node('button',{class:'btn',type:'submit',text:'Prepare shared calling connection'})
  ]);
+ const reviewButton=btn('Review failed setup (read-only)',async()=>{
+  reviewButton.disabled=true;
+  try{
+   const d=await api('/v1/human/voice-gateway','POST',{action:'review'});
+   const flag=v=>v===true?'Yes':v===false?'No':'Not confirmed';
+   result.replaceChildren(
+    node('p',{class:'note',text:'Only read-only Exotel checks were performed. This report does not authorize rollout, retries, or live calling.'}),
+    table(['Check','Result'],[
+     ['Saved status',d.savedState],
+     ['AR3D guard assistant recorded',flag(d.guardAssistantRecorded)],
+     ['Gateway version recorded',d.gatewayVersionRecorded||'No'],
+     ['Exotel read succeeded',flag(d.providerReadable)],
+     ['Exotel latest version',d.latestVersion||'Unknown'],
+     ['Exotel stable version',d.stableVersion||'Unknown'],
+     ['Latest version matches AR3D guard',flag(d.latestVersionUsesRecordedGuard)],
+     ['Stable version matches AR3D guard',flag(d.stableVersionUsesRecordedGuard)]
+    ]),
+    node('p',{class:'err',text:'STOP: '+d.recommendation+
+     (d.providerError?' Provider check: '+d.providerError:'')}
+    ));
+  }catch(e){asError(e)}
+  finally{await refresh().catch(asError)}
+ },true);reviewButton.disabled=true;
  async function refresh(){
   const r=await api('/v1/human/voice-gateway');
   status.textContent=r.gateway?'Shared connection: '+r.gateway.state+' · Flow '+r.gateway.flowId+
@@ -1108,6 +1132,7 @@ async function voiceGatewayPanel(main){
    'Shared connection needs one-time setup · known IDs prefilled';
   if(r.gateway){
    bot.value=r.gateway.botId;flow.value=r.gateway.flowId;
+   if(r.knownAuthTemplateBotId)authTemplate.value=r.knownAuthTemplateBotId;
    form.querySelector('button[type=submit]').disabled=true;
    if(r.gateway.state==='unknown'){
     status.textContent='SETUP NEEDS REVIEW — Provider may have partial changes. Do NOT retry Prepare, Connect, Verify or test calling. Status: unknown'+(r.gateway.errorCode?' ('+r.gateway.errorCode+')':'')+'.';
@@ -1117,6 +1142,11 @@ async function voiceGatewayPanel(main){
    bot.value=r.suggestedGateway.botId;flow.value=r.suggestedGateway.flowId;authTemplate.value=r.suggestedGateway.authTemplateBotId;
    form.querySelector('button[type=submit]').disabled=false;status.className='note';
   }
+  reviewButton.disabled=r.gateway?.state!=='unknown';
+  const unsafe=['Connect authenticated session router','Verify shared gateway rollout',
+   'Test published client on my verified phone'];
+  for(const button of card.querySelectorAll('button'))
+   if(unsafe.includes(button.textContent.trim()))button.disabled=r.gateway?.state==='unknown';
   return r;
  }
  form.addEventListener('submit',async e=>{
@@ -1145,7 +1175,7 @@ async function voiceGatewayPanel(main){
  });
  card.append(form,div('formrow',btn('Refresh saved gateway status (read-only)',async()=>{
    try{await refresh();notice('Gateway status refreshed; no Exotel changes or calls made.')}catch(e){asError(e)}
- },true),btn('Inspect gateway contract',async()=>{
+ },true),reviewButton,btn('Inspect gateway contract',async()=>{
    inspectedBotId=null;
    try{
     const r=await api('/v1/human/voice-gateway','POST',{action:'inspect',botId:bot.value});
