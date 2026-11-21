@@ -1,5 +1,5 @@
 import {mutationOriginAllowed} from './human-auth.mjs';
-import {readSharedGateway,inspectGatewayConfiguration,prepareSharedGateway,verifySharedGatewayLive} from './shared-voice-gateway.mjs';
+import {readSharedGateway,inspectGatewayConfiguration,prepareSharedGateway,verifySharedGatewayLive,connectSharedGatewayRouter} from './shared-voice-gateway.mjs';
 const path='/v1/human/voice-gateway';
 const json=(d,s=200)=>Response.json(d,{status:s,headers:{'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'}});
 export async function handleVoiceGatewayRequest(req,env,user,{now=Date.now(),fetcher=fetch}={}){
@@ -16,6 +16,7 @@ export async function handleVoiceGatewayRequest(req,env,user,{now=Date.now(),fet
   const d=JSON.parse(raw);if(!d||typeof d!=='object'||Array.isArray(d))return json({error:'invalid_request'},400);
   if(d.action==='inspect'&&Object.keys(d).sort().join(',')==='action,botId')return json(await inspectGatewayConfiguration(env,d.botId,{fetcher}));
   if(d.action==='configure'&&Object.keys(d).sort().join(',')==='action,authTemplateBotId,botId,flowId')return json(await prepareSharedGateway(env,{...d,actorId:user.id,now},{fetcher}));
+  if(d.action==='connect'&&Object.keys(d).sort().join(',')==='action,authTemplateBotId')return json(await connectSharedGatewayRouter(env,{authTemplateBotId:d.authTemplateBotId,actorId:user.id,now},{fetcher}));
   if(d.action==='verify'&&Object.keys(d).length===1){await verifySharedGatewayLive(env,runtime,{fetcher});return json({rolloutVerified:true,routingVerified:runtime.state==='ready',notice:runtime.state==='ready'?'Shared client calling connection verified.':'Provider rollout verified. One authenticated verified-phone routing test is still required.'})}
   return json({error:'invalid_request'},400);
  }catch(e){return json({error:/^[a-z0-9_]+$/.test(e.message)?e.message:'gateway_unavailable'},503)}

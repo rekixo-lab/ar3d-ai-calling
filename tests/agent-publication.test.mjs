@@ -5,7 +5,7 @@ import {handleCallingScripts} from '../src/calling-script-routes.mjs';
 import {requirePublishedAgent} from '../src/published-agent.mjs';
 import {gatewayBot,setupPublication,publicationProvider,publishForTest,publicationRequest} from './helpers/publication-fixture.mjs';
 test('client publishes isolated immutable assistant without per-client bot or flow setup',async()=>{const f=fixture();try{const s=await setupPublication(f),p=publicationProvider();
- await publishForTest(f,s,p);const row=f.c.db.prepare('SELECT * FROM calling_agent_publications').get();assert.equal(row.provider_state,'ready');assert.equal(row.provider_version,'v1');assert.ok(row.provider_assistant_id);assert.equal(row.provider_bot_id,gatewayBot);
+ await publishForTest(f,s,p);const row=f.c.db.prepare('SELECT * FROM calling_agent_publications').get();assert.equal(row.provider_state,'ready');assert.equal(row.provider_version,'v2');assert.ok(row.provider_assistant_id);assert.equal(row.provider_bot_id,gatewayBot);
  assert.equal(f.c.db.prepare('SELECT COUNT(*) AS n FROM calling_script_bindings').get().n,0);assert.equal(p.posts,1);
  await publishForTest(f,s,p);assert.equal(p.posts,1);
  assert.ok((await requirePublishedAgent(f.env,tid,'123456',{fetcher:p.fetcher})).publication);

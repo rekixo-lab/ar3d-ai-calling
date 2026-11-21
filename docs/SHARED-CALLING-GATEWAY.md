@@ -31,3 +31,14 @@ redials. Gateway tests use only the privately configured verified operator numbe
 Conversation-result persistence and the simplified account/reporting interface
 are separate application workflow changes; this connection alone does not claim
 that customer transcripts or structured answers have been stored in CRM.
+
+## Exotel configuration compatibility
+
+Versioned reads expose hook names but omit HTTP action details. The one-time
+setup therefore rolls out the generic routing guard through the version API,
+then installs the authenticated Session Start, transcript and session-end actions
+using Exotel's documented legacy GET/full-config-merge/PUT contract. Authentication
+is retained server-side from the already-owned AR3D webhook action. Unrelated HTTP
+actions are not copied. The gateway enforces a 120-second initial test limit.
+
+Reference: [Exotel's official configuration tool](https://github.com/exotel/ExotelMCP/blob/main/src/main/java/com/example/mcp_api/service/VoiceBotAdminTools.java).

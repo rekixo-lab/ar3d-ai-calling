@@ -70,7 +70,7 @@ export {request as voicebotRequest,unwrap as unwrapVoicebot,versionConfig as ass
 export async function createIsolatedPublishedAssistant(env,runtime,prompt,name,{fetcher=fetch,onCreated=async()=>{}}={}){
  const options={fetcher};
  const source=versionConfig(unwrap(await request(env,'/assistants/'+runtime.template_assistant_id+'?version='+runtime.template_version,options)),runtime.template_version);
- if(!source||source.agents?.length!==1||[source.tools,source.mcp_servers,source.agents[0].tools,source.agents[0].sub_agents].some(x=>x!=null&&(typeof x!=='object'||Object.keys(x).length>0)))throw Error('gateway_template_requires_single_agent_without_tools');
+ if(!source||source.agents?.length!==1||[source.tools,source.mcp_servers,source.agents[0].tools,source.agents[0].mcp_tools,source.agents[0].sub_agents].some(x=>x!=null&&(typeof x!=='object'||Object.keys(x).length>0)))throw Error('gateway_template_requires_single_agent_without_tools');
  const agent={...source.agents[0],id:crypto.randomUUID(),name:'Property enquiry assistant',description:'Dedicated client property enquiry',instruction:prompt};
  let wrote=false,creationAcknowledged=false;
  try{
@@ -82,14 +82,16 @@ export async function createIsolatedPublishedAssistant(env,runtime,prompt,name,{
   await onCreated(id);
   let saved=unwrap(await request(env,'/assistants/'+id,options)),version=saved.latest_version||saved.version;
   if(!/^v[1-9]\d{0,8}$/.test(version||''))throw Error();
-  if(saved.stable_version!==version){
-   const stable=unwrap(await request(env,'/assistants/'+id+'/versions',{...options,method:'POST',body:{source_version:version,mark_as_stable:'true',version_description:'Immutable AR3D company publication',data:{agents:[agent]}}}));
-   version=stable.version||stable.latest_version;
-   if(!/^v[1-9]\d{0,8}$/.test(version||''))throw Error();
-  }
+  // Pin both the supervisor and agent model from the working template rather
+  // than letting the create endpoint choose a different default model.
+  const stable=unwrap(await request(env,'/assistants/'+id+'/versions',{...options,method:'POST',body:{source_version:version,mark_as_stable:'true',version_description:'Immutable AR3D company publication',data:{instruction:prompt,llm_config:source.llm_config,intent_detection_config:source.intent_detection_config,agents:[agent]}}}));
+  version=stable.version||stable.latest_version;
+  if(!/^v[1-9]\d{0,8}$/.test(version||''))throw Error();
   saved=unwrap(await request(env,'/assistants/'+id+'?version='+version,options));
   const config=versionConfig(saved,version);
   if((saved.id||saved.assistant_id)!==id||saved.stable_version!==version||config?.agents?.length!==1||config.agents[0].instruction!==prompt)throw Error();
+  if(source.llm_config?.model_id&&saved.llm_config?.model_id!==source.llm_config.model_id)throw Error();
+  if(source.agents[0].llm_config?.model_id&&config.agents[0].llm_config?.model_id!==source.agents[0].llm_config.model_id)throw Error();
   return {assistantId:id,version};
  }catch(e){if(wrote&&!(creationAcknowledged===false&&(/^(?:provider_http_(?:400|401|403|404|422|429)|voicebot_management_access_denied)$/.test(e.message))))throw Error('provider_write_unknown');throw e}
 }

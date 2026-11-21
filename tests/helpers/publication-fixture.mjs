@@ -22,12 +22,12 @@ export function publicationProvider({uncertain=false,mismatch=false,unstableCrea
    posts++;const body=JSON.parse(init.body);assert.equal(body.agents.length,1);assert.deepEqual(body.agents[0].tools,[]);assert.match(body.instruction,/Demo Heights/);assert.match(body.instruction,/20 lakh onwards/);assert.match(body.instruction,/जी हाँ/);
    if(uncertain)throw Error('private-provider-token');const id=crypto.randomUUID();assistants.set(id,{prompt:body.instruction,version:'v1',stable:unstableCreate?null:'v1'});return Response.json({response:{id,latest_version:'v1'}});
   }
-  if(url.includes('/assistants/'+templateAssistant))return Response.json({response:{id:templateAssistant,latest_version:'v1',stable_version:'v1',agents:[{id:'template',tools:[],instruction:'template',llm_config:{model:'trusted-existing-model'}}]}});
+  if(url.includes('/assistants/'+templateAssistant))return Response.json({response:{id:templateAssistant,latest_version:'v1',stable_version:'v1',llm_config:{model_id:'trusted-google-model'},agents:[{id:'template',tools:[],instruction:'template',llm_config:{model:'trusted-existing-model',model_id:'trusted-google-model'}}]}});
   const id=url.match(/\/assistants\/([^/?]+)/)?.[1],a=assistants.get(id);assert.ok(a,'unknown assistant requested');
   if(init.method==='POST'){
-   const body=JSON.parse(init.body);assert.equal(body.mark_as_stable,'true');assert.equal(body.source_version,'v1');a.version='v2';a.stable='v2';return Response.json({response:{latest_version:'v2'}});
+   const body=JSON.parse(init.body);assert.equal(body.mark_as_stable,'true');assert.equal(body.source_version,'v1');assert.equal(body.data.llm_config.model_id,'trusted-google-model');assert.equal(body.data.agents[0].llm_config.model_id,'trusted-google-model');a.version='v2';a.stable='v2';a.llm=body.data.llm_config;return Response.json({response:{latest_version:'v2'}});
   }
-  return Response.json({response:{id,latest_version:a.version,stable_version:a.stable,agents:[{id:'published',tools:[],instruction:mismatch?'wrong prompt':a.prompt}]}});
+  return Response.json({response:{id,latest_version:a.version,stable_version:a.stable,llm_config:a.llm,agents:[{id:'published',tools:[],llm_config:a.llm,instruction:mismatch?'wrong prompt':a.prompt}]}});
  }};
 }
 export async function publishForTest(f,script,p){const r=await handleCallingScripts(publicationRequest('publish',{id:script.id,profileRevision:1}),f.env,client,{now,fetcher:p.fetcher});assert.equal(r.status,200,await r.clone().text());return r.json()}
