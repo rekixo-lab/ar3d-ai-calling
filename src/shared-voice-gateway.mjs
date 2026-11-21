@@ -202,7 +202,7 @@ export async function previewUnknownSharedGatewayRecovery(env,runtime,{fetcher=f
  * Never return full prompts, agent configs, credentials, or resource IDs.
  */
 export async function inspectUnknownGuardRepair(env,runtime,{fetcher=fetch}={}){
- if(!runtime||runtime.state!=='unknown'||runtime.error_code!=='guard_repair_unknown'||
+ if(!runtime||runtime.state!=='unknown'||!['guard_repair_unknown','guard_agent_fix_unknown'].includes(runtime.error_code)||
     !uuid(runtime.guard_assistant_id)||!uuid(runtime.bot_id)||
     !uuid(runtime.template_assistant_id)||runtime.gateway_version!=null)
   throw Error('guard_repair_review_requires_uncertain_state');
@@ -287,6 +287,142 @@ export async function inspectUnknownGuardRepair(env,runtime,{fetcher=fetch}={}){
    guard:{stableVersion:stable,latestVersion:latest,
     latest:latestReport,stable:stableReport,evidence}};
  }catch{return blocked('provider_read_failed_stop')}
+}
+
+
+/*
+ * One-shot recovery for the documented Exotel incident:
+ * guard v3 stable/latest, but its exact version, version map and stable alias
+ * all contain ZERO agents. The first repair copied a synthetic agent id and
+ * sent numerous root fields; Exotel created v3 but stored no agent.
+ *
+ * Exotel's public MCP update-prompt implementation sends data.agents alone.
+ * This alternative deliberately uses a NEW minimal child-agent payload (no id,
+ * tools or business data). It is NOT automatically executed. A current MFA
+ * Super Admin must confirm a single try, after the provider is re-read. On any
+ * uncertain result the D1 lock permanently moves to an unretriable error.
+ * No existing stable Voicebot version, old bot, active traffic or call changes.
+ */
+export async function previewGuardAgentOnlyFix(env,runtime,{fetcher=fetch}={}){
+ const blocked=reason=>({eligible:false,reason});
+ if(!runtime||runtime.state!=='unknown'||runtime.error_code!=='guard_repair_unknown'||
+    runtime.bot_id!=='66cbf4f6-a52d-4df0-abf0-db5e3b365836'||
+    runtime.flow_id!=='1393135'||runtime.gateway_version!=null||
+    !uuid(runtime.guard_assistant_id)||!uuid(runtime.template_assistant_id)||
+    !version(runtime.template_version))return blocked('saved_guard_not_eligible');
+ const review=await inspectUnknownGuardRepair(env,runtime,{fetcher});
+ if(review.outcome!=='guard_zero_agents_confirmed_multiple_reads'||
+    review.guard?.stableVersion!=='v3'||review.guard?.latestVersion!=='v3'||
+    !review.sharedVoicebot?.unchangedAndPaused||
+    review.guard.stable?.rootInstructionMatches!==true||
+    review.guard.evidence?.responseShapeConflict!==false)
+  return blocked('guard_provider_state_not_certified');
+ try{
+  const source=unwrapVoicebot(await voicebotRequest(env,
+   '/assistants/'+runtime.template_assistant_id+'?version='+runtime.template_version,{fetcher}));
+  const config=assistantVersionConfig(source,runtime.template_version);
+  const empty=x=>x==null||(typeof x==='object'&&Object.keys(x).length===0);
+  if((source.id||source.assistant_id)!==runtime.template_assistant_id||
+     !config||!Array.isArray(config.agents)||config.agents.length!==1||
+     !config.agents[0]||typeof config.agents[0]!=='object'||
+     ![config.tools,config.mcp_servers,config.agents[0].tools,
+       config.agents[0].mcp_tools,config.agents[0].sub_agents].every(empty))
+   return blocked('safe_source_agent_unavailable');
+  // Model must be explicitly known from the working source, never a
+  // Voicebot provider default that could differ from the tested model.
+  const model=config.agents[0].llm_config||config.llm_config;
+  if(!model||typeof model!=='object'||typeof model.model_id!=='string'||!model.model_id.trim())
+   return blocked('safe_source_model_unavailable');
+  return {eligible:true,reason:'one_verified_agent_only_version_attempt',
+   sourceGuardVersion:'v3',sharedBotVersion:review.sharedVoicebot.stableVersion,
+   operation:'one_guard_agent_only_version_then_paused_bot_candidate',
+   noCalls:true,noTrafficChange:true};
+ }catch{return blocked('source_provider_read_unavailable')}
+}
+export async function fixGuardAgentOnlyOnce(env,{actorId,now=Date.now()},{fetcher=fetch}={}){
+ const db=env.CONTROL_DB,r=await readSharedGateway(env);
+ const initial=await previewGuardAgentOnlyFix(env,r,{fetcher});
+ if(!initial.eligible)throw Error('guard_agent_only_fix_preflight_blocked');
+ const botPath='/voicebots/'+r.bot_id,guardPath='/assistants/'+r.guard_assistant_id,opts={fetcher};
+ const sourceBot=unwrapVoicebot(await voicebotRequest(env,botPath+'?version='+initial.sharedBotVersion,opts));
+ if((sourceBot.id||sourceBot.bot_id)!==r.bot_id||
+    (sourceBot.assistant_config?.id||sourceBot.assistant_config?.assistant_id)!==r.template_assistant_id)
+  throw Error('guard_agent_only_fix_preflight_blocked');
+ const raw=unwrapVoicebot(await voicebotRequest(env,
+  '/assistants/'+r.template_assistant_id+'?version='+r.template_version,opts));
+ const config=assistantVersionConfig(raw,r.template_version);
+ const model=config?.agents?.[0]?.llm_config||config?.llm_config;
+ if((raw.id||raw.assistant_id)!==r.template_assistant_id||
+    !model||typeof model.model_id!=='string'||!model.model_id.trim())
+  throw Error('guard_agent_only_fix_preflight_blocked');
+ const at=new Date(now).toISOString();
+ const lock=await db.prepare("UPDATE shared_voice_gateway SET error_code='guard_agent_fix_in_progress',updated_by=?,updated_at=? WHERE id=1 AND state='unknown' AND error_code='guard_repair_unknown' AND guard_assistant_id=? AND gateway_version IS NULL")
+  .bind(actorId,at,r.guard_assistant_id).run();
+ if(lock.meta.changes!==1)throw Error('guard_agent_only_fix_already_started');
+ let phase='guard_agent_version_write';
+ try{
+  const agent={name:'AR3D routing fallback',description:'Guard only; no tenant data or tools',
+   instruction:GUARD_PROMPT,llm_config:model};
+  // Exact minimal field shape used by ExotelMCP update-prompt example:
+  // data.agents only, without a synthetic agent id or copied tenant data.
+  const posted=unwrapVoicebot(await voicebotRequest(env,guardPath+'/versions',{
+   ...opts,method:'POST',body:{source_version:initial.sourceGuardVersion,
+    mark_as_stable:'true',
+    version_description:'Single safe AR3D routing guard agent, no client data',
+    data:{agents:[agent]}}}));
+  const approved=posted.version||posted.latest_version;
+  if(!version(approved)||approved===initial.sourceGuardVersion)
+   throw Error('guard_agent_only_version_unknown');
+  phase='guard_agent_version_verify';
+  const check=unwrapVoicebot(await voicebotRequest(env,guardPath+'?version='+approved,opts));
+  if(!validRoutingGuard(check,r.guard_assistant_id,approved))
+   throw Error('guard_agent_only_version_unverified');
+  const selected=assistantVersionConfig(check,approved)?.agents?.[0];
+  if(model.model_id&&selected?.llm_config?.model_id!==model.model_id)
+   throw Error('guard_agent_only_model_mismatch');
+  const current=unwrapVoicebot(await voicebotRequest(env,botPath,opts));
+  if((current.id||current.bot_id)!==r.bot_id||
+     current.stable_version!==initial.sharedBotVersion||
+     current.latest_version!==initial.sharedBotVersion||
+     current.traffic_allocation?.[initial.sharedBotVersion]!==100||
+     Object.entries(current.traffic_allocation||{}).some(([v,n])=>v!==initial.sharedBotVersion&&Number(n)>0))
+   throw Error('shared_bot_changed_after_guard_fix');
+  phase='paused_bot_version_write';
+  const assistantConfig={...sourceBot.assistant_config,id:r.guard_assistant_id,version:approved};
+  delete assistantConfig.assistant_id;delete assistantConfig.assistant_version;
+  const staged=unwrapVoicebot(await voicebotRequest(env,botPath+'/versions',{
+   ...opts,method:'POST',body:{source_version:initial.sharedBotVersion,
+    mark_as_stable:'false',
+    version_description:'Paused AR3D shared gateway; no calling or rollout',
+    data:{name:'AR3D Client Calling Gateway',assistant_config:assistantConfig}}}));
+  const candidate=staged.version||staged.latest_version;
+  if(!version(candidate)||candidate===initial.sharedBotVersion)
+   throw Error('shared_bot_candidate_version_unknown');
+  phase='paused_bot_version_verify';
+  const botCandidate=unwrapVoicebot(await voicebotRequest(env,botPath+'?version='+candidate,opts));
+  const after=unwrapVoicebot(await voicebotRequest(env,botPath,opts));
+  if((botCandidate.id||botCandidate.bot_id)!==r.bot_id||
+     (botCandidate.assistant_config?.id||botCandidate.assistant_config?.assistant_id)!==r.guard_assistant_id||
+     (botCandidate.assistant_config?.version||botCandidate.assistant_config?.assistant_version)!==approved||
+     after.stable_version!==initial.sharedBotVersion||
+     after.latest_version!==candidate||
+     after.traffic_allocation?.[initial.sharedBotVersion]!==100||
+     Number(after.traffic_allocation?.[candidate]||0)!==0||
+     Object.entries(after.traffic_allocation||{}).some(([v,n])=>![candidate,initial.sharedBotVersion].includes(v)&&Number(n)>0))
+   throw Error('shared_bot_paused_candidate_unverified');
+  phase='database_finalize';
+  const done=await db.prepare("UPDATE shared_voice_gateway SET state='staged',gateway_version=?,error_code='router_connection_required',updated_by=?,updated_at=? WHERE id=1 AND state='unknown' AND error_code='guard_agent_fix_in_progress' AND guard_assistant_id=? AND gateway_version IS NULL")
+   .bind(candidate,actorId,at,r.guard_assistant_id).run();
+  if(done.meta.changes!==1)throw Error('guard_agent_fix_db_unconfirmed');
+  return {state:'staged',version:candidate,guardVersion:approved,
+   notice:'Exactly one Guard Agent was verified. Shared Voicebot '+candidate+' staged at 0% traffic. No calls or rollout were made; authenticated router is still pending.'};
+ }catch{
+  // A POST may have succeeded even if confirmation/read-back failed. Never
+  // retry or automatically roll back a potentially created Exotel version.
+  await db.prepare("UPDATE shared_voice_gateway SET error_code=?,updated_at=? WHERE id=1 AND state='unknown' AND error_code='guard_agent_fix_in_progress'")
+   .bind(phase.startsWith('guard_')?'guard_agent_fix_unknown':'bot_agent_fix_unknown',at).run();
+  throw Error('guard_agent_only_fix_unknown_stop');
+ }
 }
 
 // Confirm that a fallback cannot answer with client information or call tools.

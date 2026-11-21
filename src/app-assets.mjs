@@ -1188,6 +1188,24 @@ async function voiceGatewayPanel(main){
   }catch(e){asError(e)}
   finally{reconcileButton.disabled=false;await refresh().catch(asError)}
  },true);reconcileButton.disabled=true;
+ const agentOnlyButton=btn('Try single-agent Guard fix (one time, no calls)',async()=>{
+  agentOnlyButton.disabled=true;
+  try{
+   const p=await api('/v1/human/voice-gateway','POST',{action:'agent-only-preview'});
+   if(!p.eligible){
+    result.replaceChildren(node('p',{class:'err',text:'Exotel provider checks BLOCKED the new agent-only fix: '+p.reason+'. No changes made.'}));
+    return;
+   }
+   if(!confirm('ONE EXOTEL WRITE ATTEMPT: Create one new version on the saved, currently incomplete routing Guard using ONLY a minimal agent payload (no copied Agent ID or client data). If verified, stage a paused Shared Voicebot candidate at 0% traffic. No calls/rollout. An uncertain result permanently blocks retry. Continue?'))return;
+   const d=await api('/v1/human/voice-gateway','POST',{action:'agent-only-fix',
+    confirmation:'CREATE_ONE_AGENT_ONLY_GUARD_VERSION_PAUSED_NO_CALLS'});
+   result.replaceChildren(node('p',{class:'success',text:d.notice}),
+    node('p',{class:'note',text:'Guard version '+d.guardVersion+' verified. Shared Voicebot version '+d.version+' is PAUSED. Do not start calls, rollout or connect routing until separately reviewed.'}));
+  }catch(e){
+   asError(e);
+   result.replaceChildren(node('p',{class:'err',text:'Agent-only fix was not verified. Do NOT retry any Guard or Bot write. Exotel may contain a partial version. Details: '+e.message}));
+  }finally{await refresh().catch(asError)}
+ },true);agentOnlyButton.disabled=true;
  const reviewButton=btn('Review failed setup (read-only)',async()=>{
   reviewButton.disabled=true;
   try{
@@ -1244,7 +1262,9 @@ async function voiceGatewayPanel(main){
    if(r.knownAuthTemplateBotId)authTemplate.value=r.knownAuthTemplateBotId;
    form.querySelector('button[type=submit]').disabled=true;
    if(r.gateway.state==='unknown'){
-    status.textContent=r.gateway.errorCode==='guard_repair_unknown'?
+    status.textContent=r.gateway.errorCode==='guard_agent_fix_unknown'||r.gateway.errorCode==='bot_agent_fix_unknown'?
+     'EXOTEL AGENT-ONLY WRITE UNCERTAIN — Stop. Do not try another write or call. Use read-only reconciliation or Exotel Support.':
+     r.gateway.errorCode==='guard_repair_unknown'?
      'GUARD REPAIR UNCERTAIN — Stop all writes and calls. Do NOT retry Repair. Use Review last Guard repair (read-only) to reconcile Exotel versions.':
      'SETUP NEEDS REVIEW — No calls. The old Prepare/Connect/Verify buttons are blocked. First run Check repair prerequisites (read-only), then consider the one-time paused Guard repair. Status: unknown'+(r.gateway.errorCode?' ('+r.gateway.errorCode+')':'')+'.';
     status.className='note err';
@@ -1258,7 +1278,8 @@ async function voiceGatewayPanel(main){
   if(!repairable)repairReady=false;
   previewButton.disabled=!repairable;
   repairButton.disabled=!(repairable&&repairReady);
-  reconcileButton.disabled=!(r.gateway?.state==='unknown'&&r.gateway.errorCode==='guard_repair_unknown');
+  reconcileButton.disabled=!(r.gateway?.state==='unknown'&&['guard_repair_unknown','guard_agent_fix_unknown'].includes(r.gateway.errorCode));
+  agentOnlyButton.disabled=!(r.gateway?.state==='unknown'&&r.gateway.errorCode==='guard_repair_unknown');
   const unsafe=['Connect authenticated session router','Verify shared gateway rollout',
    'Test published client on my verified phone'];
   for(const button of card.querySelectorAll('button'))
@@ -1291,7 +1312,7 @@ async function voiceGatewayPanel(main){
  });
  card.append(form,div('formrow',btn('Refresh saved gateway status (read-only)',async()=>{
    try{await refresh();notice('Gateway status refreshed; no Exotel changes or calls made.')}catch(e){asError(e)}
- },true),reviewButton,reconcileButton,previewButton,repairButton,btn('Inspect gateway contract',async()=>{
+ },true),reviewButton,reconcileButton,previewButton,repairButton,agentOnlyButton,btn('Inspect gateway contract',async()=>{
    inspectedBotId=null;
    try{
     const r=await api('/v1/human/voice-gateway','POST',{action:'inspect',botId:bot.value});
