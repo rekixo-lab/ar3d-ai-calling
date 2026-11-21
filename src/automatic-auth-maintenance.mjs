@@ -87,5 +87,5 @@ export async function handleCallingCron(controller,env){
   console.log('AR3D AI Calling control metadata cleanup: auth_tables='+
     result.tablesChecked+' auth_rows='+result.rowsDeleted+
     ' expired_webhook_receipts='+webhookReceiptsDeleted);
-  return Object.freeze({...result,webhookReceiptsDeleted,verifiedTurnsDeleted});
+  return Object.freeze({...result,crmTouched:Boolean(env.CRM_DB?.prepare),webhookReceiptsDeleted,verifiedTurnsDeleted});
 }
