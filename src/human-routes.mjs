@@ -1,5 +1,6 @@
 import {handleCallingRequest} from './calling-routes.mjs';
 import {handleVoiceGatewayRequest} from './voice-gateway-routes.mjs';
+import {handleClientAccountRequest} from './client-account-routes.mjs';
 import {handleCompanyProfile} from './company-profile.mjs';
 import {handleCallingScripts} from './calling-script-routes.mjs';
 import {handleCrmRequest} from './crm-routes.mjs';
@@ -143,8 +144,9 @@ async function logout(req,env){
 }
 async function listTenants(db){
   const rows=await db.prepare(`SELECT t.id,t.slug,t.display_name,t.plan_code,t.storage_mode,t.status,
+    c.email AS contact_email,c.mobile_e164 AS contact_mobile,
     (SELECT COUNT(*) FROM tenant_memberships m WHERE m.tenant_id=t.id AND m.status='active') AS member_count
-    FROM tenants t ORDER BY t.created_at DESC LIMIT 100`).all();
+    FROM tenants t LEFT JOIN client_account_contacts c ON c.tenant_id=t.id ORDER BY t.created_at DESC LIMIT 100`).all();
   return response({tenants:rows.results});
 }
 async function createTenant(req,db,user){
@@ -238,6 +240,8 @@ export async function handleHumanRequest(req,env){
     if(!user)return fail('sign in required',401);
     if(path==='/v1/human/mfa'||path==='/v1/human/mfa/setup'||path==='/v1/human/mfa/enable'||path==='/v1/human/mfa/recovery/regenerate')
       return await handleMfaSettings(req,env,user,method==='POST'?await payload(req):null);
+    const accounts=await handleClientAccountRequest(req,env,user);
+    if(accounts)return accounts;
     const gateway=await handleVoiceGatewayRequest(req,env,user);
     if(gateway)return gateway;
     const profile=await handleCompanyProfile(req,env,user);
