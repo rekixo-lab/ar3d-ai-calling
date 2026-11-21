@@ -127,7 +127,7 @@ export async function createVerifiedRoutingGuard(env,runtime,prompt,{fetcher=fet
  try{
   // Exotel's multi-agent create contract accepts agents in the first POST.
   // Never supply a synthetic Agent ID or private template instruction.
-  const result=unwrap(await request(env,base,{...opts,method:'POST',body:{
+  const result=unwrap(await request(env,base.slice(0,-1),{...opts,method:'POST',body:{
    name:'AR3D - Routing guard',description:'Safe shared fallback; no tenant data',
    instruction:prompt,agents:[agent]
   }}));
