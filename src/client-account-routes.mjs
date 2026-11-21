@@ -1,6 +1,7 @@
 // One-screen client onboarding: does not create a password, send mail or dial anyone.
 import {checkName,normalizeIndianPhone,sha256hex,parseJsonBody} from './core.mjs';
 import {validEmail,randomSecret} from './human-auth.mjs';
+import {initialClientAI} from './default-client-ai.mjs';
 const json=(body,status=200)=>Response.json(body,{status,headers:{'Cache-Control':'no-store','Referrer-Policy':'no-referrer'}});
 const fail=(error,status=400)=>json({error},status);
 
@@ -67,6 +68,9 @@ export async function handleClientAccountRequest(req,env,user){
     if(tenant.isNew){
       actions.push(db.prepare("INSERT INTO tenants(id,slug,display_name,plan_code,storage_mode,status,created_at,updated_at) VALUES(?,?,?,'starter','shared','trial',?,?)")
         .bind(tenant.id,tenant.slug,displayName,at,at));
+      // The first immutable company/profile drafts are created in the SAME
+      // D1 transaction as the new tenant and invite (no live AI publication).
+      actions.push(...initialClientAI(db,{tenantId:tenant.id,companyName:displayName,createdBy:user.id,createdAt:at}).statements);
     }
     actions.push(db.prepare(`INSERT INTO client_account_contacts(tenant_id,email,mobile_e164,created_by,created_at,updated_at)
       VALUES(?,?,?,?,?,?)`)
@@ -78,7 +82,8 @@ export async function handleClientAccountRequest(req,env,user){
     const out=await db.batch(actions);
     if(out.some(x=>Number(x.meta?.changes)!==1))return fail('account was not changed; review existing access',409);
     return json({ok:true,id:tenant.id,slug:tenant.slug,displayName:tenant.display_name,email,
-      existingTenant:!tenant.isNew,access:'invitation_pending',
+      existingTenant:!tenant.isNew,aiDraftReady:Boolean(tenant.isNew),aiPublished:false,
+      access:'invitation_pending',
       inviteUrl:new URL(req.url).origin+'/app#invite='+token,
       expiresAt:new Date(expiry).toISOString(),
       notice:'Invitation link shown once. No password or email was sent.'},201);
