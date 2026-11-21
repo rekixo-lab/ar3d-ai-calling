@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {fixture,admin,client,now} from './helpers/calling-fixture.mjs';
-import {handleVoiceGatewayRequest} from '../src/voice-gateway-routes.mjs';
+import {handleVoiceGatewayRequest,KNOWN_SHARED_GATEWAY_BOOTSTRAP} from '../src/voice-gateway-routes.mjs';
 const bot='44444444-4444-4444-8444-444444444444';
 const req=(data,method='POST')=>new Request('https://app.example.invalid/v1/human/voice-gateway',{method,headers:{Origin:'https://app.example.invalid','Content-Type':'application/json'},...(method==='POST'?{body:JSON.stringify(data)}:{})});
 test('gateway setup is current-MFA admin only and diagnostic reads expose structure, never secret values',async()=>{const f=fixture();try{
@@ -9,5 +9,18 @@ test('gateway setup is current-MFA admin only and diagnostic reads expose struct
  assert.equal((await handleVoiceGatewayRequest(req({action:'inspect',botId:bot}),f.env,client,{now,fetcher})).status,403);
  assert.equal((await handleVoiceGatewayRequest(req({action:'inspect',botId:bot}),f.env,{...admin,token_hash:'bad'},{now,fetcher})).status,403);
  assert.equal(reads,0);const r=await handleVoiceGatewayRequest(req({action:'inspect',botId:bot}),f.env,admin,{now,fetcher});assert.equal(r.status,200);const text=await r.text();assert.ok(text.includes('webhook_config'));assert.ok(!text.includes('never-print-this'));assert.ok(!text.includes('private.example'));assert.ok(!text.includes('private-assistant'));assert.equal(writes,0);assert.equal(reads,2);
- assert.equal((await handleVoiceGatewayRequest(req({},'GET'),f.env,admin,{now})).status,200);
+ const suggested=await handleVoiceGatewayRequest(req({},'GET'),f.env,admin,{now});
+ assert.equal(suggested.status,200);
+ const data=await suggested.json();
+ assert.equal(data.gateway,null);
+ assert.deepEqual(data.suggestedGateway,KNOWN_SHARED_GATEWAY_BOOTSTRAP);
+ assert.equal(data.flowTargetVerified,false);
+ assert.equal((await handleVoiceGatewayRequest(req({},'GET'),f.env,client,{now})).status,403);
+ assert.equal((await handleVoiceGatewayRequest(req({},'GET'),f.env,{...admin,token_hash:'bad'},{now})).status,403);
+ const prep={action:'configure',...KNOWN_SHARED_GATEWAY_BOOTSTRAP};
+ assert.equal((await handleVoiceGatewayRequest(req(prep),f.env,admin,{now,fetcher})).status,400);
+ assert.equal((await handleVoiceGatewayRequest(req({...prep,flowTargetConfirmed:false}),f.env,admin,{now,fetcher})).status,409);
+ assert.equal((await handleVoiceGatewayRequest(req({...prep,botId:bot,flowTargetConfirmed:true}),f.env,admin,{now,fetcher})).status,409);
+ assert.equal(writes,0);
+ assert.equal(f.c.db.prepare('SELECT COUNT(*) AS n FROM shared_voice_gateway').get().n,0);
 }finally{f.close()}});
