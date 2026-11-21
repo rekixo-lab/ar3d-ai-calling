@@ -308,7 +308,7 @@ export async function handleHumanRequest(req,env){
     if(path==='/v1/human/invitations'&&method==='POST')return await invite(req,env.CONTROL_DB,user);
     if(path==='/v1/human/overview'&&method==='GET')return await overview(req,env,user);
     if(path==='/v1/human/leads'&&method==='POST')return await addLead(req,env,user);
-    if(path==='/v1/human/agents'&&method==='POST')return await addAgent(req,env,user);
+    if(path==='/v1/human/agents'&&method==='POST')return fail('company_ai_managed_by_super_admin',403);
     return fail('not found',404);
   }catch(e){
     const message=String(e?.message||'');
