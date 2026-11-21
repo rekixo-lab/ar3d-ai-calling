@@ -80,7 +80,34 @@ try{
  await adminPage.getByRole('heading',{name:'Client Calling Setup',exact:true}).waitFor();
  // Company knowledge and script editing are now Admin-only, under Clients.
  await adminPage.getByRole('heading',{name:'Client Company & AI Setup',exact:true}).waitFor();
+ await adminPage.getByRole('heading',{name:'Quick AI Setup — Master Templates',exact:true}).waitFor();
+ await adminPage.getByPlaceholder('Optional project name').fill('Demo Heights');
+ await adminPage.getByPlaceholder('Approved city / location').fill('Raipur, Chhattisgarh');
+ await adminPage.getByPlaceholder('Optional approved price or price range').fill('12-18 lakh');
+ await adminPage.getByRole('button',{name:'Preview generated AI'}).click();
+ await adminPage.getByRole('heading',{name:'Generated AI Preview'}).waitFor();
+ assert.equal(f.c.db.prepare('SELECT COUNT(*) AS n FROM calling_script_versions').get().n,0);
+ assert.equal(f.c.db.prepare('SELECT COUNT(*) AS n FROM calling_agent_publications').get().n,0);
+ adminPage.once('dialog',dialog=>dialog.accept());
+ await adminPage.getByRole('button',{name:'Generate AI Draft (no calls)'}).click();
+ await adminPage.getByText(/Master AI draft generated/).waitFor();
+ assert.equal(f.c.db.prepare('SELECT COUNT(*) AS n FROM company_profile_versions').get().n,1);
+ assert.equal(f.c.db.prepare('SELECT COUNT(*) AS n FROM calling_script_versions').get().n,1);
+ assert.equal(f.c.db.prepare('SELECT COUNT(*) AS n FROM calling_agent_publications').get().n,0);
+ // Update ONLY one approved price; don't rewrite the script or publish.
+ await adminPage.getByPlaceholder('Approved price or range').fill('14-19 lakh');
+ adminPage.once('dialog',dialog=>dialog.accept());
+ await adminPage.getByRole('button',{name:'Save price change (draft only)'}).click();
+ await adminPage.getByText(/Approved price saved as a new company version/).waitFor();
+ assert.equal(f.c.db.prepare('SELECT COUNT(*) AS n FROM company_profile_versions').get().n,2);
+ assert.equal(f.c.db.prepare('SELECT COUNT(*) AS n FROM calling_script_versions').get().n,1);
+ assert.equal(f.c.db.prepare('SELECT COUNT(*) AS n FROM calling_agent_publications').get().n,0);
+ const latestPricing=JSON.parse(f.c.db.prepare('SELECT config_json FROM company_profile_versions WHERE tenant_id=? ORDER BY revision DESC LIMIT 1').get(tid).config_json).pricing;
+ assert.equal(latestPricing,'14-19 lakh');
+ const generatedScript=JSON.parse(f.c.db.prepare('SELECT config_json FROM calling_script_versions WHERE tenant_id=? ORDER BY revision DESC LIMIT 1').get(tid).config_json);
+ assert.ok(!JSON.stringify(generatedScript).includes('12-18 lakh'));
  await adminPage.getByRole('heading',{name:'AI Questions & Answers',exact:true}).waitFor();
+ await adminPage.getByRole('button',{name:'Publish AI agent for calls'}).waitFor();
  await adminPage.locator('[name=company-companyName]').fill('Fictional Builder');
  await adminPage.getByRole('button',{name:'Save company information',exact:true}).click();
  await adminPage.getByText('Company information saved',{exact:true}).waitFor();
