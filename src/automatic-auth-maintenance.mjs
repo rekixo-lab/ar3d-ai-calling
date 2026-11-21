@@ -3,6 +3,7 @@ import {CAMPAIGN_CRON,runCampaignCron} from './campaign-dispatch.mjs';
 // Control D1. Runs ONLY from a Cloudflare Cron Trigger. No client, CRM,
 // recording, consent, opt-out, lead or billing records are deleted.
 import {retentionPlan} from './retention-maintenance.mjs';
+import {pruneVerifiedVoicebotTurns} from './verified-voicebot-bridge.mjs';
 export const AUTH_MAINTENANCE_CRON='0 */6 * * *';
 export const AUTH_MAINTENANCE_LIMIT=100;
 const TABLES=Object.freeze(['human_sessions','human_mfa_challenges',
@@ -81,9 +82,10 @@ export async function handleCallingCron(controller,env){
   const webhookReceiptsDeleted=await pruneExpiredExotelWebhookReceipts(env,{
     now:timestamp,cron:controller.cron
   });
+  const verifiedTurnsDeleted=env.CRM_DB?.prepare?await pruneVerifiedVoicebotTurns(env,{now:timestamp}):0;
   // Safe numeric counters only; never log event IDs, phones or transcript data.
   console.log('AR3D AI Calling control metadata cleanup: auth_tables='+
     result.tablesChecked+' auth_rows='+result.rowsDeleted+
     ' expired_webhook_receipts='+webhookReceiptsDeleted);
-  return Object.freeze({...result,webhookReceiptsDeleted});
+  return Object.freeze({...result,crmTouched:Boolean(env.CRM_DB?.prepare),webhookReceiptsDeleted,verifiedTurnsDeleted});
 }

@@ -4,6 +4,7 @@
 // Vendor wire contract: https://docs.exotel.com/intelligent-voice-agents/voicebot-webhooks
 import {parseExotelVoicebotEvent,exotelVoicebotAck} from './exotel-voicebot-webhook-contract.mjs';
 import {checkExotelWebhookNetwork} from './exotel-webhook-network-guard.mjs';
+import {recordVerifiedVoicebotTurn} from './verified-voicebot-bridge.mjs';
 
 const ROOT='/v1/provider/exotel/voicebot/';
 const PATHS=Object.freeze({
@@ -332,9 +333,16 @@ export async function handleExotelVoicebotWebhookRequest(req,env){
   }
   try{
     await quarantineExotelVoicebotDelivery(env,parsed,{kind});
+    // Live Calling CRM: only a privately registered, independently checked call
+    // can stage structured customer answers. Synthetic receipt-only fixtures
+    // (which have no CRM DB) retain their previous no-write behavior.
   }catch{
     // 503 encourages Exotel retry. Never expose raw text, IDs or DB errors.
     return fail(503,'webhook_quarantine_unavailable');
+  }
+  if(env.CRM_DB){
+    try{await recordVerifiedVoicebotTurn(env,parsed,kind)}
+    catch{return fail(503,'webhook_delivery_unconfirmed')}
   }
   // Exact vendor-compatible success response; no customer data echoed.
   return response(exotelVoicebotAck());

@@ -106,7 +106,7 @@ test('review GET is tenant-scoped, private and offers provisional fields only',a
   assert.equal(data.reviews.length,1);
   assert.equal(data.reviews[0].provisionalSurvey.budgetInr,2500000);
   assert.equal(data.reviews[0].suppressionConfirmed,false);
-  assert.equal(data.liveProviderWebhookConfigured,false);
+  assert.equal(data.liveProviderWebhookConfigured,true);
   assert.equal(f.logs.every(x=>x.params.includes(tenant)),true);
   assert.equal(JSON.stringify(data).includes('+919000000001'),false);
   assert.equal((await worker.fetch(req('/v1/human/voicebot-reviews?tenantId='+foreign),f.env)).status,403);
