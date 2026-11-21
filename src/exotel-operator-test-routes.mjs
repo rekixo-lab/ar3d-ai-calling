@@ -107,18 +107,24 @@ export function makeOperatorTestRequest(env){
   });
   return req;
 }
-async function reserve(db,userId,now){
+export function operatorTestDailyLimit(env={},now=Date.now()){
+  // Short-lived QA allowance for the SAME privately configured verified phone.
+  // Expiry is mandatory, at most 24h away; malformed/stale settings fail closed.
+  const until=Date.parse(env.EXOTEL_OPERATOR_QA_UNTIL||'');
+  return Number.isFinite(until)&&until>now&&until-now<=86400000?5:2;
+}
+async function reserve(db,userId,now,dailyLimit=2){
   const slot=String(Math.floor(now/(30*60*1000)));
   const at=new Date(now).toISOString();
   const earliest=new Date(now-24*60*60*1000).toISOString();
   const id=crypto.randomUUID();
   // The quota check and reservation are ONE write, serialized by D1.
-  // Global 30-minute slot + TWO attempts per rolling 24h, across admins.
+  // Global 30-minute slot + bounded rolling quota, across admins.
   const row=await db.prepare(
     "INSERT INTO exotel_operator_test_calls "+
     "(id,actor_user_id,rate_slot,state,created_at,updated_at) "+
     "SELECT ?,?,?,'reserved',?,? WHERE "+
-    "(SELECT COUNT(*) FROM exotel_operator_test_calls WHERE created_at>=?)<2 "+
+    "(SELECT COUNT(*) FROM exotel_operator_test_calls WHERE created_at>=?)<"+dailyLimit+" "+
     "ON CONFLICT(rate_slot) DO NOTHING"
   ).bind(id,userId,slot,at,at,earliest).run();
   if(Number(row?.meta?.changes)!==1)return null;
@@ -200,6 +206,7 @@ export async function handleExotelOperatorTest(req,env,user,{apiFetch=fetch,now=
     })));
     return json({
       mode:'operator_verified_number_only',configured:cfg.ready,
+      dailyLimit:operatorTestDailyLimit(env,now),
       missing:cfg.missing,mfaEnabled,recent,realCallsStartedByRead:0,
       purpose:'one verified self-test only; no customers or campaigns',
       voicebotFlowId:FLOW.test(string(env.EXOTEL_VOICE_AI_FLOW_ID))?
@@ -213,7 +220,7 @@ export async function handleExotelOperatorTest(req,env,user,{apiFetch=fetch,now=
   let confirmation;
   try{confirmation=await readBody(req)}catch{return error('explicit_confirmation_required',400)}
   let attempt;
-  try{attempt=confirmation.retryOf?await reserveReviewedRetry(env.CONTROL_DB,user.id,confirmation.retryOf,now):await reserve(env.CONTROL_DB,user.id,now)}
+  try{attempt=confirmation.retryOf?await reserveReviewedRetry(env.CONTROL_DB,user.id,confirmation.retryOf,now):await reserve(env.CONTROL_DB,user.id,now,operatorTestDailyLimit(env,now))}
   catch{return error('self_test_reservation_unavailable',503)}
   if(!attempt)return error('self_test_rate_limited',429);
   try{

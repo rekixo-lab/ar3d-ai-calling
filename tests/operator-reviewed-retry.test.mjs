@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {fixture,admin,now,at,accepted} from './helpers/calling-fixture.mjs';
-import {handleExotelOperatorTest} from '../src/exotel-operator-test-routes.mjs';
+import {handleExotelOperatorTest,operatorTestDailyLimit} from '../src/exotel-operator-test-routes.mjs';
 const failed='77777777-7777-4777-8777-777777777777';
 function setup(owner=admin.id){const f=fixture();Object.assign(f.env,{EXOTEL_OPERATOR_TEST_ENABLED:'enabled',EXOTEL_VOICE_AI_FLOW_ID:'123456',EXOTEL_VERIFIED_TEST_NUMBER:'+919000000001'});
  f.c.db.prepare("INSERT INTO exotel_operator_test_calls VALUES(?,?,?,'CAfictionalfailed','submitted',NULL,?,?)").run(failed,owner,'normal-slot',at,at);
@@ -23,3 +23,22 @@ test('reviewed retry cannot use unknown, unverified, other-admin, or completed c
  else f.c.db.prepare("INSERT INTO exotel_operator_status_checks(id,call_request_id,actor_user_id,check_slot,state,error_code,created_at,finished_at) VALUES(?,?,?,'new-check','unknown','provider_unavailable',?,?)").run(crypto.randomUUID(),failed,admin.id,'2026-11-20T06:31:00.000Z',at);
  let n=0;const r=await handleExotelOperatorTest(req(retry),f.env,admin,{now,apiFetch:async()=>{n++;return accepted()}});assert.ok([403,429].includes(r.status));assert.equal(n,0);
  }finally{retry.failedRequestId=failed;f.close()}}});
+
+
+test('QA expiry is bounded, defaults closed and expires automatically',()=>{
+ for(const value of [undefined,'bad',new Date(now).toISOString(),new Date(now+86400001).toISOString()])assert.equal(operatorTestDailyLimit({EXOTEL_OPERATOR_QA_UNTIL:value},now),2);
+ assert.equal(operatorTestDailyLimit({EXOTEL_OPERATOR_QA_UNTIL:new Date(now+3600000).toISOString()},now),5);
+});
+test('temporary verified-phone QA retains atomic 30-minute slot and five-attempt cap',async()=>{const f=setup();try{
+ f.env.EXOTEL_OPERATOR_QA_UNTIL=new Date(now+7200000).toISOString();let calls=0;
+ const options=t=>({now:t,apiFetch:async()=>{calls++;return Response.json({Call:{Sid:'CAfictional'+calls,Status:'queued',Direction:'outbound-api',PhoneNumberSid:f.env.EXOTEL_CALLER_ID}})}});
+ const normal={confirm:'CALL_MY_VERIFIED_NUMBER_ONCE'};
+ const results=await Promise.all([handleExotelOperatorTest(req(normal),f.env,admin,options(now)),handleExotelOperatorTest(req(normal),f.env,admin,options(now))]);
+ assert.deepEqual(results.map(r=>r.status).sort(),[202,429]);
+ assert.equal((await handleExotelOperatorTest(req(normal),f.env,admin,options(now+1800000))).status,202);
+ assert.equal((await handleExotelOperatorTest(req(normal),f.env,admin,options(now+3600000))).status,202);
+ assert.equal((await handleExotelOperatorTest(req(normal),f.env,admin,options(now+5400000))).status,429);
+ assert.equal(calls,3);assert.equal(f.c.db.prepare('SELECT COUNT(*) AS n FROM exotel_operator_test_calls').get().n,5);
+ // Config expiry restores the standard two-call quota without deleting audits.
+ assert.equal((await handleExotelOperatorTest(req(normal),f.env,admin,options(now+7200000))).status,429);
+}finally{f.close()}});
