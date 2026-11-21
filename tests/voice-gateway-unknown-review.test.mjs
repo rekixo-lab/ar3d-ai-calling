@@ -44,7 +44,7 @@ test('unknown gateway review reads provider versions without any Exotel or D1 mu
   assert.match(d.recommendation,/Never retry Prepare/);
   assert.equal(reads,3);assert.equal(writes,0);
   const after=f.c.db.prepare('SELECT state,guard_assistant_id,gateway_version,error_code FROM shared_voice_gateway WHERE id=1').get();
-  assert.deepEqual(after,{state:'unknown',guard_assistant_id:guard,gateway_version:null,error_code:'provider_write_unknown'});
+  assert.deepEqual({...after},{state:'unknown',guard_assistant_id:guard,gateway_version:null,error_code:'provider_write_unknown'});
   assert.equal(f.r.db.prepare('SELECT COUNT(*) AS n FROM calls').get().n,0);
  }finally{f.close()}
 });
