@@ -9,7 +9,8 @@ test('both native Super Admin tenant creation paths seed generic AI safely and o
  try{
   const session='f'.repeat(64);
   const hash=await sha256hex(session);
-  f.c.db.prepare("UPDATE human_sessions SET token_hash=? WHERE user_id='admin'").run(hash);
+  f.c.db.prepare("UPDATE human_sessions SET token_hash=?, created_at=?, expires_at=? WHERE user_id='admin'")
+   .run(hash,new Date(Date.now()-1000).toISOString(),Date.now()+8*60*60*1000);
   const post=async(displayName,slug,plan='starter',storageMode='shared')=>
    handleHumanRequest(new Request('https://calling.example.invalid/v1/human/tenants',{
     method:'POST',headers:{
