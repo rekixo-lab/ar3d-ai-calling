@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {fixture,tid,admin,client,now} from './helpers/calling-fixture.mjs';
 import {handleCallingScripts} from '../src/calling-script-routes.mjs';
 import {MASTER_TEMPLATE_VERSION,MASTER_TEMPLATES,buildMasterAIQuickSetup} from '../src/ai-master-templates.mjs';
+import {DEFAULT_AI_TEMPLATE_ID,prepareMissingClientAI} from '../src/default-client-ai.mjs';
 
 const details=Object.freeze({templateId:'plot_sales',language:'hi-en',
  projectName:'Demo Heights',location:'Raipur Chhattisgarh',price:'12–18 lakh INR',size:'1200 sqft'});
@@ -14,9 +15,9 @@ const call=(f,body,user=admin,origin)=>handleCallingScripts(make(body,user,origi
 const preview=async(f,d=details)=>call(f,{mode:'preview',details:d});
 
 test('Master AI templates are validated, versioned and never invent unprovided price or location',()=>{
- assert.equal(MASTER_TEMPLATES.length,3);
+ assert.equal(MASTER_TEMPLATES.length,4);
  for(const [id,type] of [['plot_sales','Residential plots'],['flat_sales','Flats / apartments'],
-  ['property_followup','Properties']]){
+  ['property_followup','Properties'],['property_enquiry','Properties']]){
   const g=buildMasterAIQuickSetup({templateId:id,language:'hi-en',
    projectName:'',location:'',price:'',size:''},'Demo Builder');
   assert.equal(g.templateVersion,MASTER_TEMPLATE_VERSION);
@@ -120,5 +121,50 @@ test('master setup is only for fresh MFA Super Admin and same-origin requests',a
   assert.equal((await call(f,{mode:'preview',details:{...details,location:'\nINJECT'}})).status,400);
   assert.equal(f.c.db.prepare('SELECT COUNT(*) AS n FROM company_profile_versions').get().n,0);
   assert.equal(f.c.db.prepare('SELECT COUNT(*) AS n FROM calling_script_versions').get().n,0);
+ }finally{f.close()}
+});
+
+
+test('empty legacy tenant gets exactly one default AI through admin-only route, existing profile/script remain untouched',async()=>{
+ const f=fixture();
+ try{
+  const request=make({mode:'preview',details});
+  const url='https://app.example.invalid/v1/human/calling-scripts/apply-defaults';
+  const post=(user=admin,origin='https://app.example.invalid')=>
+   handleCallingScripts(new Request(url,{method:'POST',headers:{Origin:origin,'Content-Type':'application/json'},
+    body:JSON.stringify({tenantId:tid})}),f.env,user,{now,
+    fetcher:async()=>{throw Error('Provider access must never occur')}});
+  assert.equal((await post(client)).status,403);
+  assert.equal((await post({...admin,token_hash:'invalid'})).status,403);
+  assert.equal((await post(admin,'https://unsafe.invalid')).status,403);
+  const first=await post();
+  assert.equal(first.status,201,await first.clone().text());
+  assert.equal((await first.json()).created,true);
+  const p=f.c.db.prepare('SELECT * FROM company_profile_versions WHERE tenant_id=?').get(tid);
+  const s=f.c.db.prepare('SELECT * FROM calling_script_versions WHERE tenant_id=?').get(tid);
+  assert.equal(JSON.parse(p.config_json).companyName,'Demo');
+  assert.equal(JSON.parse(p.config_json).pricing,'');
+  assert.equal(JSON.parse(p.config_json).projects,'');
+  assert.equal(JSON.parse(s.config_json).name,'Real Estate Enquiry · Master v1');
+  assert.equal(JSON.parse(s.config_json).questions.length,7);
+  assert.equal(s.provider_state,'draft');
+  assert.equal(f.c.db.prepare('SELECT COUNT(*) AS n FROM calling_agent_publications').get().n,0);
+  assert.equal(f.r.db.prepare('SELECT COUNT(*) AS n FROM calling_jobs').get().n,0);
+  assert.equal((await post()).status,409);
+  assert.equal(f.c.db.prepare('SELECT COUNT(*) AS n FROM company_profile_versions').get().n,1);
+  assert.equal(f.c.db.prepare('SELECT COUNT(*) AS n FROM calling_script_versions').get().n,1);
+ }finally{f.close()}
+});
+test('partially configured tenant receives no automatic AI when one version already exists',async()=>{
+ const f=fixture();
+ try{
+  f.c.db.prepare('INSERT INTO company_profile_versions(tenant_id,revision,config_json,created_by,created_at) VALUES(?,1,?,\'admin\',?)')
+   .run(tid,JSON.stringify(buildMasterAIQuickSetup(details,'Demo').profile),new Date(now).toISOString());
+  const result=await prepareMissingClientAI(f.env.CONTROL_DB,{tenantId:tid,companyName:'Demo',createdBy:'admin',createdAt:new Date(now).toISOString()});
+  assert.equal(result.created,false);
+  assert.equal(result.reason,'already_configured_no_overwrite');
+  assert.equal(f.c.db.prepare('SELECT COUNT(*) AS n FROM company_profile_versions').get().n,1);
+  assert.equal(f.c.db.prepare('SELECT COUNT(*) AS n FROM calling_script_versions').get().n,0);
+  assert.equal(DEFAULT_AI_TEMPLATE_ID,'property_enquiry');
  }finally{f.close()}
 });

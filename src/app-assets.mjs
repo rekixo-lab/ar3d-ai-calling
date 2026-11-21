@@ -872,10 +872,10 @@ async function aiQuickSetupWizard(tenantId,content,refreshEditors,tenantLabel=''
  ]);
  const existing=profileState.revision>0||scriptState.versions.length>0;
  const card=div('card stack',title('Quick AI Setup — Master Templates','h3'),
-  node('p',{class:'note',text:'One-time setup for a new client. The company name starts with the client account label; correct it here if the builder business name is different. Enter approved facts only. AI questions and safety rules come from a reusable versioned template. No call or publication happens automatically.'}));
+  node('p',{class:'note',text:'New clients get their Real Estate Enquiry AI questions, greeting, safe conversation rules and a company-name-only draft automatically. Review the correct builder name and optional business facts before separately publishing. These defaults never grant consent, make calls or change existing clients.'}));
  content.append(card);
  if(existing){
-  card.append(node('p',{class:'muted',text:'This client already has company information or an AI script. Master generation is locked to protect existing versions. Update only the necessary fact below or use Advanced for other changes. Every change needs an explicit new Publish; calling never starts automatically.'}));
+  card.append(node('p',{class:'success',text:'AI company details v'+profileState.revision+' and conversation v'+(scriptState.versions[0]?.revision||0)+' are saved. No repeated prompt entry required. Review the actual company name, then Publish separately. Existing versions are protected from automatic replacement.'}));
   if(profileState.revision>0){
    const priceField=input('quickPriceUpdate','text','Approved price or range');
    priceField.required=false;priceField.maxLength=160;priceField.value=profileState.profile.pricing||'';
@@ -897,13 +897,26 @@ async function aiQuickSetupWizard(tenantId,content,refreshEditors,tenantLabel=''
   }
   return true;
  }
+ const useDefault=btn('Use ready-made Default AI (no form)',async()=>{
+  if(!confirm('Create the default Real Estate Enquiry AI as drafts for this unconfigured client? No Exotel publication, consent changes or calls.'))return;
+  useDefault.disabled=true;
+  try{
+   const r=await api('/v1/human/calling-scripts/apply-defaults','POST',{tenantId});
+   if(!r.created||r.published!==false||r.customerCallsStarted!==0)throw Error('Default setup unconfirmed');
+   notice('Default AI ready as drafts. Check the builder name and Publish separately.');
+   await refreshEditors();
+  }catch(e){asError(e);useDefault.disabled=false}
+ });
+ card.append(useDefault,node('p',{class:'muted',text:'Or choose Plot / Flat / Follow-up below. Location, price, project and size are optional; AI will not invent them.'}));
  const companyName=input('quickCompanyName','text','Approved builder/company name');
  companyName.value=tenantLabel;companyName.maxLength=160;companyName.required=true;
  const template=node('select',{class:'field','aria-label':'Master AI Template'},[
   node('option',{value:'plot_sales',text:'Plot Sales — प्लॉट'}),
   node('option',{value:'flat_sales',text:'Flat Sales — फ्लैट'}),
-  node('option',{value:'property_followup',text:'Property Follow-up — फॉलोअप'})
+  node('option',{value:'property_followup',text:'Property Follow-up — फॉलोअप'}),
+  node('option',{value:'property_enquiry',text:'Real Estate Enquiry — default'})
  ]);
+ template.value='property_enquiry';
  const project=input('quickProject','text','Optional project name'),
   city=input('quickLocation','text','Approved city / location'),
   price=input('quickPrice','text','Optional approved price or price range'),

@@ -7,7 +7,8 @@ export const MASTER_TEMPLATE_VERSION='2026-11-21-v1';
 export const MASTER_TEMPLATES=Object.freeze([
  Object.freeze({id:'plot_sales',label:'Plot Sales',propertyType:'Residential plots'}),
  Object.freeze({id:'flat_sales',label:'Flat Sales',propertyType:'Flats / apartments'}),
- Object.freeze({id:'property_followup',label:'Property Follow-up',propertyType:'Properties'})
+ Object.freeze({id:'property_followup',label:'Property Follow-up',propertyType:'Properties'}),
+ Object.freeze({id:'property_enquiry',label:'Real Estate Enquiry',propertyType:'Properties'})
 ]);
 const VALID_FIELDS=new Set(['templateId','companyName','projectName','location','price','size','language']);
 const LIMITS=Object.freeze({companyName:160,projectName:120,location:160,price:160,size:120});

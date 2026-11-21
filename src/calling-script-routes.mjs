@@ -1,6 +1,7 @@
 import {requireMembership,mutationOriginAllowed} from './human-auth.mjs';
 import {parseJsonBody,sha256hex} from './core.mjs';
 import {buildMasterAIQuickSetup,MASTER_TEMPLATE_VERSION} from './ai-master-templates.mjs';
+import {prepareMissingClientAI} from './default-client-ai.mjs';
 import {defaultScript,validateScript,compileScript} from './calling-script-core.mjs';
 import {scriptProviderConfiguration,stageScript,probeScriptProvider,createIsolatedPublishedAssistant} from './calling-script-provider.mjs';
 import {readSharedGateway,verifySharedGatewayLive} from './shared-voice-gateway.mjs';
@@ -22,8 +23,8 @@ export async function handleCallingScripts(req,env,user,{now=Date.now(),fetcher=
  if(path!==BASE&&!path.startsWith(BASE+'/'))return null;
  const action=path===BASE?'versions':path.slice(BASE.length+1),db=env.CONTROL_DB;
  const fail=(error,status=400)=>json({error},status);
- if(!['versions','binding','stage','probe','publish','quick-setup'].includes(action))return fail('not_found',404);
- if(!['GET','POST'].includes(req.method)||['stage','probe','publish','quick-setup'].includes(action)&&req.method!=='POST')return fail('method_not_allowed',405);
+ if(!['versions','binding','stage','probe','publish','quick-setup','apply-defaults'].includes(action))return fail('not_found',404);
+ if(!['GET','POST'].includes(req.method)||['stage','probe','publish','quick-setup','apply-defaults'].includes(action)&&req.method!=='POST')return fail('method_not_allowed',405);
  if(req.method==='POST'&&!mutationOriginAllowed(req))return fail('same_origin_required',403);
  try{
   const d=req.method==='POST'?await read(req):Object.fromEntries(url.searchParams);
@@ -35,7 +36,18 @@ export async function handleCallingScripts(req,env,user,{now=Date.now(),fetcher=
   if((req.method==='POST'||!['versions'].includes(action))&&!isAdmin)
    return fail('super_admin_required',403);
   const tid=d.tenantId,at=new Date(now).toISOString();
-  if(action==='quick-setup'){
+  if(action==='apply-defaults'){
+    if(req.method!=='POST'||Object.keys(d).some(k=>k!=='tenantId'))
+      return fail('invalid_default_ai_request');
+    const tenant=await db.prepare("SELECT display_name FROM tenants WHERE id=? AND status IN('trial','active')").bind(tid).first();
+    if(!tenant)return fail('tenant_unavailable',404);
+    const outcome=await prepareMissingClientAI(db,{tenantId:tid,companyName:tenant.display_name,createdBy:user.id,createdAt:at});
+    return outcome.created?
+      json({...outcome,profileRevision:1,scriptRevision:1,published:false,customerCallsStarted:0,
+        notice:'Generic AI defaults saved as drafts only. Review the builder name and AI before explicit publication.'},201):
+      fail(outcome.reason,409);
+   }
+   if(action==='quick-setup'){
    // Zero remote/provider calls, zero consent/calling mutations. One atomic,
    // create-only, tenant-scoped pair of immutable version-1 records.
    if(req.method!=='POST'||Object.keys(d).some(k=>!['tenantId','mode','details','previewDigest','templateVersion','acknowledgedReview'].includes(k))||
