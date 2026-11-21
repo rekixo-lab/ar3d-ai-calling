@@ -11,6 +11,48 @@ export async function verifySharedGatewayLive(env,runtime,{fetcher=fetch}={}){
  if((bot.assistant_config?.id||bot.assistant_config?.assistant_id)!==runtime.guard_assistant_id)throw Error('shared_gateway_guard_mismatch');
  return true;
 }
+// Review a previously uncertain provider write without mutating Exotel or D1.
+// Never infer that a candidate version is safe to roll out or that calls are ready.
+// Return only IDs/version numbers and comparisons; never serialize credentials,
+// webhook settings, full assistant content, personal data or provider payloads.
+export async function reviewUnknownGateway(env,runtime,{fetcher=fetch}={}){
+ if(!runtime||runtime.state!=='unknown'||!uuid(runtime.bot_id))
+  throw Error('gateway_review_requires_unknown_state');
+ const savedGuard=uuid(runtime.guard_assistant_id)?runtime.guard_assistant_id:null;
+ const savedVersion=version(runtime.gateway_version)?runtime.gateway_version:null;
+ const output={
+  savedState:'unknown',errorCode:'provider_write_unknown',
+  guardAssistantRecorded:Boolean(savedGuard),gatewayVersionRecorded:savedVersion,
+  providerReadable:false,latestVersion:null,stableVersion:null,
+  latestVersionUsesRecordedGuard:null,stableVersionUsesRecordedGuard:null,
+  recommendation:'Stop. Review the actual Exotel Voicebot versions and account state before any provider update, rollout or call. Never retry Prepare.'
+ };
+ try{
+  const path='/voicebots/'+runtime.bot_id;
+  const current=unwrapVoicebot(await voicebotRequest(env,path,{fetcher}));
+  if((current.id||current.bot_id)!==runtime.bot_id)
+   return {...output,providerError:'provider_bot_identity_mismatch'};
+  const latest=version(current.latest_version)?current.latest_version:null;
+  const stable=version(current.stable_version)?current.stable_version:null;
+  const result={...output,providerReadable:true,latestVersion:latest,stableVersion:stable};
+  if(!savedGuard)return result;
+  const examine=async v=>{
+   if(!v)return null;
+   try{
+    const data=unwrapVoicebot(await voicebotRequest(env,path+'?version='+v,{fetcher}));
+    if((data.id||data.bot_id)!==runtime.bot_id)return null;
+    return (data.assistant_config?.id||data.assistant_config?.assistant_id)===savedGuard;
+   }catch{return null}
+  };
+  result.latestVersionUsesRecordedGuard=await examine(latest);
+  result.stableVersionUsesRecordedGuard=stable===latest?
+   result.latestVersionUsesRecordedGuard:await examine(stable);
+  return result;
+ }catch(e){
+  const safe=/^[a-z0-9_]{1,80}$/.test(e?.message||'')?e.message:'provider_review_unavailable';
+  return {...output,providerError:safe};
+ }
+}
 export async function registeredVoiceCallKey(env,callSid){
  if(!/^[0-9a-f]{64}$/i.test(env.EXOTEL_VOICEBOT_WEBHOOK_TOKEN||'')||!/^[A-Za-z0-9_-]{4,128}$/.test(callSid||''))throw Error('voice_route_configuration_required');
  const bytes=new TextEncoder(),key=await crypto.subtle.importKey('raw',bytes.encode(env.EXOTEL_VOICEBOT_WEBHOOK_TOKEN),{name:'HMAC',hash:'SHA-256'},false,['sign']);
