@@ -517,7 +517,7 @@ async function superAdmin(main){
  existing=node('select',{class:'field'},[node('option',{value:'',text:'New company or automatically match by name'}),
   ...tenantRowsAll.filter(t=>t.status==='trial'||t.status==='active').map(t=>node('option',{value:t.id,text:t.display_name}))]);
  existing.addEventListener('change',()=>{const t=tenantRowsAll.find(t=>t.id===existing.value);if(t)name.value=t.display_name});
- const advanced=node('details',{},node('summary',{text:'Link to an existing company instead'}),lab('Existing company',existing));
+ const advanced=node('details',{},[node('summary',{text:'Link to an existing company instead'}),lab('Existing company',existing)]);
  const f=node('form',{class:'stack'},[
   div('formrow',lab('Company name',name),lab('Client email',email),lab('Client mobile',mobile)),
   advanced,
