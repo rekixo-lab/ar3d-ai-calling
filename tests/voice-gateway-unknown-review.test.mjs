@@ -15,6 +15,11 @@ function unknown(f,guardId=guard){
 test('unknown gateway review reads provider versions without any Exotel or D1 mutation',async()=>{
  const f=fixture();try{
   unknown(f);
+  const current=await handleVoiceGatewayRequest(new Request('https://app.example.invalid/v1/human/voice-gateway',{method:'GET'}),f.env,admin,{now});
+  assert.equal(current.status,200);
+  const status=await current.json();
+  assert.equal(status.gateway.state,'unknown');
+  assert.equal(status.knownAuthTemplateBotId,'c3c7ca7c-b06d-4b3d-b661-ef121f751021');
   let reads=0,writes=0;
   const fetcher=async(url,init)=>{
    assert.equal(new URL(url).hostname,'voicebot.in.exotel.com');
