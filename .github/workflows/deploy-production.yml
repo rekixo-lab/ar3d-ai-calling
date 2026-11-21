@@ -104,6 +104,9 @@ jobs:
       - name: Add registered Exotel answer queue to isolated Calling CRM
         if: github.event_name == 'push' && steps.schema.outputs.schema_state == 'crm_voice_turn_upgrade'
         run: npx --yes wrangler@4 d1 execute ar3d-calling-shared-crm --remote --yes --config wrangler.jsonc --file migrations/crm/0012_verified_voicebot_turns.sql
+      - name: Add private client company change requests to Calling Control D1
+        if: github.event_name == 'push' && steps.schema.outputs.schema_state == 'control_company_change_upgrade'
+        run: npx --yes wrangler@4 d1 execute ar3d-calling-control --remote --yes --config wrangler.jsonc --file migrations/control/0015_company_change_requests.sql
       - name: Add isolated Calling Control client contact accounts
         if: github.event_name == 'push' && steps.schema.outputs.schema_state == 'control_client_accounts_upgrade'
         run: npx --yes wrangler@4 d1 execute ar3d-calling-control --remote --yes --config wrangler.jsonc --file migrations/control/0014_client_accounts.sql
@@ -141,6 +144,7 @@ jobs:
           npx --yes wrangler@4 d1 execute ar3d-calling-control --remote --yes --config wrangler.jsonc --file migrations/control/0012_company_profiles.sql
           npx --yes wrangler@4 d1 execute ar3d-calling-control --remote --yes --config wrangler.jsonc --file migrations/control/0013_agent_publications.sql
           npx --yes wrangler@4 d1 execute ar3d-calling-control --remote --yes --config wrangler.jsonc --file migrations/control/0014_client_accounts.sql
+          npx --yes wrangler@4 d1 execute ar3d-calling-control --remote --yes --config wrangler.jsonc --file migrations/control/0015_company_change_requests.sql
       - name: Initialize NEW AR3D Calling Shared CRM D1 database
         if: (github.event_name == 'push' && steps.schema.outputs.schema_state == 'fresh') || (github.event_name == 'workflow_dispatch' && inputs.operation == 'initialize')
         run: |

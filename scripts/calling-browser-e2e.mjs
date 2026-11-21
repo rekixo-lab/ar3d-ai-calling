@@ -34,23 +34,18 @@ try{
  await page.getByRole('tab',{name:'Calling',exact:true}).click();
  await page.getByRole('heading',{name:'Exotel Customer Calling',exact:true}).waitFor();
  await page.getByRole('tab',{name:'Company / AI',exact:true}).click();
- await page.getByRole('heading',{name:'AI Questions & Answers',exact:true}).waitFor();
- await page.getByLabel('Company name',{exact:true}).fill('Fictional Builder '+viewport.width);
- await page.getByRole('button',{name:'Save company information',exact:true}).click();
- await page.getByText('Company information saved',{exact:true}).waitFor();
- assert.equal(JSON.parse(f.c.db.prepare('SELECT config_json FROM company_profile_versions WHERE tenant_id=? ORDER BY revision DESC LIMIT 1').get(tid).config_json).companyName,'Fictional Builder '+viewport.width);
-
- await page.locator('[name=scriptName]').fill('Survey '+viewport.width);
- await page.getByLabel('Call questions',{exact:true}).fill('आपका बजट क्या है?\nआप कब विजिट करना चाहते हैं?');
- await page.getByLabel('Conversation rules',{exact:true}).fill('पहले बजट पूछें, फिर सुविधाजनक समय पूछें।');
- await page.getByRole('button',{name:'Add approved answer',exact:true}).click();
- await page.locator('[name=faqQuestion]').last().fill('क्या कीमत तय है?');
- await page.getByPlaceholder('Approved answer',{exact:true}).last().fill('टीम से पुष्टि करेंगे।');
- await page.getByRole('button',{name:'Save new script version',exact:true}).click();
- await page.getByText(/Script version .* saved. Live calls have not changed./).waitFor();
- await page.getByRole('button',{name:'Load v1',exact:true}).click();
- await page.getByText(/Loaded v1. Save to create a new version/).waitFor();
- await page.getByRole('heading',{name:'AI Questions & Answers',exact:true}).locator('..').screenshot({path:'artifacts/script-editor-'+viewport.width+'.png'});
+ await page.getByRole('heading',{name:'Your Company / AI',exact:true}).waitFor();
+ await page.getByRole('heading',{name:'Request Changes',exact:true}).waitFor();
+ assert.equal(await page.getByRole('button',{name:'Save company information'}).count(),0);
+ assert.equal(await page.getByRole('button',{name:'Save new script version'}).count(),0);
+ assert.equal(await page.getByRole('button',{name:'Publish AI agent for calls'}).count(),0);
+ if(viewport.width===1440){
+  await page.getByLabel('What should AR3D update?').fill('Please update our fictional Raipur plot price from 12 lakh to 14 lakh.');
+  await page.getByRole('button',{name:'Send change request'}).click();
+  await page.getByText(/Request sent to AR3D/).waitFor();
+ }
+ await page.getByText('Please update our fictional Raipur plot price from 12 lakh to 14 lakh.').waitFor();
+ await page.getByRole('heading',{name:'Request Changes'}).locator('..').screenshot({path:'artifacts/script-editor-'+viewport.width+'.png'});
 
  await page.getByRole('tab',{name:'Customers / Excel',exact:true}).click();
  await page.getByRole('button',{name:'Download customer Excel template (CSV)',exact:true}).waitFor();
@@ -83,7 +78,17 @@ try{
  await adminPage.goto(origin+'/app');
  await adminPage.getByText('Workspace settings',{exact:true}).click();
  await adminPage.getByRole('heading',{name:'Client Calling Setup',exact:true}).waitFor();
- await adminPage.getByRole('heading',{name:'Questions & Conversation Logic',exact:true}).waitFor();
+ // Company knowledge and script editing are now Admin-only, under Clients.
+ await adminPage.getByRole('heading',{name:'Client Company & AI Setup',exact:true}).waitFor();
+ await adminPage.getByRole('heading',{name:'AI Questions & Answers',exact:true}).waitFor();
+ await adminPage.locator('[name=company-companyName]').fill('Fictional Builder');
+ await adminPage.getByRole('button',{name:'Save company information',exact:true}).click();
+ await adminPage.getByText('Company information saved',{exact:true}).waitFor();
+ await adminPage.locator('[name=scriptName]').fill('Admin approved script');
+ await adminPage.getByRole('button',{name:'Save new script version',exact:true}).click();
+ await adminPage.getByText(/Script version .* saved. Live calls have not changed./).waitFor();
+ await adminPage.getByRole('heading',{name:'Client Change Requests',exact:true}).waitFor();
+ await adminPage.getByText('Please update our fictional Raipur plot price from 12 lakh to 14 lakh.').waitFor();
 
  await adminPage.getByLabel('Exotel Voicebot Flow ID',{exact:true}).fill('123456');
  await adminPage.getByLabel('Provider approval reference',{exact:true}).fill('browser-reviewed-provider-reference');

@@ -46,23 +46,18 @@ test('tenant viewer can read agents but cannot edit; foreign tenant forbidden',a
   assert.equal((await worker.fetch(req('/v1/human/agents?tenantId='+another),fixture().env)).status,403);
   assert.equal((await worker.fetch(req('/v1/human/agents/'+id,'PATCH',d,false),fixture().env)).status,403);
 });
-test('agent editor saves own draft with audit; no live calling',async()=>{
-  const f=fixture();
-  const r=await worker.fetch(req('/v1/human/agents/'+id,'PATCH',{tenantId:tenant,
-    displayName:'Indore assistant',languageMode:'hi',questions:['कहाँ प्लॉट चाहिए?'],status:'paused'}),f.env);
-  assert.equal(r.status,200);assert.equal((await r.json()).status,'paused');
-  assert.ok(f.log.some(x=>x.sql.includes('UPDATE agents SET')));
-  assert.ok(f.log.some(x=>x.sql.includes('agent.updated')));
-  assert.ok(f.log.filter(x=>x.type==='crm').every(x=>x.params.includes(tenant)));
-  assert.ok(!f.log.some(x=>/INSERT INTO calls/.test(x.sql)));
-});
-test('agent rejects activation and arbitrary fields',async()=>{
-  const base={tenantId:tenant,displayName:'Demo'};
-  for(const bad of [{...base,status:'active'},{...base,phoneNumber:'1234'},
-    {...base,questions:[]},{...base,languageMode:'ru'},
-    {...base,questions:Array(26).fill('Question')}])
-    assert.equal((await worker.fetch(req('/v1/human/agents/'+id,'PATCH',bad),fixture().env)).status,400);
-  assert.equal((await worker.fetch(req('/v1/human/agents/'+id,'PATCH',base),fixture('client_admin','active').env)).status,409);
+test('client AI drafts are read-only; API cannot edit or activate hidden agent settings',async()=>{
+ const f=fixture();
+ for(const patch of [
+  {tenantId:tenant,displayName:'Indore assistant',languageMode:'hi',questions:['कहाँ प्लॉट चाहिए?'],status:'paused'},
+  {tenantId:tenant,status:'active'},
+  {tenantId:tenant,phoneNumber:'1234'}
+ ]){
+  const r=await worker.fetch(req('/v1/human/agents/'+id,'PATCH',patch),f.env);
+  assert.equal(r.status,403);
+ }
+ assert.equal((await worker.fetch(req('/v1/human/agents','POST',{tenantId:tenant,displayName:'Test',languageMode:'hi',questions:['Hi?']}),f.env)).status,403);
+ assert.equal(f.log.some(x=>x.type==='crm'&&/UPDATE agents|INSERT INTO agents|agent.updated/.test(x.sql)),false);
 });
 test('audit history is tenant-scoped, viewer denied, pagination bounded',async()=>{
   const r=await worker.fetch(req('/v1/human/audit?tenantId='+tenant),fixture().env);
@@ -83,7 +78,7 @@ test('oversized machine API JSON rejected before reaching database',async()=>{
 });
 test('dashboard source parses and contains agent editing/audit/lead paging',()=>{
   assert.doesNotThrow(()=>new vm.Script(js));
-  assert.match(js,/Edit or pause an AI Agent/);
+  assert.match(js,/Request Changes/);
   assert.match(js,/CRM Audit History/);
   assert.match(js,/offset:String\(offset\)/);
   assert.match(js,/Next →/);

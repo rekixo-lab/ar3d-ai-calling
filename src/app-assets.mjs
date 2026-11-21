@@ -440,7 +440,7 @@ function dashboard(){
  else aside.append(nav('Company / AI','spark','client-ai'),nav('Results & activity','file','client-reports'));
  aside.append(div('sidebar-footer',div('account',div('avatar',node('span',{text:state.me.email.slice(0,2).toUpperCase()})),div('account-copy',node('strong',{text:admin?'Administrator':'Client workspace'}),node('p',{text:state.me.email}))),btn('Sign out',logout,true)));
  const main=div('main',div('topbar',div('',node('div',{class:'eyebrow',text:'WORKSPACE / '+(admin?'OVERVIEW':'DASHBOARD')}),title(admin?'Super Admin':'Personal AI Calling','h1'),node('p',{class:'page-description',text:admin?'Manage your clients, calling and workspace access.':'Your customers, conversations and campaigns. All in one place.'})),div('topbar-right',node('span',{class:'pill'},[node('span',{class:'status-dot'}),'AR3D Client Platform']),div('avatar',node('span',{text:state.me.email.slice(0,2).toUpperCase()})))),div('',node('div',{id:'notice-anchor'})));main.id='workspace-top';root.append(div('layout',aside,main));
- if(admin){const grid=div('admin-grid');main.append(grid);superAdmin(grid);const settings=node('details',{class:'card',id:'platform-settings'},node('summary',{text:'Workspace settings'})),settingsGrid=div('admin-grid');main.append(settings);settings.append(settingsGrid);callingAdminPanel(settingsGrid);scriptAdminPanel(settingsGrid);mfaPanel(settingsGrid);const advanced=node('details',{class:'stack'},node('summary',{text:'Engineering tools and diagnostics'}));settings.append(advanced);engineeringPanel(advanced);voiceGatewayPanel(advanced)}
+ if(admin){const grid=div('admin-grid');main.append(grid);superAdmin(grid);const settings=node('details',{class:'card',id:'platform-settings'},node('summary',{text:'Workspace settings'})),settingsGrid=div('admin-grid');main.append(settings);settings.append(settingsGrid);callingAdminPanel(settingsGrid);mfaPanel(settingsGrid);const advanced=node('details',{class:'stack'},node('summary',{text:'Engineering tools and diagnostics'}));settings.append(advanced);engineeringPanel(advanced);voiceGatewayPanel(advanced)}
  if(state.me.tenants.length)clientPanel(main);
 }
 function showRecoveryCodes(target,codes){
@@ -570,7 +570,7 @@ async function superAdmin(main){
     node('input',{class:'field',value:d.inviteUrl,readonly:'readonly','aria-label':'Private client invitation link'})
    ));
    notice('Invitation prepared; client account activates after invitation acceptance.');
-   f.reset();await refresh();await refreshAccess();
+   f.reset();await refresh();await refreshAccess();document.dispatchEvent(new CustomEvent('client-created',{detail:d.id}));
   }catch(err){asError(err)}
   finally{submit.disabled=false}
  });
@@ -603,10 +603,111 @@ actionForm.addEventListener('submit',async e=>{e.preventDefault();try{
   notice('Tenant '+result.status+'. This is not a payment transaction.');
   reason.value='';await refresh();await refreshAccess();
 }catch(err){asError(err)}});
-await inviteSection(management)}
+await inviteSection(management);await scriptAdminPanel(main);await adminCompanyChangesPanel(main)}
 async function inviteSection(main){const previous=document.getElementById('invite-card');if(previous)previous.remove();const card=div('card invite-card');card.id='invite-card';card.append(title('Invite client admin','h2'),node('p',{class:'muted',text:'Invitation link shown once. Share privately with the intended client.'}));const select=node('select',{class:'field'},[node('option',{value:'',text:'Choose company'})]);const tenants=await api('/v1/human/tenants');tenants.tenants.forEach(t=>select.append(node('option',{value:t.id,text:t.display_name})));const email=input('email','email','client@builder.com');const role=node('select',{class:'field'},['client_admin','viewer'].map(x=>node('option',{value:x,text:x})));const f=node('form',{class:'formrow'},[lab('Company',select),lab('Client email',email),lab('Role',role),node('button',{type:'submit',class:'btn',text:'Create invitation'})]);f.addEventListener('submit',async e=>{e.preventDefault();try{const d=await api('/v1/human/invitations','POST',{tenantId:select.value,email:email.value,role:role.value});const share=node('input',{class:'field',value:d.inviteUrl,readonly:'readonly',style:'width:100%'});card.append(div('banner',node('p',{text:'Share this one-time link securely:'}),share));notice('Invitation generated for '+email.value)}catch(err){asError(err)}});card.append(f);main.append(card)}
+async function adminCompanyChangesPanel(main){
+ const card=div('card client-directory',title('Client Change Requests','h3'),
+  node('p',{class:'note',text:'Clients request corrections here. First update the approved Company / AI facts above and publish the latest AI version. Mark handled only afterwards; a request never changes live information automatically.'}));
+ card.id='company-change-inbox';main.append(card);
+ const company=node('select',{class:'field','aria-label':'Review client company'}),items=div('stack');
+ const refreshList=async()=>{
+  items.replaceChildren();
+  if(!company.value)return;
+  try{
+   const d=await api('/v1/human/company-change-requests?tenantId='+encodeURIComponent(company.value));
+   if(!d.requests.length){items.append(node('p',{class:'muted',text:'No company change requests yet.'}));return}
+   for(const item of d.requests){
+    const host=div('card stack',node('p',{text:item.message}),
+      node('p',{class:'muted',text:item.status+' · '+new Date(item.createdAt).toLocaleString()+
+        (item.resolutionNote?' · '+item.resolutionNote:'')}));
+    if(item.status==='pending'){
+     const actions=div('formrow');
+     for(const [action,label] of [['handled','Mark handled (after AI update)'],['dismissed','Dismiss request']]){
+      const button=btn(label,async()=>{
+       if(!confirm(action==='handled'?'Confirm: the approved company information or AI was reviewed and updated separately?':'Dismiss this client request without changing the company AI?'))return;
+       button.disabled=true;
+       try{
+        await api('/v1/human/company-change-requests/'+encodeURIComponent(item.id)+'/resolve','POST',
+         {tenantId:company.value,status:action});
+        notice('Client request '+action+'. Current published AI changes only after a separate Admin publish.');
+        await refreshList();
+       }catch(e){asError(e);button.disabled=false}
+      },action==='dismissed');
+      actions.append(button);
+     }
+     host.append(actions);
+    }
+    items.append(host);
+   }
+  }catch(e){items.append(node('p',{class:'err',text:e.message}))}
+ };
+ const refreshCompanies=async()=>{
+  const old=company.value;
+  const d=await api('/v1/human/tenants');
+  company.replaceChildren(...d.tenants.filter(t=>['trial','active'].includes(t.status))
+   .map(t=>node('option',{value:t.id,text:t.display_name})));
+  if([...company.options].some(x=>x.value===old))company.value=old;
+  await refreshList();
+ };
+ company.addEventListener('change',()=>refreshList().catch(asError));
+ card.append(div('formrow',lab('Client',company),
+  btn('Refresh client requests',()=>refreshCompanies().catch(asError),true)),items);
+ await refreshCompanies();
+}
+async function clientCompanySummary(tenantId,content,role,companyName=''){
+ const card=div('card',title('Your Company / AI','h3'),
+  node('p',{class:'note',text:'AR3D sets up and publishes your company AI. These details are view-only. To correct a price, project or location, use Request Changes below.'}));
+ content.append(card);
+ try{
+  const [company,script]=await Promise.all([
+   api('/v1/human/company-profile?tenantId='+encodeURIComponent(tenantId)),
+   api('/v1/human/calling-scripts?tenantId='+encodeURIComponent(tenantId))
+  ]);
+  const latest=script.versions[0],publication=script.publication;
+  const published=publication?.state==='ready'&&publication.profileRevision===company.revision&&
+    publication.scriptRevision===latest?.revision;
+  card.append(node('p',{class:published?'success':'note',
+    text:published?'AI agent: Published and up to date':company.revision&&latest?'AI setup saved. Publishing or updates pending.':'AI setup pending — AR3D will complete it.'}));
+  const labels=[['companyName','Company name'],['locations','Location'],['projects','Projects and plots'],
+   ['propertyTypes','Property types'],['pricing','Approved prices'],['amenities','Amenities'],
+   ['contact','Sales contact'],['officeHours','Office hours'],['website','Website'],
+   ['about','About the company'],['additionalFacts','Additional details']];
+  const rows=labels.map(([key,label])=>[label,company.profile[key]||((key==='companyName')?companyName:'—')])
+   .filter(([key,val])=>val&&val!=='—');
+  card.append(rows.length?table(['Company information','Provided details'],rows):
+   node('p',{class:'muted',text:'Company details have not yet been saved by AR3D.'}));
+  if(!published&&company.revision>0)card.append(node('p',{class:'muted',text:'Latest changes are not confirmed live until Admin publishes the AI.'}));
+ }catch(e){card.append(node('p',{class:'err',text:'Company information unavailable. Please contact AR3D.'}))}
+ const requestCard=div('card',title('Request Changes','h3'),
+  node('p',{class:'muted',text:'Tell AR3D what needs correcting, for example: project, location, plot size or price. Submitting a request does not change live AI answers.'}));
+ content.append(requestCard);
+ const history=div('stack');
+ async function refresh(){
+  const d=await api('/v1/human/company-change-requests?tenantId='+encodeURIComponent(tenantId));
+  history.replaceChildren(d.requests.length?
+   table(['Requested change','Status','Submitted'],d.requests.map(x=>[x.message,x.status,new Date(x.createdAt).toLocaleDateString()])):
+   node('p',{class:'muted',text:'No change requests yet.'}));
+ }
+ if(role==='client_admin'){
+  const message=node('textarea',{class:'field',rows:3,placeholder:'Example: Update our Raipur plot price from 12 lakh to 14 lakh.'});
+  message.maxLength=1200;message.minLength=15;
+  const form=node('form',{class:'stack'},[
+   lab('What should AR3D update?',message),
+   node('button',{class:'btn',type:'submit',text:'Send change request'})
+  ]);
+  form.addEventListener('submit',async e=>{
+   e.preventDefault();
+   const send=form.querySelector('button[type=submit]');send.disabled=true;
+   try{await api('/v1/human/company-change-requests','POST',{tenantId,message:message.value});
+    message.value='';notice('Request sent to AR3D. The AI is unchanged until review and publication.');await refresh()}
+   catch(err){asError(err)}finally{send.disabled=false}
+  });
+  requestCard.append(form);
+ }
+ requestCard.append(history);try{await refresh()}catch(e){history.append(node('p',{class:'err',text:'Change request history unavailable.'}))}
+}
 async function clientPanel(main){const panel=div('client-workspace',title('Personal CRM & AI Agent'));main.append(panel);const select=node('select',{class:'field'},state.me.tenants.map(t=>node('option',{value:t.id,text:t.name+' — '+t.plan})));const content=div('client-content');panel.append(lab('Your company',select),content);select.addEventListener('change',()=>renderClient(select.value,content));await renderClient(select.value,content)}
-async function renderClient(id,content){state.clientSetTab=null;content.replaceChildren(node('p',{class:'muted',text:'Loading client dashboard…'}));try{const d=await api('/v1/human/overview?tenantId='+encodeURIComponent(id));content.replaceChildren();const cards=div('cards',...[['Customers',d.metrics.leads],['Call attempts',d.metrics.calls],['Site Visits',d.metrics.siteVisits]].map(([name,val])=>div('card metric',div('metric-symbol',icon(sectionIcon(name))),node('span',{class:'muted',text:name}),node('strong',{text:String(val)}),node('small',{text:'Workspace total'}))));content.append(cards);content.append(node('p',{class:'note',text:'Set up your company AI, upload customers, then call only after review and approval.'}));
+async function renderClient(id,content){state.clientSetTab=null;content.replaceChildren(node('p',{class:'muted',text:'Loading client dashboard…'}));try{const d=await api('/v1/human/overview?tenantId='+encodeURIComponent(id));content.replaceChildren();const cards=div('cards',...[['Customers',d.metrics.leads],['Call attempts',d.metrics.calls],['Site Visits',d.metrics.siteVisits]].map(([name,val])=>div('card metric',div('metric-symbol',icon(sectionIcon(name))),node('span',{class:'muted',text:name}),node('strong',{text:String(val)}),node('small',{text:'Workspace total'}))));content.append(cards);content.append(node('p',{class:'note',text:'AR3D manages your company AI. Upload customers, prepare calling campaigns, review results and request corrections when needed.'}));
  const sections={customers:div('client-tab-panel'),calling:div('client-tab-panel'),company:div('client-tab-panel'),results:div('client-tab-panel')};
  for(const section of Object.values(sections))section.style.gridColumn='1 / -1';
  sections.company.id='client-ai';
@@ -632,7 +733,7 @@ async function renderClient(id,content){state.clientSetTab=null;content.replaceC
  selectTab(Object.hasOwn(sections,state.clientTab)?state.clientTab:'customers');
  await crmWorkflow(id,sections.customers,d.role,content);
  await customerCallingPanel(id,sections.calling,d.role);
- await callingScriptEditor(id,sections.company);const extra=node('details',{class:'card'},node('summary',{text:'Manual customer entry and agent drafts'}));sections.company.append(extra);const leadCard=div('card',title('Leads','h3'),table(['Name','Mobile','Source','Consent'],d.leads.map(l=>[l.name,l.mobile,l.sourceType,l.consentStatus])));extra.append(leadCard);const name=input('name','text','Customer name'),mobile=input('mobile','tel','9876543210');const leadForm=node('form',{class:'formrow'},[lab('Name',name),lab('Mobile',mobile),node('button',{class:'btn',type:'submit',text:'Add lead'})]);leadForm.addEventListener('submit',async e=>{e.preventDefault();try{await api('/v1/human/leads','POST',{tenantId:id,name:name.value,mobile:mobile.value});notice('Lead saved without calling consent');await renderClient(id,content)}catch(err){asError(err)}});if(d.role==='client_admin')leadCard.append(leadForm);const agentCard=div('card',title('AI Agents','h3'),table(['Name','Language','Status'],d.agents.map(a=>[a.displayName,a.languageMode,a.status])));extra.append(agentCard);if(d.role==='client_admin'){const agentName=input('displayName','text','Sales Agent'),language=node('select',{class:'field'},['hi-en','hi','en'].map(x=>node('option',{value:x,text:x}))),q=node('textarea',{class:'field',placeholder:'One question per line',rows:4});const agentForm=node('form',{class:'stack'},[lab('AI Agent Name',agentName),lab('Language',language),lab('Questions (one per line)',q),node('button',{class:'btn',type:'submit',text:'Save draft AI Agent'})]);agentForm.addEventListener('submit',async e=>{e.preventDefault();try{await api('/v1/human/agents','POST',{tenantId:id,displayName:agentName.value,languageMode:language.value,questions:q.value.split('\n').map(s=>s.trim()).filter(Boolean)});notice('Draft AI Agent saved');await renderClient(id,content)}catch(err){asError(err)}});agentCard.append(agentForm);await agentEditor(id,agentCard)}const planning=node('details',{class:'card'},node('summary',{text:'Advanced campaign planning and project links'}));sections.company.append(planning);await planningPanels(id,planning,d.role);const reports=node('details',{class:'card'},node('summary',{text:'Exports, answer reviews and audit history'}));reports.id='client-reports';sections.results.append(reports);await usageAndExport(id,reports,d.role);if(d.role==='client_admin')await voicebotReviewPanel(id,reports,content);if(d.role==='client_admin')await auditPanel(id,reports)}catch(e){content.replaceChildren();asError(e)}}
+ await clientCompanySummary(id,sections.company,d.role,d.tenant.name);const extra=node('details',{class:'card'},node('summary',{text:'Manual customer entry'}));sections.customers.append(extra);const leadCard=div('card',title('Leads','h3'),table(['Name','Mobile','Source','Consent'],d.leads.map(l=>[l.name,l.mobile,l.sourceType,l.consentStatus])));extra.append(leadCard);const name=input('name','text','Customer name'),mobile=input('mobile','tel','9876543210');const leadForm=node('form',{class:'formrow'},[lab('Name',name),lab('Mobile',mobile),node('button',{class:'btn',type:'submit',text:'Add lead'})]);leadForm.addEventListener('submit',async e=>{e.preventDefault();try{await api('/v1/human/leads','POST',{tenantId:id,name:name.value,mobile:mobile.value});notice('Lead saved without calling consent');await renderClient(id,content)}catch(err){asError(err)}});if(d.role==='client_admin')leadCard.append(leadForm);const planning=node('details',{class:'card'},node('summary',{text:'Advanced campaign planning and project links'}));sections.calling.append(planning);await planningPanels(id,planning,d.role);const reports=node('details',{class:'card'},node('summary',{text:'Exports, answer reviews and audit history'}));reports.id='client-reports';sections.results.append(reports);await usageAndExport(id,reports,d.role);if(d.role==='client_admin')await voicebotReviewPanel(id,reports,content);if(d.role==='client_admin')await auditPanel(id,reports)}catch(e){content.replaceChildren();asError(e)}}
 
 async function voicebotReviewPanel(tenantId,content,refreshContent=content){
   const card=div('card',title('Verified Exotel Voicebot Review Queue','h3'),
@@ -765,11 +866,22 @@ async function callingAdminPanel(main){
 }
 
 async function scriptAdminPanel(main){
- const card=div('card',title('Questions & Conversation Logic')),area=div('stack');card.id='conversation-setup';main.append(card);
+ const card=div('card client-directory',title('Client Company & AI Setup')),area=div('stack');card.id='conversation-setup';main.append(card);card.append(node('p',{class:'note',text:'Super Admin: choose the client, save approved company/project/price details and publish their AI. Clients can only view and request changes; this does not activate calling.'}));
  const company=node('select',{class:'field','aria-label':'Conversation company'});
- try{const result=await api('/v1/human/tenants');company.append(...result.tenants.filter(t=>['trial','active'].includes(t.status)).map(t=>node('option',{value:t.id,text:t.display_name})));}catch(e){asError(e);return}
- async function load(){area.replaceChildren();if(company.value)await callingScriptEditor(company.value,area,true)}
- company.addEventListener('change',()=>load().catch(asError));card.append(lab('Company',company),area);await load();
+ async function refreshCompanies(preferredId=''){
+  const old=preferredId||company.value;
+  const result=await api('/v1/human/tenants');
+  company.replaceChildren(...result.tenants.filter(t=>['trial','active'].includes(t.status))
+   .map(t=>node('option',{value:t.id,text:t.display_name})));
+  if([...company.options].some(option=>option.value===old))company.value=old;
+  await load();
+ }
+ async function load(){area.replaceChildren();if(company.value)await callingScriptEditor(company.value,area,true,company.selectedOptions[0]?.textContent||'')}
+ company.addEventListener('change',()=>load().catch(asError));
+ document.addEventListener('client-created',e=>refreshCompanies(e.detail||'').catch(asError));
+ card.append(div('formrow',lab('Company',company),
+  btn('Refresh client list',()=>refreshCompanies().catch(asError),true)),area);
+ await refreshCompanies();
 }
 async function voiceGatewayPanel(main){
  const card=div('card stack',title('Shared Calling Gateway','h3')),status=node('p',{class:'note',text:'Checking shared calling connection…'}),result=div('stack');main.append(card);card.append(status);
@@ -787,19 +899,19 @@ async function voiceGatewayPanel(main){
   try{const r=await api('/v1/human/engineering/exotel-self-test','POST',{confirm:'CALL_MY_VERIFIED_NUMBER_ONCE',publishedTenantId:company.value});result.replaceChildren(node('p',{class:r.routingRegistered?'success':'note',text:'Gateway test: '+r.state+' · routing '+(r.routingRegistered?'registered':'not confirmed')+' · '+r.requestId}))}catch(e){asError(e)}finally{test.disabled=false}
  },true);card.append(lab('Published client for verified-phone test',company),test);refresh().catch(asError);
 }
-async function companyProfileEditor(tenantId,content,admin=false){
+async function companyProfileEditor(tenantId,content,admin=false,companyLabel=''){
  const card=div(admin?'stack':'card',title('Company Knowledge','h3'));content.append(card);
  let data;try{data=await api('/v1/human/company-profile?tenantId='+tenantId)}catch(e){card.append(node('p',{class:'err',text:e.message}));return}
  const specs=[['companyName','Company name',1],['website','Website',1],['about','About your company',3],['locations','Cities / locations served',2],['propertyTypes','Property types',2],['projects','Projects and property details',4],['pricing','Approved prices / budget ranges',3],['amenities','Amenities and facilities',2],['officeHours','Office hours',1],['contact','Sales contact / office address',2],['additionalFacts','Other approved information',3]];
  const controls={},form=node('form',{class:'stack'}),summary=node('p',{class:'note',text:'Save company details for your AI agent. Enter only information you want the agent to use with customers. Publishing the agent applies these details to calls.'});card.append(summary,form);
  let row;
- for(const [key,label,rows] of specs){const field=rows===1?input('company-'+key,'text',label):node('textarea',{class:'field',rows});field.required=key==='companyName';field.value=data.profile[key]||'';field.disabled=!data.canEdit;controls[key]=field;if(rows===1){if(!row){row=div('formrow');form.append(row)}row.append(lab(label,field))}else{row=null;form.append(lab(label,field))}}
+ for(const [key,label,rows] of specs){const field=rows===1?input('company-'+key,'text',label):node('textarea',{class:'field',rows});field.required=key==='companyName';field.value=data.profile[key]||(admin&&key==='companyName'?companyLabel:'');field.disabled=!data.canEdit;controls[key]=field;if(rows===1){if(!row){row=div('formrow');form.append(row)}row.append(lab(label,field))}else{row=null;form.append(lab(label,field))}}
  const status=node('p',{class:'muted',text:data.revision?'Company information v'+data.revision+' saved':'Add your company information to get started'});form.append(status);
  if(data.canEdit)form.append(node('button',{class:'btn',type:'submit',text:'Save company information'}));
  form.addEventListener('submit',async e=>{e.preventDefault();const submit=form.querySelector('button[type=submit]');submit.disabled=true;try{const result=await api('/v1/human/company-profile','POST',{tenantId,baseRevision:data.revision,profile:Object.fromEntries(Object.entries(controls).map(([key,field])=>[key,field.value]))});data.revision=result.revision;status.textContent='Company information v'+data.revision+' saved. Publish the agent to use it in calls.';document.dispatchEvent(new CustomEvent('company-profile-saved',{detail:tenantId}));notice('Company information saved')}catch(e){asError(e)}finally{submit.disabled=false}});
 }
-async function callingScriptEditor(tenantId,content,admin=false){
- await companyProfileEditor(tenantId,content,admin);
+async function callingScriptEditor(tenantId,content,admin=false,companyLabel=''){
+ await companyProfileEditor(tenantId,content,admin,companyLabel);
  const card=div(admin?'stack':'card',title('AI Questions & Answers','h3')),status=div(''),history=div(''),faqRows=div('stack');content.append(card);
  let data;
  try{data=await api('/v1/human/calling-scripts?tenantId='+tenantId)}catch(e){card.append(node('p',{class:'err',text:e.message}));return}

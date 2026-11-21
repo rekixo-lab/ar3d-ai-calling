@@ -3,6 +3,7 @@ import {handleVoiceGatewayRequest} from './voice-gateway-routes.mjs';
 import {handleClientAccountRequest} from './client-account-routes.mjs';
 import {enrichAdminTenantsWithUsage} from './admin-usage.mjs';
 import {handleCompanyProfile} from './company-profile.mjs';
+import {handleCompanyChangeRequests} from './company-change-requests.mjs';
 import {handleCallingScripts} from './calling-script-routes.mjs';
 import {handleCrmRequest} from './crm-routes.mjs';
 import {handlePropertyQualificationRequest} from './property-qualification-routes.mjs';
@@ -254,6 +255,8 @@ export async function handleHumanRequest(req,env){
     if(gateway)return gateway;
     const profile=await handleCompanyProfile(req,env,user);
     if(profile)return profile;
+    const changes=await handleCompanyChangeRequests(req,env,user);
+    if(changes)return changes;
     const scripts=await handleCallingScripts(req,env,user);
     if(scripts)return scripts;
     const calling=await handleCallingRequest(req,env,user);
@@ -305,7 +308,7 @@ export async function handleHumanRequest(req,env){
     if(path==='/v1/human/invitations'&&method==='POST')return await invite(req,env.CONTROL_DB,user);
     if(path==='/v1/human/overview'&&method==='GET')return await overview(req,env,user);
     if(path==='/v1/human/leads'&&method==='POST')return await addLead(req,env,user);
-    if(path==='/v1/human/agents'&&method==='POST')return await addAgent(req,env,user);
+    if(path==='/v1/human/agents'&&method==='POST')return fail('company_ai_managed_by_super_admin',403);
     return fail('not found',404);
   }catch(e){
     const message=String(e?.message||'');

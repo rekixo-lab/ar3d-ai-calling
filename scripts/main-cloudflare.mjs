@@ -15,7 +15,7 @@ export const REQUIRED_TABLES = Object.freeze({
   CONTROL_DB: Object.freeze([
     'tenants','tenant_keys','project_links','tenant_numbers','tenant_audit_events',
     'human_users','tenant_memberships','human_sessions','human_invitations',
-    'human_login_limits','human_bootstrap_claim','human_ip_login_limits','human_mfa_settings','human_mfa_challenges','human_mfa_recovery_codes','provider_event_inbox','exotel_voicebot_event_receipts','exotel_operator_test_calls','exotel_operator_status_checks','calling_script_bindings','calling_script_versions','company_profile_versions','calling_agent_publications','shared_voice_gateway','voice_call_routes','client_account_contacts',
+    'human_login_limits','human_bootstrap_claim','human_ip_login_limits','human_mfa_settings','human_mfa_challenges','human_mfa_recovery_codes','provider_event_inbox','exotel_voicebot_event_receipts','exotel_operator_test_calls','exotel_operator_status_checks','calling_script_bindings','calling_script_versions','company_profile_versions','calling_agent_publications','shared_voice_gateway','voice_call_routes','client_account_contacts','company_change_requests',
   ]),
   CRM_DB: Object.freeze([
     'leads','agents','calls','site_visits','crm_audit_events',
@@ -36,6 +36,7 @@ export const REQUIRED_COLUMNS = Object.freeze({
     shared_voice_gateway: Object.freeze(['id','bot_id','flow_id','template_assistant_id','template_version','guard_assistant_id','gateway_version','state','last_verified_at']),
     voice_call_routes: Object.freeze(['call_key','tenant_id','publication_id','job_id','operator_request_id','created_at','expires_at']),
     client_account_contacts: Object.freeze(['tenant_id','email','mobile_e164','created_by','created_at','updated_at']),
+    company_change_requests: Object.freeze(['tenant_id','id','message','status','created_by','created_at','handled_by','handled_at','resolution_note']),
     calling_script_bindings: Object.freeze(['tenant_id','bot_id','assistant_id','source_version']),
     calling_script_versions: Object.freeze(['tenant_id','id','revision','config_json','prompt','provider_state','provider_version']),
     human_ip_login_limits: Object.freeze(['ip_hash','attempt_count','blocked_until']),
@@ -156,6 +157,7 @@ export function checkTables(tables, binding, mode) {
     return 'fresh';
   }
   const missing = expected.filter(name => !present.has(name));
+  if(mode==='preflight'&&binding==='CONTROL_DB'&&missing.length===1&&missing[0]==='company_change_requests')return 'control_company_change_upgrade';
   if(mode==='preflight'&&binding==='CONTROL_DB'&&missing.length===1&&missing[0]==='client_account_contacts')return 'control_client_accounts_upgrade';
   if(mode==='preflight'&&binding==='CONTROL_DB'&&missing.length===1&&missing[0]==='company_profile_versions')return 'control_profile_upgrade';
   if(mode==='preflight'&&binding==='CONTROL_DB'&&missing.length===3&&['calling_agent_publications','shared_voice_gateway','voice_call_routes'].every(t=>missing.includes(t)))return 'control_publication_upgrade';
@@ -231,7 +233,8 @@ export async function inspectCloudflare({ credentials, mode, apiFetch = fetch, t
         state === 'crm_call_intent_upgrade' || state === 'crm_voice_turn_upgrade' ||
         state === 'control_additive_upgrade' ||
         state === 'control_operator_test_upgrade' ||
-        state === 'control_operator_status_upgrade') {
+        state === 'control_operator_status_upgrade' ||
+        state === 'control_company_change_upgrade') {
       if (binding === 'CRM_DB') {
         const triggers = await query(id, "SELECT name,sql FROM sqlite_master WHERE type='trigger' AND name LIKE 'trg_%'");
         checkSafetyTriggers(triggers,{
@@ -241,6 +244,7 @@ export async function inspectCloudflare({ credentials, mode, apiFetch = fetch, t
       }
       for (const table of Object.keys(REQUIRED_COLUMNS[binding])) {
         if(state==='control_client_accounts_upgrade'&&table==='client_account_contacts')continue;
+        if(state==='control_company_change_upgrade'&&table==='company_change_requests')continue;
         if(state==='control_publication_upgrade'&&['calling_agent_publications','shared_voice_gateway','voice_call_routes'].includes(table))continue;
         if(state==='control_profile_upgrade'&&table==='company_profile_versions')continue;
         if(state==='control_script_upgrade'&&table.startsWith('calling_script_'))continue;
@@ -264,7 +268,8 @@ export async function inspectCloudflare({ credentials, mode, apiFetch = fetch, t
     throw Error('Main R2 bucket is missing or belongs to an unexpected resource.');
   // Preflight rejects a mixed state. This stops accidental double-initialize.
   if (mode === 'preflight' && modes.CONTROL_DB !== modes.CRM_DB &&
-      !(modes.CONTROL_DB === 'control_client_accounts_upgrade' && modes.CRM_DB === 'ready') &&
+      !(modes.CONTROL_DB === 'control_company_change_upgrade' && modes.CRM_DB === 'ready') &&
+       !(modes.CONTROL_DB === 'control_client_accounts_upgrade' && modes.CRM_DB === 'ready') &&
       !(modes.CONTROL_DB === 'control_publication_upgrade' && modes.CRM_DB === 'ready') &&
       !(modes.CONTROL_DB === 'control_profile_upgrade' && modes.CRM_DB === 'ready') &&
       !(modes.CONTROL_DB === 'control_script_upgrade' && modes.CRM_DB === 'ready') &&
@@ -282,6 +287,7 @@ export async function inspectCloudflare({ credentials, mode, apiFetch = fetch, t
 // A single clean state is mandatory for unattended deployment. Mixed/partial
 // schemas are NEVER safe to automatically initialize or deploy.
 export function verifiedSchemaState(modes) {
+  if(modes?.CONTROL_DB==='control_company_change_upgrade'&&modes?.CRM_DB==='ready')return 'control_company_change_upgrade';
   if(modes?.CONTROL_DB==='control_client_accounts_upgrade'&&modes?.CRM_DB==='ready')return 'control_client_accounts_upgrade';
   if(modes?.CONTROL_DB==='control_publication_upgrade'&&modes?.CRM_DB==='ready')return 'control_publication_upgrade';
   if(modes?.CONTROL_DB==='control_profile_upgrade'&&modes?.CRM_DB==='ready')return 'control_profile_upgrade';
