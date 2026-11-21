@@ -106,6 +106,7 @@ function cloudflareMock({ controlTables=[],crmTables=[],controlName='ar3d-callin
         else if(sql.includes('call_campaign_candidates')) rows=['tenant_id','campaign_id','lead_id'].map(name=>({name}));
         else if(sql.includes('voicebot_qualification_reviews')) rows=['tenant_id','lead_id','provider','status','survey_json','source_verified','mapping_verified','possible_opt_out'].map(name=>({name}));
         else if(sql.includes('call_intent_proposals')) rows=['tenant_id','id','campaign_id','lead_id','purpose','state','created_by','created_at'].map(name=>({name}));
+        else if(sql.includes('company_profile_versions')) rows=REQUIRED_COLUMNS.CONTROL_DB.company_profile_versions.map(name=>({name}));
         else if(sql.includes('calling_script_')) {const t=sql.match(/PRAGMA table_info\(([^)]+)\)/)[1];rows=REQUIRED_COLUMNS.CONTROL_DB[t].map(name=>({name}));}
         else if(sql.includes('calling_')) {const t=sql.match(/PRAGMA table_info\(([^)]+)\)/)[1];rows=REQUIRED_COLUMNS.CRM_DB[t].map(name=>({name}));}
         else if(sql.includes('agents')) rows=['tenant_id','status','questions_json'].map(name=>({name}));
@@ -292,4 +293,13 @@ test('campaign dispatch upgrade requires exactly four missing tables on the comp
  assert.throws(()=>checkTables(old.filter(x=>x!=='leads'),'CRM_DB','preflight'),/partial/);
  const result=await inspectCloudflare({credentials:getCredentials(env),mode:'preflight',template,apiFetch:cloudflareMock({controlTables:REQUIRED_TABLES.CONTROL_DB,crmTables:old})});
  assert.equal(result.modes.CRM_DB,'crm_dispatch_upgrade');
+});
+test('company profile upgrade requires complete prior Control schema and preserves all existing columns',async()=>{
+ const old=REQUIRED_TABLES.CONTROL_DB.filter(x=>x!=='company_profile_versions');
+ assert.equal(checkTables(old,'CONTROL_DB','preflight'),'control_profile_upgrade');
+ assert.equal(verifiedSchemaState({CONTROL_DB:'control_profile_upgrade',CRM_DB:'ready'}),'control_profile_upgrade');
+ assert.throws(()=>checkTables(old.filter(x=>x!=='human_users'),'CONTROL_DB','preflight'),/partial/);
+ assert.throws(()=>checkTables(old,'CONTROL_DB','ready'),/missing tables/);
+ const result=await inspectCloudflare({credentials:getCredentials(env),mode:'preflight',template,apiFetch:cloudflareMock({controlTables:old,crmTables:REQUIRED_TABLES.CRM_DB})});
+ assert.equal(result.modes.CONTROL_DB,'control_profile_upgrade');
 });

@@ -40,7 +40,7 @@ export async function probeScriptProvider(env,botId,options={}){
  const botVersion=data.version||data.stable_version;
  extract(data.assistant_config,/^v[1-9]\d{0,8}$/.test(botVersion||'')?botVersion:null);
  for(const [version,config] of Object.entries(data.versions||{}))if(/^v[1-9]\d{0,8}$/.test(version))extract(config?.assistant_config,version);
- return {accessVerified:true,botId,assistantCandidates:candidates,notice:'Read-only API access verified. This does not prove live rollout.'};
+ return {accessVerified:true,botId,assistantCandidates:candidates,configurationShape:responseShape({webhook_config:data.webhook_config,assistant_config:data.assistant_config}),notice:'Read-only API access verified. This does not prove live rollout.'};
 }
 export async function stageScript(env,binding,prompt,options={}){
  const path='/assistants/'+binding.assistant_id;
