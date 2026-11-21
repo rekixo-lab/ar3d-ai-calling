@@ -15,6 +15,14 @@ test('human passwords use salted slow PBKDF2 and verify without plaintext storag
   assert.equal(await checkPassword('wrong 123456789',{password_salt:p.salt,password_hash:p.hash,password_iterations:p.iterations}),false);
   assert.notEqual((await makePassword('correct horse battery staple')).salt,p.salt);
   assert.throws(()=>validPassword('short'),/12/);
+  // Invitation-only onboarding accepts 8; admin bootstrap still needs 12.
+  assert.equal(validPassword('abcdefgh',8),'abcdefgh');
+  assert.throws(()=>validPassword('abcdefg',8),/8/);
+  assert.throws(()=>validPassword('abcdefgh'),/12/);
+  const clientPassword=await makePassword('abcdefgh',8);
+  assert.equal(await checkPassword('abcdefgh',{password_salt:clientPassword.salt,
+    password_hash:clientPassword.hash,password_iterations:clientPassword.iterations}),true);
+  await assert.rejects(makePassword('abcdefgh'),/12/);
   assert.equal(validEmail('  OWNER@EXAMPLE.COM '),'owner@example.com');
   assert.throws(()=>validEmail('not-an-email'));
 });
@@ -58,6 +66,9 @@ test('UI is self-contained and scripts parse',async()=>{
   assert.match(html,/AR3D AI Calling/);
   assert.doesNotMatch(html,/https:\/\//);
   assert.doesNotThrow(()=>new vm.Script(js));
+  assert.match(js,/function inviteSessionNotice\(/);
+  assert.match(js,/try\{state.me=await api\('\/v1\/human\/me'\);inviteSessionNotice\(\)\}/);
+  assert.match(js,/pass\.minLength=8/);
   const r=await worker.fetch(new Request('https://example.test/app'),{});
   assert.equal(r.status,200);
   assert.match(r.headers.get('content-security-policy'),/script-src 'self'/);
