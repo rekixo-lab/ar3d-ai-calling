@@ -12,6 +12,8 @@ const EXOPHONE=/^\+?[0-9]{6,19}$/;
 const FLOW=/^[1-9][0-9]{1,11}$/;
 const CRED=/^[\x21-\x7e]{8,256}$/;
 const ACK='CALL_MY_VERIFIED_NUMBER_ONCE';
+const RETRY_ACK='RETRY_MY_FAILED_VERIFIED_TEST_ONCE';
+const UUID=/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
 const headers={'Cache-Control':'no-store','X-Content-Type-Options':'nosniff',
   'Referrer-Policy':'no-referrer','X-Frame-Options':'DENY'};
 const json=(body,status=200)=>Response.json(body,{status,headers});
@@ -47,9 +49,10 @@ async function readBody(req){
   const bytes=new Uint8Array(size);let pos=0;
   for(const chunk of parts){bytes.set(chunk,pos);pos+=chunk.length}
   const obj=JSON.parse(new TextDecoder('utf-8',{fatal:true}).decode(bytes));
-  if(!obj||Array.isArray(obj)||typeof obj!=='object'||
-      Object.keys(obj).length!==1||obj.confirm!==ACK)
-    throw Error('invalid self-test request');
+  if(!obj||Array.isArray(obj)||typeof obj!=='object')throw Error('invalid self-test request');
+  if(Object.keys(obj).length===1&&obj.confirm===ACK)return {retryOf:null};
+  if(Object.keys(obj).length===2&&obj.confirm===RETRY_ACK&&UUID.test(obj.failedRequestId||''))return {retryOf:obj.failedRequestId};
+  throw Error('invalid self-test request');
 }
 async function boundedJson(response){
   if(!response||response.status<200||response.status>=300||
@@ -120,6 +123,17 @@ async function reserve(db,userId,now){
   ).bind(id,userId,slot,at,at,earliest).run();
   if(Number(row?.meta?.changes)!==1)return null;
   return {id,at};
+}
+async function reserveReviewedRetry(db,userId,requestId,now){
+  const bytes=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(requestId));
+  const slot='r-'+Array.from(new Uint8Array(bytes),b=>b.toString(16).padStart(2,'0')).join('').slice(0,22);
+  const id=crypto.randomUUID(),at=new Date(now).toISOString(),earliest=new Date(now-86400000).toISOString();
+  // One explicitly confirmed diagnostic retry, only for this admin's original
+  // provider-verified failure. Unknown, answered and prior retry calls cannot
+  // qualify. The original evidence is immutable; total requests remain <=3/day.
+  const result=await db.prepare("INSERT INTO exotel_operator_test_calls(id,actor_user_id,rate_slot,state,created_at,updated_at) SELECT ?,?,?, 'reserved',?,? FROM exotel_operator_test_calls t WHERE t.id=? AND t.actor_user_id=? AND t.state='submitted' AND t.rate_slot NOT LIKE 'r-%' AND t.created_at>=? AND (SELECT c.state||':'||c.provider_status FROM exotel_operator_status_checks c WHERE c.call_request_id=t.id ORDER BY c.created_at DESC LIMIT 1) IN('verified:failed','verified:busy','verified:no-answer') AND (SELECT COUNT(*) FROM exotel_operator_test_calls WHERE created_at>=?)<3 AND NOT EXISTS(SELECT 1 FROM exotel_operator_test_calls WHERE rate_slot LIKE 'r-%' AND created_at>=?) ON CONFLICT(rate_slot) DO NOTHING")
+    .bind(id,userId,slot,at,at,requestId,userId,earliest,earliest,earliest).run();
+  return Number(result?.meta?.changes)===1?{id,at}:null;
 }
 async function finalize(db,id,state,{sid=null,code=null}={}){
   const result=await db.prepare(
@@ -196,9 +210,10 @@ export async function handleExotelOperatorTest(req,env,user,{apiFetch=fetch,now=
   }
   if(!mfaEnabled)return error('enable_super_admin_mfa_first',403);
   if(!cfg.ready)return error('self_test_disabled_or_unconfigured',503);
-  try{await readBody(req)}catch{return error('explicit_confirmation_required',400)}
+  let confirmation;
+  try{confirmation=await readBody(req)}catch{return error('explicit_confirmation_required',400)}
   let attempt;
-  try{attempt=await reserve(env.CONTROL_DB,user.id,now)}
+  try{attempt=confirmation.retryOf?await reserveReviewedRetry(env.CONTROL_DB,user.id,confirmation.retryOf,now):await reserve(env.CONTROL_DB,user.id,now)}
   catch{return error('self_test_reservation_unavailable',503)}
   if(!attempt)return error('self_test_rate_limited',429);
   try{
