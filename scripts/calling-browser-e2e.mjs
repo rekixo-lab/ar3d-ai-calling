@@ -80,7 +80,22 @@ try{
  await adminPage.getByRole('heading',{name:'Client Calling Setup',exact:true}).waitFor();
  // Company knowledge and script editing are now Admin-only, under Clients.
  await adminPage.getByRole('heading',{name:'Client Company & AI Setup',exact:true}).waitFor();
+ await adminPage.getByRole('heading',{name:'Quick AI Setup — Master Templates',exact:true}).waitFor();
+ await adminPage.getByPlaceholder('Optional project name').fill('Demo Heights');
+ await adminPage.getByPlaceholder('Approved city / location').fill('Raipur, Chhattisgarh');
+ await adminPage.getByPlaceholder('Optional approved price or price range').fill('12-18 lakh');
+ await adminPage.getByRole('button',{name:'Preview generated AI'}).click();
+ await adminPage.getByRole('heading',{name:'Generated AI Preview'}).waitFor();
+ assert.equal(f.c.db.prepare('SELECT COUNT(*) AS n FROM calling_script_versions').get().n,0);
+ assert.equal(f.c.db.prepare('SELECT COUNT(*) AS n FROM calling_agent_publications').get().n,0);
+ adminPage.once('dialog',dialog=>dialog.accept());
+ await adminPage.getByRole('button',{name:'Generate AI Draft (no calls)'}).click();
+ await adminPage.getByText(/Master AI draft generated/).waitFor();
+ assert.equal(f.c.db.prepare('SELECT COUNT(*) AS n FROM company_profile_versions').get().n,1);
+ assert.equal(f.c.db.prepare('SELECT COUNT(*) AS n FROM calling_script_versions').get().n,1);
+ assert.equal(f.c.db.prepare('SELECT COUNT(*) AS n FROM calling_agent_publications').get().n,0);
  await adminPage.getByRole('heading',{name:'AI Questions & Answers',exact:true}).waitFor();
+ await adminPage.getByRole('button',{name:'Publish AI agent for calls'}).waitFor();
  await adminPage.locator('[name=company-companyName]').fill('Fictional Builder');
  await adminPage.getByRole('button',{name:'Save company information',exact:true}).click();
  await adminPage.getByText('Company information saved',{exact:true}).waitFor();
