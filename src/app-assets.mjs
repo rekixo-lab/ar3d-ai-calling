@@ -13,7 +13,7 @@ const btn=(label,fn,secondary=false)=>node('button',{class:'btn'+(secondary?' se
 const input=(name,type='text',placeholder='')=>node('input',{class:'field',name,type,placeholder,required:'required'});
 const lab=(text,control)=>node('label',{},[node('span',{class:'label',text}),control]);
 function notice(msg,isError=false){state.notice=msg;const old=document.getElementById('notice');if(old)old.remove();const area=document.getElementById('notice-anchor')||root;area.prepend(node('div',{id:'notice',class:'banner '+(isError?'err':'success'),text:msg}))}
-async function api(path,method='GET',payload){const r=await fetch(path,{method,credentials:'same-origin',headers:payload?{'Content-Type':'application/json'}:{},body:payload?JSON.stringify(payload):undefined,cache:'no-store'});const data=await r.json();if(!r.ok)throw Error(data.error||'Request failed');return data}
+async function api(path,method='GET',payload){const r=await fetch(path,{method,credentials:'same-origin',headers:payload?{'Content-Type':'application/json'}:{},body:payload?JSON.stringify(payload):undefined,cache:'no-store'});const data=await r.json();if(!r.ok)throw Error(data.error||data.code||data.notice||'Request failed');return data}
 function asError(e){notice(e instanceof Error?e.message:'Unexpected error',true)}
 function table(headers,rows){const t=node('table',{class:'table'});const h=node('tr');headers.forEach(v=>h.append(node('th',{text:v})));t.append(node('thead',{},h));const b=node('tbody');rows.forEach(row=>{const tr=node('tr');row.forEach(v=>{const text=String(v??'—');const cell=node('td');if(['active','completed','submitted','running','trial','paused','queued','draft','suspended','failed','unknown','blocked'].includes(text))cell.append(node('span',{class:'badge '+(['active','completed','running'].includes(text)?'positive':['trial','paused','queued','draft','submitted'].includes(text)?'pending':'negative'),text}));else cell.textContent=text;tr.append(cell)});b.append(tr)});if(!rows.length)b.append(node('tr',{},node('td',{class:'empty-state',colspan:headers.length,text:'No records yet'})));t.append(b);return div('tablewrap',t)}
 async function load(){try{state.me=await api('/v1/human/me');dashboard()}catch{login()}}
@@ -143,14 +143,20 @@ function engineeringPanel(main){
   const operatorPanel=div('stack',
     node('p',{class:'note',text:'Software-initiated Exotel Voicebot test: only the one verified phone set privately on the Worker. OFF by default. Never calls Excel leads or runs campaigns. A real test may consume Exotel credits.'}));
   const operatorStatus=node('p',{class:'muted',text:'Checking trial setup...'});
-  const operatorHistory=div('stack');
+  const operatorHistory=div('stack'),operatorFeedback=div('stack');
+  function confirmOperatorTest(){return new Promise(resolve=>{
+    const prompt=div('card stack',node('p',{text:'Start ONE real outgoing Exotel Voicebot call to your privately configured verified test number? This may use trial credits. No customer will be called.'}));
+    prompt.setAttribute('role','alertdialog');prompt.setAttribute('aria-label','Confirm verified test call');
+    function finish(approved){prompt.remove();resolve(approved)}
+    prompt.append(div('formrow',btn('Confirm one test call',()=>finish(true)),btn('Cancel test call',()=>finish(false),true)));operatorPanel.append(prompt);prompt.querySelector('button').focus();
+  })}
   const operatorDial=btn('Call my verified test phone once',async()=>{
-    if(!confirm('Start ONE real outgoing Exotel Voicebot call to your privately configured verified test number? This may use trial credits. No customer will be called.'))return;
     operatorDial.disabled=true;
+    if(!await confirmOperatorTest()){operatorDial.disabled=false;return}
     try{
       const data=await api('/v1/human/engineering/exotel-self-test','POST',
         {confirm:'CALL_MY_VERIFIED_NUMBER_ONCE'});
-      operatorHistory.prepend(node('p',{class:'success',
+      operatorFeedback.replaceChildren(node('p',{class:'success',
         text:'Exotel request: '+data.state+'. The call may ring your verified phone. Request ID: '+data.requestId}));
     }catch(err){asError(err)}
     finally{operatorDial.disabled=false;loadOperatorTest()}
@@ -224,7 +230,7 @@ function engineeringPanel(main){
     }
   }
   operatorDial.disabled=true;
-  operatorPanel.append(operatorStatus,operatorDial,operatorHistory);
+  operatorPanel.append(operatorStatus,operatorDial,operatorFeedback,operatorHistory);
   card.append(title('AR3D Software → Exotel: One Verified Outgoing Voice Test','h3'),
     operatorPanel);
   loadOperatorTest();
