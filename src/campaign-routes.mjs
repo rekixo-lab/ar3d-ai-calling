@@ -108,6 +108,7 @@ export async function handleCampaignRequest(req,env,user){
         ],
         notice:'Read-only tenant-scoped risk counts. This draft cannot start calls.'});
     }
+    if(fromCrm&&method!=='POST')return fail('method not allowed',405);
     if(method==='POST'&&fromCrm){
       // Draft-only, retry-safe, tenant-owned set selection. No consent is granted and no calls start.
       if(Object.keys(d).some(k=>!['tenantId','customerSegment','interestStatus'].includes(k))||
