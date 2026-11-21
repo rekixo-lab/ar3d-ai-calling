@@ -4,6 +4,15 @@ import {
   REQUIRED_COLUMNS, REQUIRED_TABLES, REQUIRED_SAFETY_TRIGGERS, getCredentials, makeMainConfig, checkTables, checkColumns, checkSafetyTriggers, inspectCloudflare, verifiedSchemaState,
 } from '../scripts/main-cloudflare.mjs';
 
+test('Calling Control company change queue is a single additive isolated migration',async()=>{
+ const old=REQUIRED_TABLES.CONTROL_DB.filter(x=>x!=='company_change_requests');
+ assert.equal(checkTables(old,'CONTROL_DB','preflight'),'control_company_change_upgrade');
+ assert.equal(verifiedSchemaState({CONTROL_DB:'control_company_change_upgrade',CRM_DB:'ready'}),'control_company_change_upgrade');
+ assert.throws(()=>checkTables(old.filter(x=>x!=='human_sessions'),'CONTROL_DB','preflight'),/partial schema/);
+ const state=await inspectCloudflare({credentials:getCredentials(env),mode:'preflight',template,
+  apiFetch:cloudflareMock({controlTables:old,crmTables:REQUIRED_TABLES.CRM_DB})});
+ assert.equal(state.modes.CONTROL_DB,'control_company_change_upgrade');
+});
 test('client account migration accepts only exact complete prior Calling Control schema',async()=>{
   const old=REQUIRED_TABLES.CONTROL_DB.filter(x=>x!=='client_account_contacts');
   assert.equal(checkTables(old,'CONTROL_DB','preflight'),'control_client_accounts_upgrade');
@@ -118,6 +127,7 @@ function cloudflareMock({ controlTables=[],crmTables=[],controlName='ar3d-callin
         else if(sql.includes('call_intent_proposals')) rows=['tenant_id','id','campaign_id','lead_id','purpose','state','created_by','created_at'].map(name=>({name}));
         else if(sql.includes('company_profile_versions')) rows=REQUIRED_COLUMNS.CONTROL_DB.company_profile_versions.map(name=>({name}));
         else if(sql.includes('client_account_contacts')) rows=REQUIRED_COLUMNS.CONTROL_DB.client_account_contacts.map(name=>({name}));
+        else if(sql.includes('company_change_requests')) rows=REQUIRED_COLUMNS.CONTROL_DB.company_change_requests.map(name=>({name}));
         else if(sql.includes('shared_voice_gateway')) rows=REQUIRED_COLUMNS.CONTROL_DB.shared_voice_gateway.map(name=>({name}));
         else if(sql.includes('voice_call_routes')) rows=REQUIRED_COLUMNS.CONTROL_DB.voice_call_routes.map(name=>({name}));
         else if(sql.includes('calling_agent_')) {const t=sql.match(/PRAGMA table_info\(([^)]+)\)/)[1];rows=REQUIRED_COLUMNS.CONTROL_DB[t].map(name=>({name}));}
