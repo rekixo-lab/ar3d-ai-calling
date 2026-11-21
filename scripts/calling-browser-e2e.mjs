@@ -31,9 +31,9 @@ try{
  const context=await browser.newContext({viewport});await context.addCookies([{name:COOKIE,value:token,url:origin}]);
  const page=await context.newPage(),errors=[];lastPage=page;page.setDefaultTimeout(10000);page.on('pageerror',e=>errors.push(e.message));
  await page.goto(origin+'/app');
- await page.getByRole('button',{name:'Calling',exact:true}).click();
+ await page.getByRole('tab',{name:'Calling',exact:true}).click();
  await page.getByRole('heading',{name:'Exotel Customer Calling',exact:true}).waitFor();
- await page.getByRole('button',{name:'Company / AI',exact:true}).click();
+ await page.getByRole('tab',{name:'Company / AI',exact:true}).click();
  await page.getByRole('heading',{name:'AI Questions & Answers',exact:true}).waitFor();
  await page.getByLabel('Company name',{exact:true}).fill('Fictional Builder '+viewport.width);
  await page.getByRole('button',{name:'Save company information',exact:true}).click();
@@ -52,12 +52,12 @@ try{
  await page.getByText(/Loaded v1. Save to create a new version/).waitFor();
  await page.getByRole('heading',{name:'AI Questions & Answers',exact:true}).locator('..').screenshot({path:'artifacts/script-editor-'+viewport.width+'.png'});
 
- await page.getByRole('button',{name:'Customers / Excel',exact:true}).click();
+ await page.getByRole('tab',{name:'Customers / Excel',exact:true}).click();
  await page.getByRole('button',{name:'Download customer Excel template (CSV)',exact:true}).waitFor();
  const file=page.locator('input[type=file]');await file.setInputFiles({name:'customers.csv',mimeType:'text/csv',buffer:Buffer.from('Name,Mobile\r\nFictional buyer,9000000001\r\n')});
  await page.getByRole('button',{name:'Validate & Preview',exact:true}).click();await page.getByText(/1 valid rows; 1 existing in CRM/).waitFor();
  await page.getByRole('button',{name:'Import to CRM',exact:true}).click();await page.getByText('Import finished: 0 new, 1 duplicates. No calls placed.',{exact:true}).waitFor();
- await page.getByRole('button',{name:'Calling',exact:true}).click();
+ await page.getByRole('tab',{name:'Calling',exact:true}).click();
  await page.locator('[name=callCampaignName]').fill('Acceptance '+viewport.width);
  await page.getByRole('button',{name:'Create campaign with first 200 CRM customers',exact:true}).click();await page.getByText('1 customers added. Review the campaign before Start.',{exact:true}).waitFor();
  page.once('dialog',dialog=>dialog.accept());await page.getByRole('button',{name:'Start / Resume calling',exact:true}).click();await page.getByText('Campaign running. Results refresh below.',{exact:true}).waitFor();
