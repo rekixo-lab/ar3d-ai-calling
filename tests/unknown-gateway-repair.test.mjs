@@ -1,0 +1,119 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {fixture,admin,client,now,at} from './helpers/calling-fixture.mjs';
+import {handleVoiceGatewayRequest} from '../src/voice-gateway-routes.mjs';
+const bot='66cbf4f6-a52d-4df0-abf0-db5e3b365836';
+const guard='55555555-5555-4555-8555-555555555555';
+const template='66666666-6666-4666-8666-666666666666';
+const prompt='You are the AR3D call routing guard. Client context is unavailable. Say in Hindi that the connection could not be loaded and politely end. Do not discuss company, project, pricing or customer information. Never ask survey questions.';
+const req=(confirmation='REPAIR_ONLY_SHARED_GUARD_NO_CALLS')=>new Request('https://app.example.invalid/v1/human/voice-gateway',{method:'POST',headers:{'Content-Type':'application/json',Origin:'https://app.example.invalid'},body:JSON.stringify({action:'recover',confirmation})});
+const unknown=f=>f.c.db.prepare("INSERT INTO shared_voice_gateway(id,bot_id,flow_id,template_assistant_id,template_version,guard_assistant_id,gateway_version,state,error_code,updated_by,updated_at) VALUES(1,?,?,?,?,?,NULL,'unknown','provider_write_unknown','admin',?)").run(bot,'1393135',template,'v1',guard,at);
+function provider({failAfterGuardWrite=false,alreadySafe=false,changedBot=false}={}){
+ let writes=[],reads=[],guardStable='v2',botLatest=changedBot?'v3':'v2',versionedGuard=null;
+ const fetcher=async(raw,opts)=>{
+  const u=new URL(raw),path=u.pathname,ver=u.searchParams.get('version'),method=opts.method;
+  assert.equal(u.hostname,'voicebot.in.exotel.com');
+  if(method==='POST'){
+   const body=JSON.parse(opts.body),record={path,body};writes.push(record);
+   assert.ok(!path.includes('c3c7ca7c'), 'old working bot must never be touched');
+   assert.ok(!path.includes('/calls'), 'no calls permitted');
+   if(path.endsWith('/assistants/'+guard+'/versions')){
+    assert.equal(body.mark_as_stable,'true');assert.equal(body.source_version,'v2');
+    assert.equal(body.data.instruction,prompt);
+    assert.equal(body.data.agents.length,1);assert.equal(body.data.agents[0].instruction,prompt);
+    if(failAfterGuardWrite)throw Error('simulated postwrite timeout');
+    versionedGuard=body.data;guardStable='v3';
+    return Response.json({response:{version:'v3'}});
+   }
+   if(path.endsWith('/voicebots/'+bot+'/versions')){
+    assert.equal(body.mark_as_stable,'false');assert.equal(body.source_version,'v2');
+    assert.equal(body.data.assistant_config.id,guard);
+    assert.equal(body.data.assistant_config.version,guardStable);
+    botLatest='v3';
+    return Response.json({response:{version:'v3'}});
+   }
+   throw Error('unexpected provider POST '+path);
+  }
+  assert.equal(method,'GET');reads.push(path+u.search);
+  if(path.endsWith('/assistants/'+template)&&ver==='v1')return Response.json({response:{
+   id:template,version:'v1',latest_version:'v1',stable_version:'v1',
+   instruction:'safe template',llm_config:{model_id:'m1'},agents:[{id:template,instruction:'template script',tools:[],mcp_tools:[]}]
+  }});
+  if(path.endsWith('/assistants/'+guard)){
+   if(ver===guardStable&&guardStable==='v3')return Response.json({response:{
+    id:guard,version:'v3',latest_version:'v3',stable_version:'v3',
+    instruction:versionedGuard.instruction,llm_config:versionedGuard.llm_config,
+    agents:versionedGuard.agents
+   }});
+   if(ver==='v2')return Response.json({response:{
+    id:guard,latest_version:'v2',stable_version:'v2',
+    ...(alreadySafe?{instruction:prompt,agents:[{instruction:prompt,tools:[],mcp_tools:[]}]}:
+      {instruction:'draft',agents:[]})
+   }});
+   return Response.json({response:{id:guard,stable_version:guardStable,latest_version:guardStable}});
+  }
+  if(path.endsWith('/voicebots/'+bot)){
+   if(ver==='v2')return Response.json({response:{id:bot,version:'v2',stable_version:'v2',assistant_config:{id:template,version:'v1'}}});
+   if(ver==='v3')return Response.json({response:{id:bot,version:'v3',assistant_config:{id:guard,version:guardStable}}});
+   return Response.json({response:{id:bot,latest_version:botLatest,stable_version:'v2',
+    traffic_allocation:{v2:100,...(botLatest==='v3'?{v3:0}:{})}}});
+  }
+  throw Error('unexpected provider GET '+path);
+ };
+ return {fetcher,writes,reads};
+}
+test('one confirmed repair reuses the same guard, stages only paused shared bot version and remains non-calling',async()=>{
+ const f=fixture();try{
+  unknown(f);const p=provider();
+  assert.equal((await handleVoiceGatewayRequest(req(),f.env,client,{now,fetcher:p.fetcher})).status,403);
+  assert.equal((await handleVoiceGatewayRequest(req(),f.env,{...admin,token_hash:'bad'},{now,fetcher:p.fetcher})).status,403);
+  assert.equal((await handleVoiceGatewayRequest(req('NOT_CONFIRMED'),f.env,admin,{now,fetcher:p.fetcher})).status,409);
+  assert.equal(p.reads.length,0);assert.equal(p.writes.length,0);
+  const res=await handleVoiceGatewayRequest(req(),f.env,admin,{now,fetcher:p.fetcher});
+  assert.equal(res.status,200,await res.clone().text());
+  const data=await res.json();
+  assert.equal(data.state,'staged');assert.equal(data.version,'v3');
+  assert.match(data.notice,/0% traffic/);
+  assert.equal(p.writes.length,2);assert.ok(p.writes[0].path.endsWith('/assistants/'+guard+'/versions'));
+  assert.ok(p.writes[1].path.endsWith('/voicebots/'+bot+'/versions'));
+  assert.equal(f.c.db.prepare('SELECT COUNT(*) AS n FROM voice_call_routes').get().n,0);
+  assert.equal(f.c.db.prepare('SELECT state,gateway_version,error_code FROM shared_voice_gateway WHERE id=1').get().state,'staged');
+  const saved=f.c.db.prepare('SELECT gateway_version,error_code FROM shared_voice_gateway WHERE id=1').get();
+  assert.equal(saved.gateway_version,'v3');assert.equal(saved.error_code,'router_connection_required');
+  assert.equal((await handleVoiceGatewayRequest(req(),f.env,admin,{now,fetcher:p.fetcher})).status,503);
+  assert.equal(p.writes.length,2);
+ }finally{f.close()}
+});
+test('already-verified guard skips rewriting assistant, stages paused bot once',async()=>{
+ const f=fixture();try{
+  unknown(f);const p=provider({alreadySafe:true});
+  const res=await handleVoiceGatewayRequest(req(),f.env,admin,{now,fetcher:p.fetcher});
+  assert.equal(res.status,200,await res.clone().text());
+  assert.equal(p.writes.length,1);
+  assert.ok(p.writes[0].path.endsWith('/voicebots/'+bot+'/versions'));
+  assert.equal(p.writes[0].body.data.assistant_config.version,'v2');
+ }finally{f.close()}
+});
+test('changed shared voicebot prevents all provider writes and DB unlock',async()=>{
+ const f=fixture();try{
+  unknown(f);const p=provider({changedBot:true});
+  const res=await handleVoiceGatewayRequest(req(),f.env,admin,{now,fetcher:p.fetcher});
+  assert.equal(res.status,503);
+  assert.equal((await res.json()).error,'gateway_provider_changed_stop');
+  assert.equal(p.writes.length,0);
+  assert.equal(f.c.db.prepare('SELECT state,error_code FROM shared_voice_gateway WHERE id=1').get().error_code,'provider_write_unknown');
+ }finally{f.close()}
+});
+test('ambiguous guard POST cannot be retried or stage an unsafe bot version',async()=>{
+ const f=fixture();try{
+  unknown(f);const p=provider({failAfterGuardWrite:true});
+  const res=await handleVoiceGatewayRequest(req(),f.env,admin,{now,fetcher:p.fetcher});
+  assert.equal(res.status,503);
+  assert.equal((await res.json()).error,'gateway_recovery_write_unknown_stop');
+  assert.equal(p.writes.length,1);
+  assert.equal(f.c.db.prepare('SELECT state,error_code FROM shared_voice_gateway WHERE id=1').get().state,'unknown');
+  assert.equal(f.c.db.prepare('SELECT error_code FROM shared_voice_gateway WHERE id=1').get().error_code,'guard_repair_unknown');
+  const retry=await handleVoiceGatewayRequest(req(),f.env,admin,{now,fetcher:p.fetcher});
+  assert.equal(retry.status,503);assert.equal(p.writes.length,1);
+ }finally{f.close()}
+});
