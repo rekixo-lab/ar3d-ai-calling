@@ -1,5 +1,5 @@
 import {mutationOriginAllowed} from './human-auth.mjs';
-import {readSharedGateway,inspectGatewayConfiguration,prepareSharedGateway,verifySharedGatewayLive,connectSharedGatewayRouter,reviewUnknownGateway,recoverUnknownSharedGateway,previewUnknownSharedGatewayRecovery} from './shared-voice-gateway.mjs';
+import {readSharedGateway,inspectGatewayConfiguration,prepareSharedGateway,verifySharedGatewayLive,connectSharedGatewayRouter,reviewUnknownGateway,recoverUnknownSharedGateway,previewUnknownSharedGatewayRecovery,inspectUnknownGuardRepair} from './shared-voice-gateway.mjs';
 const path='/v1/human/voice-gateway';
 // Existing owner-supplied, non-secret Exotel resource IDs. These are suggested
 // only to the authenticated MFA Super Admin if no gateway has been configured.
@@ -30,6 +30,7 @@ export async function handleVoiceGatewayRequest(req,env,user,{now=Date.now(),fet
   const d=JSON.parse(raw);if(!d||typeof d!=='object'||Array.isArray(d))return json({error:'invalid_request'},400);
   if(d.action==='review'&&Object.keys(d).length===1)return json(await reviewUnknownGateway(env,runtime,{fetcher}));
   if(d.action==='repair-preview'&&Object.keys(d).length===1)return json(await previewUnknownSharedGatewayRecovery(env,runtime,{fetcher}));
+  if(d.action==='repair-review'&&Object.keys(d).length===1)return json(await inspectUnknownGuardRepair(env,runtime,{fetcher}));
   if(d.action==='recover'&&Object.keys(d).sort().join(',')==='action,confirmation'){
    if(d.confirmation!=='REPAIR_ONLY_SHARED_GUARD_NO_CALLS')return json({error:'explicit_recovery_confirmation_required'},409);
    return json(await recoverUnknownSharedGateway(env,{actorId:user.id,now},{fetcher}));
