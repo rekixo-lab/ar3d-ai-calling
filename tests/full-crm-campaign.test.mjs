@@ -20,7 +20,7 @@ test('Selecting 240 CRM leads includes entire eligible list, not first 200; repl
  try{
   seed(f,240);
   const r=await fromCrm(f);
-  assert.equal(r.status,200,await r.text());
+  if(r.status!==200)assert.fail('CRM selection failed: '+await r.text());
   const result=await r.json();
   assert.equal(result.inserted,239);
   assert.equal(result.alreadyInCampaign,1);
@@ -48,7 +48,7 @@ test('Full CRM selection excludes opted-out/denied/blocked and filters by segmen
     .run(tid,'66666666-6666-4666-8666-666666666666',id(4),at);
   f.r.db.prepare("UPDATE leads SET customer_segment='prior_inquiry' WHERE tenant_id=? AND id=?").run(tid,id(5));
   const r=await fromCrm(f,{tenantId:tid,customerSegment:'prior_inquiry'});
-  assert.equal(r.status,200,await r.text());
+  if(r.status!==200)assert.fail('CRM selection failed: '+await r.text());
   const v=await r.json();
   assert.equal(v.inserted,1);
   assert.equal(f.r.db.prepare('SELECT COUNT(*) AS n FROM call_campaign_candidates').get().n,2);
