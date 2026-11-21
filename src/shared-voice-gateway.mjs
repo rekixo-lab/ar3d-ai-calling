@@ -257,13 +257,35 @@ export async function inspectUnknownGuardRepair(env,runtime,{fetcher=fetch}={}){
   const stableReport=latest===stable?latestReport:await inspect(stable);
   if(!latestReport||!stableReport)return {...blocked('guard_version_identity_changed'),
    sharedVoicebot:botReport,guard:{stableVersion:stable,latestVersion:latest}};
+  // The Exotel MCP implementation documents agents in data.versions[v].agents,
+  // even when version-specific responses have a different root layout.
+  // Cross-check the base version map AND the 'stable' alias. Never assume that
+  // an empty root agent array proves the stored version has no agents.
+  const count=agents=>!Array.isArray(agents)?'absent':agents.length===0?'zero':
+   agents.length===1?'one':'multiple';
+  const mappedCount=count(guard.versions?.[stable]?.agents);
+  const alias=unwrapVoicebot(await voicebotRequest(env,guardPath+'?version=stable',opts));
+  if((alias.id||alias.assistant_id)!==runtime.guard_assistant_id)
+   return {...blocked('guard_stable_alias_identity_changed'),sharedVoicebot:botReport,
+    guard:{stableVersion:stable,latestVersion:latest}};
+  const aliasRootCount=count(alias.agents);
+  const aliasMappedCount=count(alias.versions?.[stable]?.agents);
+  const aliases=[mappedCount,aliasRootCount,aliasMappedCount];
+  const conflictingAgents=aliases.some(c=>c==='multiple'||(stableReport.agentCount==='zero'&&c==='one')||
+   (stableReport.agentCount==='one'&&c==='zero'));
+  const evidence={overviewVersionMapCount:mappedCount,stableAliasRootCount:aliasRootCount,
+   stableAliasVersionMapCount:aliasMappedCount,
+   responseShapeConflict:conflictingAgents};
   let outcome='guard_not_verified_stop';
   if(latest!==stable)outcome='guard_latest_differs_from_stable_stop';
+  else if(conflictingAgents)outcome='guard_response_shape_conflict_stop';
   else if(stableReport.strictGuardVerified)outcome='saved_guard_verified_bot_not_staged';
-  else if(stableReport.agentCount==='zero')outcome='guard_still_has_zero_agents';
+  else if(stableReport.agentCount==='zero'&&aliasRootCount==='zero')
+   outcome='guard_zero_agents_confirmed_multiple_reads';
+  else if(stableReport.agentCount==='zero')outcome='guard_agent_presence_not_confirmed';
   return {outcome,writeOperationsAllowed:false,sharedVoicebot:botReport,
    guard:{stableVersion:stable,latestVersion:latest,
-    latest:latestReport,stable:stableReport}};
+    latest:latestReport,stable:stableReport,evidence}};
  }catch{return blocked('provider_read_failed_stop')}
 }
 

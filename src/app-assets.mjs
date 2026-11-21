@@ -1154,7 +1154,11 @@ async function voiceGatewayPanel(main){
     guard_version_identity_changed:'The selected Guard version identity could not be confirmed.',
     guard_latest_differs_from_stable_stop:'Guard latest and stable versions differ; a Guard version may have been created without being finalized.',
     saved_guard_verified_bot_not_staged:'The recorded Guard now has exactly one verified safe agent, but Shared Voicebot staging did not complete. Do not retry Repair; a separately reviewed continuation is needed.',
-    guard_still_has_zero_agents:'Exotel still reports zero agents for the selected Guard. The previous write may have failed or did not become visible. Do not retry.',
+    guard_still_has_zero_agents:'The exact version reports zero agents. Do not retry.',
+    guard_zero_agents_confirmed_multiple_reads:'The Guard has version v3 but multiple Exotel read-only views report zero agents. The previous write did not leave a verifiable agent. Do not retry.',
+    guard_agent_presence_not_confirmed:'Exotel returned an empty selected agent list, but other version views did not confirm the agent count. Do not retry.',
+    guard_response_shape_conflict_stop:'Exotel API returns conflicting agent counts between exact version, stable alias, and version-map views. Do not retry; inspect Exotel console or ask Exotel support for the correct version contract.',
+    guard_stable_alias_identity_changed:'Exotel stable-version alias does not confirm the recorded Guard. Do not retry.',
     guard_not_verified_stop:'Exotel returned a Guard version, but its exact safety contract is not verified. Do not retry.',
     provider_read_failed_stop:'Exotel read-only reconciliation could not complete.'
    };
@@ -1166,6 +1170,10 @@ async function voiceGatewayPanel(main){
      ['Recorded Guard stable',g.stableVersion||'Unknown'],
      ['Recorded Guard latest',g.latestVersion||'Unknown'],
      ['Stable Guard agent count',v.agentCount||'Unknown'],
+     ['Overview version-map agent count',g.evidence?.overviewVersionMapCount||'Not confirmed'],
+     ['Stable alias root agent count',g.evidence?.stableAliasRootCount||'Not confirmed'],
+     ['Stable alias version-map count',g.evidence?.stableAliasVersionMapCount||'Not confirmed'],
+     ['Agent response shape conflict',val(g.evidence?.responseShapeConflict)],
      ['Stable Guard root instruction safe',val(v.rootInstructionMatches)],
      ['Stable Guard agent instruction safe',val(v.agentInstructionMatches)],
      ['Stable Guard has no tools',val(v.noAgentTools)],
