@@ -20,16 +20,25 @@ function dbFixture({changes=1,throwOn=null}={}){
       return {run:async()=>({meta:{changes}})};
     }};
   }};
-  return {env:{CONTROL_DB:db,CRM_DB:{prepare(){throw Error('CRM touched')}}},calls};
+  const crmCalls=[];
+  const crm={prepare(sql){
+    if(!sql.startsWith('DELETE FROM voicebot_verified_turns WHERE rowid IN (SELECT rowid FROM voicebot_verified_turns'))
+      throw Error('Other CRM table touched');
+    return {bind(...params){crmCalls.push({sql,params});return {async run(){return {meta:{changes}}}}}};
+  }};
+  return {env:{CONTROL_DB:db,CRM_DB:crm},calls,crmCalls};
 }
 test('Cloudflare scheduled cleanup uses four auth tables and isolated Exotel receipt expiry',async()=>{
-  const {env,calls}=dbFixture({changes:2});
+  const {env,calls,crmCalls}=dbFixture({changes:2});
   const output=await worker.scheduled({cron:AUTH_MAINTENANCE_CRON,scheduledTime:NOW},env);
   assert.equal(output.rowsDeleted,8);
   assert.equal(output.tablesChecked,4);
   assert.equal(output.webhookReceiptsDeleted,2);
   assert.equal(output.consentTouched,false);
-  assert.equal(output.crmTouched,false);
+  assert.equal(output.crmTouched,true);
+  assert.equal(output.verifiedTurnsDeleted,2);
+  assert.equal(crmCalls.length,1);
+  assert.deepEqual(crmCalls[0].params,[NOW]);
   assert.equal(output.recordingsTouched,false);
   assert.equal(output.billingTouched,false);
   assert.equal(calls.length,5);
