@@ -4,6 +4,16 @@ import {
   REQUIRED_COLUMNS, REQUIRED_TABLES, REQUIRED_SAFETY_TRIGGERS, getCredentials, makeMainConfig, checkTables, checkColumns, checkSafetyTriggers, inspectCloudflare, verifiedSchemaState,
 } from '../scripts/main-cloudflare.mjs';
 
+test('conversation script upgrade only accepts the complete previous control schema',async()=>{
+ const old=REQUIRED_TABLES.CONTROL_DB.filter(t=>!t.startsWith('calling_script_'));
+ assert.equal(checkTables(old,'CONTROL_DB','preflight'),'control_script_upgrade');
+ assert.throws(()=>checkTables(old.filter(t=>t!=='human_sessions'),'CONTROL_DB','preflight'),/partial schema/);
+ assert.throws(()=>checkTables([...old,'calling_script_versions'],'CONTROL_DB','preflight'),/partial schema/);
+ assert.equal(verifiedSchemaState({CONTROL_DB:'control_script_upgrade',CRM_DB:'ready'}),'control_script_upgrade');
+ const inspected=await inspectCloudflare({credentials:getCredentials(env),mode:'preflight',template,apiFetch:cloudflareMock({controlTables:old,crmTables:REQUIRED_TABLES.CRM_DB})});
+ assert.equal(inspected.modes.CONTROL_DB,'control_script_upgrade');
+});
+
 const env = {
   CLOUDFLARE_API_TOKEN: 'top-secret-api-token-placeholder-1234',
   CLOUDFLARE_ACCOUNT_ID: 'a'.repeat(32),
@@ -96,6 +106,7 @@ function cloudflareMock({ controlTables=[],crmTables=[],controlName='ar3d-callin
         else if(sql.includes('call_campaign_candidates')) rows=['tenant_id','campaign_id','lead_id'].map(name=>({name}));
         else if(sql.includes('voicebot_qualification_reviews')) rows=['tenant_id','lead_id','provider','status','survey_json','source_verified','mapping_verified','possible_opt_out'].map(name=>({name}));
         else if(sql.includes('call_intent_proposals')) rows=['tenant_id','id','campaign_id','lead_id','purpose','state','created_by','created_at'].map(name=>({name}));
+        else if(sql.includes('calling_script_')) {const t=sql.match(/PRAGMA table_info\(([^)]+)\)/)[1];rows=REQUIRED_COLUMNS.CONTROL_DB[t].map(name=>({name}));}
         else if(sql.includes('calling_')) {const t=sql.match(/PRAGMA table_info\(([^)]+)\)/)[1];rows=REQUIRED_COLUMNS.CRM_DB[t].map(name=>({name}));}
         else if(sql.includes('agents')) rows=['tenant_id','status','questions_json'].map(name=>({name}));
         else rows=['token_hash','expires_at'].map(name=>({name}));

@@ -101,6 +101,9 @@ jobs:
         if: github.event_name == 'push' && steps.schema.outputs.schema_state == 'crm_call_intent_upgrade'
         run: |
           npx --yes wrangler@4 d1 execute ar3d-calling-shared-crm --remote --yes --config wrangler.jsonc --file migrations/crm/0010_call_intent_proposals.sql
+      - name: Add versioned client conversation scripts
+        if: github.event_name == 'push' && steps.schema.outputs.schema_state == 'control_script_upgrade'
+        run: npx --yes wrangler@4 d1 execute ar3d-calling-control --remote --yes --config wrangler.jsonc --file migrations/control/0011_calling_scripts.sql
       - name: Add isolated Calling campaign queue (dispatch remains opt-in)
         if: github.event_name == 'push' && steps.schema.outputs.schema_state == 'crm_dispatch_upgrade'
         run: npx --yes wrangler@4 d1 execute ar3d-calling-shared-crm --remote --yes --config wrangler.jsonc --file migrations/crm/0011_exotel_campaign_dispatch.sql
@@ -122,6 +125,7 @@ jobs:
           npx --yes wrangler@4 d1 execute ar3d-calling-control --remote --yes --config wrangler.jsonc --file migrations/control/0008_exotel_voicebot_receipts.sql
           npx --yes wrangler@4 d1 execute ar3d-calling-control --remote --yes --config wrangler.jsonc --file migrations/control/0009_operator_self_test_calls.sql
           npx --yes wrangler@4 d1 execute ar3d-calling-control --remote --yes --config wrangler.jsonc --file migrations/control/0010_exotel_operator_status_checks.sql
+          npx --yes wrangler@4 d1 execute ar3d-calling-control --remote --yes --config wrangler.jsonc --file migrations/control/0011_calling_scripts.sql
       - name: Initialize NEW AR3D Calling Shared CRM D1 database
         if: (github.event_name == 'push' && steps.schema.outputs.schema_state == 'fresh') || (github.event_name == 'workflow_dispatch' && inputs.operation == 'initialize')
         run: |

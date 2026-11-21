@@ -15,7 +15,7 @@ export const REQUIRED_TABLES = Object.freeze({
   CONTROL_DB: Object.freeze([
     'tenants','tenant_keys','project_links','tenant_numbers','tenant_audit_events',
     'human_users','tenant_memberships','human_sessions','human_invitations',
-    'human_login_limits','human_bootstrap_claim','human_ip_login_limits','human_mfa_settings','human_mfa_challenges','human_mfa_recovery_codes','provider_event_inbox','exotel_voicebot_event_receipts','exotel_operator_test_calls','exotel_operator_status_checks',
+    'human_login_limits','human_bootstrap_claim','human_ip_login_limits','human_mfa_settings','human_mfa_challenges','human_mfa_recovery_codes','provider_event_inbox','exotel_voicebot_event_receipts','exotel_operator_test_calls','exotel_operator_status_checks','calling_script_bindings','calling_script_versions',
   ]),
   CRM_DB: Object.freeze([
     'leads','agents','calls','site_visits','crm_audit_events',
@@ -31,6 +31,8 @@ export const REQUIRED_COLUMNS = Object.freeze({
     human_mfa_recovery_codes: Object.freeze(['user_id','code_hash','used_at']),
     provider_event_inbox: Object.freeze(['tenant_id','provider','event_id','status']),
     exotel_voicebot_event_receipts: Object.freeze(['receipt_key','account_fingerprint','session_fingerprint','call_fingerprint','conversation_fingerprint','event_fingerprint','payload_digest','event_kind','turn_status','possible_opt_out','status','received_at','expires_at']),
+    calling_script_bindings: Object.freeze(['tenant_id','bot_id','assistant_id','source_version']),
+    calling_script_versions: Object.freeze(['tenant_id','id','revision','config_json','prompt','provider_state','provider_version']),
     human_ip_login_limits: Object.freeze(['ip_hash','attempt_count','blocked_until']),
     exotel_operator_test_calls: Object.freeze(['id','actor_user_id','rate_slot','provider_call_sid','state','error_code','created_at','updated_at']),
     exotel_operator_status_checks: Object.freeze(['id','call_request_id','actor_user_id','check_slot','state','provider_status','duration_seconds','error_code','created_at','finished_at']),
@@ -150,6 +152,7 @@ export function checkTables(tables, binding, mode) {
   const missing = expected.filter(name => !present.has(name));
   const dispatchTables=['calling_policies','calling_clearances','calling_runs','calling_jobs'];
   if(mode==='preflight'&&binding==='CRM_DB'&&missing.length===4&&dispatchTables.every(x=>missing.includes(x)))return 'crm_dispatch_upgrade';
+  if(mode==='preflight'&&binding==='CONTROL_DB'&&missing.length===2&&['calling_script_bindings','calling_script_versions'].every(t=>missing.includes(t)))return 'control_script_upgrade';
   if (mode === 'ready') {
     if (missing.length) throw Error(D1_NAME[binding] + ' missing tables: ' + missing.join(', '));
     return 'ready';
@@ -214,7 +217,7 @@ export async function inspectCloudflare({ credentials, mode, apiFetch = fetch, t
     const names = rows.map(x => x.name);
     const state = checkTables(names, binding, mode);
     modes[binding] = state;
-    if (state === 'crm_dispatch_upgrade' || state === 'ready' || state === 'crm_additive_upgrade' ||
+    if (state === 'control_script_upgrade' || state === 'crm_dispatch_upgrade' || state === 'ready' || state === 'crm_additive_upgrade' ||
         state === 'crm_call_intent_upgrade' ||
         state === 'control_additive_upgrade' ||
         state === 'control_operator_test_upgrade' ||
@@ -227,6 +230,7 @@ export async function inspectCloudflare({ credentials, mode, apiFetch = fetch, t
         });
       }
       for (const table of Object.keys(REQUIRED_COLUMNS[binding])) {
+        if(state==='control_script_upgrade'&&table.startsWith('calling_script_'))continue;
         if(state==='crm_dispatch_upgrade'&&table.startsWith('calling_'))continue;
         if (state === 'crm_additive_upgrade' && table === 'voicebot_qualification_reviews')continue;
         if (state === 'crm_call_intent_upgrade' && table === 'call_intent_proposals')continue;
@@ -246,6 +250,7 @@ export async function inspectCloudflare({ credentials, mode, apiFetch = fetch, t
     throw Error('Main R2 bucket is missing or belongs to an unexpected resource.');
   // Preflight rejects a mixed state. This stops accidental double-initialize.
   if (mode === 'preflight' && modes.CONTROL_DB !== modes.CRM_DB &&
+      !(modes.CONTROL_DB === 'control_script_upgrade' && modes.CRM_DB === 'ready') &&
       !(modes.CONTROL_DB === 'ready' && modes.CRM_DB === 'crm_dispatch_upgrade') &&
       !(modes.CONTROL_DB === 'ready' && modes.CRM_DB === 'crm_additive_upgrade') &&
       !(modes.CONTROL_DB === 'ready' && modes.CRM_DB === 'crm_call_intent_upgrade') &&
@@ -259,6 +264,7 @@ export async function inspectCloudflare({ credentials, mode, apiFetch = fetch, t
 // A single clean state is mandatory for unattended deployment. Mixed/partial
 // schemas are NEVER safe to automatically initialize or deploy.
 export function verifiedSchemaState(modes) {
+  if(modes?.CONTROL_DB==='control_script_upgrade'&&modes?.CRM_DB==='ready')return 'control_script_upgrade';
   if(modes?.CONTROL_DB==='ready'&&modes?.CRM_DB==='crm_dispatch_upgrade')return 'crm_dispatch_upgrade';
   if (modes?.CONTROL_DB === 'ready' && modes?.CRM_DB === 'crm_additive_upgrade')
     return 'crm_additive_upgrade';
