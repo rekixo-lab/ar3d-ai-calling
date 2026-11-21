@@ -5,6 +5,9 @@ const json=(x,s=200)=>Response.json(x,{status:s,headers:{'Cache-Control':'no-sto
 const fail=(e,s=400)=>json({error:e},s);
 const uuid=/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
 const route=/^\/v1\/human\/campaigns\/([a-f0-9-]{36})(?:\/(candidates|readiness))?$/i;
+const MAX_CAMPAIGN_CUSTOMERS=2000;
+const SEGMENTS=new Set(['prior_inquiry','unknown_contact','unclassified']);
+const INTEREST=new Set(['new','contacted','interested','followup','not_interested','converted']);
 async function body(req){
   if(Number(req.headers.get('content-length'))>10000)throw Error('request too large');
   const reader=req.body?.getReader();if(!reader)throw Error('request required');
@@ -18,7 +21,8 @@ async function body(req){
 export async function handleCampaignRequest(req,env,user){
   const url=new URL(req.url),path=url.pathname,method=req.method;
   const removal=path.match(/^\/v1\/human\/campaigns\/([a-f0-9-]{36})\/candidates\/([a-f0-9-]{36})$/i);
-  const match=path.match(route)||removal;
+  const fromCrm=path.match(/^\/v1\/human\/campaigns\/([a-f0-9-]{36})\/candidates\/from-crm$/i);
+   const match=path.match(route)||removal||fromCrm;
   if(path!=='/v1/human/campaigns'&&!match)return null;
   try{
     const d=method==='POST'?await body(req):null;
@@ -103,6 +107,46 @@ export async function handleCampaignRequest(req,env,user){
           'Obtain independent telecom DND and calling-purpose approval before any real launch.'
         ],
         notice:'Read-only tenant-scoped risk counts. This draft cannot start calls.'});
+    }
+    if(fromCrm&&method!=='POST')return fail('method not allowed',405);
+    if(method==='POST'&&fromCrm){
+      // Draft-only, retry-safe, tenant-owned set selection. No consent is granted and no calls start.
+      if(Object.keys(d).some(k=>!['tenantId','customerSegment','interestStatus'].includes(k))||
+        (d.customerSegment!==undefined&&!SEGMENTS.has(d.customerSegment))||
+        (d.interestStatus!==undefined&&!INTEREST.has(d.interestStatus)))
+        return fail('invalid CRM customer selection');
+      if(record.status!=='draft')return fail('campaign is no longer a draft',409);
+      const conditions=["l.tenant_id=?","l.consent_status!='denied'","l.dnd_status!='blocked'",
+        "NOT EXISTS(SELECT 1 FROM lead_opt_out_events x WHERE x.tenant_id=l.tenant_id AND x.lead_id=l.id)"];
+      const params=[tid];
+      if(d.customerSegment){conditions.push('l.customer_segment=?');params.push(d.customerSegment)}
+      if(d.interestStatus){conditions.push('l.interest_status=?');params.push(d.interestStatus)}
+      const eligible=conditions.join(' AND ');
+      const notYet="NOT EXISTS(SELECT 1 FROM call_campaign_candidates cc WHERE cc.tenant_id=l.tenant_id AND cc.campaign_id=? AND cc.lead_id=l.id)";
+      const [total,added,current]=await Promise.all([
+        db.prepare('SELECT COUNT(*) AS n FROM leads l WHERE '+eligible).bind(...params).first(),
+        db.prepare('SELECT COUNT(*) AS n FROM leads l WHERE '+eligible+' AND '+notYet).bind(...params,campaignId).first(),
+        db.prepare('SELECT COUNT(*) AS n FROM call_campaign_candidates WHERE tenant_id=? AND campaign_id=?').bind(tid,campaignId).first()
+      ]);
+      const count=Number(added?.n||0),existing=Number(current?.n||0);
+      if(count+existing>MAX_CAMPAIGN_CUSTOMERS)return fail('Selection exceeds 2000 campaign customers; narrow customer filters or create another campaign. Nothing was added.',409);
+      if(!total?.n)return fail('No eligible CRM customers match this selection',409);
+      const at=new Date().toISOString();
+      // The capacity check is repeated inside one SQLite statement, preventing stale previews from overfilling.
+      const result=await db.prepare('INSERT OR IGNORE INTO call_campaign_candidates(tenant_id,campaign_id,lead_id,created_at) '+
+        'SELECT l.tenant_id,?,l.id,? FROM leads l WHERE '+eligible+' AND '+notYet+
+        ' AND ((SELECT COUNT(*) FROM call_campaign_candidates z WHERE z.tenant_id=? AND z.campaign_id=?) + ?)<=? '+
+        ' ORDER BY l.created_at,l.id')
+        .bind(campaignId,at,...params,campaignId,tid,campaignId,count,MAX_CAMPAIGN_CUSTOMERS).run();
+      const inserted=Number(result?.meta?.changes||0);
+      if(inserted!==count)return fail('CRM selection changed; refresh and retry (existing customers remain deduplicated)',409);
+      if(inserted){
+        await db.prepare("INSERT INTO crm_audit_events(tenant_id,id,actor,action,target_id,created_at) VALUES(?,?,'human:'||?,'campaign.crm_selection_added',?,?)")
+          .bind(tid,crypto.randomUUID(),user.id,campaignId,at).run();
+      }
+      return json({inserted,alreadyInCampaign:Number(total.n)-count,totalEligible:Number(total.n),
+        campaignTotal:existing+inserted,dialingEnabled:false,
+        notice:'Draft customer selection only. Consent and DND approval are still required; no calls were placed.'});
     }
     if(method==='POST'&&match[2]==='candidates'){
       if(Object.keys(d).some(k=>!['tenantId','leadIds'].includes(k))||!Array.isArray(d.leadIds)||
