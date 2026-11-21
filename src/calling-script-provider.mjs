@@ -95,3 +95,89 @@ export async function createIsolatedPublishedAssistant(env,runtime,prompt,name,{
   return {assistantId:id,version};
  }catch(e){if(wrote&&!(creationAcknowledged===false&&(/^(?:provider_http_(?:400|401|403|404|422|429)|voicebot_management_access_denied)$/.test(e.message))))throw Error('provider_write_unknown');throw e}
 }
+
+
+/*
+ * Safe first-creation path for the SHARED routing Guard only. The ExotelMCP
+ * version updater selects a source version which ALREADY contains an Agent.
+ * Do not create v2/v3 from a new empty v1. The previously deployed generic
+ * publisher constructed synthetic Agent IDs and only checked Agent presence
+ * AFTER creating a second version. Ajay's test-client publication is separate
+ * and is not modified by this function.
+ *
+ * No existing Guard is modified here: prepareSharedGateway requires an empty
+ * Gateway database record. Existing unknown installations remain locked.
+ */
+export async function createVerifiedRoutingGuard(env,runtime,prompt,{fetcher=fetch,onCreated=async()=>{}}={}){
+ const opts={fetcher},base='/assistants/';
+ const raw=unwrap(await request(env,base+runtime.template_assistant_id+'?version='+runtime.template_version,opts));
+ const source=versionConfig(raw,runtime.template_version);
+ const noTools=x=>x==null||(typeof x==='object'&&Object.keys(x).length===0);
+ if((raw.id||raw.assistant_id)!==runtime.template_assistant_id||
+    !source||!Array.isArray(source.agents)||source.agents.length!==1||
+    ![source.tools,source.mcp_servers,source.agents[0]?.tools,
+      source.agents[0]?.mcp_tools,source.agents[0]?.sub_agents].every(noTools))
+  throw Error('guard_seed_template_unverified');
+ const agentModel=source.agents[0].llm_config||source.llm_config;
+ if(!agentModel||typeof agentModel.model_id!=='string'||!agentModel.model_id.trim())
+  throw Error('guard_seed_model_unverified');
+ const agent={name:'AR3D routing fallback',description:'Fail-closed fallback, no tenant data',
+  instruction:prompt,llm_config:agentModel};
+ let created=false;
+ try{
+  // Exotel's multi-agent create contract accepts agents in the first POST.
+  // Never supply a synthetic Agent ID or private template instruction.
+  const result=unwrap(await request(env,base,{...opts,method:'POST',body:{
+   name:'AR3D - Routing guard',description:'Safe shared fallback; no tenant data',
+   instruction:prompt,agents:[agent]
+  }}));
+  created=true;
+  const assistantId=result?.id||result?.assistant_id;
+  if(!/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(assistantId||''))
+   throw Error('guard_seed_create_identity_unknown');
+  await onCreated(assistantId);
+  const overview=unwrap(await request(env,base+assistantId,opts));
+  const seedVersion=overview?.latest_version||overview?.version;
+  if(!/^v[1-9]\\d{0,8}$/.test(seedVersion||'')||
+     (overview.id||overview.assistant_id)!==assistantId)
+   throw Error('guard_seed_version_unknown');
+  const seed=unwrap(await request(env,base+assistantId+'?version='+seedVersion,opts));
+  const seedConfig=versionConfig(seed,seedVersion);
+  const validSeed=(data,cfg,v)=>
+   (data?.id||data?.assistant_id)===assistantId&&
+   (data?.version===v||data?.latest_version===v)&&
+   cfg?.instruction===prompt&&Array.isArray(cfg.agents)&&cfg.agents.length===1&&
+   cfg.agents[0]?.instruction===prompt&&
+   cfg.agents[0]?.llm_config?.model_id===agentModel.model_id&&
+   [cfg.tools,cfg.mcp_servers,cfg.agents[0].tools,
+    cfg.agents[0].mcp_tools,cfg.agents[0].sub_agents].every(noTools);
+  if(!validSeed(seed,seedConfig,seedVersion))
+   throw Error('guard_seed_agent_missing_stop');
+  if(overview.stable_version===seedVersion){
+   // Already stable and VERIFIED: no unnecessary new Agent version.
+   return {assistantId,version:seedVersion};
+  }
+  if(overview.stable_version!=null||overview.latest_version!==seedVersion)
+   throw Error('guard_seed_unexpected_stable_version');
+  // Newly created version is known to contain a valid Agent. Use the exact
+  // provider-returned Agent (including any provider-assigned identity).
+  const saved=unwrap(await request(env,base+assistantId+'/versions',{...opts,method:'POST',body:{
+   source_version:seedVersion,mark_as_stable:'true',
+   version_description:'Verified no-tools AR3D routing fallback',
+   data:{agents:[seedConfig.agents[0]]}
+  }}));
+  const stableVersion=saved?.version||saved?.latest_version;
+  if(!/^v[1-9]\\d{0,8}$/.test(stableVersion||'')||stableVersion===seedVersion)
+   throw Error('guard_seed_version_write_unknown');
+  const check=unwrap(await request(env,base+assistantId+'?version='+stableVersion,opts));
+  if(check.stable_version!==stableVersion||
+     !validSeed(check,versionConfig(check,stableVersion),stableVersion))
+   throw Error('guard_seed_stable_agent_unverified');
+  return {assistantId,version:stableVersion};
+ }catch(e){
+  // Any successful/uncertain Assistant POST may have created provider state;
+  // caller records 'unknown' and must never automatically retry.
+  if(created)throw Error('provider_write_unknown');
+  throw e;
+ }
+}
