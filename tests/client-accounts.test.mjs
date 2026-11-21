@@ -23,7 +23,7 @@ test('new client account atomically creates shared tenant, contact and one priva
  try{
   const email='owner@example.test';
   const r=await post(f,{displayName:'North Builder',email,mobile:'9000000002'});
-  assert.equal(r.status,201,await r.text());
+  if(r.status!==201)assert.fail('onboarding failed: '+await r.text());
   const d=await r.json();
   assert.equal(d.existingTenant,false);
   assert.equal(d.access,'invitation_pending');
@@ -52,7 +52,7 @@ test('existing company is reused, never duplicated, when creating first login in
  try{
   const before=f.c.db.prepare('SELECT COUNT(*) AS n FROM tenants').get().n;
   const r=await post(f,{displayName:'Demo',email:'firstowner@example.test',mobile:'9888888888',tenantId:tid});
-  assert.equal(r.status,201,await r.text());
+  if(r.status!==201)assert.fail('onboarding failed: '+await r.text());
   const d=await r.json();
   assert.equal(d.id,tid);
   assert.equal(d.existingTenant,true);
