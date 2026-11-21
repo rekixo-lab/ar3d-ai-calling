@@ -608,11 +608,11 @@ async function renderClient(id,content){state.clientSetTab=null;content.replaceC
  content.append(tabs,...Object.values(sections));
  state.clientSetTab=selectTab;
  selectTab(Object.hasOwn(sections,state.clientTab)?state.clientTab:'customers');
- await crmWorkflow(id,sections.customers,d.role);
+ await crmWorkflow(id,sections.customers,d.role,content);
  await customerCallingPanel(id,sections.calling,d.role);
- await callingScriptEditor(id,sections.company);const extra=node('details',{class:'card'},node('summary',{text:'Manual customer entry and agent drafts'}));sections.company.append(extra);const leadCard=div('card',title('Leads','h3'),table(['Name','Mobile','Source','Consent'],d.leads.map(l=>[l.name,l.mobile,l.sourceType,l.consentStatus])));extra.append(leadCard);const name=input('name','text','Customer name'),mobile=input('mobile','tel','9876543210');const leadForm=node('form',{class:'formrow'},[lab('Name',name),lab('Mobile',mobile),node('button',{class:'btn',type:'submit',text:'Add lead'})]);leadForm.addEventListener('submit',async e=>{e.preventDefault();try{await api('/v1/human/leads','POST',{tenantId:id,name:name.value,mobile:mobile.value});notice('Lead saved without calling consent');await renderClient(id,content)}catch(err){asError(err)}});if(d.role==='client_admin')leadCard.append(leadForm);const agentCard=div('card',title('AI Agents','h3'),table(['Name','Language','Status'],d.agents.map(a=>[a.displayName,a.languageMode,a.status])));extra.append(agentCard);if(d.role==='client_admin'){const agentName=input('displayName','text','Sales Agent'),language=node('select',{class:'field'},['hi-en','hi','en'].map(x=>node('option',{value:x,text:x}))),q=node('textarea',{class:'field',placeholder:'One question per line',rows:4});const agentForm=node('form',{class:'stack'},[lab('AI Agent Name',agentName),lab('Language',language),lab('Questions (one per line)',q),node('button',{class:'btn',type:'submit',text:'Save draft AI Agent'})]);agentForm.addEventListener('submit',async e=>{e.preventDefault();try{await api('/v1/human/agents','POST',{tenantId:id,displayName:agentName.value,languageMode:language.value,questions:q.value.split('\n').map(s=>s.trim()).filter(Boolean)});notice('Draft AI Agent saved');await renderClient(id,content)}catch(err){asError(err)}});agentCard.append(agentForm);await agentEditor(id,agentCard)}const planning=node('details',{class:'card'},node('summary',{text:'Advanced campaign planning and project links'}));sections.company.append(planning);await planningPanels(id,planning,d.role);const reports=node('details',{class:'card'},node('summary',{text:'Exports, answer reviews and audit history'}));reports.id='client-reports';sections.results.append(reports);await usageAndExport(id,reports,d.role);if(d.role==='client_admin')await voicebotReviewPanel(id,reports);if(d.role==='client_admin')await auditPanel(id,reports)}catch(e){content.replaceChildren();asError(e)}}
+ await callingScriptEditor(id,sections.company);const extra=node('details',{class:'card'},node('summary',{text:'Manual customer entry and agent drafts'}));sections.company.append(extra);const leadCard=div('card',title('Leads','h3'),table(['Name','Mobile','Source','Consent'],d.leads.map(l=>[l.name,l.mobile,l.sourceType,l.consentStatus])));extra.append(leadCard);const name=input('name','text','Customer name'),mobile=input('mobile','tel','9876543210');const leadForm=node('form',{class:'formrow'},[lab('Name',name),lab('Mobile',mobile),node('button',{class:'btn',type:'submit',text:'Add lead'})]);leadForm.addEventListener('submit',async e=>{e.preventDefault();try{await api('/v1/human/leads','POST',{tenantId:id,name:name.value,mobile:mobile.value});notice('Lead saved without calling consent');await renderClient(id,content)}catch(err){asError(err)}});if(d.role==='client_admin')leadCard.append(leadForm);const agentCard=div('card',title('AI Agents','h3'),table(['Name','Language','Status'],d.agents.map(a=>[a.displayName,a.languageMode,a.status])));extra.append(agentCard);if(d.role==='client_admin'){const agentName=input('displayName','text','Sales Agent'),language=node('select',{class:'field'},['hi-en','hi','en'].map(x=>node('option',{value:x,text:x}))),q=node('textarea',{class:'field',placeholder:'One question per line',rows:4});const agentForm=node('form',{class:'stack'},[lab('AI Agent Name',agentName),lab('Language',language),lab('Questions (one per line)',q),node('button',{class:'btn',type:'submit',text:'Save draft AI Agent'})]);agentForm.addEventListener('submit',async e=>{e.preventDefault();try{await api('/v1/human/agents','POST',{tenantId:id,displayName:agentName.value,languageMode:language.value,questions:q.value.split('\n').map(s=>s.trim()).filter(Boolean)});notice('Draft AI Agent saved');await renderClient(id,content)}catch(err){asError(err)}});agentCard.append(agentForm);await agentEditor(id,agentCard)}const planning=node('details',{class:'card'},node('summary',{text:'Advanced campaign planning and project links'}));sections.company.append(planning);await planningPanels(id,planning,d.role);const reports=node('details',{class:'card'},node('summary',{text:'Exports, answer reviews and audit history'}));reports.id='client-reports';sections.results.append(reports);await usageAndExport(id,reports,d.role);if(d.role==='client_admin')await voicebotReviewPanel(id,reports,content);if(d.role==='client_admin')await auditPanel(id,reports)}catch(e){content.replaceChildren();asError(e)}}
 
-async function voicebotReviewPanel(tenantId,content){
+async function voicebotReviewPanel(tenantId,content,refreshContent=content){
   const card=div('card',title('Verified Exotel Voicebot Review Queue','h3'),
     node('p',{class:'note',text:'Pending staff review of independently verified Exotel answers. Speech answers are reviewed in Exotel. Automatic transcript import is not configured here.'}));
   content.append(card);
@@ -641,7 +641,7 @@ async function voicebotReviewPanel(tenantId,content){
               await api('/v1/human/voicebot-reviews/'+encodeURIComponent(item.id)+'/apply','POST',{
                 tenantId,expectedUpdatedAt:item.leadUpdatedAt,acknowledged:true});
               notice('Reviewed Voicebot answers applied. No call or site visit was created.');
-              await renderClient(tenantId,content);
+              await renderClient(tenantId,refreshContent);
             }catch(e){asError(e)}finally{apply.disabled=false}
           },true);
           buttons.append(apply);
@@ -654,7 +654,7 @@ async function voicebotReviewPanel(tenantId,content){
             try{
               await api('/v1/human/voicebot-reviews/'+encodeURIComponent(item.id)+'/dismiss','POST',{tenantId});
               notice('Review dismissed without changing CRM.');
-              await renderClient(tenantId,content);
+              await renderClient(tenantId,refreshContent);
             }catch(e){asError(e)}finally{dismiss.disabled=false}
           },true);
           buttons.append(dismiss);
@@ -1062,7 +1062,7 @@ async function usageAndExport(tenantId,content,role){
   card.append(info,exportBtn);
 }
 // CRM workflows: CSV/XLSX Preview/Import, statuses, notes and requested site visits.
-async function crmWorkflow(tenantId,content,role){
+async function crmWorkflow(tenantId,content,role,refreshContent=content){
   const editable=role==='client_admin';
   const workflow=div('card',title('Lead Workflow & Excel Import','h3'));workflow.id='customer-workflow';
   workflow.append(node('p',{class:'note',text:'Excel .xlsx या CSV UTF-8 अपलोड करें (अधिकतम 200 leads)। Import से calling consent नहीं मिलता; consent/DND unknown रहेगा।'}));
@@ -1098,7 +1098,7 @@ async function crmWorkflow(tenantId,content,role){
       commitBtn.disabled=true;
       try{const result=await api('/v1/human/import/commit','POST',importData);
         notice('Import finished: '+result.inserted+' new, '+result.skipped+' duplicates. No calls placed.');
-        await renderClient(tenantId,content);
+        await renderClient(tenantId,refreshContent);
       }catch(e){asError(e);commitBtn.disabled=false}
     });commitBtn.disabled=true;
     picker.addEventListener('change',()=>{importData=null;commitBtn.disabled=true;previewBox.replaceChildren()});
