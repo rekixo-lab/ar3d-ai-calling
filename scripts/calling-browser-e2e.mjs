@@ -76,9 +76,11 @@ try{
   await route.fulfill({contentType:'application/json',body:JSON.stringify(post?{state:'submitted',requestId:'fictional-operator-request'}:{configured:true,mfaEnabled:true,recent:[],voicebotFlowId:'123456',destinationLast4:'0001'})});
  });
  await adminPage.goto(origin+'/app');
- await adminPage.getByText('Workspace settings',{exact:true}).click();
+ await adminPage.getByText('3. Calling & Exotel Setup',{exact:true}).click();
+ await adminPage.getByText('Customer Calling Approval — after gateway verification',{exact:true}).click();
  await adminPage.getByRole('heading',{name:'Client Calling Setup',exact:true}).waitFor();
- // Company knowledge and script editing are now Admin-only, under Clients.
+ // Client AI details open only when specifically selected.
+ await adminPage.getByText('2. Client AI Setup & Publish',{exact:true}).click();
  await adminPage.getByRole('heading',{name:'Client Company & AI Setup',exact:true}).waitFor();
  await adminPage.getByRole('heading',{name:'Quick AI Setup — Master Templates',exact:true}).waitFor();
  await adminPage.getByPlaceholder('Optional project name').fill('Demo Heights');
@@ -94,7 +96,8 @@ try{
  assert.equal(f.c.db.prepare('SELECT COUNT(*) AS n FROM company_profile_versions').get().n,1);
  assert.equal(f.c.db.prepare('SELECT COUNT(*) AS n FROM calling_script_versions').get().n,1);
  assert.equal(f.c.db.prepare('SELECT COUNT(*) AS n FROM calling_agent_publications').get().n,0);
- // Update ONLY one approved price; don't rewrite the script or publish.
+ // Optional price updates are hidden until requested.
+ await adminPage.getByText('Optional: change approved price only',{exact:true}).click();
  await adminPage.getByPlaceholder('Approved price or range').fill('14-19 lakh');
  adminPage.once('dialog',dialog=>dialog.accept());
  await adminPage.getByRole('button',{name:'Save price change (draft only)'}).click();
@@ -106,6 +109,7 @@ try{
  assert.equal(latestPricing,'14-19 lakh');
  const generatedScript=JSON.parse(f.c.db.prepare('SELECT config_json FROM calling_script_versions WHERE tenant_id=? ORDER BY revision DESC LIMIT 1').get(tid).config_json);
  assert.ok(!JSON.stringify(generatedScript).includes('12-18 lakh'));
+ await adminPage.getByText('Advanced: Company Knowledge & AI Questions',{exact:true}).click();
  await adminPage.getByRole('heading',{name:'AI Questions & Answers',exact:true}).waitFor();
  await adminPage.getByRole('button',{name:'Publish AI agent for calls'}).waitFor();
  await adminPage.locator('[name=company-companyName]').fill('Fictional Builder');
@@ -114,6 +118,7 @@ try{
  await adminPage.locator('[name=scriptName]').fill('Admin approved script');
  await adminPage.getByRole('button',{name:'Save new script version',exact:true}).click();
  await adminPage.getByText(/Script version .* saved. Live calls have not changed./).waitFor();
+ await adminPage.getByText('Client change requests (optional)',{exact:true}).click();
  await adminPage.getByRole('heading',{name:'Client Change Requests',exact:true}).waitFor();
  await adminPage.getByText('Please update our fictional Raipur plot price from 12 lakh to 14 lakh.').waitFor();
 
@@ -126,20 +131,20 @@ try{
  await adminPage.getByLabel('Fictional buyer — '+lead.slice(0,8),{exact:true}).check();
  await adminPage.getByRole('button',{name:'Approve selected customers',exact:true}).click();
  await adminPage.getByText('1 customer approvals saved.',{exact:true}).waitFor();
- await adminPage.getByText('Engineering tools and diagnostics',{exact:true}).click();
  await adminPage.getByRole('heading',{name:'Shared Calling Gateway',exact:true}).waitFor();
  await adminPage.getByLabel('Shared gateway bot').waitFor();
  assert.equal(await adminPage.getByLabel('Shared gateway bot').inputValue(),'66cbf4f6-a52d-4df0-abf0-db5e3b365836');
  assert.equal(await adminPage.getByLabel('Shared gateway flow').inputValue(),'1393135');
  assert.equal(await adminPage.getByLabel('Authenticated webhook template').inputValue(),'c3c7ca7c-b06d-4b3d-b661-ef121f751021');
  assert.equal(await adminPage.getByLabel('I verified in Exotel that the copied Flow targets this shared Voicebot').isChecked(),false);
+ await adminPage.getByText('Advanced developer diagnostics (optional)',{exact:true}).click();
  await adminPage.getByRole('button',{name:'Call my verified test phone once',exact:true}).click();
  await adminPage.getByRole('alertdialog',{name:'Confirm verified test call'}).waitFor();assert.equal(operatorRequests,0);
  await adminPage.getByRole('button',{name:'Cancel test call',exact:true}).click();assert.equal(operatorRequests,0);
  await adminPage.getByRole('button',{name:'Call my verified test phone once',exact:true}).click();
  await adminPage.getByRole('button',{name:'Confirm one test call',exact:true}).click();
  await adminPage.getByText(/Exotel request: submitted/).waitFor();assert.equal(operatorRequests,1);
- await adminPage.getByText('Engineering tools and diagnostics',{exact:true}).click();
+ await adminPage.getByText('Advanced developer diagnostics (optional)',{exact:true}).click();
  await adminPage.evaluate(()=>window.scrollTo(0,0));await adminPage.screenshot({path:'artifacts/premium-super-admin.png',fullPage:true});
  await adminContext.close();console.log('Super Admin UI: current MFA session, company policy and selected customer clearances PASS');
 }catch(e){console.error(await lastPage?.locator('body').innerText());await lastPage?.screenshot({path:'/tmp/ar3d-calling-failure.png',fullPage:true});throw e}finally{await browser.close();server.close();f.close()}

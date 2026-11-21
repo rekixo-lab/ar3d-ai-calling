@@ -434,13 +434,45 @@ function engineeringPanel(main){
 }
 function dashboard(){
  root.replaceChildren();const admin=state.me.superAdmin;
- const nav=(label,name,target,active=false)=>node('a',{href:'#'+target,class:'navitem'+(active?' active':''),onclick:e=>{e.preventDefault();document.querySelectorAll('.sidebar a[href^="#"]').forEach(n=>n.classList.remove('active'));e.currentTarget.classList.add('active');const el=document.getElementById(target);if(!admin&&state.clientSetTab){const tab=target==='customer-workflow'?'customers':target==='customer-calling'?'calling':target==='client-ai'?'company':target==='client-reports'?'results':null;if(tab)state.clientSetTab(tab)}if(el){if(el.tagName==='DETAILS')el.open=true;el.scrollIntoView({behavior:matchMedia('(prefers-reduced-motion: reduce)').matches?'instant':'smooth',block:'start'})}}},[icon(name),node('span',{text:label})]);
- const aside=div('sidebar',div('brand',div('brand-mark',icon('spark')),node('div',{},['AR3D',node('small',{text:'AI CALLING WORKSPACE'})])),node('div',{class:'nav-caption',text:'WORKSPACE'}),nav(admin?'Overview':'Dashboard','grid','workspace-top',true),nav(admin?'Clients':'Customers','users',admin?'clients-panel':'customer-workflow'),nav(admin?'Settings':'Calling','phone',admin?'platform-settings':'customer-calling'),node('div',{class:'nav-caption',text:'MANAGEMENT'}));
- if(admin)aside.append(nav('Client access','mail','client-access'),nav('Security','shield','platform-settings'));
+ function reveal(target){
+  const el=document.getElementById(target);if(!el){notice('Section is loading. Retry shortly.',true);return}
+  for(let p=el;p;p=p.parentElement)if(p.tagName==='DETAILS')p.open=true;
+  el.scrollIntoView({behavior:matchMedia('(prefers-reduced-motion: reduce)').matches?'instant':'smooth',block:'start'});
+ }
+ const nav=(label,name,target,active=false)=>node('a',{href:'#'+target,class:'navitem'+(active?' active':''),onclick:e=>{
+  e.preventDefault();document.querySelectorAll('.sidebar a[href^="#"]').forEach(n=>n.classList.remove('active'));e.currentTarget.classList.add('active');
+  if(!admin&&state.clientSetTab){const tab=target==='customer-workflow'?'customers':target==='customer-calling'?'calling':target==='client-ai'?'company':target==='client-reports'?'results':null;if(tab)state.clientSetTab(tab)}
+  reveal(target);
+ }},[icon(name),node('span',{text:label})]);
+ const aside=div('sidebar',div('brand',div('brand-mark',icon('spark')),node('div',{},['AR3D',node('small',{text:'AI CALLING WORKSPACE'})])),node('div',{class:'nav-caption',text:'WORKSPACE'}),nav(admin?'Overview':'Dashboard','grid','workspace-top',true),nav(admin?'Clients':'Customers','users',admin?'clients-panel':'customer-workflow'));
+ if(admin)aside.append(nav('AI Setup','spark','ai-setup'),nav('Calling Setup','phone','platform-settings'));
+ else aside.append(nav('Calling','phone','customer-calling'));
+ aside.append(node('div',{class:'nav-caption',text:'MANAGEMENT'}));
+ if(admin)aside.append(nav('Client access','mail','client-access'),nav('Security','shield','security-section'));
  else aside.append(nav('Company / AI','spark','client-ai'),nav('Results & activity','file','client-reports'));
  aside.append(div('sidebar-footer',div('account',div('avatar',node('span',{text:state.me.email.slice(0,2).toUpperCase()})),div('account-copy',node('strong',{text:admin?'Administrator':'Client workspace'}),node('p',{text:state.me.email}))),btn('Sign out',logout,true)));
- const main=div('main',div('topbar',div('',node('div',{class:'eyebrow',text:'WORKSPACE / '+(admin?'OVERVIEW':'DASHBOARD')}),title(admin?'Super Admin':'Personal AI Calling','h1'),node('p',{class:'page-description',text:admin?'Manage your clients, calling and workspace access.':'Your customers, conversations and campaigns. All in one place.'})),div('topbar-right',node('span',{class:'pill'},[node('span',{class:'status-dot'}),'AR3D Client Platform']),div('avatar',node('span',{text:state.me.email.slice(0,2).toUpperCase()})))),div('',node('div',{id:'notice-anchor'})));main.id='workspace-top';root.append(div('layout',aside,main));
- if(admin){const grid=div('admin-grid');main.append(grid);superAdmin(grid);const settings=node('details',{class:'card',id:'platform-settings'},node('summary',{text:'Workspace settings'})),settingsGrid=div('admin-grid');main.append(settings);settings.append(settingsGrid);callingAdminPanel(settingsGrid);mfaPanel(settingsGrid);const advanced=node('details',{class:'stack'},node('summary',{text:'Engineering tools and diagnostics'}));settings.append(advanced);engineeringPanel(advanced);voiceGatewayPanel(advanced)}
+ const main=div('main',div('topbar',div('',node('div',{class:'eyebrow',text:'WORKSPACE / '+(admin?'OVERVIEW':'DASHBOARD')}),title(admin?'Super Admin':'Personal AI Calling','h1'),node('p',{class:'page-description',text:admin?'Clients → AI → Exotel Gateway → Calling approval.':'Your customers, conversations and campaigns. All in one place.'})),div('topbar-right',node('span',{class:'pill'},[node('span',{class:'status-dot'}),'AR3D Client Platform']),div('avatar',node('span',{text:state.me.email.slice(0,2).toUpperCase()})))),div('',node('div',{id:'notice-anchor'})));main.id='workspace-top';root.append(div('layout',aside,main));
+ if(admin){
+  const guide=div('card',title('Simple Setup — Next Step','h2')),status=node('p',{class:'note',text:'Checking Shared Gateway…'});
+  guide.append(status,div('formrow',
+   btn('1. Shared Gateway',()=>reveal('gateway-panel')),
+   btn('2. Publish AI',()=>reveal('conversation-setup'),true),
+   btn('3. Calling Approval',()=>reveal('calling-setup'),true)));
+  main.append(guide);
+  api('/v1/human/voice-gateway').then(r=>{
+   status.textContent=r.gateway?.state==='ready'?'Shared Gateway ready. Review AI publication and calling approvals.'
+    :r.gateway?'Shared Gateway: '+r.gateway.state+'. Finish verification before client calls.'
+    :'Next: Exotel Flow saved. Open Shared Gateway, then click Inspect gateway contract. No calls yet.';
+  }).catch(()=>{status.textContent='Shared Gateway status unavailable. Check it before calling.'});
+  const grid=div('admin-grid');main.append(grid);superAdmin(grid);
+  const settings=node('details',{class:'card',id:'platform-settings'},node('summary',{text:'3. Calling & Exotel Setup'}));main.append(settings);
+  voiceGatewayPanel(settings);
+  const approvals=node('details',{class:'card',id:'approval-section'},node('summary',{text:'Customer Calling Approval — after gateway verification'}));
+  settings.append(approvals);callingAdminPanel(approvals);
+  const security=node('details',{class:'card',id:'security-section'},node('summary',{text:'Account Security & Recovery'}));settings.append(security);mfaPanel(security);
+  const advanced=node('details',{class:'card',id:'engineering-advanced'},node('summary',{text:'Advanced developer diagnostics (optional)'}));settings.append(advanced);
+  advanced.addEventListener('toggle',()=>{if(advanced.open&&!advanced.dataset.loaded){advanced.dataset.loaded='1';engineeringPanel(advanced)}});
+ }
  if(state.me.tenants.length)clientPanel(main);
 }
 function showRecoveryCodes(target,codes){
@@ -523,13 +555,15 @@ async function superAdmin(main){
       ['Team members',d.tenants.reduce((n,t)=>n+Number(t.member_count||0),0),'shield']
     ].map(([label,value,symbol])=>div('card metric',div('metric-symbol',icon(symbol)),node('span',{class:'muted',text:label}),node('strong',{text:String(value)})))),
     table(['Company','Contact email','Mobile','Status','Members'],d.tenants.map(t=>[t.display_name,t.contact_email||'—',t.contact_mobile||'—',t.status,t.member_count])),
-    title('Client usage (verified Calling records)','h3'),
-    table(['Company','Customers','Excel imports','Reserved attempts','Provider accepted','Completed + duration','Recorded seconds','Uncertain'],d.tenants.map(t=>{
-      const x=t.usage;return [t.display_name,x?.customers??'—',x?.uploads??'—',x?.reservedAttempts??'—',
-        x?.providerAccepted??'—',x?.providerCompletedWithDuration??'—',x?.completedSeconds??'—',x?.uncertain??'—'];
-    })),
-    node('p',{class:'note',text:d.reportingUnavailable?'Calling CRM reporting is temporarily unavailable; blank values are unknown.':
-      'Completed + duration is verified provider status evidence only—not proof that AI answers or a transcript were saved. Dedicated-storage usage shows — until separately verified.'})
+    node('details',{class:'stack'},[
+     node('summary',{text:'Detailed usage & provider records (optional)'}),
+     table(['Company','Customers','Excel imports','Reserved attempts','Provider accepted','Completed + duration','Recorded seconds','Uncertain'],d.tenants.map(t=>{
+       const x=t.usage;return [t.display_name,x?.customers??'—',x?.uploads??'—',x?.reservedAttempts??'—',
+         x?.providerAccepted??'—',x?.providerCompletedWithDuration??'—',x?.completedSeconds??'—',x?.uncertain??'—'];
+     })),
+     node('p',{class:'note',text:d.reportingUnavailable?'Calling CRM reporting is temporarily unavailable; blank values are unknown.':
+       'Provider call status is not proof that AI answers or a transcript were saved.'})
+    ])
    );
    if(existing){
     const old=existing.value;
@@ -574,7 +608,7 @@ async function superAdmin(main){
   }catch(err){asError(err)}
   finally{submit.disabled=false}
  });
- panel.append(title('Create client access','h3'),f,inviteResult);
+ panel.append(node('details',{class:'card'},[node('summary',{text:'Create / invite a new client'}),f,inviteResult]));
 const accessCard=div('card access-card',title('Tenant Access: Suspend / Resume','h3'),
   node('p',{class:'note',text:'Suspension immediately blocks the company CRM and API keys. Resume restores its prior status, not a paid subscription.'}));
 const management=node('details',{class:'card client-directory',id:'client-access'},node('summary',{text:'Client access and invitations'}));main.append(management);management.append(accessCard);
@@ -603,7 +637,12 @@ actionForm.addEventListener('submit',async e=>{e.preventDefault();try{
   notice('Tenant '+result.status+'. This is not a payment transaction.');
   reason.value='';await refresh();await refreshAccess();
 }catch(err){asError(err)}});
-await inviteSection(management);await scriptAdminPanel(main);await adminCompanyChangesPanel(main)}
+await inviteSection(management);
+ const ai=node('details',{class:'card client-directory',id:'ai-setup'},node('summary',{text:'2. Client AI Setup & Publish'}));
+ main.append(ai);await scriptAdminPanel(ai);
+ const requests=node('details',{class:'card',id:'company-requests'},node('summary',{text:'Client change requests (optional)'}));
+ ai.append(requests);await adminCompanyChangesPanel(requests);
+}
 async function inviteSection(main){const previous=document.getElementById('invite-card');if(previous)previous.remove();const card=div('card invite-card');card.id='invite-card';card.append(title('Invite client admin','h2'),node('p',{class:'muted',text:'Invitation link shown once. Share privately with the intended client.'}));const select=node('select',{class:'field'},[node('option',{value:'',text:'Choose company'})]);const tenants=await api('/v1/human/tenants');tenants.tenants.forEach(t=>select.append(node('option',{value:t.id,text:t.display_name})));const email=input('email','email','client@builder.com');const role=node('select',{class:'field'},['client_admin','viewer'].map(x=>node('option',{value:x,text:x})));const f=node('form',{class:'formrow'},[lab('Company',select),lab('Client email',email),lab('Role',role),node('button',{type:'submit',class:'btn',text:'Create invitation'})]);f.addEventListener('submit',async e=>{e.preventDefault();try{const d=await api('/v1/human/invitations','POST',{tenantId:select.value,email:email.value,role:role.value});const share=node('input',{class:'field',value:d.inviteUrl,readonly:'readonly',style:'width:100%'});card.append(div('banner',node('p',{text:'Share this one-time link securely:'}),share));notice('Invitation generated for '+email.value)}catch(err){asError(err)}});card.append(f);main.append(card)}
 async function adminCompanyChangesPanel(main){
  const card=div('card client-directory',title('Client Change Requests','h3'),
@@ -893,7 +932,9 @@ async function aiQuickSetupWizard(tenantId,content,refreshEditors,tenantLabel=''
      await refreshEditors();
     }catch(e){asError(e);update.disabled=false}
    });
-   card.append(div('formrow',lab('Quick update: Approved price',priceField),update));
+   const optional=node('details',{},node('summary',{text:'Optional: change approved price only'}));
+   optional.append(div('formrow',lab('Quick update: Approved price',priceField),update));
+   card.append(optional);
   }
   return true;
  }
@@ -1015,7 +1056,28 @@ async function scriptAdminPanel(main){
    const hasExisting=await aiQuickSetupWizard(tenantId,stage,()=>load(),label);
    if(generation!==loadGeneration||company.value!==tenantId)return;
    const advanced=node('details',{class:'card'},node('summary',{text:'Advanced: Company Knowledge & AI Questions'}));
-   advanced.open=hasExisting;
+   advanced.open=false;
+   if(hasExisting){
+    const inline=node('p',{class:'note',text:'AI questions are saved. First prepare Shared Gateway, then publish. Publishing does not call any customer.'});
+    const publish=btn('Publish this client AI',async()=>{
+     publish.disabled=true;
+     try{
+      const d=await api('/v1/human/calling-scripts?tenantId='+encodeURIComponent(tenantId));
+      const v=d.versions[0];if(!v)throw Error('No saved AI script. Open Advanced to edit.');
+      const published=d.publication?.state==='ready'&&d.publication.scriptRevision===v.revision&&d.publication.profileRevision===d.profileRevision;
+      if(published){inline.textContent='Latest approved AI is already published.';return}
+      const result=await api('/v1/human/calling-scripts/publish','POST',{tenantId,id:v.id,profileRevision:d.profileRevision});
+      inline.textContent=result.notice||'AI publish completed.';
+      notice(result.notice||'AI publish completed.');await load();
+     }catch(e){
+      inline.textContent=e.message==='shared_gateway_setup_required'
+       ?'Shared Gateway not ready: open Calling Setup → Shared Gateway → Inspect gateway contract.'
+       :'Publish is not complete: '+e.message;
+      asError(e);
+     }finally{publish.disabled=false}
+    });
+    stage.append(div('formrow',publish),inline);
+   }
    area.append(stage,advanced);
    await callingScriptEditor(tenantId,advanced,true,label);
   }catch(e){if(generation===loadGeneration)asError(e)}
@@ -1027,7 +1089,7 @@ async function scriptAdminPanel(main){
  await refreshCompanies();
 }
 async function voiceGatewayPanel(main){
- const card=div('card stack',title('Shared Calling Gateway','h3')),status=node('p',{class:'note',text:'Checking shared calling connection…'}),result=div('stack');main.append(card);card.append(status);
+ const card=div('card stack',title('Shared Calling Gateway','h3')),status=node('p',{class:'note',text:'Checking shared calling connection…'}),result=div('stack');card.id='gateway-panel';main.append(card);card.append(status);
  const bot=input('gatewayBotId','text','Shared Voicebot UUID'),flow=input('gatewayFlowId','text','Shared Exotel flow ID'),authTemplate=input('gatewayAuthTemplate','text','Existing authenticated webhook bot UUID');
  const flowConfirmed=node('input',{type:'checkbox','aria-label':'I verified in Exotel that the copied Flow targets this shared Voicebot'});
  let inspectedBotId=null;

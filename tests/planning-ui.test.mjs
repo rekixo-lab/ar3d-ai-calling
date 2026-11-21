@@ -22,7 +22,10 @@ test('dashboard sidebar has distinct block navigation and accessible sign-out sp
   const {css,js}=await import('../src/app-assets.mjs');
   assert.match(css,/\.sidebar-footer\{margin-top:auto/);
   assert.match(css,/:focus-visible/);
-  assert.match(js,/nav\('Security','shield','platform-settings'\)/);
+  assert.match(js,/nav\('Security','shield','security-section'\)/);
+  assert.match(js,/nav\('AI Setup','spark','ai-setup'\)/);
+  assert.match(js,/nav\('Calling Setup','phone','platform-settings'\)/);
+  assert.match(js,/advanced\.open&&!advanced\.dataset\.loaded/);
   assert.match(js,/btn\('Sign out',logout,true\)/);
 });
 
@@ -46,7 +49,7 @@ test('public smoke checks health, login UI, sidebar fix and 401 without writes o
     ['/health',[200,'application/json',JSON.stringify({service:'AR3D AI Calling',status:'foundation'})]],
     ['/app',[200,'text/html','<title>AR3D AI Calling</title>']],
     ['/app/assets/style.css',[200,'text/css',css]],
-    ['/app/assets/app.js',[200,'text/javascript','Workspace settings Sign out']],
+    ['/app/assets/app.js',[200,'text/javascript','Calling & Exotel Setup Sign out']],
     ['/v1/human/me',[401,'application/json',JSON.stringify({error:'sign in required'})]],
     ['/v1/human/engineering/status',[401,'application/json',JSON.stringify({error:'sign in required'})]],
     ['/v1/human/engineering/provider-pilot',[401,'application/json',JSON.stringify({error:'sign in required'})]],
