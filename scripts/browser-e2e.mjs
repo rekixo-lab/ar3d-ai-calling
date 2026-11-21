@@ -226,7 +226,7 @@ try{
     await page.goto(origin+'/app',{waitUntil:'load'});
     await page.getByRole('heading',{name:'AR3D AI Calling',exact:true}).waitFor();
     await page.getByPlaceholder('you@company.com').fill(TEST_EMAIL);
-    await page.getByPlaceholder('Minimum 12 characters').fill(TEST_PASSWORD);
+    await page.getByPlaceholder('Enter your password').fill(TEST_PASSWORD);
     await page.getByRole('button',{name:'Sign in',exact:true}).click();
     await page.getByRole('heading',{name:'Super Admin',exact:true}).waitFor();
     await page.getByText('Workspace settings',{exact:true}).click();
@@ -313,6 +313,12 @@ try{
     const body=await page.locator('body').innerText();
     assert.ok(body.includes('Commercial go-live blocked:'));
     assert.ok(!body.includes('Start real calls'));
+    // Existing Super Admin cookie must not hide an invitation link in this profile.
+    const invitePage=await context.newPage();
+    await invitePage.goto(origin+'/app#invite='+'a'.repeat(64),{waitUntil:'load'});
+    await invitePage.getByRole('heading',{name:'Client invitation — separate login'}).waitFor();
+    assert.equal(await invitePage.getByRole('heading',{name:'Super Admin'}).count(),0);
+    await invitePage.close();
     assert.deepEqual(errors,[],viewport.name+' browser JavaScript errors');
     await signout.click();
     await page.getByRole('heading',{name:'AR3D AI Calling',exact:true}).waitFor();
