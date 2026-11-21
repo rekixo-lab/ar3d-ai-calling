@@ -16,8 +16,18 @@ function notice(msg,isError=false){state.notice=msg;const old=document.getElemen
 async function api(path,method='GET',payload){const r=await fetch(path,{method,credentials:'same-origin',headers:payload?{'Content-Type':'application/json'}:{},body:payload?JSON.stringify(payload):undefined,cache:'no-store'});const data=await r.json();if(!r.ok)throw Error(data.error||data.code||data.notice||'Request failed');return data}
 function asError(e){notice(e instanceof Error?e.message:'Unexpected error',true)}
 function table(headers,rows){const t=node('table',{class:'table'});const h=node('tr');headers.forEach(v=>h.append(node('th',{text:v})));t.append(node('thead',{},h));const b=node('tbody');rows.forEach(row=>{const tr=node('tr');row.forEach(v=>{const text=String(v??'—');const cell=node('td');if(['active','completed','submitted','running','trial','paused','queued','draft','suspended','failed','unknown','blocked'].includes(text))cell.append(node('span',{class:'badge '+(['active','completed','running'].includes(text)?'positive':['trial','paused','queued','draft','submitted'].includes(text)?'pending':'negative'),text}));else cell.textContent=text;tr.append(cell)});b.append(tr)});if(!rows.length)b.append(node('tr',{},node('td',{class:'empty-state',colspan:headers.length,text:'No records yet'})));t.append(b);return div('tablewrap',t)}
-async function load(){try{state.me=await api('/v1/human/me');dashboard()}catch{login()}}
-function login(){root.replaceChildren();const email=input('email','email','you@company.com'),pass=input('password','password','Minimum 12 characters');email.autocomplete='username';pass.autocomplete='current-password';const form=node('form',{class:'stack'},[lab('Email address',email),lab('Password',pass),node('button',{class:'btn',type:'submit',text:'Sign in'})]);form.addEventListener('submit',async e=>{e.preventDefault();try{const res=await api('/v1/human/login','POST',{email:email.value,password:pass.value});if(res.mfaRequired){mfaChallengeView(res.challenge);return}await load()}catch(err){asError(err)}});root.append(div('auth',div('card',title('AR3D AI Calling','h1'),node('p',{class:'muted',text:'Secure Super Admin & Client Login'}),div('stack',form),node('p',{class:'foot',text:'Human login is separate from backend API keys.'}))));if(location.hash.startsWith('#invite='))inviteView(location.hash.slice(8))}
+async function load(){
+ const invite=location.hash.match(/^#invite=([a-f0-9]{64})$/i);
+ if(invite){
+  // An existing Super Admin session must never silently mask the invitation.
+  // Do not switch the signed-in browser session or consume the one-time link.
+  try{state.me=await api('/v1/human/me');inviteSessionNotice()}
+  catch{state.me=null;inviteView(invite[1])}
+  return;
+ }
+ try{state.me=await api('/v1/human/me');dashboard()}catch{login()}
+}
+function login(){root.replaceChildren();const email=input('email','email','you@company.com'),pass=input('password','password','Enter your password');email.autocomplete='username';pass.autocomplete='current-password';const form=node('form',{class:'stack'},[lab('Email address',email),lab('Password',pass),node('button',{class:'btn',type:'submit',text:'Sign in'})]);form.addEventListener('submit',async e=>{e.preventDefault();try{const res=await api('/v1/human/login','POST',{email:email.value,password:pass.value});if(res.mfaRequired){mfaChallengeView(res.challenge);return}await load()}catch(err){asError(err)}});root.append(div('auth',div('card',title('AR3D AI Calling','h1'),node('p',{class:'muted',text:'Secure Super Admin & Client Login'}),div('stack',form),node('p',{class:'foot',text:'Human login is separate from backend API keys.'}))));if(location.hash.startsWith('#invite='))inviteView(location.hash.slice(8))}
 function mfaChallengeView(challenge){
   root.replaceChildren();
   const mode=node('select',{class:'field'},[
@@ -49,7 +59,19 @@ function mfaChallengeView(challenge){
     node('p',{class:'muted',text:'Use your authenticator or an unused recovery code. The challenge expires after 5 minutes.'}),
     f,btn('Back to login',login,true))));
 }
-function inviteView(token){root.replaceChildren();const email=input('email','email','invited@company.com'),pass=input('password','password','At least 12 characters');pass.autocomplete='new-password';const form=node('form',{class:'stack'},[lab('Invited email',email),lab('Create password',pass),node('button',{class:'btn',type:'submit',text:'Activate client account'})]);form.addEventListener('submit',async e=>{e.preventDefault();try{await api('/v1/human/accept-invite','POST',{token,email:email.value,password:pass.value});history.replaceState(null,'','/app');await load()}catch(err){asError(err)}});root.append(div('auth',div('card',title('Accept client invitation','h1'),node('p',{class:'muted',text:'Only accept an invitation you were expecting.'}),form)))}
+function inviteSessionNotice(){
+ root.replaceChildren();
+ const account=state.me?.email||'your existing account';
+ const message=state.me?.superAdmin?'Super Admin':'another account';
+ const openLogin=btn('Back to my dashboard',()=>{
+  history.replaceState(null,'','/app');dashboard()
+ },true);
+ root.append(div('auth',div('card',title('Client invitation — separate login','h1'),
+  node('p',{class:'note',text:'You are already signed in as '+account+' ('+message+'). Opening a client invitation does not replace this login.'}),
+  node('p',{class:'muted',text:'To keep both accounts separate, open the invitation in an Incognito window or a different Chrome profile. If it was already activated on mobile, open /app there and sign in with the client email and existing password; the invitation is one-time.'}),
+  openLogin)));
+}
+function inviteView(token){root.replaceChildren();const email=input('email','email','invited@company.com'),pass=input('password','password','Minimum 8 characters');pass.minLength=8;pass.maxLength=128;pass.autocomplete='new-password';const form=node('form',{class:'stack'},[lab('Invited email',email),lab('Create password',pass),node('button',{class:'btn',type:'submit',text:'Activate client account'})]);form.addEventListener('submit',async e=>{e.preventDefault();try{await api('/v1/human/accept-invite','POST',{token,email:email.value,password:pass.value});history.replaceState(null,'','/app');await load()}catch(err){asError(err)}});root.append(div('auth',div('card',title('Accept client invitation','h1'),node('p',{class:'muted',text:'Only accept an invitation you were expecting.'}),form)))}
 async function logout(){try{await api('/v1/human/logout','POST',{})}finally{state.me=null;login()}}
 function engineeringPanel(main){
   const card=div('card',title('Production Readiness & Safe AI Calling Pilot'));
