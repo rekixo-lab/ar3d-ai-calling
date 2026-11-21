@@ -1,4 +1,5 @@
 import {handleCallingRequest} from './calling-routes.mjs';
+import {handleCompanyProfile} from './company-profile.mjs';
 import {handleCallingScripts} from './calling-script-routes.mjs';
 import {handleCrmRequest} from './crm-routes.mjs';
 import {handlePropertyQualificationRequest} from './property-qualification-routes.mjs';
@@ -236,6 +237,8 @@ export async function handleHumanRequest(req,env){
     if(!user)return fail('sign in required',401);
     if(path==='/v1/human/mfa'||path==='/v1/human/mfa/setup'||path==='/v1/human/mfa/enable'||path==='/v1/human/mfa/recovery/regenerate')
       return await handleMfaSettings(req,env,user,method==='POST'?await payload(req):null);
+    const profile=await handleCompanyProfile(req,env,user);
+    if(profile)return profile;
     const scripts=await handleCallingScripts(req,env,user);
     if(scripts)return scripts;
     const calling=await handleCallingRequest(req,env,user);

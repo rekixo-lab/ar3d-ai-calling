@@ -13,7 +13,10 @@ export function compileScript(value){
  'Language: '+d.language+'. Follow the customer’s preferred supported language. Speak naturally and briefly; ask one question at a time.',
  'If the customer declines, asks not to be called, or withdraws consent: acknowledge and end the call immediately. Never continue persuasion.',
  'Use only the approved facts below. Never invent prices, availability, discounts, legal approvals, appointments or confirmed site visits. If uncertain, offer a team follow-up. Never claim that an action or booking succeeded without a confirmed tool result.',
- 'Opening: '+d.greeting,'Questions in preferred order:',...d.questions.map((q,i)=>(i+1)+'. '+q),
+ 'Opening: '+d.greeting,
+ 'If the platform has already played the opening greeting, do not repeat it. After an availability question, short affirmative answers such as जी हाँ, हाँ, जी, बोलिए, बताइए or yes mean continue: ask the first unanswered question. Never treat a recognized affirmative answer as silence or refusal.',
+ 'Preserve the exact city, area, BHK, dates and monetary amounts the customer says. Corrections override earlier interpretations. बीस लाख / 20 लाख means INR 2000000, never ten lakh. Clarify uncertainty with one short question; never invent an unheard answer.',
+ 'Questions in preferred order:',...d.questions.map((q,i)=>(i+1)+'. '+q),
  'Approved answers:',...d.faqs.map(f=>'Q: '+f.question+'\nA: '+f.answer),
  'Company conversation rules (subject to the above requirements):\n'+d.rules,'Closing: '+d.closing].join('\n\n');
 }
