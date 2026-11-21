@@ -1,5 +1,6 @@
-import {voicebotRequest,unwrapVoicebot,createIsolatedPublishedAssistant} from './calling-script-provider.mjs';
+import {voicebotRequest,unwrapVoicebot,assistantVersionConfig,createIsolatedPublishedAssistant} from './calling-script-provider.mjs';
 export const GATEWAY_CALLBACK='https://aicalling.ar3dstudio.in/v1/provider/exotel/voicebot/session-start';
+const GUARD_PROMPT='You are the AR3D call routing guard. Client context is unavailable. Say in Hindi that the connection could not be loaded and politely end. Do not discuss company, project, pricing or customer information. Never ask survey questions.';
 const uuid=v=>typeof v==='string'&&/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(v);
 const version=v=>typeof v==='string'&&/^v[1-9]\d{0,8}$/.test(v);
 export async function readSharedGateway(env){return env.CONTROL_DB.prepare('SELECT * FROM shared_voice_gateway WHERE id=1').first()}
@@ -25,8 +26,41 @@ export async function reviewUnknownGateway(env,runtime,{fetcher=fetch}={}){
   guardAssistantRecorded:Boolean(savedGuard),gatewayVersionRecorded:savedVersion,
   providerReadable:false,latestVersion:null,stableVersion:null,
   latestVersionUsesRecordedGuard:null,stableVersionUsesRecordedGuard:null,
+  guardAssistantReadable:null,guardAssistantStableVersion:null,
+  guardAssistantFinalized:null,guardAssistantReadError:null,
   recommendation:'Stop. Review the actual Exotel Voicebot versions and account state before any provider update, rollout or call. Never retry Prepare.'
  };
+ // A guard ID is written to D1 immediately after provider creation, before
+ // its version is finalized. Read only the NEW guard to locate the failure.
+ if(savedGuard){
+  try{
+   const base=unwrapVoicebot(await voicebotRequest(env,'/assistants/'+savedGuard,{fetcher}));
+   if((base?.id||base?.assistant_id)!==savedGuard){
+    output.guardAssistantReadable=false;
+    output.guardAssistantReadError='guard_identity_mismatch';
+   }else{
+    output.guardAssistantReadable=true;
+    const stable=version(base.stable_version)?base.stable_version:null;
+    output.guardAssistantStableVersion=stable;
+    if(stable){
+     try{
+      const saved=unwrapVoicebot(await voicebotRequest(env,'/assistants/'+savedGuard+'?version='+stable,{fetcher}));
+      if((saved?.id||saved?.assistant_id)!==savedGuard)
+       output.guardAssistantReadError='guard_version_identity_mismatch';
+      else{
+       const config=assistantVersionConfig(saved,stable);
+       if(config?.agents?.length===1){
+        // Exact prompt verification happens server-side; never return the
+        // instructions, assistant/agent config, models or credentials.
+        output.guardAssistantFinalized=saved.stable_version===stable&&
+         config.agents[0].instruction===GUARD_PROMPT;
+       }else output.guardAssistantReadError='guard_version_not_confirmed';
+      }
+     }catch{output.guardAssistantReadError='guard_version_read_unavailable'}
+    }
+   }
+  }catch{output.guardAssistantReadable=false;output.guardAssistantReadError='guard_read_unavailable'}
+ }
  try{
   const path='/voicebots/'+runtime.bot_id;
   const current=unwrapVoicebot(await voicebotRequest(env,path,{fetcher}));
@@ -115,7 +149,7 @@ export async function prepareSharedGateway(env,{botId,flowId,authTemplateBotId,a
  await db.prepare("INSERT INTO shared_voice_gateway(id,bot_id,flow_id,template_assistant_id,template_version,state,updated_by,updated_at) VALUES(1,?,?,?,?,'configuring',?,?)").bind(botId,flowId,templateId,templateVersion,actorId,at).run();
  try{
   const runtime={template_assistant_id:templateId,template_version:templateVersion};
-  const guard=await createIsolatedPublishedAssistant(env,runtime,'You are the AR3D call routing guard. Client context is unavailable. Say in Hindi that the connection could not be loaded and politely end. Do not discuss company, project, pricing or customer information. Never ask survey questions.','Routing guard',{fetcher,onCreated:async id=>{await db.prepare('UPDATE shared_voice_gateway SET guard_assistant_id=? WHERE id=1').bind(id).run()}});
+  const guard=await createIsolatedPublishedAssistant(env,runtime,GUARD_PROMPT,'Routing guard',{fetcher,onCreated:async id=>{await db.prepare('UPDATE shared_voice_gateway SET guard_assistant_id=? WHERE id=1').bind(id).run()}});
   const assistant_config={...bot.assistant_config,id:guard.assistantId,version:null};delete assistant_config.assistant_id;delete assistant_config.assistant_version;
   const result=unwrapVoicebot(await voicebotRequest(env,'/voicebots/'+botId+'/versions',{...options,method:'POST',body:{source_version:stable,version_description:'AR3D shared multi-client gateway: authenticated session router and isolated fallback',data:{name:'AR3D Client Calling Gateway',assistant_config}}}));
   const v=result.version||result.latest_version;if(!version(v))throw Error();
