@@ -26,6 +26,12 @@ test('unknown gateway review reads provider versions without any Exotel or D1 mu
    if(init.method!=='GET')writes++;
    reads++;
    const u=new URL(url),v=u.searchParams.get('version');
+   if(u.pathname.includes('/assistants/')){
+    const prompt='You are the AR3D call routing guard. Client context is unavailable. Say in Hindi that the connection could not be loaded and politely end. Do not discuss company, project, pricing or customer information. Never ask survey questions.';
+    return Response.json({response:v==='v2'
+     ?{id:guard,version:'v2',stable_version:'v2',agents:[{instruction:prompt}],credentials:'never-leak-secret'}
+     :{id:guard,latest_version:'v2',stable_version:'v2',credentials:'never-leak-secret'}});
+   }
    const result=v==='v3'?{id:bot,version:'v3',assistant_config:{id:guard},credentials:'never-leak-secret'}:
     v==='v2'?{id:bot,version:'v2',assistant_config:{id:template},credentials:'never-leak-secret'}:
     {id:bot,latest_version:'v3',stable_version:'v2',traffic_allocation:{v2:100},credentials:'never-leak-secret'};
@@ -41,13 +47,16 @@ test('unknown gateway review reads provider versions without any Exotel or D1 mu
   assert.ok(!raw.includes(f.env.EXOTEL_API_TOKEN));
   assert.equal(d.savedState,'unknown');
   assert.equal(d.guardAssistantRecorded,true);
+  assert.equal(d.guardAssistantReadable,true);
+  assert.equal(d.guardAssistantStableVersion,'v2');
+  assert.equal(d.guardAssistantFinalized,true);
   assert.equal(d.gatewayVersionRecorded,null);
   assert.equal(d.latestVersion,'v3');assert.equal(d.stableVersion,'v2');
   assert.equal(d.providerReadable,true);
   assert.equal(d.latestVersionUsesRecordedGuard,true);
   assert.equal(d.stableVersionUsesRecordedGuard,false);
   assert.match(d.recommendation,/Never retry Prepare/);
-  assert.equal(reads,3);assert.equal(writes,0);
+  assert.equal(reads,5);assert.equal(writes,0);
   const after=f.c.db.prepare('SELECT state,guard_assistant_id,gateway_version,error_code FROM shared_voice_gateway WHERE id=1').get();
   assert.deepEqual({...after},{state:'unknown',guard_assistant_id:guard,gateway_version:null,error_code:'provider_write_unknown'});
   assert.equal(f.r.db.prepare('SELECT COUNT(*) AS n FROM calls').get().n,0);
