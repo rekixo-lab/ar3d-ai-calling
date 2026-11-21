@@ -1,5 +1,5 @@
 import {mutationOriginAllowed} from './human-auth.mjs';
-import {readSharedGateway,inspectGatewayConfiguration,prepareSharedGateway,verifySharedGatewayLive,connectSharedGatewayRouter} from './shared-voice-gateway.mjs';
+import {readSharedGateway,inspectGatewayConfiguration,prepareSharedGateway,verifySharedGatewayLive,connectSharedGatewayRouter,reviewUnknownGateway} from './shared-voice-gateway.mjs';
 const path='/v1/human/voice-gateway';
 // Existing owner-supplied, non-secret Exotel resource IDs. These are suggested
 // only to the authenticated MFA Super Admin if no gateway has been configured.
@@ -27,6 +27,7 @@ export async function handleVoiceGatewayRequest(req,env,user,{now=Date.now(),fet
   if(!req.body||!req.headers.get('content-type')?.startsWith('application/json'))return json({error:'invalid_json'},400);
   const reader=req.body.getReader();let raw='',size=0;const decoder=new TextDecoder('utf-8',{fatal:true});try{while(true){const r=await reader.read();if(r.done)break;size+=r.value.byteLength;if(size>2048){await reader.cancel();return json({error:'request_too_large'},413)}raw+=decoder.decode(r.value,{stream:true})}raw+=decoder.decode()}finally{reader.releaseLock()}
   const d=JSON.parse(raw);if(!d||typeof d!=='object'||Array.isArray(d))return json({error:'invalid_request'},400);
+  if(d.action==='review'&&Object.keys(d).length===1)return json(await reviewUnknownGateway(env,runtime,{fetcher}));
   if(d.action==='inspect'&&Object.keys(d).sort().join(',')==='action,botId')return json(await inspectGatewayConfiguration(env,d.botId,{fetcher}));
   if(d.action==='configure'&&Object.keys(d).sort().join(',')==='action,authTemplateBotId,botId,flowId,flowTargetConfirmed'){
    if(d.flowTargetConfirmed!==true)return json({error:'flow_target_confirmation_required'},409);
