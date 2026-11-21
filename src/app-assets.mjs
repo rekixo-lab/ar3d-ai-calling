@@ -205,6 +205,13 @@ function engineeringPanel(main){
           }
         }
         if(item.state==='submitted'&&r.mfaEnabled){
+          if(item.checkState==='verified'&&['failed','busy','no-answer'].includes(item.providerStatus)){
+            const retry=btn('Retry this failed test once',async()=>{
+              retry.disabled=true;
+              if(!await confirmOperatorTest()){retry.disabled=false;return}
+              try{const result=await api('/v1/human/engineering/exotel-self-test','POST',{confirm:'RETRY_MY_FAILED_VERIFIED_TEST_ONCE',failedRequestId:item.id});operatorFeedback.replaceChildren(node('p',{class:'success',text:'Reviewed retry: '+result.state+'. Request ID: '+result.requestId}))}catch(e){asError(e)}finally{await loadOperatorTest()}
+            },true);entry.append(retry);
+          }
           const refresh=btn('Check existing Exotel call status (read-only)',async()=>{
             refresh.disabled=true;
             try{
