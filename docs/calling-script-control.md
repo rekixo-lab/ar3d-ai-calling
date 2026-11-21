@@ -13,8 +13,11 @@ Configure these **Worker secrets**, never client-side configuration or Git:
 - `EXOTEL_VOICEBOT_API_KEY`
 - `EXOTEL_VOICEBOT_API_TOKEN`
 
-These are Voicebot management credentials. A dashboard session or ordinary
-CPaaS call credentials are not proof of management access. Exotel documents its
+These are dedicated Voicebot management credentials. When none are configured,
+the server can test its existing account API credentials against the same Exotel
+management service. Partial dedicated credentials never mix with account keys.
+A dashboard session or ordinary CPaaS call credentials are not proof of management
+access: use the read-only API test, which never changes the bot. Exotel documents its
 management API as chargeable and not enabled for every account by default:
 https://developer.exotel.com/docs/voicebot-tools/voicebot-api
 

@@ -1,20 +1,39 @@
 // Exotel's official ExotelMCP assistant-version contract. Credentials stay on Worker.
 // Saves a new, non-stable version. A provider save is never reported as live rollout.
 export function scriptProviderConfiguration(env){
- const missing=['EXOTEL_VOICEBOT_ACCOUNT_ID','EXOTEL_VOICEBOT_API_KEY','EXOTEL_VOICEBOT_API_TOKEN'].filter(k=>!env[k]);
- return {ready:missing.length===0,missing};
+ const dedicated=['EXOTEL_VOICEBOT_ACCOUNT_ID','EXOTEL_VOICEBOT_API_KEY','EXOTEL_VOICEBOT_API_TOKEN'];
+ const selected=dedicated.some(k=>env[k])?dedicated:['EXOTEL_ACCOUNT_SID','EXOTEL_API_KEY','EXOTEL_API_TOKEN'];
+ const missing=selected.filter(k=>!env[k]);
+ return {ready:missing.length===0,missing,credentialSource:selected===dedicated?'voicebot_api':'account_api',accessVerified:false};
 }
 async function request(env,path,{fetcher=fetch,method='GET',body}={}){
  if(!scriptProviderConfiguration(env).ready)throw Error('voicebot_management_credentials_required');
- if(!/^[a-zA-Z0-9_-]{1,64}$/.test(env.EXOTEL_VOICEBOT_ACCOUNT_ID))throw Error('invalid_provider_account');
- const url='https://voicebot.in.exotel.com/voicebot/api/v2/accounts/'+env.EXOTEL_VOICEBOT_ACCOUNT_ID+path;
+ const dedicated=scriptProviderConfiguration(env).credentialSource==='voicebot_api';
+ const account=dedicated?env.EXOTEL_VOICEBOT_ACCOUNT_ID:env.EXOTEL_ACCOUNT_SID;
+ const key=dedicated?env.EXOTEL_VOICEBOT_API_KEY:env.EXOTEL_API_KEY,token=dedicated?env.EXOTEL_VOICEBOT_API_TOKEN:env.EXOTEL_API_TOKEN;
+ if(!/^[a-zA-Z0-9_-]{1,64}$/.test(account))throw Error('invalid_provider_account');
+ if(!/^[\x21-\x7e]{1,256}$/.test(key)||key.includes(':')||!/^[\x21-\x7e]{1,256}$/.test(token))throw Error('invalid_provider_credentials');
+ const url='https://voicebot.in.exotel.com/voicebot/api/v2/accounts/'+account+path;
  let response;
- try{response=await fetcher(url,{method,redirect:'manual',signal:AbortSignal.timeout(15000),headers:{Authorization:'Basic '+btoa(env.EXOTEL_VOICEBOT_API_KEY+':'+env.EXOTEL_VOICEBOT_API_TOKEN),'Content-Type':'application/json',Accept:'application/json'},...(body?{body:JSON.stringify(body)}:{})})}catch{throw Error(method==='POST'?'provider_write_unknown':'provider_unreachable')}
+ try{response=await fetcher(url,{method,redirect:'manual',signal:AbortSignal.timeout(15000),headers:{Authorization:'Basic '+btoa(key+':'+token),'Content-Type':'application/json',Accept:'application/json'},...(body?{body:JSON.stringify(body)}:{})})}catch{throw Error(method==='POST'?'provider_write_unknown':'provider_unreachable')}
  if(!response.ok)throw Error(response.status>=500&&method==='POST'?'provider_write_unknown':response.status===401||response.status===403?'voicebot_management_access_denied':'provider_http_'+response.status);
  let raw='';const reader=response.body?.getReader();if(!reader)throw Error(method==='POST'?'provider_write_unknown':'provider_invalid_response');
  try{const decoder=new TextDecoder();let size=0;while(true){const {done,value}=await reader.read();if(done)break;size+=value.length;if(size>1000000)throw Error();raw+=decoder.decode(value,{stream:true})}raw+=decoder.decode();return JSON.parse(raw)}catch{throw Error(method==='POST'?'provider_write_unknown':'provider_invalid_response')}finally{await reader.cancel().catch(()=>{});reader.releaseLock()}
 }
 const unwrap=r=>r?.response?.data||r?.data||r;
+export async function probeScriptProvider(env,botId,options={}){
+ const data=unwrap(await request(env,'/voicebots/'+botId,options));
+ if((data?.bot_id||data?.id)!==botId)throw Error('provider_bot_identity_unverified');
+ const candidates=[];
+ const extract=(config,botVersion)=>{
+  if(!config||typeof config!=='object')return;
+  const id=config.assistant_id||config.id,version=config.assistant_version||config.version;
+  if(/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(id||'')&&/^v[1-9]\d{0,8}$/.test(version||''))candidates.push({assistantId:id,sourceVersion:version,botVersion});
+ };
+ extract(data.assistant_config,/^v[1-9]\d{0,8}$/.test(data.version||'')?data.version:null);
+ for(const [version,config] of Object.entries(data.versions||{}))if(/^v[1-9]\d{0,8}$/.test(version))extract(config?.assistant_config,version);
+ return {accessVerified:true,botId,assistantCandidates:candidates,notice:'Read-only API access verified. This does not prove live rollout.'};
+}
 export async function stageScript(env,binding,prompt,options={}){
  const path='/assistants/'+binding.assistant_id;
  const current=unwrap(await request(env,path+'?version='+binding.source_version,options));
