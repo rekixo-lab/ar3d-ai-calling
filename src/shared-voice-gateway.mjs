@@ -1,4 +1,4 @@
-import {voicebotRequest,unwrapVoicebot,assistantVersionConfig,createIsolatedPublishedAssistant} from './calling-script-provider.mjs';
+import {voicebotRequest,unwrapVoicebot,assistantVersionConfig,createVerifiedRoutingGuard} from './calling-script-provider.mjs';
 export const GATEWAY_CALLBACK='https://aicalling.ar3dstudio.in/v1/provider/exotel/voicebot/session-start';
 const GUARD_PROMPT='You are the AR3D call routing guard. Client context is unavailable. Say in Hindi that the connection could not be loaded and politely end. Do not discuss company, project, pricing or customer information. Never ask survey questions.';
 const uuid=v=>typeof v==='string'&&/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(v);
@@ -558,8 +558,14 @@ export async function prepareSharedGateway(env,{botId,flowId,authTemplateBotId,a
  if(existing)throw Error('gateway_already_configured_review_existing_setup');
  const options={fetcher},overview=unwrapVoicebot(await voicebotRequest(env,'/voicebots/'+botId,options));
  const stable=overview.stable_version;
- if((overview.id||overview.bot_id)!==botId||!version(stable))throw Error('invalid_provider_bot');
- const bot=overview.latest_version===stable||overview.version===stable?overview:unwrapVoicebot(await voicebotRequest(env,'/voicebots/'+botId+'?version='+stable,options));
+ // A setup must not stage anything on an already-mutated Bot. Later repair
+ // paths require independent reconciliation and explicit authorization.
+ if((overview.id||overview.bot_id)!==botId||!version(stable)||
+    overview.latest_version!==stable||overview.traffic_allocation?.[stable]!==100||
+    Object.entries(overview.traffic_allocation||{}).some(([v,n])=>v!==stable&&Number(n)>0))
+  throw Error('shared_bot_not_stable_for_gateway');
+ const bot=overview.assistant_config?.id||overview.assistant_config?.assistant_id?
+  overview:unwrapVoicebot(await voicebotRequest(env,'/voicebots/'+botId+'?version='+stable,options));
  const templateId=bot.assistant_config?.id||bot.assistant_config?.assistant_id;
  let templateVersion=bot.assistant_config?.version||bot.assistant_config?.assistant_version;
  if(!uuid(templateId))throw Error('invalid_template_assistant');
@@ -574,10 +580,27 @@ export async function prepareSharedGateway(env,{botId,flowId,authTemplateBotId,a
  await db.prepare("INSERT INTO shared_voice_gateway(id,bot_id,flow_id,template_assistant_id,template_version,state,updated_by,updated_at) VALUES(1,?,?,?,?,'configuring',?,?)").bind(botId,flowId,templateId,templateVersion,actorId,at).run();
  try{
   const runtime={template_assistant_id:templateId,template_version:templateVersion};
-  const guard=await createIsolatedPublishedAssistant(env,runtime,GUARD_PROMPT,'Routing guard',{fetcher,onCreated:async id=>{await db.prepare('UPDATE shared_voice_gateway SET guard_assistant_id=? WHERE id=1').bind(id).run()}});
+  const guard=await createVerifiedRoutingGuard(env,runtime,GUARD_PROMPT,{fetcher,onCreated:async id=>{await db.prepare('UPDATE shared_voice_gateway SET guard_assistant_id=? WHERE id=1').bind(id).run()}});
   const assistant_config={...bot.assistant_config,id:guard.assistantId,version:null};delete assistant_config.assistant_id;delete assistant_config.assistant_version;
-  const result=unwrapVoicebot(await voicebotRequest(env,'/voicebots/'+botId+'/versions',{...options,method:'POST',body:{source_version:stable,version_description:'AR3D shared multi-client gateway: authenticated session router and isolated fallback',data:{name:'AR3D Client Calling Gateway',assistant_config}}}));
-  const v=result.version||result.latest_version;if(!version(v))throw Error();
+  const result=unwrapVoicebot(await voicebotRequest(env,'/voicebots/'+botId+'/versions',{...options,method:'POST',body:{
+   source_version:stable,mark_as_stable:'false',
+   version_description:'Paused AR3D shared gateway; no live calls',
+   data:{name:'AR3D Client Calling Gateway',assistant_config}
+  }}));
+  const v=result.version||result.latest_version;
+  if(!version(v)||v===stable)throw Error('shared_bot_candidate_version_unconfirmed');
+  // A 0% candidate is necessary but insufficient: check exact assistant
+  // binding AND independently re-fetch stable traffic before DB staging.
+  const candidate=unwrapVoicebot(await voicebotRequest(env,'/voicebots/'+botId+'?version='+v,options));
+  const after=unwrapVoicebot(await voicebotRequest(env,'/voicebots/'+botId,options));
+  if((candidate.id||candidate.bot_id)!==botId||
+     (candidate.assistant_config?.id||candidate.assistant_config?.assistant_id)!==guard.assistantId||
+     (candidate.assistant_config?.version||candidate.assistant_config?.assistant_version)!==guard.version||
+     (after.id||after.bot_id)!==botId||after.stable_version!==stable||
+     after.latest_version!==v||after.traffic_allocation?.[stable]!==100||
+     Number(after.traffic_allocation?.[v]||0)!==0||
+     Object.entries(after.traffic_allocation||{}).some(([key,n])=>![v,stable].includes(key)&&Number(n)>0))
+   throw Error('shared_bot_candidate_unverified');
   await db.prepare("UPDATE shared_voice_gateway SET state='staged',gateway_version=?,error_code='router_connection_required',updated_at=? WHERE id=1 AND state='configuring'").bind(v,at).run();
   return {version:v,state:'staged',notice:'Shared gateway prepared. Roll this version out once, then connect its authenticated session router below. New clients will not need Exotel dashboard work.'};
  }catch{await db.prepare("UPDATE shared_voice_gateway SET state='unknown',error_code='provider_write_unknown',updated_at=? WHERE id=1").bind(at).run();throw Error('gateway_setup_unknown_review_before_retry')}
