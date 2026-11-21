@@ -1029,10 +1029,47 @@ async function scriptAdminPanel(main){
 async function voiceGatewayPanel(main){
  const card=div('card stack',title('Shared Calling Gateway','h3')),status=node('p',{class:'note',text:'Checking shared calling connection…'}),result=div('stack');main.append(card);card.append(status);
  const bot=input('gatewayBotId','text','Shared Voicebot UUID'),flow=input('gatewayFlowId','text','Shared Exotel flow ID'),authTemplate=input('gatewayAuthTemplate','text','Existing authenticated webhook bot UUID');
- const form=node('form',{class:'stack'},[node('p',{class:'muted',text:'One-time platform connection. New clients use this gateway automatically; their company knowledge and assistants remain separate.'}),lab('Shared gateway bot',bot),lab('Shared gateway flow',flow),lab('Authenticated webhook template',authTemplate),node('button',{class:'btn',type:'submit',text:'Prepare shared calling connection'})]);
- async function refresh(){const r=await api('/v1/human/voice-gateway');status.textContent=r.gateway?'Shared connection: '+r.gateway.state+' · Flow '+r.gateway.flowId+(r.gateway.version?' · '+r.gateway.version:'')+(r.gateway.errorCode?' · '+r.gateway.errorCode:''):'Shared connection needs one-time setup';if(r.gateway){bot.value=r.gateway.botId;flow.value=r.gateway.flowId;form.querySelector('button[type=submit]').disabled=true}}
- form.addEventListener('submit',async e=>{e.preventDefault();const submit=form.querySelector('button[type=submit]');submit.disabled=true;try{const r=await api('/v1/human/voice-gateway','POST',{action:'configure',botId:bot.value,flowId:flow.value,authTemplateBotId:authTemplate.value});result.replaceChildren(node('p',{class:'note',text:r.notice}));await refresh()}catch(e){asError(e);submit.disabled=false}});
- card.append(form,div('formrow',btn('Inspect gateway contract',async()=>{try{const r=await api('/v1/human/voice-gateway','POST',{action:'inspect',botId:bot.value});result.replaceChildren(node('pre',{class:'note',text:JSON.stringify(r,null,2)}))}catch(e){asError(e)}},true),btn('Connect authenticated session router',async()=>{try{const r=await api('/v1/human/voice-gateway','POST',{action:'connect',authTemplateBotId:authTemplate.value});result.replaceChildren(node('p',{class:'note',text:r.notice}));await refresh()}catch(e){asError(e)}},true),btn('Verify shared gateway rollout',async()=>{try{const r=await api('/v1/human/voice-gateway','POST',{action:'verify'});result.replaceChildren(node('p',{class:'note',text:r.notice}));await refresh()}catch(e){asError(e)}},true)),result);
+ const flowConfirmed=node('input',{type:'checkbox','aria-label':'I verified the copied Exotel Flow targets the shared Voicebot'});
+ let inspectedBotId=null;
+ for(const control of [bot,flow,authTemplate])control.addEventListener('input',()=>{inspectedBotId=null;flowConfirmed.checked=false});
+ const form=node('form',{class:'stack'},[
+  node('p',{class:'muted',text:'One-time platform connection. IDs from your earlier Exotel setup are prefilled automatically when no gateway exists. New clients will share this gateway with isolated company assistants. The old working bot and flow stay untouched.'}),
+  lab('Shared gateway bot',bot),lab('Shared gateway flow',flow),lab('Authenticated webhook template',authTemplate),
+  node('p',{class:'note',text:'First open this copied Flow in Exotel and confirm its Voicebot applet targets the NEW shared bot shown above, not the old working bot. Also run the read-only inspect below. A copied Flow ID alone does not prove correct routing.'}),
+  lab('I verified in Exotel that the copied Flow targets this shared Voicebot',flowConfirmed),
+  node('button',{class:'btn',type:'submit',text:'Prepare shared calling connection'})
+ ]);
+ async function refresh(){
+  const r=await api('/v1/human/voice-gateway');
+  status.textContent=r.gateway?'Shared connection: '+r.gateway.state+' · Flow '+r.gateway.flowId+
+   (r.gateway.version?' · '+r.gateway.version:'')+(r.gateway.errorCode?' · '+r.gateway.errorCode:''):
+   'Shared connection needs one-time setup · known IDs prefilled';
+  if(r.gateway){bot.value=r.gateway.botId;flow.value=r.gateway.flowId;form.querySelector('button[type=submit]').disabled=true}
+  else if(r.suggestedGateway){bot.value=r.suggestedGateway.botId;flow.value=r.suggestedGateway.flowId;authTemplate.value=r.suggestedGateway.authTemplateBotId}
+ }
+ form.addEventListener('submit',async e=>{
+  e.preventDefault();
+  const submit=form.querySelector('button[type=submit]');
+  if(!flowConfirmed.checked)return notice('First verify in Exotel that the copied Flow points to the new shared bot; do not change the old working bot.',true);
+  if(inspectedBotId!==bot.value)return notice('Run read-only Inspect gateway contract for the selected shared bot first.',true);
+  submit.disabled=true;
+  try{
+   const r=await api('/v1/human/voice-gateway','POST',{action:'configure',
+    botId:bot.value,flowId:flow.value,authTemplateBotId:authTemplate.value,flowTargetConfirmed:true});
+   result.replaceChildren(node('p',{class:'note',text:r.notice}));
+   await refresh();
+  }catch(e){asError(e);submit.disabled=false}
+ });
+ card.append(form,div('formrow',btn('Inspect gateway contract',async()=>{
+   inspectedBotId=null;
+   try{
+    const r=await api('/v1/human/voice-gateway','POST',{action:'inspect',botId:bot.value});
+    if(r.botId!==bot.value||!r.legacyAvailable)throw Error('Exotel bot configuration could not be verified. Do not prepare the gateway.');
+    inspectedBotId=bot.value;
+    result.replaceChildren(node('p',{class:'success',text:'Read-only Exotel bot inspection completed. The copied Flow target still needs separate verification in Exotel.'}),
+      node('pre',{class:'note',text:JSON.stringify(r,null,2)}));
+   }catch(e){asError(e)}
+  },true),btn('Connect authenticated session router',async()=>{try{const r=await api('/v1/human/voice-gateway','POST',{action:'connect',authTemplateBotId:authTemplate.value});result.replaceChildren(node('p',{class:'note',text:r.notice}));await refresh()}catch(e){asError(e)}},true),btn('Verify shared gateway rollout',async()=>{try{const r=await api('/v1/human/voice-gateway','POST',{action:'verify'});result.replaceChildren(node('p',{class:'note',text:r.notice}));await refresh()}catch(e){asError(e)}},true)),result);
  const company=node('select',{class:'field','aria-label':'Gateway test company'});try{const r=await api('/v1/human/tenants');company.append(...r.tenants.filter(t=>['trial','active'].includes(t.status)).map(t=>node('option',{value:t.id,text:t.display_name})))}catch(e){asError(e)}
  const test=btn('Test published client on my verified phone',async()=>{
   test.disabled=true;
