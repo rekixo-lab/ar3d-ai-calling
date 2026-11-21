@@ -9,8 +9,8 @@ export const MASTER_TEMPLATES=Object.freeze([
  Object.freeze({id:'flat_sales',label:'Flat Sales',propertyType:'Flats / apartments'}),
  Object.freeze({id:'property_followup',label:'Property Follow-up',propertyType:'Properties'})
 ]);
-const VALID_FIELDS=new Set(['templateId','projectName','location','price','size','language']);
-const LIMITS=Object.freeze({projectName:120,location:160,price:160,size:120});
+const VALID_FIELDS=new Set(['templateId','companyName','projectName','location','price','size','language']);
+const LIMITS=Object.freeze({companyName:160,projectName:120,location:160,price:160,size:120});
 const NO_CONTROL=/[\u0000-\u001f\u007f]/u;
 
 function field(value,key){
@@ -27,6 +27,7 @@ export function validateQuickSetup(input){
  if(!['hi','en','hi-en'].includes(language))throw Error('invalid_language');
  return {
   template,language,
+  companyName:field(input.companyName??'','companyName'),
   projectName:field(input.projectName??'','projectName'),
   location:field(input.location??'','location'),
   price:field(input.price??'','price'),
@@ -66,7 +67,7 @@ export function buildMasterAIQuickSetup(raw,companyName){
  const d=validateQuickSetup(raw);
  if(typeof companyName!=='string'||!companyName.trim()||companyName.length>160||NO_CONTROL.test(companyName))
   throw Error('invalid_company_name');
- const company=companyName.trim();
+ const company=d.companyName||companyName.trim();
  const profile=emptyCompanyProfile();
  profile.companyName=company;
  profile.propertyTypes=d.template.propertyType;
@@ -102,6 +103,7 @@ export function buildMasterAIQuickSetup(raw,companyName){
   closing:'धन्यवाद! यदि आप चाहें तो हमारी टीम उपलब्ध जानकारी और आपकी सुविधानुसार अगले कदम की पुष्टि करेगी।'
  });
  const warnings=[];
+ if(d.companyName&&d.companyName!==companyName.trim())warnings.push('Company name differs from the client account label; verify the approved legal/business name before publishing.');
  if(!d.projectName)warnings.push('Project name is not provided; AI will not invent one.');
  if(!d.location)warnings.push('Location is not provided; AI must ask or offer staff confirmation.');
  if(!d.price)warnings.push('Price is not provided; AI will not quote an invented price.');
