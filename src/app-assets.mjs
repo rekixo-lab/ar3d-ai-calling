@@ -1132,6 +1132,7 @@ async function voiceGatewayPanel(main){
    'Shared connection needs one-time setup · known IDs prefilled';
   if(r.gateway){
    bot.value=r.gateway.botId;flow.value=r.gateway.flowId;
+   if(r.knownAuthTemplateBotId)authTemplate.value=r.knownAuthTemplateBotId;
    form.querySelector('button[type=submit]').disabled=true;
    if(r.gateway.state==='unknown'){
     status.textContent='SETUP NEEDS REVIEW — Provider may have partial changes. Do NOT retry Prepare, Connect, Verify or test calling. Status: unknown'+(r.gateway.errorCode?' ('+r.gateway.errorCode+')':'')+'.';
