@@ -15,6 +15,7 @@ import {handleExotelOperatorStatusCheck} from './exotel-operator-status-check.mj
 import {handleExotelWebhookHealth} from './exotel-webhook-health.mjs';
 import {handleProductionCutover} from './production-cutover-routes.mjs';
 import {handleTenantLifecycleRequest} from './tenant-lifecycle-routes.mjs';
+import {initialClientAI} from './default-client-ai.mjs';
 import {handleDataPortabilityRequest} from './data-portability-routes.mjs';
 import {handleAgentSettingsRequest} from './agent-settings-routes.mjs';
 import {handleAuditRequest} from './audit-routes.mjs';
@@ -162,13 +163,16 @@ async function createTenant(req,db,user){
   const d=await payload(req),slug=checkSlug(d.slug),name=checkName(d.displayName);
   const plan=d.plan||'starter',mode=d.storageMode||'shared';checkStorageMode(plan,mode);
   const id=crypto.randomUUID(),date=now();
+  const defaults=initialClientAI(db,{tenantId:id,companyName:name,createdBy:user.id,createdAt:date});
   await db.batch([
     db.prepare("INSERT INTO tenants(id,slug,display_name,plan_code,storage_mode,status,created_at,updated_at) VALUES(?,?,?,?,?,'trial',?,?)")
       .bind(id,slug,name,plan,mode,date,date),
+    ...defaults.statements,
     db.prepare("INSERT INTO tenant_audit_events(id,tenant_id,actor,action,target_id,created_at) VALUES(?,?,?,'tenant.created',?,?)")
       .bind(crypto.randomUUID(),id,user.id,id,date)
   ]);
-  return response({id,slug,displayName:name,plan,storageMode:mode,status:'trial',provisioning:mode==='dedicated'?'pending':'ready'},201);
+  return response({id,slug,displayName:name,plan,storageMode:mode,status:'trial',provisioning:mode==='dedicated'?'pending':'ready',
+     aiDraftReady:true,aiPublished:false},201);
 }
 async function invite(req,db,user){
   const d=await payload(req),tenantId=d.tenantId,email=validEmail(d.email),role=d.role||'client_admin';
