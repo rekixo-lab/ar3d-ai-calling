@@ -38,6 +38,7 @@ export async function handleAgentSettingsRequest(req,env,user){
   try{
     if(path==='/v1/human/agents'&&method==='POST')return null; // existing create endpoint
     if(!['GET','PATCH'].includes(method))return fail('method not allowed',405);
+    if(method==='PATCH')return fail('company_ai_managed_by_super_admin',403);
     const d=method==='PATCH'?await payload(req):null;
     const tenantId=method==='GET'?u.searchParams.get('tenantId'):d.tenantId;
     const member=await requireMembership(env.CONTROL_DB,user,tenantId,method==='PATCH');
