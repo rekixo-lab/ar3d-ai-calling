@@ -865,19 +865,40 @@ async function callingAdminPanel(main){
  area.append(policyForm,clearanceForm,status);await refresh();
 }
 
-async function aiQuickSetupWizard(tenantId,content,refreshEditors){
+async function aiQuickSetupWizard(tenantId,content,refreshEditors,tenantLabel=''){
  const [profileState,scriptState]=await Promise.all([
   api('/v1/human/company-profile?tenantId='+encodeURIComponent(tenantId)),
   api('/v1/human/calling-scripts?tenantId='+encodeURIComponent(tenantId))
  ]);
  const existing=profileState.revision>0||scriptState.versions.length>0;
  const card=div('card stack',title('Quick AI Setup — Master Templates','h3'),
-  node('p',{class:'note',text:'One-time setup for a new client. Company name comes from the selected client. Enter only approved business facts; all AI questions and safety rules are generated from a reusable versioned template. No call or publication happens automatically.'}));
+  node('p',{class:'note',text:'One-time setup for a new client. The company name starts with the client account label; correct it here if the builder business name is different. Enter approved facts only. AI questions and safety rules come from a reusable versioned template. No call or publication happens automatically.'}));
  content.append(card);
  if(existing){
-  card.append(node('p',{class:'muted',text:'This client already has company information or an AI script. Automatic generation is locked to protect existing versions. To change a price or project, use the Advanced editor below; the existing AI script is reused until you explicitly publish the update.'}));
+  card.append(node('p',{class:'muted',text:'This client already has company information or an AI script. Master generation is locked to protect existing versions. Update only the necessary fact below or use Advanced for other changes. Every change needs an explicit new Publish; calling never starts automatically.'}));
+  if(profileState.revision>0){
+   const priceField=input('quickPriceUpdate','text','Approved price or range');
+   priceField.required=false;priceField.maxLength=160;priceField.value=profileState.profile.pricing||'';
+   const update=btn('Save price change (draft only)',async()=>{
+    if(priceField.value.trim()===(profileState.profile.pricing||''))return notice('Price is unchanged. Nothing saved.');
+    if(!confirm('Save only the approved price change as a new version? Existing AI publication will NOT be silently replaced.'))return;
+    update.disabled=true;
+    try{
+     const result=await api('/v1/human/company-profile','POST',{
+      tenantId,baseRevision:profileState.revision,
+      profile:{...profileState.profile,pricing:priceField.value.trim()}
+     });
+     if(!result.saved)throw Error('Price update could not be confirmed');
+     notice('Approved price saved as a new company version. Review and Publish the AI again before further calls.');
+     await refreshEditors();
+    }catch(e){asError(e);update.disabled=false}
+   });
+   card.append(div('formrow',lab('Quick update: Approved price',priceField),update));
+  }
   return true;
  }
+ const companyName=input('quickCompanyName','text','Approved builder/company name');
+ companyName.value=tenantLabel;companyName.maxLength=160;companyName.required=true;
  const template=node('select',{class:'field','aria-label':'Master AI Template'},[
   node('option',{value:'plot_sales',text:'Plot Sales — प्लॉट'}),
   node('option',{value:'flat_sales',text:'Flat Sales — फ्लैट'}),
@@ -896,6 +917,7 @@ async function aiQuickSetupWizard(tenantId,content,refreshEditors){
   node('option',{value:'en',text:'English'})
  ]);
  const form=node('form',{class:'stack'},[
+  lab('Approved company name (check builder name)',companyName),
   div('formrow',lab('Master Template',template),lab('AI Language',language)),
   div('formrow',lab('Project name (optional)',project),lab('Project location (optional)',city)),
   div('formrow',lab('Approved price (optional)',price),lab('Property size / BHK (optional)',size))
@@ -951,7 +973,7 @@ async function aiQuickSetupWizard(tenantId,content,refreshEditors){
  },true);
  let snapshot=null;
  const currentDetails=()=>({
-  templateId:template.value,language:language.value,projectName:project.value,
+  templateId:template.value,language:language.value,companyName:companyName.value,projectName:project.value,
   location:city.value,price:price.value,size:size.value
  });
  form.addEventListener('input',()=>{snapshot=null;review.replaceChildren()});
@@ -977,7 +999,7 @@ async function scriptAdminPanel(main){
   if(!tenantId)return;
   try{
    const stage=div('stack');
-   const hasExisting=await aiQuickSetupWizard(tenantId,stage,()=>load());
+   const hasExisting=await aiQuickSetupWizard(tenantId,stage,()=>load(),label);
    if(generation!==loadGeneration||company.value!==tenantId)return;
    const advanced=node('details',{class:'card'},node('summary',{text:'Advanced: Company Knowledge & AI Questions'}));
    advanced.open=hasExisting;
