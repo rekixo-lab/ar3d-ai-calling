@@ -144,9 +144,15 @@ function engineeringPanel(main){
     node('p',{class:'note',text:'Software-initiated Exotel Voicebot test: only the one verified phone set privately on the Worker. OFF by default. Never calls Excel leads or runs campaigns. A real test may consume Exotel credits.'}));
   const operatorStatus=node('p',{class:'muted',text:'Checking trial setup...'});
   const operatorHistory=div('stack');
+  function confirmOperatorTest(){return new Promise(resolve=>{
+    const prompt=div('card stack',node('p',{text:'Start ONE real outgoing Exotel Voicebot call to your privately configured verified test number? This may use trial credits. No customer will be called.'}));
+    prompt.setAttribute('role','alertdialog');prompt.setAttribute('aria-label','Confirm verified test call');
+    function finish(approved){prompt.remove();resolve(approved)}
+    prompt.append(div('formrow',btn('Confirm one test call',()=>finish(true)),btn('Cancel test call',()=>finish(false),true)));operatorPanel.append(prompt);prompt.querySelector('button').focus();
+  })}
   const operatorDial=btn('Call my verified test phone once',async()=>{
-    if(!confirm('Start ONE real outgoing Exotel Voicebot call to your privately configured verified test number? This may use trial credits. No customer will be called.'))return;
     operatorDial.disabled=true;
+    if(!await confirmOperatorTest()){operatorDial.disabled=false;return}
     try{
       const data=await api('/v1/human/engineering/exotel-self-test','POST',
         {confirm:'CALL_MY_VERIFIED_NUMBER_ONCE'});

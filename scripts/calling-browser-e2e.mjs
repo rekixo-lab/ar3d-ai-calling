@@ -64,7 +64,13 @@ try{
  }
  const adminContext=await browser.newContext({viewport:{width:1440,height:1000}});
  const adminToken=await newSession(f.env.CONTROL_DB,'admin');await adminContext.addCookies([{name:COOKIE,value:adminToken,url:origin}]);
- const adminPage=await adminContext.newPage();lastPage=adminPage;adminPage.setDefaultTimeout(10000);await adminPage.goto(origin+'/app');
+ const adminPage=await adminContext.newPage();lastPage=adminPage;adminPage.setDefaultTimeout(10000);
+ let operatorRequests=0;
+ await adminPage.route('**/v1/human/engineering/exotel-self-test',async route=>{
+  const post=route.request().method()==='POST';if(post)operatorRequests++;
+  await route.fulfill({contentType:'application/json',body:JSON.stringify(post?{state:'submitted',requestId:'fictional-operator-request'}:{configured:true,mfaEnabled:true,recent:[],voicebotFlowId:'123456',destinationLast4:'0001'})});
+ });
+ await adminPage.goto(origin+'/app');
  await adminPage.getByRole('heading',{name:'Client Calling Setup',exact:true}).waitFor();
  await adminPage.getByRole('heading',{name:'Questions & Conversation Logic',exact:true}).waitFor();
  await adminPage.getByText('Exotel connection',{exact:true}).click();
@@ -83,6 +89,14 @@ try{
  await adminPage.getByLabel('Fictional buyer — '+lead.slice(0,8),{exact:true}).check();
  await adminPage.getByRole('button',{name:'Approve selected customers',exact:true}).click();
  await adminPage.getByText('1 customer approvals saved.',{exact:true}).waitFor();
+ await adminPage.getByText('Engineering tools and diagnostics',{exact:true}).click();
+ await adminPage.getByRole('button',{name:'Call my verified test phone once',exact:true}).click();
+ await adminPage.getByRole('alertdialog',{name:'Confirm verified test call'}).waitFor();assert.equal(operatorRequests,0);
+ await adminPage.getByRole('button',{name:'Cancel test call',exact:true}).click();assert.equal(operatorRequests,0);
+ await adminPage.getByRole('button',{name:'Call my verified test phone once',exact:true}).click();
+ await adminPage.getByRole('button',{name:'Confirm one test call',exact:true}).click();
+ await adminPage.getByText(/Exotel request: submitted/).waitFor();assert.equal(operatorRequests,1);
+ await adminPage.getByText('Engineering tools and diagnostics',{exact:true}).click();
  await adminPage.evaluate(()=>window.scrollTo(0,0));await adminPage.screenshot({path:'artifacts/premium-super-admin.png',fullPage:true});
  await adminContext.close();console.log('Super Admin UI: current MFA session, company policy and selected customer clearances PASS');
 }catch(e){console.error(await lastPage?.locator('body').innerText());await lastPage?.screenshot({path:'/tmp/ar3d-calling-failure.png',fullPage:true});throw e}finally{await browser.close();server.close();f.close()}
