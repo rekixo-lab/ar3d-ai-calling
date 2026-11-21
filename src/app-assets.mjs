@@ -546,7 +546,6 @@ async function superAdmin(main){
   finally{submit.disabled=false}
  });
  panel.append(title('Create client access','h3'),f,inviteResult);
-}
 const accessCard=div('card access-card',title('Tenant Access: Suspend / Resume','h3'),
   node('p',{class:'note',text:'Suspension immediately blocks the company CRM and API keys. Resume restores its prior status, not a paid subscription.'}));
 const management=node('details',{class:'card client-directory',id:'client-access'},node('summary',{text:'Client access and invitations'}));main.append(management);management.append(accessCard);
