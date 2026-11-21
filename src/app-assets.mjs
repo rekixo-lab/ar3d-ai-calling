@@ -1143,6 +1143,43 @@ async function voiceGatewayPanel(main){
   }catch(e){asError(e)}
   finally{previewButton.disabled=false;repairButton.disabled=!repairReady}
  },true);previewButton.disabled=true;
+ const reconcileButton=btn('Review last Guard repair (read-only)',async()=>{
+  reconcileButton.disabled=true;
+  try{
+   const d=await api('/v1/human/voice-gateway','POST',{action:'repair-review'});
+   const reason={
+    shared_voicebot_changed_stop:'The Shared Voicebot has changed or its stable traffic is unverified. Stop and review Exotel.',
+    recorded_guard_identity_changed:'Exotel did not return the recorded Guard assistant.',
+    guard_version_unavailable:'Guard latest or stable version is missing.',
+    guard_version_identity_changed:'The selected Guard version identity could not be confirmed.',
+    guard_latest_differs_from_stable_stop:'Guard latest and stable versions differ; a Guard version may have been created without being finalized.',
+    saved_guard_verified_bot_not_staged:'The recorded Guard now has exactly one verified safe agent, but Shared Voicebot staging did not complete. Do not retry Repair; a separately reviewed continuation is needed.',
+    guard_still_has_zero_agents:'Exotel still reports zero agents for the selected Guard. The previous write may have failed or did not become visible. Do not retry.',
+    guard_not_verified_stop:'Exotel returned a Guard version, but its exact safety contract is not verified. Do not retry.',
+    provider_read_failed_stop:'Exotel read-only reconciliation could not complete.'
+   };
+   const g=d.guard||{},v=g.stable||{};
+   const val=x=>x===true?'Yes':x===false?'No':'Not confirmed';
+   result.replaceChildren(
+    node('p',{class:'err',text:(reason[d.outcome]||'Guard reconciliation is uncertain; stop all writes.')+' No provider or database changes were made.'}),
+    table(['Read-only check','Result'],[
+     ['Recorded Guard stable',g.stableVersion||'Unknown'],
+     ['Recorded Guard latest',g.latestVersion||'Unknown'],
+     ['Stable Guard agent count',v.agentCount||'Unknown'],
+     ['Stable Guard root instruction safe',val(v.rootInstructionMatches)],
+     ['Stable Guard agent instruction safe',val(v.agentInstructionMatches)],
+     ['Stable Guard has no tools',val(v.noAgentTools)],
+     ['Strict Guard verification',val(v.strictGuardVerified)],
+     ['Shared Voicebot stable version',d.sharedVoicebot?.stableVersion||'Unknown'],
+     ['Shared Voicebot latest version',d.sharedVoicebot?.latestVersion||'Unknown'],
+     ['Shared Voicebot unchanged at 100% stable',val(d.sharedVoicebot?.unchangedAndPaused)],
+     ['Any provider writes authorized', 'No']
+    ]),
+    node('p',{class:'note',text:'This inspection NEVER retries an Exotel write, calls a customer, unlocks the gateway or authorizes staging/rollout. Save this report for review.'})
+   );
+  }catch(e){asError(e)}
+  finally{reconcileButton.disabled=false;await refresh().catch(asError)}
+ },true);reconcileButton.disabled=true;
  const reviewButton=btn('Review failed setup (read-only)',async()=>{
   reviewButton.disabled=true;
   try{
@@ -1199,7 +1236,9 @@ async function voiceGatewayPanel(main){
    if(r.knownAuthTemplateBotId)authTemplate.value=r.knownAuthTemplateBotId;
    form.querySelector('button[type=submit]').disabled=true;
    if(r.gateway.state==='unknown'){
-    status.textContent='SETUP NEEDS REVIEW — No calls. The old Prepare/Connect/Verify buttons are blocked. First run Check repair prerequisites (read-only), then consider the one-time paused Guard repair. Status: unknown'+(r.gateway.errorCode?' ('+r.gateway.errorCode+')':'')+'.';
+    status.textContent=r.gateway.errorCode==='guard_repair_unknown'?
+     'GUARD REPAIR UNCERTAIN — Stop all writes and calls. Do NOT retry Repair. Use Review last Guard repair (read-only) to reconcile Exotel versions.':
+     'SETUP NEEDS REVIEW — No calls. The old Prepare/Connect/Verify buttons are blocked. First run Check repair prerequisites (read-only), then consider the one-time paused Guard repair. Status: unknown'+(r.gateway.errorCode?' ('+r.gateway.errorCode+')':'')+'.';
     status.className='note err';
    }else status.className='note';
   }else if(r.suggestedGateway){
@@ -1211,6 +1250,7 @@ async function voiceGatewayPanel(main){
   if(!repairable)repairReady=false;
   previewButton.disabled=!repairable;
   repairButton.disabled=!(repairable&&repairReady);
+  reconcileButton.disabled=!(r.gateway?.state==='unknown'&&r.gateway.errorCode==='guard_repair_unknown');
   const unsafe=['Connect authenticated session router','Verify shared gateway rollout',
    'Test published client on my verified phone'];
   for(const button of card.querySelectorAll('button'))
@@ -1243,7 +1283,7 @@ async function voiceGatewayPanel(main){
  });
  card.append(form,div('formrow',btn('Refresh saved gateway status (read-only)',async()=>{
    try{await refresh();notice('Gateway status refreshed; no Exotel changes or calls made.')}catch(e){asError(e)}
- },true),reviewButton,previewButton,repairButton,btn('Inspect gateway contract',async()=>{
+ },true),reviewButton,reconcileButton,previewButton,repairButton,btn('Inspect gateway contract',async()=>{
    inspectedBotId=null;
    try{
     const r=await api('/v1/human/voice-gateway','POST',{action:'inspect',botId:bot.value});
