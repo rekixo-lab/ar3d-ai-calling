@@ -8,7 +8,7 @@ const template='66666666-6666-4666-8666-666666666666';
 const prompt='You are the AR3D call routing guard. Client context is unavailable. Say in Hindi that the connection could not be loaded and politely end. Do not discuss company, project, pricing or customer information. Never ask survey questions.';
 const req=(confirmation='REPAIR_ONLY_SHARED_GUARD_NO_CALLS')=>new Request('https://app.example.invalid/v1/human/voice-gateway',{method:'POST',headers:{'Content-Type':'application/json',Origin:'https://app.example.invalid'},body:JSON.stringify({action:'recover',confirmation})});
 const unknown=f=>f.c.db.prepare("INSERT INTO shared_voice_gateway(id,bot_id,flow_id,template_assistant_id,template_version,guard_assistant_id,gateway_version,state,error_code,updated_by,updated_at) VALUES(1,?,?,?,?,?,NULL,'unknown','provider_write_unknown','admin',?)").run(bot,'1393135',template,'v1',guard,at);
-function provider({failAfterGuardWrite=false,alreadySafe=false,changedBot=false,unsafeTemplate=false}={}){
+function provider({failAfterGuardWrite=false,alreadySafe=false,changedBot=false,unsafeTemplate=false,persistGuardBeforeFailure=false}={}){
  let writes=[],reads=[],guardStable='v2',botLatest=changedBot?'v3':'v2',versionedGuard=null;
  const fetcher=async(raw,opts)=>{
   const u=new URL(raw),path=u.pathname,ver=u.searchParams.get('version'),method=opts.method;
@@ -21,8 +21,9 @@ function provider({failAfterGuardWrite=false,alreadySafe=false,changedBot=false,
     assert.equal(body.mark_as_stable,'true');assert.equal(body.source_version,'v2');
     assert.equal(body.data.instruction,prompt);
     assert.equal(body.data.agents.length,1);assert.equal(body.data.agents[0].instruction,prompt);
-    if(failAfterGuardWrite)throw Error('simulated postwrite timeout');
+    if(failAfterGuardWrite&&!persistGuardBeforeFailure)throw Error('simulated postwrite timeout');
     versionedGuard=body.data;guardStable='v3';
+    if(failAfterGuardWrite)throw Error('simulated postwrite timeout after save');
     return Response.json({response:{version:'v3'}});
    }
    if(path.endsWith('/voicebots/'+bot+'/versions')){
@@ -142,6 +143,61 @@ test('changed shared voicebot prevents all provider writes and DB unlock',async(
   assert.equal(f.c.db.prepare('SELECT state,error_code FROM shared_voice_gateway WHERE id=1').get().error_code,'provider_write_unknown');
  }finally{f.close()}
 });
+
+const readRepairReq=()=>new Request('https://app.example.invalid/v1/human/voice-gateway',{
+ method:'POST',headers:{'Content-Type':'application/json',Origin:'https://app.example.invalid'},
+ body:JSON.stringify({action:'repair-review'})});
+test('uncertain Guard POST that never persisted can be reconciled without writing or unlocking',async()=>{
+ const f=fixture();try{
+  unknown(f);const p=provider({failAfterGuardWrite:true});
+  const failure=await handleVoiceGatewayRequest(req(),f.env,admin,{now,fetcher:p.fetcher});
+  assert.equal(failure.status,503);
+  assert.equal(f.c.db.prepare('SELECT error_code FROM shared_voice_gateway WHERE id=1').get().error_code,'guard_repair_unknown');
+  const originalWrites=p.writes.length;
+  const rejected=await handleVoiceGatewayRequest(readRepairReq(),f.env,client,{now,fetcher:p.fetcher});
+  assert.equal(rejected.status,403);
+  const res=await handleVoiceGatewayRequest(readRepairReq(),f.env,admin,{now,fetcher:p.fetcher});
+  assert.equal(res.status,200,await res.clone().text());
+  const body=await res.json();
+  assert.equal(body.outcome,'guard_still_has_zero_agents');
+  assert.equal(body.writeOperationsAllowed,false);
+  assert.equal(body.guard.stable.agentCount,'zero');
+  assert.equal(body.sharedVoicebot.unchangedAndPaused,true);
+  assert.equal(p.writes.length,originalWrites);
+  assert.equal(f.c.db.prepare('SELECT error_code FROM shared_voice_gateway WHERE id=1').get().error_code,'guard_repair_unknown');
+ }finally{f.close()}
+});
+test('provider-saved Guard v3 after timeout is detected as verified, without staging or retrying',async()=>{
+ const f=fixture();try{
+  unknown(f);const p=provider({failAfterGuardWrite:true,persistGuardBeforeFailure:true});
+  const failure=await handleVoiceGatewayRequest(req(),f.env,admin,{now,fetcher:p.fetcher});
+  assert.equal(failure.status,503);
+  assert.equal(p.writes.length,1);
+  const res=await handleVoiceGatewayRequest(readRepairReq(),f.env,admin,{now,fetcher:p.fetcher});
+  assert.equal(res.status,200);
+  const body=await res.json();
+  assert.equal(body.outcome,'saved_guard_verified_bot_not_staged');
+  assert.equal(body.guard.stableVersion,'v3');
+  assert.equal(body.guard.stable.agentCount,'one');
+  assert.equal(body.guard.stable.strictGuardVerified,true);
+  assert.equal(body.sharedVoicebot.unchangedAndPaused,true);
+  assert.equal(body.writeOperationsAllowed,false);
+  assert.equal(p.writes.length,1);
+  assert.equal(f.c.db.prepare('SELECT error_code FROM shared_voice_gateway WHERE id=1').get().error_code,'guard_repair_unknown');
+  assert.equal((await handleVoiceGatewayRequest(req(),f.env,admin,{now,fetcher:p.fetcher})).status,503);
+  assert.equal(p.writes.length,1);
+ }finally{f.close()}
+});
+test('repair review requires guard_repair_unknown and cannot read providers for other states',async()=>{
+ const f=fixture();try{
+  unknown(f);const p=provider();
+  const res=await handleVoiceGatewayRequest(readRepairReq(),f.env,admin,{now,fetcher:p.fetcher});
+  assert.equal(res.status,503);
+  assert.equal((await res.json()).error,'guard_repair_review_requires_uncertain_state');
+  assert.equal(p.writes.length,0);assert.equal(p.reads.length,0);
+ }finally{f.close()}
+});
+
 test('ambiguous guard POST cannot be retried or stage an unsafe bot version',async()=>{
  const f=fixture();try{
   unknown(f);const p=provider({failAfterGuardWrite:true});
