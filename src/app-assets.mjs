@@ -570,7 +570,7 @@ async function superAdmin(main){
     node('input',{class:'field',value:d.inviteUrl,readonly:'readonly','aria-label':'Private client invitation link'})
    ));
    notice('Invitation prepared; client account activates after invitation acceptance.');
-   f.reset();await refresh();await refreshAccess();document.dispatchEvent(new CustomEvent('client-created'));
+   f.reset();await refresh();await refreshAccess();document.dispatchEvent(new CustomEvent('client-created',{detail:d.id}));
   }catch(err){asError(err)}
   finally{submit.disabled=false}
  });
@@ -866,8 +866,8 @@ async function callingAdminPanel(main){
 async function scriptAdminPanel(main){
  const card=div('card client-directory',title('Client Company & AI Setup')),area=div('stack');card.id='conversation-setup';main.append(card);card.append(node('p',{class:'note',text:'Super Admin: choose the client, save approved company/project/price details and publish their AI. Clients can only view and request changes; this does not activate calling.'}));
  const company=node('select',{class:'field','aria-label':'Conversation company'});
- async function refreshCompanies(){
-  const old=company.value;
+ async function refreshCompanies(preferredId=''){
+  const old=preferredId||company.value;
   const result=await api('/v1/human/tenants');
   company.replaceChildren(...result.tenants.filter(t=>['trial','active'].includes(t.status))
    .map(t=>node('option',{value:t.id,text:t.display_name})));
@@ -876,7 +876,7 @@ async function scriptAdminPanel(main){
  }
  async function load(){area.replaceChildren();if(company.value)await callingScriptEditor(company.value,area,true,company.selectedOptions[0]?.textContent||'')}
  company.addEventListener('change',()=>load().catch(asError));
- document.addEventListener('client-created',()=>refreshCompanies().catch(asError));
+ document.addEventListener('client-created',e=>refreshCompanies(e.detail||'').catch(asError));
  card.append(div('formrow',lab('Company',company),
   btn('Refresh client list',()=>refreshCompanies().catch(asError),true)),area);
  await refreshCompanies();
