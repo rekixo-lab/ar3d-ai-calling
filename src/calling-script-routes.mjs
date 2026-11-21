@@ -31,7 +31,8 @@ export async function handleCallingScripts(req,env,user,{now=Date.now(),fetcher=
   if(user.globalRole==='super_admin'&&!isAdmin)return fail('current_super_admin_mfa_required',403);
   if(isAdmin){if(!await db.prepare("SELECT id FROM tenants WHERE id=? AND status IN('trial','active')").bind(d.tenantId).first())return fail('tenant_unavailable',404)}
   else if(!await requireMembership(db,user,d.tenantId,req.method==='POST'))return fail('forbidden',403);
-  if(!['versions','publish'].includes(action)&&!isAdmin)return fail('super_admin_required',403);
+  if((req.method==='POST'||!['versions'].includes(action))&&!isAdmin)
+   return fail('super_admin_required',403);
   const tid=d.tenantId,at=new Date(now).toISOString();
   if(action==='probe'){
    if(Object.keys(d).some(k=>!['tenantId','botId'].includes(k))||!UUID.test(d.botId||''))return fail('invalid_bot');
@@ -41,7 +42,7 @@ export async function handleCallingScripts(req,env,user,{now=Date.now(),fetcher=
    const rows=await db.prepare('SELECT id,revision,config_json,provider_state AS providerState,provider_version AS providerVersion,error_code AS errorCode,created_at AS createdAt,synced_at AS syncedAt FROM calling_script_versions WHERE tenant_id=? ORDER BY revision DESC LIMIT 50').bind(tid).all();
    const publication=await db.prepare('SELECT id,script_revision AS scriptRevision,profile_revision AS profileRevision,provider_state AS state,provider_version AS providerVersion,error_code AS errorCode,published_at AS publishedAt FROM calling_agent_publications WHERE tenant_id=? ORDER BY created_at DESC LIMIT 1').bind(tid).first();
    const profile=await db.prepare('SELECT MAX(revision) AS revision FROM company_profile_versions WHERE tenant_id=?').bind(tid).first();
-   return json({publication,profileRevision:profile?.revision||0,versions:rows.results.map(({config_json,...r})=>({...r,config:JSON.parse(config_json)})),defaults:defaultScript(),canEdit:isAdmin||!!await requireMembership(db,user,tid,true),canStage:isAdmin,notice:'Saved scripts require Exotel version sync and a verified rollout before they affect calls.'});
+   return json({publication,profileRevision:profile?.revision||0,versions:rows.results.map(({config_json,...r})=>({...r,config:JSON.parse(config_json)})),defaults:defaultScript(),canEdit:isAdmin,canStage:isAdmin,notice:'Saved scripts require Exotel version sync and a verified rollout before they affect calls.'});
   }
   if(action==='versions'){
    if(Object.keys(d).some(k=>!['tenantId','baseRevision','config'].includes(k))||!Number.isInteger(d.baseRevision)||d.baseRevision<0)return fail('invalid_revision');
