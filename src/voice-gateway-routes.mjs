@@ -21,6 +21,7 @@ export async function handleVoiceGatewayRequest(req,env,user,{now=Date.now(),fet
   if(req.method==='GET')return json({
    gateway:runtime?{state:runtime.state,botId:runtime.bot_id,flowId:runtime.flow_id,version:runtime.gateway_version,lastVerifiedAt:runtime.last_verified_at,errorCode:runtime.error_code}:null,
    suggestedGateway:runtime?null:KNOWN_SHARED_GATEWAY_BOOTSTRAP,
+   knownAuthTemplateBotId:KNOWN_SHARED_GATEWAY_BOOTSTRAP.authTemplateBotId,
    flowTargetVerified:false,
    notice:runtime?'Existing gateway preserved.':'Known owner-supplied Exotel resource IDs loaded read-only. The copied Flow may still point to the old bot: inspect and independently verify in Exotel before preparation.'
   });
