@@ -66,3 +66,15 @@ test('ambiguous POST locks retries, provider errors never expose credentials, mu
  assert.equal((await call(f,'stage',{id:v.id},admin,'POST',{fetcher})).status,409);assert.equal(posts,1);
  assert.equal((await call(f,'binding',{botId,assistantId,sourceVersion:'v3'},admin)).status,409);
 }finally{f.close()}});
+test('flat production assistant response is pinned to its returned version and advances the saved source',async()=>{const f=fixture();try{
+ const v=await save(f);await connect(f);let posted=false,posts=0;
+ const fetcher=async(url,init)=>{
+  if(init.method==='POST'){posted=true;posts++;return Response.json({http_code:200,response:{id:assistantId,latest_version:'v3',stable_version:'v2'}})}
+  return Response.json({http_code:200,response:{id:assistantId,latest_version:posted?'v3':'v2',stable_version:'v2',agents:[{id:'survey',instruction:posted?compileScript(defaultScript()):'old',tools:[]}]}});
+ };
+ const r=await call(f,'stage',{id:v.id},admin,'POST',{fetcher});assert.equal(r.status,200,await r.clone().text());assert.equal(posts,1);
+ assert.equal(f.c.db.prepare('SELECT source_version FROM calling_script_bindings WHERE tenant_id=?').get(tid).source_version,'v3');
+ const next=await save(f,defaultScript(),1);
+ const mismatch=await call(f,'stage',{id:next.id},admin,'POST',{fetcher:async()=>Response.json({http_code:200,response:{latest_version:'v9',agents:[{instruction:'unrelated'}]}})});
+ assert.equal(mismatch.status,502);assert.equal(posts,1);
+}finally{f.close()}});

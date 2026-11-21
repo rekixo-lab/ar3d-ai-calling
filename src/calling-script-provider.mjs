@@ -21,6 +21,8 @@ async function request(env,path,{fetcher=fetch,method='GET',body}={}){
  try{const decoder=new TextDecoder();let size=0;while(true){const {done,value}=await reader.read();if(done)break;size+=value.length;if(size>1000000)throw Error();raw+=decoder.decode(value,{stream:true})}raw+=decoder.decode();return JSON.parse(raw)}catch{throw Error(method==='POST'?'provider_write_unknown':'provider_invalid_response')}finally{await reader.cancel().catch(()=>{});reader.releaseLock()}
 }
 const unwrap=r=>r?.response?.data||r?.response||r?.data||r;
+const versionConfig=(data,version)=>data?.versions?.[version]||
+ ((data?.version===version||data?.latest_version===version)?data:null);
 function responseShape(raw){
  const out=[];
  function walk(v,path,depth){if(out.length>=30)return;if(!v||typeof v!=='object'){out.push(path+':'+(typeof v==='number'&&Number.isSafeInteger(v)&&/(?:^|\.)(?:code|status_code|http_code)$/.test(path)?String(v):typeof v));return}if(depth>=3){out.push(path+':object');return}for(const [key,value] of Object.entries(v).slice(0,20)){if(!/^[A-Za-z][A-Za-z0-9_]{0,40}$/.test(key))continue;walk(value,path?path+'.'+key:key,depth+1)}}
@@ -43,7 +45,7 @@ export async function probeScriptProvider(env,botId,options={}){
 export async function stageScript(env,binding,prompt,options={}){
  const path='/assistants/'+binding.assistant_id;
  const current=unwrap(await request(env,path+'?version='+binding.source_version,options));
- const config=current?.versions?.[binding.source_version];
+ const config=versionConfig(current,binding.source_version);
  if(!config||!Array.isArray(config.agents)||config.agents.length!==1||typeof config.agents[0]!=='object'||!config.agents[0])throw Error('provider_source_requires_single_agent');
  const agents=config.agents.map(agent=>({...agent,instruction:prompt}));
  const result=unwrap(await request(env,path+'/versions',{...options,method:'POST',body:{source_version:binding.source_version,mark_as_stable:'false',version_description:'AR3D reviewed conversation script',data:{agents}}}));
@@ -51,6 +53,7 @@ export async function stageScript(env,binding,prompt,options={}){
  if(!/^v[1-9]\d{0,8}$/.test(version||''))throw Error('provider_write_unknown');
  // A read-back must match the precise new version and prompt, not stable/latest.
  let check;try{check=unwrap(await request(env,path+'?version='+version,options))}catch{throw Error('provider_write_unknown')}
- if(check?.versions?.[version]?.agents?.length!==1||check.versions[version].agents[0].instruction!==prompt)throw Error('provider_write_unknown');
+ const saved=versionConfig(check,version);
+ if(saved?.agents?.length!==1||saved.agents[0].instruction!==prompt)throw Error('provider_write_unknown');
  return {version};
 }

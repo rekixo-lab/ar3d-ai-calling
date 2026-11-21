@@ -65,11 +65,16 @@ export async function handleCallingScripts(req,env,user,{now=Date.now(),fetcher=
   if(!['draft','failed'].includes(version.provider_state))return fail('provider_sync_needs_review',409);
   const lock=await db.prepare("UPDATE calling_script_versions SET provider_state='sending',error_code=NULL,provider_bot_id=?,provider_assistant_id=?,synced_by=? WHERE tenant_id=? AND id=? AND provider_state IN('draft','failed') AND NOT EXISTS(SELECT 1 FROM calling_script_versions v WHERE v.tenant_id=? AND v.provider_state IN('sending','unknown'))").bind(binding.bot_id,binding.assistant_id,user.id,tid,d.id,tid).run();
   if(lock.meta.changes!==1)return fail('provider_sync_needs_review',409);
+  let providerSucceeded=false;
   try{
    const result=await stageScript(env,binding,version.prompt,{fetcher});
-   await db.prepare("UPDATE calling_script_versions SET provider_state='saved',provider_version=?,synced_at=? WHERE tenant_id=? AND id=? AND provider_state='sending'").bind(result.version,at,tid,d.id).run();
+   providerSucceeded=true;
+   await db.batch([
+    db.prepare("UPDATE calling_script_versions SET provider_state='saved',provider_version=?,synced_at=? WHERE tenant_id=? AND id=? AND provider_state='sending'").bind(result.version,at,tid,d.id),
+    db.prepare('UPDATE calling_script_bindings SET source_version=?,updated_by=?,updated_at=? WHERE tenant_id=? AND bot_id=? AND assistant_id=? AND source_version=?').bind(result.version,user.id,at,tid,binding.bot_id,binding.assistant_id,binding.source_version)
+   ]);
    return json({providerState:'saved',providerVersion:result.version,liveVerified:false,notice:'Exotel version saved and read back. Review and roll it out in Exotel before using it for live calls.'});
-  }catch(e){const error=String(e.message),unknown=error==='provider_write_unknown';await db.prepare('UPDATE calling_script_versions SET provider_state=?,error_code=? WHERE tenant_id=? AND id=?').bind(unknown?'unknown':'failed',error,tid,d.id).run();return fail(error,502)}
+  }catch(e){const error=providerSucceeded?'provider_write_unknown':String(e.message),unknown=error==='provider_write_unknown';await db.prepare('UPDATE calling_script_versions SET provider_state=?,error_code=? WHERE tenant_id=? AND id=?').bind(unknown?'unknown':'failed',error,tid,d.id).run();return fail(error,502)}
  }catch(e){
   const error=String(e.message||'');
   if(/invalid|Agent needs|body_too_large/i.test(error))return fail(error);
