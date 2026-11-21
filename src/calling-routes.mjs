@@ -104,14 +104,14 @@ export async function handleCallingRequest(req,env,user,{now=Date.now(),fetcher=
   if(!policy)return fail('super_admin_calling_approval_required',409);
   try{await requirePublishedAgent(env,tid,policy.flow_id,{fetcher})}catch(e){return fail(e.message,409)}
   const count=await db.prepare('SELECT COUNT(*) AS n FROM call_campaign_candidates WHERE tenant_id=? AND campaign_id=?').bind(tid,d.campaignId).first();
-  if(!count||count.n<1||count.n>200)return fail('campaign_requires_1_to_200_customers',409);
+  if(!count||count.n<1||count.n>2000)return fail('campaign_requires_1_to_2000_customers',409);
   const id=crypto.randomUUID();
   // Retry-safe run creation + bounded snapshot of the existing tenant campaign.
   // A completed campaign cannot be restarted accidentally; create a new campaign.
   await db.batch([
    db.prepare("INSERT INTO calling_runs(tenant_id,id,campaign_id,state,created_by,created_at,updated_at) SELECT tenant_id,?,id,'running',?,?,? FROM call_campaign_drafts WHERE tenant_id=? AND id=? AND EXISTS(SELECT 1 FROM call_campaign_candidates cc WHERE cc.tenant_id=call_campaign_drafts.tenant_id AND cc.campaign_id=call_campaign_drafts.id) ON CONFLICT(tenant_id,campaign_id) DO UPDATE SET state=CASE WHEN calling_runs.state='paused' THEN 'running' ELSE calling_runs.state END,updated_at=excluded.updated_at")
     .bind(id,user.id,at,at,tid,d.campaignId),
-   db.prepare("INSERT OR IGNORE INTO calling_jobs(tenant_id,id,run_id,lead_id,state,created_at,updated_at) SELECT cc.tenant_id,lower(hex(randomblob(16))),r.id,cc.lead_id,'queued',?,? FROM call_campaign_candidates cc JOIN calling_runs r ON r.tenant_id=cc.tenant_id AND r.campaign_id=cc.campaign_id WHERE cc.tenant_id=? AND cc.campaign_id=? AND r.id=? ORDER BY cc.created_at,cc.lead_id LIMIT 200")
+   db.prepare("INSERT OR IGNORE INTO calling_jobs(tenant_id,id,run_id,lead_id,state,created_at,updated_at) SELECT cc.tenant_id,lower(hex(randomblob(16))),r.id,cc.lead_id,'queued',?,? FROM call_campaign_candidates cc JOIN calling_runs r ON r.tenant_id=cc.tenant_id AND r.campaign_id=cc.campaign_id WHERE cc.tenant_id=? AND cc.campaign_id=? AND r.id=? ORDER BY cc.created_at,cc.lead_id LIMIT 2000")
     .bind(at,at,tid,d.campaignId,id)
   ]);
   const run=await db.prepare('SELECT id,state FROM calling_runs WHERE tenant_id=? AND campaign_id=?').bind(tid,d.campaignId).first();
