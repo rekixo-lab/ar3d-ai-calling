@@ -682,28 +682,28 @@ async function customerCallingPanel(tenantId,content,role){
  card.append(refreshBtn);
  if(role==='client_admin'){
   const name=input('callCampaignName','text','November follow-up');
-  const create=btn('Create campaign with first 200 CRM customers',async()=>{
-   create.disabled=true;
-   try{
-    if(!name.value.trim())throw Error('Enter a campaign name');
-    const first=await api('/v1/human/leads?tenantId='+tenantId+'&limit=100&offset=0');
-    const second=first.total>100?await api('/v1/human/leads?tenantId='+tenantId+'&limit=100&offset=100'):{leads:[]};
-    const ids=[...first.leads,...second.leads].map(l=>l.id);
-    if(!ids.length)throw Error('Upload your Excel file first');
-    const campaign=await api('/v1/human/campaigns','POST',{tenantId,name:name.value,languageMode:'hi-en',purpose:'property_information'});
-    let inserted=0;
-    for(let i=0;i<ids.length;i+=50){const r=await api('/v1/human/campaigns/'+campaign.id+'/candidates','POST',{tenantId,leadIds:ids.slice(i,i+50)});inserted+=r.inserted}
-    notice(inserted+' customers added. Review the campaign before Start.');await refresh();pick.value=campaign.id;
-   }catch(e){asError(e)}finally{create.disabled=false}
-  });
-  const start=btn('Start / Resume calling',async()=>{
+  const customerType=node('select',{class:'field','aria-label':'Campaign customer type'},
+    [['','All CRM customers'],['prior_inquiry','Previous enquiries'],['unknown_contact','Unknown/new contacts'],['unclassified','Unclassified']].map(([value,text])=>node('option',{value,text})));
+   const create=btn('Create campaign with selected CRM customers',async()=>{
+    create.disabled=true;
+    try{
+     if(!name.value.trim())throw Error('Enter a campaign name');
+     const campaign=await api('/v1/human/campaigns','POST',{tenantId,name:name.value,languageMode:'hi-en',purpose:'property_information'});
+     const selection={tenantId};
+     if(customerType.value)selection.customerSegment=customerType.value;
+     const r=await api('/v1/human/campaigns/'+campaign.id+'/candidates/from-crm','POST',selection);
+     notice(r.inserted+' customers added, '+r.alreadyInCampaign+' already selected. No calls placed. Review approvals before Start.');
+     await refresh();pick.value=campaign.id;
+    }catch(e){asError(e)}finally{create.disabled=false}
+   });
+   const start=btn('Start / Resume calling',async()=>{
    if(!pick.value)return notice('Create a campaign first.',true);
    if(!confirm('Start real Exotel calls to the approved customers in this campaign? This uses Exotel credits.'))return;
    start.disabled=true;
    try{const r=await api('/v1/human/calling/runs','POST',{tenantId,campaignId:pick.value,action:'start'});notice('Campaign '+r.state+'. Results refresh below.');await refresh()}catch(e){asError(e)}finally{start.disabled=false}
   });
   const pause=btn('Pause campaign',async()=>{try{await api('/v1/human/calling/runs','POST',{tenantId,campaignId:pick.value,action:'pause'});notice('Paused. A call already sent to Exotel may finish.');await refresh()}catch(e){asError(e)}},true);
-  card.append(div('formrow',lab('Campaign name',name),create),div('formrow',lab('Campaign',pick),start,pause));
+  card.append(div('formrow',lab('Campaign name',name),lab('Customers',customerType),create),div('formrow',lab('Campaign',pick),start,pause));
  }
  try{await refresh()}catch(e){area.append(node('p',{class:'err',text:e.message}))}
 }
