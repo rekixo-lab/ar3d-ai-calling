@@ -62,6 +62,30 @@ test('unknown gateway review reads provider versions without any Exotel or D1 mu
   assert.equal(f.r.db.prepare('SELECT COUNT(*) AS n FROM calls').get().n,0);
  }finally{f.close()}
 });
+test('a recorded guard without verified final instructions stays unconfirmed',async()=>{
+ const f=fixture();try{
+  unknown(f);let reads=0,writes=0;
+  const fetcher=async(url,init)=>{
+   reads++;if(init.method!=='GET')writes++;
+   const u=new URL(url),v=u.searchParams.get('version');
+   if(u.pathname.includes('/assistants/'))return Response.json({response:v==='v1'
+    ?{id:guard,version:'v1',stable_version:'v1',agents:[{instruction:'wrong prompt should not appear in output'}]}
+    :{id:guard,stable_version:'v1',latest_version:'v1'}});
+   return Response.json({response:v?{id:bot,version:'v2',assistant_config:{id:template}}:
+    {id:bot,latest_version:'v2',stable_version:'v2'}});
+  };
+  const res=await handleVoiceGatewayRequest(req(),f.env,admin,{now,fetcher});
+  assert.equal(res.status,200);
+  const d=await res.json();
+  assert.equal(d.guardAssistantReadable,true);
+  assert.equal(d.guardAssistantStableVersion,'v1');
+  assert.equal(d.guardAssistantFinalized,false);
+  assert.equal(d.latestVersionUsesRecordedGuard,false);
+  assert.ok(!JSON.stringify(d).includes('wrong prompt'));
+  assert.equal(reads,4);assert.equal(writes,0);
+  assert.equal(f.c.db.prepare('SELECT state FROM shared_voice_gateway WHERE id=1').get().state,'unknown');
+ }finally{f.close()}
+});
 test('missing guard and provider outage never pretend a gateway is ready',async()=>{
  for(const outage of [false,true]){
   const f=fixture();try{
