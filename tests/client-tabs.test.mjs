@@ -9,7 +9,9 @@ test('client workspace is divided into four practical tabs without dropping any 
   assert.match(js,/section\.hidden=name!==key/);
   assert.match(js,/await crmWorkflow\(id,sections\.customers,d\.role,content\)/);
   assert.match(js,/await customerCallingPanel\(id,sections\.calling,d\.role\)/);
-  assert.match(js,/await callingScriptEditor\(id,sections\.company\)/);
+  assert.match(js,/await clientCompanySummary\(id,sections\.company,d\.role,d\.tenant\.name\)/);
+  assert.match(js,/adminCompanyChangesPanel\(main\)/);
+  assert.doesNotMatch(js,/await callingScriptEditor\(id,sections\.company\)/);
   assert.match(js,/await usageAndExport\(id,reports,d\.role\)/);
   assert.match(js,/await voicebotReviewPanel\(id,reports,content\)/);
   assert.match(js,/state\.clientTab=key/);
