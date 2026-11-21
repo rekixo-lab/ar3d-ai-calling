@@ -21,9 +21,14 @@ async function request(env,path,{fetcher=fetch,method='GET',body}={}){
  try{const decoder=new TextDecoder();let size=0;while(true){const {done,value}=await reader.read();if(done)break;size+=value.length;if(size>1000000)throw Error();raw+=decoder.decode(value,{stream:true})}raw+=decoder.decode();return JSON.parse(raw)}catch{throw Error(method==='POST'?'provider_write_unknown':'provider_invalid_response')}finally{await reader.cancel().catch(()=>{});reader.releaseLock()}
 }
 const unwrap=r=>r?.response?.data||r?.data||r;
+function responseShape(raw){
+ const out=[];
+ function walk(v,path,depth){if(out.length>=30)return;if(!v||typeof v!=='object'){out.push(path+':'+(typeof v==='number'&&Number.isSafeInteger(v)&&/(?:^|\.)(?:code|status_code|http_code)$/.test(path)?String(v):typeof v));return}if(depth>=3){out.push(path+':object');return}for(const [key,value] of Object.entries(v).slice(0,20)){if(!/^[A-Za-z][A-Za-z0-9_]{0,40}$/.test(key))continue;walk(value,path?path+'.'+key:key,depth+1)}}
+ walk(raw,'',0);return out.join(', ');
+}
 export async function probeScriptProvider(env,botId,options={}){
- const data=unwrap(await request(env,'/voicebots/'+botId,options));
- if((data?.bot_id||data?.id)!==botId)throw Error('provider_bot_identity_unverified');
+ const raw=await request(env,'/voicebots/'+botId,options),data=unwrap(raw);
+ if((data?.bot_id||data?.id)!==botId)return {accessVerified:false,botId,assistantCandidates:[],notice:'Provider response did not verify the expected bot. Response structure (values hidden): '+responseShape(raw)};
  const candidates=[];
  const extract=(config,botVersion)=>{
   if(!config||typeof config!=='object')return;

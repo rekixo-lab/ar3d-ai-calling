@@ -11,6 +11,8 @@ test('read-only provider probe tests existing credentials, returns only whitelis
  const result=await call(f,'probe',{botId},admin,'POST',{fetcher});assert.equal(result.status,200);const data=await result.json();assert.equal(data.accessVerified,true);assert.equal(data.assistantCandidates[0].assistantId,assistantId);assert.ok(!JSON.stringify(data).includes('must-not-return'));assert.equal(count,1);
  assert.equal((await call(f,'probe',{botId},client,'POST',{fetcher})).status,403);assert.equal(count,1);
  const denied=await call(f,'probe',{botId},admin,'POST',{fetcher:async()=>new Response('denied',{status:403})});assert.equal((await denied.json()).error,'voicebot_management_access_denied');
+ const unexpected=await call(f,'probe',{botId},admin,'POST',{fetcher:async()=>Response.json({response:{data:{token:'never-expose-this',credentials:'private'}}})});
+ const diagnostic=await unexpected.json();assert.equal(diagnostic.accessVerified,false);assert.match(diagnostic.notice,/response.data.token:string/);assert.ok(!JSON.stringify(diagnostic).includes('never-expose-this'));assert.ok(!JSON.stringify(diagnostic).includes('private'));
  f.env.EXOTEL_VOICEBOT_ACCOUNT_ID='dedicated';assert.equal(scriptProviderConfiguration(f.env).ready,false);assert.equal(scriptProviderConfiguration(f.env).credentialSource,'voicebot_api');
 }finally{f.close()}});
 const call=(f,action='',d={},user=client,method='POST',options={})=>handleCallingScripts(new Request('https://app.example.invalid/v1/human/calling-scripts'+(action?'/'+action:'')+(method==='GET'?'?tenantId='+tid:''),{method,headers:{Origin:'https://app.example.invalid','Content-Type':'application/json'},...(method==='POST'?{body:JSON.stringify({tenantId:tid,...d})}:{})}),f.env,user,{now,...options});

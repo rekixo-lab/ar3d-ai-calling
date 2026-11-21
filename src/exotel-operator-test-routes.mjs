@@ -84,7 +84,7 @@ export function validateOperatorTestResult(raw,caller){
 }
 export function makeOperatorTestRequest(env){
   if(!operatorTestConfig(env).ready)throw Error('self-test configuration missing');
-  const url=exotelApiBase(env.EXOTEL_REGION)+'/v1/Accounts/'+env.EXOTEL_ACCOUNT_SID+'/Calls/connect';
+  const url=exotelApiBase(env.EXOTEL_REGION)+'/v1/Accounts/'+env.EXOTEL_ACCOUNT_SID+'/Calls/connect.json';
   // Exotel documents curl -d parameters: application/x-www-form-urlencoded.
   const body=new URLSearchParams();
   body.set('From',env.EXOTEL_VERIFIED_TEST_NUMBER);

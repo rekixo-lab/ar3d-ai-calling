@@ -116,7 +116,7 @@ test('never accepts arbitrary API hosts, account names, flow IDs or recipient nu
     assert.equal(operatorTestConfig(cfg).ready,false,key);
   }
   const request=makeOperatorTestRequest(envBase);
-  assert.equal(request.url,'https://api.exotel.com/v1/Accounts/rekixo1/Calls/connect');
+  assert.equal(request.url,'https://api.exotel.com/v1/Accounts/rekixo1/Calls/connect.json');
   assert.equal(request.method,'POST');
   assert.equal(request.redirect,'manual');
   assert.equal(request.headers.get('authorization'),

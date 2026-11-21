@@ -25,7 +25,7 @@ export function campaignRequest(env,job,policy){
  const form=new URLSearchParams({From:job.destination,CallerId:env.EXOTEL_CALLER_ID,
   Url:'http://my.exotel.com/'+env.EXOTEL_ACCOUNT_SID+'/exoml/start_voice/'+policy.flow_id,
   Record:'false',TimeLimit:String(policy.max_seconds),TimeOut:'30'});
- return new Request(exotelApiBase(env.EXOTEL_REGION)+'/v1/Accounts/'+env.EXOTEL_ACCOUNT_SID+'/Calls/connect',{
+ return new Request(exotelApiBase(env.EXOTEL_REGION)+'/v1/Accounts/'+env.EXOTEL_ACCOUNT_SID+'/Calls/connect.json',{
   method:'POST',headers:{Authorization:'Basic '+btoa(env.EXOTEL_API_KEY+':'+env.EXOTEL_API_TOKEN),
   Accept:'application/json','Content-Type':'application/x-www-form-urlencoded'},body:form,redirect:'manual'});
 }
