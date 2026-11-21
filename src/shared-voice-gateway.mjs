@@ -202,7 +202,7 @@ export async function previewUnknownSharedGatewayRecovery(env,runtime,{fetcher=f
  * Never return full prompts, agent configs, credentials, or resource IDs.
  */
 export async function inspectUnknownGuardRepair(env,runtime,{fetcher=fetch}={}){
- if(!runtime||runtime.state!=='unknown'||!['guard_repair_unknown','guard_agent_fix_unknown'].includes(runtime.error_code)||
+ if(!runtime||runtime.state!=='unknown'||!['guard_repair_unknown','guard_agent_fix_unknown','bot_agent_fix_unknown'].includes(runtime.error_code)||
     !uuid(runtime.guard_assistant_id)||!uuid(runtime.bot_id)||
     !uuid(runtime.template_assistant_id)||runtime.gateway_version!=null)
   throw Error('guard_repair_review_requires_uncertain_state');
@@ -213,9 +213,14 @@ export async function inspectUnknownGuardRepair(env,runtime,{fetcher=fetch}={}){
   const stableBot=version(bot.stable_version)?bot.stable_version:null;
   const latestBot=version(bot.latest_version)?bot.latest_version:null;
   const traffic=bot.traffic_allocation||{};
-  const botTrafficSafe=(bot.id||bot.bot_id)===runtime.bot_id&&stableBot!=null&&
-   latestBot===stableBot&&traffic[stableBot]===100&&
+  const stableTrafficSafe=(bot.id||bot.bot_id)===runtime.bot_id&&
+   stableBot!=null&&version(latestBot)&&traffic[stableBot]===100&&
    Object.entries(traffic).every(([v,pct])=>v===stableBot||Number(pct)===0);
+  // Only a post-BOT-write unknown state can have a paused candidate (latest
+  // differs from stable). A "guard write" uncertainty must never accept it.
+  const pausedCandidate=runtime.error_code==='bot_agent_fix_unknown'&&
+   stableTrafficSafe&&latestBot!==stableBot&&traffic[latestBot]===0;
+  const botTrafficSafe=stableTrafficSafe&&(latestBot===stableBot||pausedCandidate);
   let sourceBotMatches=false;
   if(botTrafficSafe){
    const source=unwrapVoicebot(await voicebotRequest(env,botPath+'?version='+stableBot,opts));
@@ -223,8 +228,11 @@ export async function inspectUnknownGuardRepair(env,runtime,{fetcher=fetch}={}){
     (source.assistant_config?.id||source.assistant_config?.assistant_id)===runtime.template_assistant_id;
   }
   const botReport={stableVersion:stableBot,latestVersion:latestBot,
-   unchangedAndPaused:botTrafficSafe&&sourceBotMatches};
-  if(!botReport.unchangedAndPaused)
+   unchangedAndPaused:botTrafficSafe&&sourceBotMatches&&latestBot===stableBot,
+   stableTrafficPreserved:botTrafficSafe&&sourceBotMatches,
+   pausedCandidatePresent:pausedCandidate&&sourceBotMatches,
+   pausedCandidateReferencesGuard:null};
+  if(!botReport.stableTrafficPreserved)
    return {...blocked('shared_voicebot_changed_stop'),sharedVoicebot:botReport};
   const guard=unwrapVoicebot(await voicebotRequest(env,guardPath,opts));
   if((guard.id||guard.assistant_id)!==runtime.guard_assistant_id)
@@ -276,9 +284,22 @@ export async function inspectUnknownGuardRepair(env,runtime,{fetcher=fetch}={}){
   const evidence={overviewVersionMapCount:mappedCount,stableAliasRootCount:aliasRootCount,
    stableAliasVersionMapCount:aliasMappedCount,
    responseShapeConflict:conflictingAgents};
+  if(botReport.pausedCandidatePresent){
+   // Verify the already existing paused Bot candidate with GET only. Never
+   // treat 0% traffic as proof of a correct Guard binding.
+   const candidate=unwrapVoicebot(await voicebotRequest(env,botPath+'?version='+latestBot,opts));
+   botReport.pausedCandidateReferencesGuard=
+    (candidate.id||candidate.bot_id)===runtime.bot_id&&
+    (candidate.assistant_config?.id||candidate.assistant_config?.assistant_id)===runtime.guard_assistant_id&&
+    (candidate.assistant_config?.version||candidate.assistant_config?.assistant_version)===stable;
+  }
   let outcome='guard_not_verified_stop';
   if(latest!==stable)outcome='guard_latest_differs_from_stable_stop';
   else if(conflictingAgents)outcome='guard_response_shape_conflict_stop';
+  else if(botReport.pausedCandidatePresent)
+   outcome=stableReport.strictGuardVerified&&botReport.pausedCandidateReferencesGuard?
+    'paused_candidate_verified_but_gateway_locked_stop':
+    'paused_candidate_guard_unverified_stop';
   else if(stableReport.strictGuardVerified)outcome='saved_guard_verified_bot_not_staged';
   else if(stableReport.agentCount==='zero'&&aliasRootCount==='zero')
    outcome='guard_zero_agents_confirmed_multiple_reads';
