@@ -44,7 +44,7 @@ test('Full CRM selection excludes opted-out/denied/blocked and filters by segmen
   const id=(i)=>'55555555-5555-4555-8555-'+String(i).padStart(12,'0');
   f.r.db.prepare("UPDATE leads SET consent_status='denied' WHERE tenant_id=? AND id=?").run(tid,id(2));
   f.r.db.prepare("UPDATE leads SET dnd_status='blocked' WHERE tenant_id=? AND id=?").run(tid,id(3));
-  f.r.db.prepare("INSERT INTO lead_opt_out_events(tenant_id,id,lead_id,source,created_at) VALUES(?,?,?,'manual',?)")
+  f.r.db.prepare("INSERT INTO lead_opt_out_events(tenant_id,id,lead_id,source,reason,actor,created_at) VALUES(?,?,?,'admin_action','synthetic test','admin',?)")
     .run(tid,'66666666-6666-4666-8666-666666666666',id(4),at);
   f.r.db.prepare("UPDATE leads SET customer_segment='prior_inquiry' WHERE tenant_id=? AND id=?").run(tid,id(5));
   const r=await fromCrm(f,{tenantId:tid,customerSegment:'prior_inquiry'});
