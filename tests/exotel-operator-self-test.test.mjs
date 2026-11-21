@@ -12,7 +12,7 @@ const envBase=Object.freeze({
   EXOTEL_REGION:'singapore',
   EXOTEL_CALLER_ID:'09513886363',
   EXOTEL_VOICE_AI_FLOW_ID:'1392699',
-  EXOTEL_VERIFIED_TEST_NUMBER:'+917415011511'
+  EXOTEL_VERIFIED_TEST_NUMBER:'+919000000001'
 });
 const at=Date.parse('2026-11-20T10:00:00Z');
 const req=(method='GET',body=null)=>new Request(
@@ -88,8 +88,8 @@ test('operator route is disabled without explicit operator consent and configure
   const status=await (await handleExotelOperatorTest(req(),env,user)).json();
   assert.equal(status.configured,false);
   assert.ok(status.missing.includes('operator_explicit_opt_in'));
-  assert.equal(status.destinationLast4,'1511');
-  assert.ok(!JSON.stringify(status).includes('+917415011511'));
+  assert.equal(status.destinationLast4,'0001');
+  assert.ok(!JSON.stringify(status).includes('+919000000001'));
   assert.ok(!JSON.stringify(status).includes(env.EXOTEL_API_TOKEN));
 });
 test('only super-admin MFA signed-in actor can launch; forged target is rejected',async()=>{
@@ -122,7 +122,7 @@ test('never accepts arbitrary API hosts, account names, flow IDs or recipient nu
   assert.equal(request.headers.get('authorization'),
     'Basic '+btoa(envBase.EXOTEL_API_KEY+':'+envBase.EXOTEL_API_TOKEN));
   return request.formData().then(body=>{
-    assert.equal(body.get('From'),'+917415011511');
+    assert.equal(body.get('From'),'+919000000001');
     assert.equal(body.get('CallerId'),'09513886363');
     assert.equal(body.get('Url'),'http://my.exotel.com/rekixo1/exoml/start_voice/1392699');
     assert.equal(body.get('Record'),'false');
@@ -152,7 +152,7 @@ test('one explicit approved self-test reserves before fetch, submits once and st
   assert.equal(called,1);
   assert.equal(db.entries.length,1);
   assert.equal(db.entries[0].state,'submitted');
-  assert.ok(!JSON.stringify(db.entries).includes('7415011511'));
+  assert.ok(!JSON.stringify(db.entries).includes('9000000001'));
   const replay=await handleExotelOperatorTest(req('POST',confirm),env,user,
     {apiFetch,now:at+1000});
   assert.equal(replay.status,429);assert.equal(called,1);

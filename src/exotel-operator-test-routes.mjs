@@ -226,7 +226,7 @@ export async function handleExotelOperatorTest(req,env,user,{apiFetch=fetch,now=
   if(confirmation.publishedTenantId){
     try{
       const gateway=await readSharedGateway(env);
-      if(!gateway||!['staged','ready'].includes(gateway.state))return error('shared_gateway_setup_required',409);
+      if(!gateway||gateway.error_code||!['staged','ready'].includes(gateway.state))return error('shared_gateway_setup_required',409);
       gatewayTest=await requirePublishedAgent(env,confirmation.publishedTenantId,gateway.flow_id,{fetcher:apiFetch,allowStaged:true});
       if(!gatewayTest?.publication)return error('published_client_agent_required',409);
       requestEnv={...env,EXOTEL_VOICE_AI_FLOW_ID:gateway.flow_id};
