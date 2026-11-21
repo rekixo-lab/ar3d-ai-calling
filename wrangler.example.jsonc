@@ -34,6 +34,7 @@
     ]
   },
   "vars": {
-    "EXOTEL_CUSTOMER_CAMPAIGNS_ENABLED": "enabled"
+    "EXOTEL_CUSTOMER_CAMPAIGNS_ENABLED": "enabled",
+    "EXOTEL_OPERATOR_QA_UNTIL": "2026-11-21T18:30:00.000Z"
   }
 }
