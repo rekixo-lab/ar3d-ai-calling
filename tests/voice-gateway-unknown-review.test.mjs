@@ -86,6 +86,36 @@ test('a recorded guard without verified final instructions stays unconfirmed',as
   assert.equal(f.c.db.prepare('SELECT state FROM shared_voice_gateway WHERE id=1').get().state,'unknown');
  }finally{f.close()}
 });
+test('guard read-only inspection reports version-field mismatch without exposing prompt or changing provider',async()=>{
+ const f=fixture();try{
+  unknown(f);let reads=0,mutations=0;
+  const fetcher=async(url,init)=>{
+   reads++;if(init.method!=='GET')mutations++;
+   const u=new URL(url),isGuard=u.pathname.includes('/assistants/'),selected=u.searchParams.get('version');
+   if(isGuard&&selected==='v2')return Response.json({response:{
+    id:guard,stable_version:'v2',latest_version:'v3',
+    agents:[{instruction:'sensitive guard instructions must never be leaked'}]
+   }});
+   if(isGuard)return Response.json({response:{id:guard,stable_version:'v2',latest_version:'v3'}});
+   if(selected)return Response.json({response:{id:bot,version:'v2',assistant_config:{id:template}}});
+   return Response.json({response:{id:bot,stable_version:'v2',latest_version:'v2'}});
+  };
+  const response=await handleVoiceGatewayRequest(req(),f.env,admin,{now,fetcher});
+  assert.equal(response.status,200);
+  const serialized=await response.text(),d=JSON.parse(serialized);
+  assert.equal(d.guardAssistantReadable,true);
+  assert.equal(d.guardAssistantFinalized,null);
+  assert.equal(d.guardAssistantReadError,'guard_version_not_confirmed');
+  assert.equal(d.guardVersionContract.responseHasRootAgents,true);
+  assert.equal(d.guardVersionContract.responseHasVersionedAgents,false);
+  assert.equal(d.guardVersionContract.responseVersionMatchesRequested,false);
+  assert.equal(d.guardVersionContract.responseLatestMatchesRequested,false);
+  assert.equal(d.guardVersionContract.responseStableMatchesRequested,true);
+  assert.ok(!serialized.includes('sensitive guard instructions'));
+  assert.equal(d.savedState,'unknown');assert.equal(mutations,0);assert.equal(reads,4);
+  assert.equal(f.c.db.prepare('SELECT state FROM shared_voice_gateway WHERE id=1').get().state,'unknown');
+ }finally{f.close()}
+});
 test('missing guard and provider outage never pretend a gateway is ready',async()=>{
  for(const outage of [false,true]){
   const f=fixture();try{
