@@ -20,7 +20,7 @@ async function request(env,path,{fetcher=fetch,method='GET',body}={}){
  let raw='';const reader=response.body?.getReader();if(!reader)throw Error(method==='POST'?'provider_write_unknown':'provider_invalid_response');
  try{const decoder=new TextDecoder();let size=0;while(true){const {done,value}=await reader.read();if(done)break;size+=value.length;if(size>1000000)throw Error();raw+=decoder.decode(value,{stream:true})}raw+=decoder.decode();return JSON.parse(raw)}catch{throw Error(method==='POST'?'provider_write_unknown':'provider_invalid_response')}finally{await reader.cancel().catch(()=>{});reader.releaseLock()}
 }
-const unwrap=r=>r?.response?.data||r?.data||r;
+const unwrap=r=>r?.response?.data||r?.response||r?.data||r;
 function responseShape(raw){
  const out=[];
  function walk(v,path,depth){if(out.length>=30)return;if(!v||typeof v!=='object'){out.push(path+':'+(typeof v==='number'&&Number.isSafeInteger(v)&&/(?:^|\.)(?:code|status_code|http_code)$/.test(path)?String(v):typeof v));return}if(depth>=3){out.push(path+':object');return}for(const [key,value] of Object.entries(v).slice(0,20)){if(!/^[A-Za-z][A-Za-z0-9_]{0,40}$/.test(key))continue;walk(value,path?path+'.'+key:key,depth+1)}}
@@ -35,7 +35,8 @@ export async function probeScriptProvider(env,botId,options={}){
   const id=config.assistant_id||config.id,version=config.assistant_version||config.version;
   if(/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(id||'')&&/^v[1-9]\d{0,8}$/.test(version||''))candidates.push({assistantId:id,sourceVersion:version,botVersion});
  };
- extract(data.assistant_config,/^v[1-9]\d{0,8}$/.test(data.version||'')?data.version:null);
+ const botVersion=data.version||data.stable_version;
+ extract(data.assistant_config,/^v[1-9]\d{0,8}$/.test(botVersion||'')?botVersion:null);
  for(const [version,config] of Object.entries(data.versions||{}))if(/^v[1-9]\d{0,8}$/.test(version))extract(config?.assistant_config,version);
  return {accessVerified:true,botId,assistantCandidates:candidates,notice:'Read-only API access verified. This does not prove live rollout.'};
 }

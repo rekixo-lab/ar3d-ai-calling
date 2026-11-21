@@ -9,6 +9,7 @@ export function compileScript(value){
  const d=validateScript(value);
  return ['AR3D customer conversation instructions',
  'You are the company’s AI calling assistant. Identify yourself as AI. These instructions do not grant calling consent or authorize CRM changes.',
+ 'Use a female assistant persona. In Hindi refer to yourself in the feminine: बोल रही हूँ, कर सकती हूँ, समझ गई. Do not assume the customer’s gender.',
  'Language: '+d.language+'. Follow the customer’s preferred supported language. Speak naturally and briefly; ask one question at a time.',
  'If the customer declines, asks not to be called, or withdraws consent: acknowledge and end the call immediately. Never continue persuasion.',
  'Use only the approved facts below. Never invent prices, availability, discounts, legal approvals, appointments or confirmed site visits. If uncertain, offer a team follow-up. Never claim that an action or booking succeeded without a confirmed tool result.',

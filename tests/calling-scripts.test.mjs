@@ -9,6 +9,8 @@ test('read-only provider probe tests existing credentials, returns only whitelis
  let count=0;
  const fetcher=async(url,init)=>{count++;assert.equal(init.method,'GET');assert.ok(url.endsWith('/voicebots/'+botId));return Response.json({bot_id:botId,version:'v4',assistant_config:{assistant_id:assistantId,version:'v2',secret:'must-not-return'},webhook_token:'must-not-return'})};
  const result=await call(f,'probe',{botId},admin,'POST',{fetcher});assert.equal(result.status,200);const data=await result.json();assert.equal(data.accessVerified,true);assert.equal(data.assistantCandidates[0].assistantId,assistantId);assert.ok(!JSON.stringify(data).includes('must-not-return'));assert.equal(count,1);
+ const actualEnvelope=await call(f,'probe',{botId},admin,'POST',{fetcher:async()=>Response.json({http_code:200,response:{id:botId,stable_version:'v6',assistant_config:{id:assistantId,version:'v4'},webhook_config:{token:'never-return'}},request_id:'private-request'})});
+ const actual=await actualEnvelope.json();assert.equal(actual.accessVerified,true);assert.deepEqual(actual.assistantCandidates,[{assistantId,sourceVersion:'v4',botVersion:'v6'}]);assert.ok(!JSON.stringify(actual).includes('never-return'));assert.ok(!JSON.stringify(actual).includes('private-request'));
  assert.equal((await call(f,'probe',{botId},client,'POST',{fetcher})).status,403);assert.equal(count,1);
  const denied=await call(f,'probe',{botId},admin,'POST',{fetcher:async()=>new Response('denied',{status:403})});assert.equal((await denied.json()).error,'voicebot_management_access_denied');
  const unexpected=await call(f,'probe',{botId},admin,'POST',{fetcher:async()=>Response.json({response:{data:{token:'never-expose-this',credentials:'private'}}})});
