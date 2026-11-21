@@ -242,6 +242,7 @@ export async function recoverUnknownSharedGateway(env,{actorId,now=Date.now()},{
   const after=unwrapVoicebot(await voicebotRequest(env,botPath,opts));
   if((verified.id||verified.bot_id)!==r.bot_id||
      (verified.assistant_config?.id||verified.assistant_config?.assistant_id)!==r.guard_assistant_id||
+     (verified.assistant_config?.version||verified.assistant_config?.assistant_version)!==approvedVersion||
      after.stable_version!==stable||after.traffic_allocation?.[stable]!==100||
      after.latest_version!==candidate||
      Number(after.traffic_allocation?.[candidate]||0)!==0)
