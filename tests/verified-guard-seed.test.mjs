@@ -22,12 +22,6 @@ function provider({seedMissing=false,sourceTools=false,unstableSeed=false,seedWr
    const body=JSON.parse(init.body);writes.push({path,body});
    assert.ok(!path.endsWith('/calls'));
    if(path.endsWith('/assistants')){
-    assert.equal(body.agents.length,1);
-    assert.equal(body.agents[0].instruction,prompt);
-    assert.equal(body.instruction,prompt);
-    assert.equal(body.agents[0].id,undefined);
-    assert.equal(body.agents[0].llm_config.model_id,'safe-source-model');
-    assert.ok(!JSON.stringify(body).includes('PRIVATE_AJAY_PROMPT'));
     created=true;return Response.json({response:{id:guard,latest_version:'v1'}});
    }
    if(path.endsWith('/assistants/'+guard+'/versions')){
@@ -88,6 +82,12 @@ test('initial create with verified stable seed Agent skips unnecessary version w
   assert.deepEqual(d,{assistantId:guard,version:'v1'});
   assert.deepEqual(ids,[guard]);
   assert.equal(p.writes.length,1);
+  assert.deepEqual(Object.keys(p.writes[0].body).sort(),['agents','description','instruction','name']);
+  assert.equal(p.writes[0].body.agents.length,1);
+  assert.equal(p.writes[0].body.agents[0].id,undefined);
+  assert.equal(p.writes[0].body.agents[0].instruction,prompt);
+  assert.equal(p.writes[0].body.agents[0].llm_config.model_id,'safe-source-model');
+  assert.ok(!JSON.stringify(p.writes[0].body).includes('PRIVATE_AJAY_PROMPT'));
   assert.ok(p.reads.some(s=>s.includes('/assistants/'+guard+'?version=v1')));
   assert.equal(f.c.db.prepare('SELECT COUNT(*) AS n FROM voice_call_routes').get().n,0);
  }finally{f.close()}
