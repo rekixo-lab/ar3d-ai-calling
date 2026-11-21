@@ -14,8 +14,12 @@ export function validEmail(value){
   if(v.length>254||!/^[^\s@<>]{1,64}@[^\s@<>]{1,180}\.[^\s@<>]{2,}$/.test(v))throw Error('invalid email');
   return v;
 }
-export function validPassword(value){
-  if(typeof value!=='string'||value.length<12||value.length>128)throw Error('password must be 12–128 characters');
+export function validPassword(value,minLength=12){
+  // Client invitations accept 8 characters; the Super Admin bootstrap
+  // retains its existing 12-character minimum and hash scheme.
+  if(![8,12].includes(minLength))throw Error('invalid password policy');
+  if(typeof value!=='string'||value.length<minLength||value.length>128)
+    throw Error('password must be '+minLength+'–128 characters');
   return value;
 }
 export function randomSecret(){
@@ -57,8 +61,8 @@ export async function passwordDigest(password,saltHex,iterations=ITERATIONS){
   }
   return hex(material);
 }
-export async function makePassword(password){
-  validPassword(password);
+export async function makePassword(password,minLength=12){
+  validPassword(password,minLength);
   const salt=hex(crypto.getRandomValues(new Uint8Array(16)));
   return {salt,hash:await passwordDigest(password,salt),iterations:ITERATIONS};
 }
