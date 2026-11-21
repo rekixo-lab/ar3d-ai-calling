@@ -23,7 +23,7 @@ async function request(env,path,{fetcher=fetch,method='GET',body}={}){
 const unwrap=r=>r?.response?.data||r?.data||r;
 function responseShape(raw){
  const out=[];
- function walk(v,path,depth){if(out.length>=30)return;if(!v||typeof v!=='object'){out.push(path+':'+typeof v);return}if(depth>=3){out.push(path+':object');return}for(const [key,value] of Object.entries(v).slice(0,20)){if(!/^[A-Za-z][A-Za-z0-9_]{0,40}$/.test(key))continue;walk(value,path?path+'.'+key:key,depth+1)}}
+ function walk(v,path,depth){if(out.length>=30)return;if(!v||typeof v!=='object'){out.push(path+':'+(typeof v==='number'&&Number.isSafeInteger(v)&&/(?:^|\.)(?:code|status_code|http_code)$/.test(path)?String(v):typeof v));return}if(depth>=3){out.push(path+':object');return}for(const [key,value] of Object.entries(v).slice(0,20)){if(!/^[A-Za-z][A-Za-z0-9_]{0,40}$/.test(key))continue;walk(value,path?path+'.'+key:key,depth+1)}}
  walk(raw,'',0);return out.join(', ');
 }
 export async function probeScriptProvider(env,botId,options={}){
