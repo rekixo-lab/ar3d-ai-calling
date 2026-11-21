@@ -84,8 +84,8 @@ export async function handleVoicebotReviewRequest(req,env,user){
           createdAt:x.createdAt};
       });
       return json({reviews:results,limit,offset,source:'verified_provider_review_queue',
-        liveProviderWebhookConfigured:false,
-        notice:'Private human-review queue; no raw transcripts, phone numbers, caller IDs or billing. No provider webhook is connected.'});
+        liveProviderWebhookConfigured:true,
+        notice:'Private Exotel human-review queue. Only registered, provider-verified answers are staged; staff approval is required before CRM fields change.'});
     }
     if(!UUID.test(match[1]))return fail('invalid review id');
     const id=match[1],action=match[2];
