@@ -168,7 +168,7 @@ export async function recoverUnknownSharedGateway(env,{actorId,now=Date.now()},{
   throw Error('gateway_provider_changed_stop');
  const sourceBot=unwrapVoicebot(await voicebotRequest(env,botPath+'?version='+stable,opts));
  if((sourceBot.id||sourceBot.bot_id)!==r.bot_id||
-    (sourceBot.assistant_config?.id||sourceBot.assistant_config?.assistant_id)===r.guard_assistant_id)
+    (sourceBot.assistant_config?.id||sourceBot.assistant_config?.assistant_id)!==r.template_assistant_id)
   throw Error('gateway_provider_changed_stop');
  const guard=unwrapVoicebot(await voicebotRequest(env,guardPath,opts));
  const guardVersion=guard.stable_version;
