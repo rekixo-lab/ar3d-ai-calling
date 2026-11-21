@@ -59,7 +59,7 @@ try{
  await page.getByRole('button',{name:'Import to CRM',exact:true}).click();await page.getByText('Import finished: 0 new, 1 duplicates. No calls placed.',{exact:true}).waitFor();
  await page.getByRole('tab',{name:'Calling',exact:true}).click();
  await page.locator('[name=callCampaignName]').fill('Acceptance '+viewport.width);
- await page.getByRole('button',{name:'Create campaign with first 200 CRM customers',exact:true}).click();await page.getByText('1 customers added. Review the campaign before Start.',{exact:true}).waitFor();
+ await page.getByRole('button',{name:'Create campaign with selected CRM customers',exact:true}).click();await page.getByText('1 customers added, 0 already selected. No calls placed. Review approvals before Start.',{exact:true}).waitFor();
  page.once('dialog',dialog=>dialog.accept());await page.getByRole('button',{name:'Start / Resume calling',exact:true}).click();await page.getByText('Campaign running. Results refresh below.',{exact:true}).waitFor();
  await page.getByRole('button',{name:'Pause campaign',exact:true}).click();await page.getByText('Paused. A call already sent to Exotel may finish.',{exact:true}).waitFor();
  page.once('dialog',dialog=>dialog.accept());await page.getByRole('button',{name:'Start / Resume calling',exact:true}).click();await page.getByText('Campaign running. Results refresh below.',{exact:true}).waitFor();
