@@ -127,6 +127,12 @@ try{
  await adminPage.getByRole('button',{name:'Approve selected customers',exact:true}).click();
  await adminPage.getByText('1 customer approvals saved.',{exact:true}).waitFor();
  await adminPage.getByText('Engineering tools and diagnostics',{exact:true}).click();
+ await adminPage.getByRole('heading',{name:'Shared Calling Gateway',exact:true}).waitFor();
+ await adminPage.getByLabel('Shared gateway bot').waitFor();
+ assert.equal(await adminPage.getByLabel('Shared gateway bot').inputValue(),'66cbf4f6-a52d-4df0-abf0-db5e3b365836');
+ assert.equal(await adminPage.getByLabel('Shared gateway flow').inputValue(),'1393135');
+ assert.equal(await adminPage.getByLabel('Authenticated webhook template').inputValue(),'c3c7ca7c-b06d-4b3d-b661-ef121f751021');
+ assert.equal(await adminPage.getByLabel('I verified in Exotel that the copied Flow targets this shared Voicebot').isChecked(),false);
  await adminPage.getByRole('button',{name:'Call my verified test phone once',exact:true}).click();
  await adminPage.getByRole('alertdialog',{name:'Confirm verified test call'}).waitFor();assert.equal(operatorRequests,0);
  await adminPage.getByRole('button',{name:'Cancel test call',exact:true}).click();assert.equal(operatorRequests,0);
