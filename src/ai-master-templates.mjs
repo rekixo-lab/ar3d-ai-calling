@@ -81,17 +81,20 @@ export function buildMasterAIQuickSetup(raw,companyName){
   'Hello! I am the AI calling assistant for '+company+'. Is this a convenient time to talk about property information?':
   'नमस्ते! मैं '+company+' की AI कॉलिंग सहायक बोल रही हूँ। क्या अभी प्रॉपर्टी के बारे में बात करना सुविधाजनक है?';
  const faqs=[];
+ // Do not duplicate mutable prices, locations or sizes in immutable FAQ
+ // script versions. Reference the current approved company-facts version instead,
+ // so a price-only company update can reuse the unchanged Master AI script.
  if(d.location)faqs.push({
   question:'प्रॉपर्टी की लोकेशन कहाँ है?',
-  answer:'कंपनी ने '+d.location+' की जानकारी दी है। सही साइट और रास्ते की पुष्टि सेल्स टीम से करें।'
+  answer:'कॉल में साथ प्रकाशित कंपनी की वर्तमान स्वीकृत लोकेशन की जानकारी ही बताएं। उपलब्धता और सही रास्ते की पुष्टि सेल्स टीम से करें।'
  });
  if(d.price)faqs.push({
   question:'प्रॉपर्टी की कीमत कितनी है?',
-  answer:'कंपनी द्वारा दी गई कीमत की जानकारी: '+d.price+'। अंतिम कीमत, उपलब्धता और ऑफर की पुष्टि टीम से करें।'
+  answer:'कॉल में साथ प्रकाशित कंपनी की वर्तमान स्वीकृत कीमत की जानकारी ही बताएं। अंतिम कीमत, उपलब्धता और ऑफर की पुष्टि टीम से करें।'
  });
  if(d.size)faqs.push({
   question:'प्रॉपर्टी का साइज कितना है?',
-  answer:'कंपनी द्वारा दिया गया साइज: '+d.size+'। यूनिट या प्लॉट की उपलब्धता की पुष्टि टीम से करें।'
+  answer:'कॉल में साथ प्रकाशित कंपनी की वर्तमान स्वीकृत साइज की जानकारी ही बताएं। वास्तविक यूनिट या प्लॉट उपलब्धता की पुष्टि टीम से करें।'
  });
  const config=validateScript({
   name:d.template.label+' · Master v1',
