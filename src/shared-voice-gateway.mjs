@@ -586,7 +586,9 @@ export async function prepareSharedGateway(env,{botId,flowId,authTemplateBotId,a
 export async function connectSharedGatewayRouter(env,{authTemplateBotId,actorId,now=Date.now()},{fetcher=fetch}={}){
  if(!uuid(authTemplateBotId))throw Error('invalid_webhook_template');
  const db=env.CONTROL_DB,runtime=await readSharedGateway(env);
- if(!runtime||!['staged','unknown'].includes(runtime.state)||!uuid(runtime.guard_assistant_id))throw Error('shared_gateway_rollout_required');
+ // Never allow an unknown/partially written Guard to reach a provider PUT,
+ // even if its Voicebot has been externally pointed to the Guard.
+ if(!runtime||runtime.state!=='staged'||!uuid(runtime.guard_assistant_id))throw Error('shared_gateway_rollout_required');
  const options={fetcher},path='/voicebots/'+runtime.bot_id;
  const live=unwrapVoicebot(await voicebotRequest(env,path,options)),stable=live.stable_version;
  if(!version(stable)||live.traffic_allocation?.[stable]!==100)throw Error('shared_gateway_rollout_required');
