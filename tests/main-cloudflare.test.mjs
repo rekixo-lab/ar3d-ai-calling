@@ -114,6 +114,7 @@ function cloudflareMock({ controlTables=[],crmTables=[],controlName='ar3d-callin
         else if(sql.includes('call_campaign_drafts')) rows=['tenant_id','status','language_mode'].map(name=>({name}));
         else if(sql.includes('call_campaign_candidates')) rows=['tenant_id','campaign_id','lead_id'].map(name=>({name}));
         else if(sql.includes('voicebot_qualification_reviews')) rows=['tenant_id','lead_id','provider','status','survey_json','source_verified','mapping_verified','possible_opt_out'].map(name=>({name}));
+        else if(sql.includes('voicebot_verified_turns')) rows=REQUIRED_COLUMNS.CRM_DB.voicebot_verified_turns.map(name=>({name}));
         else if(sql.includes('call_intent_proposals')) rows=['tenant_id','id','campaign_id','lead_id','purpose','state','created_by','created_at'].map(name=>({name}));
         else if(sql.includes('company_profile_versions')) rows=REQUIRED_COLUMNS.CONTROL_DB.company_profile_versions.map(name=>({name}));
         else if(sql.includes('client_account_contacts')) rows=REQUIRED_COLUMNS.CONTROL_DB.client_account_contacts.map(name=>({name}));
