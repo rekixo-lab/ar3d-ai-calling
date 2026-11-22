@@ -4,6 +4,7 @@
   "main": "./src/index.mjs",
   "compatibility_date": "2026-11-17",
   "workers_dev": false,
+  "ai": { "binding": "AI" },
   "d1_databases": [
     {
       "binding": "CONTROL_DB",
@@ -32,10 +33,5 @@
     "crons": [
       "* * * * *"
     ]
-  },
-  "vars": {
-    "EXOTEL_CUSTOMER_CAMPAIGNS_ENABLED": "enabled",
-    "EXOTEL_REQUIRE_PUBLISHED_AGENT": "enabled",
-    "EXOTEL_OPERATOR_QA_UNTIL": "2026-11-21T18:30:00.000Z"
   }
 }

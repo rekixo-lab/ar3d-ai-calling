@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {fixture,tid,cid,lead,at,client,admin,route} from './helpers/calling-fixture.mjs';
+import {fixture,tid,cid,lead,at,client,admin,route,configureScriptedCampaign,until} from './helpers/calling-fixture.mjs';
 import {handleCampaignRequest} from '../src/campaign-routes.mjs';
 
 function fromCrm(f,body={tenantId:tid},user=client){
@@ -29,7 +29,8 @@ test('Selecting 240 CRM leads includes entire eligible list, not first 200; repl
   assert.equal(f.r.db.prepare('SELECT COUNT(*) AS n FROM call_campaign_candidates WHERE tenant_id=? AND campaign_id=?').get(tid,cid).n,240);
   const retry=await fromCrm(f);
   assert.equal((await retry.json()).inserted,0);
-  const policy=await route(f,'policy',{tenantId:tid,enabled:true,flowId:'123456',approvalReference:'approved',expiresAt:new Date(Date.now()+86400000).toISOString(),dailyLimit:1,maxSeconds:120},admin);
+  configureScriptedCampaign(f);
+  const policy=await route(f,'policy',{tenantId:tid,enabled:true,approvalReference:'approved',expiresAt:until,dailyLimit:1,maxSeconds:180},admin);
   assert.equal(policy.status,200);
   const start=await route(f,'runs',{tenantId:tid,campaignId:cid,action:'start'});
   assert.equal(start.status,202,await start.text());

@@ -1,81 +1,17 @@
-# Customer calling operations
+# Customer campaigns
 
-## Concrete release scope
+Complete the [verified-number pilot](scripted-phone-pilot.md) before enabling customer traffic. In production, use the exact custom hostname for the signed callbacks. Set `AR3D_SCRIPTED_CAMPAIGNS_ENABLED=enabled` only after the operator approves the carrier account, caller, permitted purpose and recording configuration.
 
-The customer dispatcher uses Exotel's [Connect with Flow API](https://developer.exotel.com/docs/agentstream/connect-voice-ai-flow),
-Basic authentication, server-owned destination/caller/Flow, recording off, and a
-persisted pre-submission reservation. It uses [Call Details](https://developer.exotel.com/docs/voice-v1/api-reference/call-details)
-for result reconciliation. It neither assumes a browser API request is a call
-completion nor automatically retries an ambiguous provider response.
+## Company setup
 
-The earlier GO/NO-GO engineering panel and historical docs describe the
-prototype path and commercial readiness, not this new operator-reviewed
-campaign path. Existing `calls`, `agents`, consent and webhook-quarantine
-protections remain intact. Actual campaign records live in `calling_runs` and
-`calling_jobs`. Overview counts include reserved campaign attempts.
+1. Upload the reviewed Hindi or English MP3 prompts to `scripted-phone-campaigns/<tenant-uuid>/<hi-or-en>/` in private R2. Use the [pilot filenames](scripted-phone-pilot.md) and identify the calling company and purpose in its opening. The opening explains recording and asks recipients to press 1 to continue or 2 to stop further calls. Keep every prompt under 512 KiB.
+2. Under **Calling Setup → Customer Calling Approval**, a current MFA Super Admin saves the provider approval reference, expiry, daily cap and 180–300 second call limit. Use **Review customers for calling** for the permitted purpose with evidence of consent and current DND clearance. Renew these customer clearances after changing the company approval and before recontacting a number.
+3. From **Customers / Excel**, the client imports the matched Name and Mobile columns. In **Calling**, the client creates a campaign, selects the language with uploaded prompts, and uses **Start / Resume calling**. Existing bilingual drafts require a new Hindi or English campaign. New campaign runs never inherit a legacy provider run.
 
-## Setup and launch
+## Queue and results
 
-- Preserve existing Exotel secrets; do not copy keys into client UI or GitHub.
-- In a current MFA Super Admin session, create a client and issue an invitation.
-- Review the actual caller, provider account restrictions and intended Voicebot
-  Flow before enabling that client's policy. The Flow and its prompt/version
-  are selected in Exotel, not by the client browser.
-- Select only leads covered by a specific consent reference and current DND
-  check. Choose the campaign purpose, expiry, daily attempts and max seconds.
-- The client imports its own sheet, makes a campaign and confirms Start.
-  Existing campaign planning APIs can select individual customers instead.
-- Each campaign's first Start snapshots its candidates once. Start retries
-  reuse the same run; Resume never adds new candidates. A completed campaign
-  stays completed. Create a new campaign for an explicitly reviewed recontact.
-- Recontact requires a newer clearance than the last reservation. Review the
-  previous Exotel interaction and record Do Not Call in the existing CRM action
-  before approving further contact. This release does not ingest speech answers
-  or automatically detect spoken opt-outs in the dispatcher.
+The Worker dispatches on a one-minute schedule within 09:00–20:00 India time. It reserves one call at a time per company and enforces the daily cap including failed attempts. Pause or disable company calling to suspend further reservations. A call already being submitted can finish. An uncertain request locks that company's queue until operations confirms its outcome from Plivo and the application audit. Operations must never resubmit an uncertain call based on a timeout alone.
 
-## Incident actions
+A signed Plivo callback establishes call identity. A successful questionnaire writes tenant-scoped property details and logs one CRM audit event. Partial responses, failed transcription or a concurrently edited lead are flagged for staff follow-up. A proposed visit date is a preference. Recording begins only after pressing 1. Pressing 2 or requesting to stop a campaign call creates a permanent opt-out in the CRM. Review customer consent separately before any further contact.
 
-Pause the run or disable company calling to stop future calls. To stop all new
-submissions set `EXOTEL_CUSTOMER_CAMPAIGNS_ENABLED=disabled` on this Worker.
-These actions do not hang up a call already accepted by Exotel.
-
-`reserved` after a Worker crash or `unknown` after a timeout means dispatch
-might have happened. Never clear the state or retry just because the UI lacks
-a result. Check the corresponding time/destination in Exotel and retain its
-provider record. The queue deliberately stays locked until an operator resolves
-the incident with provider evidence. There is no UI force-reset button.
-A submitted call whose status cannot be verified also blocks the next call.
-
-Limits count reservations, including failed/unknown attempts, to bound spend.
-Usage shown is attempt count/duration, not an invoice. No payment gateway is
-required for an operator-run pilot.
-
-## Rollout evidence, 20 November 2026
-
-Read-only Exotel UI review found a free-trial account, an existing Voicebot Flow
-and live agent version v4 with one 3m21s historical interaction. Configure can
-show an older stable assistant even while another version receives 100% of
-traffic. A new seven-question property survey version was saved as paused v5,
-0% traffic; the existing v4 allocation was preserved. Review/test the chosen
-version before changing live allocation. No customer calls were started during
-this implementation.
-
-## Verification
-
-`tests/calling-campaigns.test.mjs` uses actual Control+CRM migrations and SQLite,
-with a fake Exotel transport. It checks admin/client/viewer isolation, current
-MFA, duplicate reservations, verified results, pause/expiry/window/kill switch,
-opt-out/missing clearance and uncertain response lockout. Browser acceptance
-runs the real Worker routes backed by migrated SQLite on localhost, uploads a
-synthetic CSV, creates a campaign, starts/pauses/resumes it and refreshes results.
-No test uses a real provider destination or private account credentials.
-
-Live acceptance still requires an explicitly selected verified recipient,
-provider-permitted trial/production caller, chosen agent version and a real
-conversation check. Passing automated tests is not evidence that those
-account-side steps happened.
-
-The account has the Workers Free five-cron ceiling. This Worker therefore uses
-one minute schedule in place of its old six-hour schedule. The minute handler
-runs auth/receipt cleanup only at the original UTC six-hour boundaries. It does
-not add an account cron slot or touch any other Worker schedule.
+For an emergency global stop, disable `AR3D_SCRIPTED_CAMPAIGNS_ENABLED`. Existing authenticated callbacks can finish recording the result of a call already in progress.

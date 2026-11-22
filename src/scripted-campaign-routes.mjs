@@ -1,8 +1,7 @@
 import {requireMembership,mutationOriginAllowed} from './human-auth.mjs';
 import {resolveCrmDb,parseJsonBody} from './core.mjs';
-import {campaignConfig} from './campaign-dispatch.mjs';
-import {requirePublishedAgent} from './published-agent.mjs';
-import {readSharedGateway} from './shared-voice-gateway.mjs';
+import {scriptedCampaignConfiguration} from './scripted-campaign-dispatch.mjs';
+import {SCRIPTED_CALLING_POLICY,scriptedPromptsReady} from './scripted-phone-pilot.mjs';
 const BASE='/v1/human/calling';
 const UUID=/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
 const json=(data,status=200)=>Response.json(data,{status,headers:{'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'}});
@@ -26,7 +25,7 @@ async function audit(db,tid,user,action,target,at){
  await db.prepare("INSERT INTO crm_audit_events(tenant_id,id,actor,action,target_id,created_at) VALUES(?,?,'human:'||?,?,?,?)")
  .bind(tid,crypto.randomUUID(),user.id,action,target,at).run();
 }
-export async function handleCallingRequest(req,env,user,{now=Date.now(),fetcher=fetch}={}){
+export async function handleScriptedCallingRequest(req,env,user,{now=Date.now()}={}){
  const url=new URL(req.url),path=url.pathname;
  if(!path.startsWith(BASE+'/'))return null;
  const action=path.slice(BASE.length+1);
@@ -47,18 +46,15 @@ export async function handleCallingRequest(req,env,user,{now=Date.now(),fetcher=
    if(!member)return fail('forbidden',403);
   }
   const db=resolveCrmDb(env,member),tid=member.tenant_id,at=new Date(now).toISOString();
-  if(action==='policy'&&req.method==='GET')return json({policy:await db.prepare('SELECT enabled,flow_id AS flowId,approval_reference AS approvalReference,expires_at AS expiresAt,daily_limit AS dailyLimit,max_seconds AS maxSeconds FROM calling_policies WHERE tenant_id=?').bind(tid).first(),configuration:campaignConfig(env)});
+  if(action==='policy'&&req.method==='GET')return json({policy:await db.prepare('SELECT enabled,approval_reference AS approvalReference,expires_at AS expiresAt,daily_limit AS dailyLimit,max_seconds AS maxSeconds FROM calling_policies WHERE tenant_id=? AND flow_id=?').bind(tid,SCRIPTED_CALLING_POLICY).first(),configuration:await scriptedCampaignConfiguration(env)});
   if(action==='policy'){
-   if(Object.keys(d).some(k=>!['tenantId','enabled','flowId','approvalReference','expiresAt','dailyLimit','maxSeconds'].includes(k))||
-    typeof d.enabled!=='boolean'||!/^[1-9]\d{0,11}$/.test(d.flowId||'')||!reference(d.approvalReference)||!expiry(d.expiresAt,now)||
-    !Number.isInteger(d.dailyLimit)||d.dailyLimit<1||d.dailyLimit>100||!Number.isInteger(d.maxSeconds)||d.maxSeconds<30||d.maxSeconds>600)return fail('invalid_policy');
-   if(d.enabled&&env.EXOTEL_REQUIRE_PUBLISHED_AGENT==='enabled'){
-    const gateway=await readSharedGateway(env);
-    if(!gateway||gateway.state!=='ready'||gateway.flow_id!==d.flowId)return fail('verified_shared_calling_gateway_required',409);
-   }
+   if(Object.keys(d).some(k=>!['tenantId','enabled','approvalReference','expiresAt','dailyLimit','maxSeconds'].includes(k))||
+    typeof d.enabled!=='boolean'||!reference(d.approvalReference)||!expiry(d.expiresAt,now)||
+    !Number.isInteger(d.dailyLimit)||d.dailyLimit<1||d.dailyLimit>100||!Number.isInteger(d.maxSeconds)||d.maxSeconds<180||d.maxSeconds>300)return fail('invalid_policy');
+   if(d.enabled&&!(await scriptedCampaignConfiguration(env)).ready)return fail('scripted_campaign_setup_required',409);
    await db.batch([
     db.prepare('INSERT INTO calling_policies(tenant_id,enabled,flow_id,approval_reference,expires_at,daily_limit,max_seconds,updated_by,updated_at) VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT(tenant_id) DO UPDATE SET enabled=excluded.enabled,flow_id=excluded.flow_id,approval_reference=excluded.approval_reference,expires_at=excluded.expires_at,daily_limit=excluded.daily_limit,max_seconds=excluded.max_seconds,updated_by=excluded.updated_by,updated_at=excluded.updated_at')
-    .bind(tid,Number(d.enabled),d.flowId,d.approvalReference,d.expiresAt,d.dailyLimit,d.maxSeconds,user.id,at),
+    .bind(tid,Number(d.enabled),SCRIPTED_CALLING_POLICY,d.approvalReference,d.expiresAt,d.dailyLimit,d.maxSeconds,user.id,at),
     db.prepare("INSERT INTO crm_audit_events(tenant_id,id,actor,action,target_id,created_at) VALUES(?,?,'human:'||?,'calling.policy_reviewed',?,?)").bind(tid,crypto.randomUUID(),user.id,tid,at)
    ]);
    if(d.enabled&&member.status==='trial'){
@@ -88,21 +84,27 @@ export async function handleCallingRequest(req,env,user,{now=Date.now(),fetcher=
    const [runs,jobs,policy]=await Promise.all([
     db.prepare('SELECT r.id,r.campaign_id AS campaignId,c.name,r.state,r.created_at AS createdAt FROM calling_runs r JOIN call_campaign_drafts c ON c.tenant_id=r.tenant_id AND c.id=r.campaign_id WHERE r.tenant_id=? ORDER BY r.created_at DESC LIMIT 50').bind(tid).all(),
     db.prepare('SELECT j.id,j.run_id AS runId,j.lead_id AS leadId,l.name,j.state,j.provider_status AS providerStatus,j.duration_seconds AS durationSeconds,j.error_code AS errorCode,j.updated_at AS updatedAt FROM calling_jobs j JOIN leads l ON l.tenant_id=j.tenant_id AND l.id=j.lead_id WHERE j.tenant_id=? ORDER BY j.created_at DESC,j.id DESC LIMIT 200').bind(tid).all(),
-    db.prepare('SELECT enabled,expires_at AS expiresAt,daily_limit AS dailyLimit FROM calling_policies WHERE tenant_id=?').bind(tid).first()
+    db.prepare('SELECT enabled,expires_at AS expiresAt,daily_limit AS dailyLimit FROM calling_policies WHERE tenant_id=? AND flow_id=?').bind(tid,SCRIPTED_CALLING_POLICY).first()
    ]);
-   return json({runs:runs.results,jobs:jobs.results,policy,configuration:campaignConfig(env),window:'09:00–20:00 Asia/Kolkata',recordingEnabled:false});
+   return json({runs:runs.results,jobs:jobs.results,policy,configuration:await scriptedCampaignConfiguration(env),window:'09:00–20:00 Asia/Kolkata',recordingEnabled:true});
   }
   if(req.method!=='POST')return fail('method_not_allowed',405);
   if(Object.keys(d).some(k=>!['tenantId','campaignId','action'].includes(k))||!UUID.test(d.campaignId||'')||!['start','pause'].includes(d.action))return fail('invalid_run');
   if(d.action==='pause'){
    await db.prepare("UPDATE calling_runs SET state='paused',updated_at=? WHERE tenant_id=? AND campaign_id=? AND state='running'").bind(at,tid,d.campaignId).run();
-   await audit(db,tid,user,'calling.paused',d.campaignId,at);return json({state:'paused',notice:'A call already submitted to Exotel may finish.'});
+   await audit(db,tid,user,'calling.paused',d.campaignId,at);return json({state:'paused',notice:'A call already submitted to Plivo may finish.'});
   }
   if(member.status!=='active')return fail('super_admin_must_activate_tenant',409);
-  if(!campaignConfig(env).ready)return fail('exotel_customer_campaigns_unconfigured',503);
-  const policy=await db.prepare('SELECT tenant_id,flow_id FROM calling_policies WHERE tenant_id=? AND enabled=1 AND expires_at>?').bind(tid,at).first();
+  if(!(await scriptedCampaignConfiguration(env)).ready)return fail('scripted_customer_campaigns_unconfigured',503);
+  const policy=await db.prepare('SELECT tenant_id,flow_id FROM calling_policies WHERE tenant_id=? AND enabled=1 AND expires_at>? AND flow_id=?').bind(tid,at,SCRIPTED_CALLING_POLICY).first();
   if(!policy)return fail('super_admin_calling_approval_required',409);
-  try{await requirePublishedAgent(env,tid,policy.flow_id,{fetcher})}catch(e){return fail(e.message,409)}
+  const draft=await db.prepare('SELECT language_mode FROM call_campaign_drafts WHERE tenant_id=? AND id=?').bind(tid,d.campaignId).first();
+  if(!['hi','en'].includes(draft?.language_mode))return fail('choose_hindi_or_english_recordings',409);
+  if(!await scriptedPromptsReady(env,draft.language_mode,tid))return fail('campaign_prompt_recordings_incomplete',409);
+  const existing=await db.prepare(`SELECT r.id FROM calling_runs r WHERE r.tenant_id=? AND r.campaign_id=?
+   AND NOT EXISTS(SELECT 1 FROM calling_jobs j WHERE j.tenant_id=r.tenant_id AND j.run_id=r.id AND j.flow_id=?)`)
+   .bind(tid,d.campaignId,SCRIPTED_CALLING_POLICY).first();
+  if(existing)return fail('create_a_new_campaign_after_provider_cutover',409);
   const count=await db.prepare('SELECT COUNT(*) AS n FROM call_campaign_candidates WHERE tenant_id=? AND campaign_id=?').bind(tid,d.campaignId).first();
   if(!count||count.n<1||count.n>2000)return fail('campaign_requires_1_to_2000_customers',409);
   const id=crypto.randomUUID();
@@ -111,8 +113,8 @@ export async function handleCallingRequest(req,env,user,{now=Date.now(),fetcher=
   await db.batch([
    db.prepare("INSERT INTO calling_runs(tenant_id,id,campaign_id,state,created_by,created_at,updated_at) SELECT tenant_id,?,id,'running',?,?,? FROM call_campaign_drafts WHERE tenant_id=? AND id=? AND EXISTS(SELECT 1 FROM call_campaign_candidates cc WHERE cc.tenant_id=call_campaign_drafts.tenant_id AND cc.campaign_id=call_campaign_drafts.id) ON CONFLICT(tenant_id,campaign_id) DO UPDATE SET state=CASE WHEN calling_runs.state='paused' THEN 'running' ELSE calling_runs.state END,updated_at=excluded.updated_at")
     .bind(id,user.id,at,at,tid,d.campaignId),
-   db.prepare("INSERT OR IGNORE INTO calling_jobs(tenant_id,id,run_id,lead_id,state,created_at,updated_at) SELECT cc.tenant_id,lower(hex(randomblob(16))),r.id,cc.lead_id,'queued',?,? FROM call_campaign_candidates cc JOIN calling_runs r ON r.tenant_id=cc.tenant_id AND r.campaign_id=cc.campaign_id WHERE cc.tenant_id=? AND cc.campaign_id=? AND r.id=? ORDER BY cc.created_at,cc.lead_id LIMIT 2000")
-    .bind(at,at,tid,d.campaignId,id)
+   db.prepare("INSERT OR IGNORE INTO calling_jobs(tenant_id,id,run_id,lead_id,state,flow_id,created_at,updated_at) SELECT cc.tenant_id,lower(hex(randomblob(16))),r.id,cc.lead_id,'queued',?,?,? FROM call_campaign_candidates cc JOIN calling_runs r ON r.tenant_id=cc.tenant_id AND r.campaign_id=cc.campaign_id WHERE cc.tenant_id=? AND cc.campaign_id=? AND r.id=? ORDER BY cc.created_at,cc.lead_id LIMIT 2000")
+    .bind(SCRIPTED_CALLING_POLICY,at,at,tid,d.campaignId,id)
   ]);
   const run=await db.prepare('SELECT id,state FROM calling_runs WHERE tenant_id=? AND campaign_id=?').bind(tid,d.campaignId).first();
   if(!run)return fail('campaign_missing_or_empty',409);

@@ -25,7 +25,6 @@ test('dashboard sidebar has distinct block navigation and accessible sign-out sp
   assert.match(js,/nav\('Security','shield','security-section'\)/);
   assert.match(js,/nav\('AI Setup','spark','ai-setup'\)/);
   assert.match(js,/nav\('Calling Setup','phone','platform-settings'\)/);
-  assert.match(js,/advanced\.open&&!advanced\.dataset\.loaded/);
   assert.match(js,/btn\('Sign out',logout,true\)/);
 });
 
@@ -49,18 +48,11 @@ test('public smoke checks health, login UI, sidebar fix and 401 without writes o
     ['/health',[200,'application/json',JSON.stringify({service:'AR3D AI Calling',status:'foundation'})]],
     ['/app',[200,'text/html','<title>AR3D AI Calling</title>']],
     ['/app/assets/style.css',[200,'text/css',css]],
-    ['/app/assets/app.js',[200,'text/javascript','Calling & Exotel Setup Sign out']],
+    ['/app/assets/app.js',[200,'text/javascript','Calling Setup /v1/human/scripted-phone-pilot Sign out']],
     ['/v1/human/me',[401,'application/json',JSON.stringify({error:'sign in required'})]],
-    ['/v1/human/engineering/status',[401,'application/json',JSON.stringify({error:'sign in required'})]],
-    ['/v1/human/engineering/provider-pilot',[401,'application/json',JSON.stringify({error:'sign in required'})]],
-    ['/v1/human/engineering/media-protocol',[401,'application/json',JSON.stringify({error:'sign in required'})]],
-    ['/v1/human/engineering/provider-connectivity',[401,'application/json',JSON.stringify({error:'sign in required'})]],
-    ['/v1/human/engineering/exotel-trial-setup',[401,'application/json',JSON.stringify({error:'sign in required'})]],
-    ['/v1/human/engineering/own-sip-setup',[401,'application/json',JSON.stringify({error:'sign in required'})]],
-    ['/v1/human/engineering/voicebot-fixture',[401,'application/json',JSON.stringify({error:'sign in required'})]],
-    ['/v1/human/engineering/voicebot-qualification',[401,'application/json',JSON.stringify({error:'sign in required'})]],
+    ['/v1/human/scripted-phone-pilot',[401,'application/json',JSON.stringify({error:'sign in required'})]],
+    ['/v1/provider/exotel/voicebot',[410,'application/json',JSON.stringify({error:'provider_route_retired'})]],
     ['/v1/human/leads/33333333-3333-4333-8333-333333333333/qualification',[401,'application/json',JSON.stringify({error:'sign in required'})]],
-    ['/v1/human/voicebot-reviews',[401,'application/json',JSON.stringify({error:'sign in required'})]],
     ['/v1/human/call-intent-proposals',[401,'application/json',JSON.stringify({error:'sign in required'})]],
     ['/v1/human/voice-preview',[401,'application/json',JSON.stringify({error:'sign in required'})]]
   ]);
@@ -78,40 +70,4 @@ test('public smoke checks health, login UI, sidebar fix and 401 without writes o
 test('public smoke fails closed on an unsafe redirect, broken content or wrong response',async()=>{
   const result=await smoke('https://aicalling.ar3dstudio.in',async()=>new Response('Not found',{status:404,headers:{'Content-Type':'text/html'}}));
   assert.equal(result,false);
-});
-
-test('Engineering status and 100 synthetic calls are Super Admin-only UI and do not expose live dialing',()=>{
-  assert.match(js,/Production Readiness & Safe AI Calling Pilot/);
-  assert.match(js,/Run 100 Synthetic Calls \(no dialing\)/);
-  assert.match(js,/\/v1\/human\/engineering\/status/);
-  assert.match(js,/\/v1\/human\/engineering\/pilot/);
-  assert.match(js,/realCallsStarted/);
-  assert.doesNotMatch(js,/\/v1\/human\/calls\/start/);
-  assert.doesNotThrow(()=>new vm.Script(js));
-});
-
-
-test('Exotel mock adapter visible in super-admin engineering panel without enabling telecom',()=>{
-  assert.match(js,/Test Exotel Mock Provider \(100 events\)/);
-  assert.match(js,/\/v1\/human\/engineering\/provider-pilot/);
-  assert.match(js,/External requests:/);
-  assert.doesNotMatch(js,/\/v1\/human\/calls\/start/);
-  assert.doesNotThrow(()=>new vm.Script(js));
-});
-
-
-test('AgentStream Offline PCM protocol acceptance is strictly Super Admin-only',()=>{
-  assert.match(js,/Test 100 PCM Audio Frames \(offline\)/);
-  assert.match(js,/\/v1\/human\/engineering\/media-protocol/);
-  assert.match(js,/Media server connected: no/);
-  assert.doesNotMatch(js,/\/v1\/human\/calls\/start/);
-  assert.doesNotThrow(()=>new vm.Script(js));
-});
-
-
-test('Exotel connectivity uses private read-only Super Admin endpoint and shows no live dial UI',()=>{
- assert.match(js,/Check Exotel Connection \(read-only\)/);
- assert.match(js,/\/v1\/human\/engineering\/provider-connectivity/);
- assert.match(js,/Real dialing: disabled/);
- assert.doesNotMatch(js,/\/v1\/human\/calls\/start/);
 });

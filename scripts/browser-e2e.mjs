@@ -9,23 +9,13 @@ import http from 'node:http';
 import {once} from 'node:events';
 import {chromium} from 'playwright';
 import {html,css,js} from '../src/app-assets.mjs';
-import {productionReadiness} from '../src/release-gates.mjs';
-import {operationalReadiness} from '../src/operational-readiness.mjs';
-import {probeExotelConnectivity} from '../src/provider-connectivity.mjs';
-import {runSyntheticPilot} from '../src/sandbox-pilot.mjs';
-import {runExotelMockPilot} from '../src/exotel-mock-pilot.mjs';
-import {runExotelMediaHarness} from '../src/exotel-media-harness.mjs';
 import {fixedPropertyQuestions,PROPERTY_TYPES,normalizePropertySurvey} from '../src/fixed-property-survey.mjs';
-import {exotelTrialReadiness,managedVoicebotInstructions} from '../src/exotel-trial-readiness.mjs';
-import {ownSipSetup} from '../src/own-sip-readiness.mjs';
-import {runExotelVoicebotOfflineFixture} from '../src/exotel-voicebot-webhook-contract.mjs';
-import {runVoicebotQualificationFixture} from '../src/exotel-voicebot-qualification.mjs';
 import {beginFixedVoicePreview,advanceFixedVoicePreview} from '../src/fixed-voice-turns.mjs';
 
 const SESSION='synthetic-browser-session-only';
 const TEST_EMAIL='sandbox-operator@example.invalid';
 const TEST_PASSWORD='FictionalBrowserTestPassword2026!';
-let pilotRuns=0,providerRuns=0,mediaRuns=0,invalidRequests=0;
+let invalidRequests=0;
 const respond=(res,code,body,type='application/json',extra={})=>{
   res.writeHead(code,{'Content-Type':type,'Cache-Control':'no-store',...extra});
   res.end(typeof body==='string'?body:JSON.stringify(body));
@@ -66,98 +56,11 @@ const server=http.createServer(async(req,res)=>{
         'Set-Cookie':'sandbox_session=; Path=/; HttpOnly; Max-Age=0'
       });
     if(!authenticated)return respond(res,401,{error:'sign in required'});
-    if(req.method==='GET'&&path==='/v1/human/voice-gateway')return respond(res,200,{gateway:null});
     if(req.method==='GET'&&path==='/v1/human/mfa')
       return respond(res,200,{enabled:false,configured:true});
     if(req.method==='GET'&&path==='/v1/human/tenants')
       return respond(res,200,{tenants:[]});
-    if(req.method==='GET'&&path==='/v1/human/engineering/status')
-      return respond(res,200,{...productionReadiness(),operational:operationalReadiness({})});
-    if(req.method==='GET'&&path==='/v1/human/engineering/production-cutover')
-      return respond(res,200,{
-        verdict:'NO_GO',databaseSafety:{
-          control:'guarded',crm:'guarded',controlMissing:[],crmMissing:[]
-        },customerCampaignLaunchAuthorized:false,
-        hundredCustomerCallPilotAuthorized:false,
-        customerCallsPlaced:0,providerNetworkRequests:0,
-        blockers:[{id:'telecom_contract',requiredForPilot:true,
-          title:'Approved commercial outbound Exotel agreement',
-          owner:'Exotel / business',
-          action:'Obtain written commercial outbound entitlement'}],
-        note:'Live provider proof, consent/DND and independently verified telecom approval are pending.'
-      });
-    if(req.method==='GET'&&path==='/v1/human/engineering/exotel-trial-setup')
-      return respond(res,200,{...exotelTrialReadiness({}),managedVoicebotPrompt:managedVoicebotInstructions()});
-    if(req.method==='GET'&&path==='/v1/human/engineering/own-sip-setup')
-      return respond(res,200,ownSipSetup());
-    if(req.method==='GET'&&path==='/v1/human/engineering/exotel-self-test')
-      return respond(res,200,{
-        mode:'operator_verified_number_only',configured:false,
-        missing:['operator_explicit_opt_in'],mfaEnabled:true,
-        voicebotFlowId:null,destinationLast4:null,realCallsStartedByRead:0,
-        recent:[{id:'00112233-4455-4677-8899-aabbccddeeff',state:'submitted',
-          createdAt:'2026-11-20T12:00:00.000Z',errorCode:null,checkState:null,
-          webhookCandidate:{state:'candidate_only',uniqueReceipts:2,
-            transcriptEvents:1,sessionEnds:1,completedTurns:1,
-            uniqueSessions:1,possibleOptOutEvents:0,
-            lastReceivedAt:'2026-11-20T12:10:00.000Z',
-            sourceAuthenticated:false,leadMatched:false,canUpdateCrm:false}}]
-      });
-    if(req.method==='GET'&&path==='/v1/human/engineering/exotel-webhook-health')
-      return respond(res,200,{
-        mode:'read_only_quarantined_metadata',window:'unexpired_receipts_only',
-        sourceNetworkPolicy:'cloudflare_ipv4_allowlist_enforced',
-        webhookTokenConfigured:true,lastReceivedAt:'2026-11-20T12:20:00.000Z',
-        metrics:{uniqueReceipts:3,transcriptReceipts:2,sessionEndReceipts:1,
-          completedTurns:1,inProgressTurns:1,distinctSessions:1,
-          possibleOptOutSignals:1},
-        sourceVerified:false,callToLeadLinked:false,crmWrites:0,liveCallsStarted:0
-      });
-
-    if(req.method==='POST'&&path==='/v1/human/engineering/pilot'){
-      if(req.headers.origin!=='http://127.0.0.1:'+server.address().port)
-        return respond(res,403,{error:'origin required'});
-      const params=await readBounded(req);
-      pilotRuns++;
-      return respond(res,200,runSyntheticPilot(params));
-    }
-    if(req.method==='POST'&&path==='/v1/human/engineering/provider-pilot'){
-      if(req.headers.origin!=='http://127.0.0.1:'+server.address().port)
-        return respond(res,403,{error:'origin required'});
-      const params=await readBounded(req);
-      providerRuns++;
-      return respond(res,200,runExotelMockPilot(params));
-    }
-    if(req.method==='POST'&&path==='/v1/human/engineering/voicebot-fixture'){
-      if(req.headers.origin!=='http://127.0.0.1:'+server.address().port)
-        return respond(res,403,{error:'origin required'});
-      const input=await readBounded(req);
-      if(Object.keys(input).length!==1||typeof input.scenario!=='string')
-        return respond(res,400,{error:'invalid fictional input'});
-      return respond(res,200,runExotelVoicebotOfflineFixture(input.scenario));
-    }
-    if(req.method==='POST'&&path==='/v1/human/engineering/voicebot-qualification'){
-      if(req.headers.origin!=='http://127.0.0.1:'+server.address().port)
-        return respond(res,403,{error:'origin required'});
-      const input=await readBounded(req);
-      if(Object.keys(input).length!==1||typeof input.scenario!=='string')
-        return respond(res,400,{error:'invalid fictional input'});
-      return respond(res,200,runVoicebotQualificationFixture(input.scenario));
-    }
-    if(req.method==='POST'&&path==='/v1/human/engineering/media-protocol'){
-      if(req.headers.origin!=='http://127.0.0.1:'+server.address().port)
-        return respond(res,403,{error:'origin required'});
-      const params=await readBounded(req);
-      mediaRuns++;
-      return respond(res,200,runExotelMediaHarness(params));
-    }
-    if(req.method==='POST'&&path==='/v1/human/engineering/provider-connectivity'){
-      if(req.headers.origin!=='http://127.0.0.1:'+server.address().port)
-        return respond(res,403,{error:'origin required'});
-      const input=await readBounded(req);
-      if(Object.keys(input).length) return respond(res,400,{error:'invalid request'});
-      return respond(res,200,await probeExotelConnectivity({}));
-    }
+    if(req.method==='GET'&&path==='/v1/human/scripted-phone-pilot')return respond(res,200,{configured:false});
     if(req.method==='POST'&&path==='/v1/human/voice-preview'){
       if(req.headers.origin!=='http://127.0.0.1:'+server.address().port)
         return respond(res,403,{error:'origin required'});
@@ -229,27 +132,10 @@ try{
     await page.getByPlaceholder('Enter your password').fill(TEST_PASSWORD);
     await page.getByRole('button',{name:'Sign in',exact:true}).click();
     await page.getByRole('heading',{name:'Super Admin',exact:true}).waitFor();
-    await page.getByRole('heading',{name:'Simple Setup — Next Step'}).waitFor();
-    assert.equal(await page.getByRole('heading',{name:'Production Readiness & Safe AI Calling Pilot'}).count(),0);
-    await page.getByText('3. Calling & Exotel Setup',{exact:true}).click();
-    await page.getByText('Advanced developer diagnostics (optional)',{exact:true}).click();
-    await page.getByRole('heading',{name:'Production Readiness & Safe AI Calling Pilot'}).waitFor();
-    await page.getByRole('heading',{name:'Operator Setup Checklist'}).waitFor();
-    await page.getByRole('heading',{name:'Customer Production Launch — GO / NO-GO'}).waitFor();
-    await page.getByRole('button',{name:'Run Production GO/NO-GO Audit (no calls)'}).click();
-    await page.getByText('Customer launch: NO_GO | Control DB: guarded | CRM safety: guarded | Customer calls: 0 | Provider requests: 0').waitFor();
-    await page.getByRole('row',{name:/Approved commercial outbound Exotel agreement/}).waitFor();
-
-    await page.getByRole('heading',{name:'Exotel Trial Setup — What Is Ready?'}).waitFor();
-    await page.getByText(/Potential Exotel webhook matches \(hashed metadata only\): 2 unique events/).waitFor();
-    await page.getByText(/Candidate only: the webhook external_id must equal/).waitFor();
-
-    await page.getByRole('heading',{name:'Our Own Calling Engine — No Exotel Required'}).waitFor();
-    await page.getByText(/Asterisk local-only lab: source ready/).waitFor();
-    await page.getByRole('button',{name:'Copy 7-question Exotel Voicebot instructions'}).waitFor();
-    await page.getByText('Missing: EXOTEL_API_TOKEN').waitFor();
-    await page.getByRole('button',{name:'Check Exotel Connection (read-only)'}).click();
-    await page.getByText('Exotel API: Not verified | Region: not configured (missing) | Real dialing: disabled').waitFor();
+    await page.getByRole('heading',{name:'Calling setup',exact:true}).waitFor();
+    await page.getByText('3. Calling Setup',{exact:true}).click();
+    await page.getByRole('heading',{name:'AR3D Fixed-question Phone Pilot'}).waitFor();
+    await page.getByText('Phone pilot is disabled or unconfigured.',{exact:true}).waitFor();
     const nav=page.getByRole('link',{name:'Security',exact:true});
     const signout=page.getByRole('button',{name:'Sign out'});
     await nav.waitFor();await signout.waitFor();
@@ -257,28 +143,6 @@ try{
     assert.ok(navBox&&logoutBox,viewport.name+' sidebar controls invisible');
     assert.ok(navBox.y+navBox.height+3<=logoutBox.y,
       viewport.name+' navigation and Sign out overlap');
-    await page.getByRole('button',{name:'Run 100 Synthetic Calls (no dialing)'}).click();
-    await page.getByText('Synthetic calls: 100 | Real calls: 0 | Audio generated: 0').waitFor();
-    await page.getByText(/Real billing: disabled \| Payment collected: no/).waitFor();
-    await page.getByRole('button',{name:'Test Exotel Mock Provider (100 events)'}).click();
-    await page.getByText('Provider mock events: 100 | Real calls: 0 | External requests: 0').waitFor();
-    await page.getByRole('button',{name:'Test Exotel Voicebot Transcript Webhooks (offline)'}).click();
-    await page.getByText('seven questions',{exact:true}).waitFor();
-    await page.getByText('opt out',{exact:true}).waitFor();
-    await page.getByText(/Session-end does NOT contain the full transcript/).waitFor();
-    await page.getByRole('heading',{name:'Exotel Webhook Receipt Health (real saved metadata)'}).waitFor();
-    await page.getByRole('button',{name:'Check saved Exotel webhooks (read-only)'}).click();
-    await page.getByText(/Source IP guard: network-restricted \(not vendor-verified\)/).waitFor();
-    await page.getByText(/Webhook Bearer token: configured \| Source IP guard: network-restricted \(not vendor-verified\) \| Last saved event: 2026-11-20T12:20:00\.000Z/).waitFor();
-    await page.getByRole('row',{name:'Potential opt-out signals 1'}).waitFor();
-    await page.getByText(/NOT all webhook attempts or verified provider-origin events/).waitFor();
-
-    await page.getByRole('button',{name:'Test Voicebot Answers to CRM Review (offline)'}).click();
-    await page.getByText('provisional_review_ready').first().waitFor();
-    await page.getByText('opt_out_needs_verification').waitFor();
-    await page.getByText('needs_human_review').waitFor();
-    await page.getByRole('button',{name:'Test 100 PCM Audio Frames (offline)'}).click();
-    await page.getByText('PCM frames: 100 received and 100 returned | Real calls: 0').waitFor();
     // Real DOM exercise of the shipped fixed questionnaire without real
     // customer data, vendor speech recognition, telephone or D1.
     await page.evaluate(()=>{
@@ -313,7 +177,6 @@ try{
     await page.getByRole('button',{name:'Save Reviewed Answers to CRM'}).click();
     await page.getByText(/CRM updated\. Visit preference is not a confirmed booking/).waitFor();
     const body=await page.locator('body').innerText();
-    assert.ok(body.includes('Commercial go-live blocked:'));
     assert.ok(!body.includes('Start real calls'));
     // Existing Super Admin cookie must not hide an invitation link in this profile.
     const invitePage=await context.newPage();
@@ -326,11 +189,8 @@ try{
     await page.getByRole('heading',{name:'AR3D AI Calling',exact:true}).waitFor();
     assert.equal(await page.getByRole('button',{name:'Sign in'}).count(),1);
     await context.close();
-    console.log(viewport.name+': authenticated browser E2E + 100 fake calls + signout + sidebar PASS');
+    console.log(viewport.name+': authenticated browser E2E + signout + sidebar PASS');
   }
-  assert.equal(pilotRuns,3);
-  assert.equal(providerRuns,3);
-  assert.equal(mediaRuns,3);
   // Missing favicon requests are harmless and never reach remote services.
   assert.ok(invalidRequests<=3,'unexpected fixture requests');
   console.log('Browser E2E PASS: 3 responsive viewports, no real calls/DB/customer data/vendor network');

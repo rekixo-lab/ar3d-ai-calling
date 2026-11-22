@@ -1,5 +1,5 @@
-import {handleCallingRequest} from './calling-routes.mjs';
-import {handleVoiceGatewayRequest} from './voice-gateway-routes.mjs';
+import {handleScriptedPhoneAdmin} from './scripted-phone-pilot.mjs';
+import {handleScriptedCallingRequest} from './scripted-campaign-routes.mjs';
 import {handleClientAccountRequest} from './client-account-routes.mjs';
 import {enrichAdminTenantsWithUsage} from './admin-usage.mjs';
 import {handleCompanyProfile} from './company-profile.mjs';
@@ -7,13 +7,7 @@ import {handleCompanyChangeRequests} from './company-change-requests.mjs';
 import {handleCallingScripts} from './calling-script-routes.mjs';
 import {handleCrmRequest} from './crm-routes.mjs';
 import {handlePropertyQualificationRequest} from './property-qualification-routes.mjs';
-import {handleVoicebotReviewRequest} from './voicebot-review-routes.mjs';
 import {handleFixedVoicePreviewRequest} from './fixed-voice-preview-routes.mjs';
-import {handleEngineeringRequest} from './engineering-routes.mjs';
-import {handleExotelOperatorTest} from './exotel-operator-test-routes.mjs';
-import {handleExotelOperatorStatusCheck} from './exotel-operator-status-check.mjs';
-import {handleExotelWebhookHealth} from './exotel-webhook-health.mjs';
-import {handleProductionCutover} from './production-cutover-routes.mjs';
 import {handleTenantLifecycleRequest} from './tenant-lifecycle-routes.mjs';
 import {initialClientAI} from './default-client-ai.mjs';
 import {handleDataPortabilityRequest} from './data-portability-routes.mjs';
@@ -225,7 +219,7 @@ async function addAgent(req,env,user){
 }
 export async function handleHumanRequest(req,env){
   const u=new URL(req.url),path=u.pathname,method=req.method;
-  if(path==='/app'&&method==='GET')return new Response(html,{headers:{...headers,'Content-Type':'text/html;charset=utf-8','Content-Security-Policy':"default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'"}});
+  if(path==='/app'&&method==='GET')return new Response(html,{headers:{...headers,'Permissions-Policy':'camera=(),microphone=(self)','Content-Type':'text/html;charset=utf-8','Content-Security-Policy':"default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; media-src 'self' blob:; form-action 'self'; base-uri 'none'; frame-ancestors 'none'"}});
   if(path==='/app/simulator'&&method==='GET')return new Response(simulatorHtml,{headers:{...headers,'Permissions-Policy':'camera=(),microphone=(self)','Content-Type':'text/html;charset=utf-8','Content-Security-Policy':"default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'"}});
   if(path==='/app/assets/simulator.js'&&method==='GET')return new Response(simulatorJs,{headers:{...headers,'Content-Type':'text/javascript;charset=utf-8'}});
   if(path==='/app/assets/simulator.css'&&method==='GET')return new Response(simulatorCss,{headers:{...headers,'Content-Type':'text/css;charset=utf-8'}});
@@ -253,28 +247,18 @@ export async function handleHumanRequest(req,env){
     if(!user)return fail('sign in required',401);
     if(path==='/v1/human/mfa'||path==='/v1/human/mfa/setup'||path==='/v1/human/mfa/enable'||path==='/v1/human/mfa/recovery/regenerate')
       return await handleMfaSettings(req,env,user,method==='POST'?await payload(req):null);
+    const scriptedPhone=await handleScriptedPhoneAdmin(req,env,user);
+    if(scriptedPhone)return scriptedPhone;
     const accounts=await handleClientAccountRequest(req,env,user);
     if(accounts)return accounts;
-    const gateway=await handleVoiceGatewayRequest(req,env,user);
-    if(gateway)return gateway;
     const profile=await handleCompanyProfile(req,env,user);
     if(profile)return profile;
     const changes=await handleCompanyChangeRequests(req,env,user);
     if(changes)return changes;
     const scripts=await handleCallingScripts(req,env,user);
     if(scripts)return scripts;
-    const calling=await handleCallingRequest(req,env,user);
+    const calling=await handleScriptedCallingRequest(req,env,user);
     if(calling)return calling;
-    const statusCheck=await handleExotelOperatorStatusCheck(req,env,user);
-    if(statusCheck)return statusCheck;
-    const webhookHealth=await handleExotelWebhookHealth(req,env,user);
-    if(webhookHealth)return webhookHealth;
-    const cutover=await handleProductionCutover(req,env,user);
-    if(cutover)return cutover;
-    const selfTest=await handleExotelOperatorTest(req,env,user);
-    if(selfTest)return selfTest;
-    const engineeringResponse=await handleEngineeringRequest(req,user,env);
-    if(engineeringResponse)return engineeringResponse;
     const consentResponse=await handleConsentRequest(req,env,user);
     if(consentResponse)return consentResponse;
     const projectResponse=await handleProjectLinkRequest(req,env,user);
@@ -291,10 +275,8 @@ export async function handleHumanRequest(req,env){
     if(auditResponse)return auditResponse;
     const dataResponse=await handleDataPortabilityRequest(req,env,user);
     if(dataResponse)return dataResponse;
-    const voicePreviewResponse=await handleFixedVoicePreviewRequest(req);
+    const voicePreviewResponse=await handleFixedVoicePreviewRequest(req,env,user);
     if(voicePreviewResponse)return voicePreviewResponse;
-    const voicebotReviewResponse=await handleVoicebotReviewRequest(req,env,user);
-    if(voicebotReviewResponse)return voicebotReviewResponse;
     const qualificationResponse=await handlePropertyQualificationRequest(req,env,user);
     if(qualificationResponse)return qualificationResponse;
     const crmResponse=await handleCrmRequest(req,env,user);

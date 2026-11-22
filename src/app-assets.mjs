@@ -7,7 +7,7 @@ const node=(tag,props={},children=[])=>{const n=document.createElement(tag);for(
 const div=(className,...ch)=>node('div',{class:className},ch);
 const iconPaths={grid:'M3 3h7v7H3z M14 3h7v7h-7z M3 14h7v7H3z M14 14h7v7h-7z',users:'M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2 M16 3a4 4 0 0 1 0 8 M22 21v-2a4 4 0 0 0-3-3.87 M13 7a4 4 0 1 1-8 0 4 4 0 0 1 8 0',phone:'M22 16.92v3a2 2 0 0 1-2.18 2A19.79 19.79 0 0 1 3.09 5.18 2 2 0 0 1 5.08 3h3a2 2 0 0 1 2 1.72c.13.96.36 1.9.69 2.79a2 2 0 0 1-.45 2.11L9.05 10.9a16 16 0 0 0 4.05 4.05l1.27-1.27a2 2 0 0 1 2.11-.45c.89.33 1.83.56 2.79.69A2 2 0 0 1 22 16.92',shield:'M12 22s8-4 8-11V5l-8-3-8 3v6c0 7 8 11 8 11 M9 12l2 2 4-4',mail:'M4 4h16a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2 M22 6l-10 7L2 6',settings:'M4 7h16 M4 17h16 M8 4v6 M16 14v6',upload:'M12 16V3 M7 8l5-5 5 5 M3 16v4a1 1 0 0 0 1 1h16a1 1 0 0 0 1-1v-4',plus:'M12 5v14 M5 12h14',arrow:'M5 12h14 M13 6l6 6-6 6',logout:'M9 21H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h5 M16 17l5-5-5-5 M21 12H9',spark:'m12 3 2.7 6.3L21 12l-6.3 2.7L12 21l-2.7-6.3L3 12l6.3-2.7L12 3',calendar:'M4 5h16v16H4z M16 3v4 M8 3v4 M4 11h16',play:'m8 5 11 7-11 7V5',pause:'M8 5v14 M16 5v14',refresh:'M20 7v5h-5 M4 17v-5h5 M6.1 7a7 7 0 0 1 11.6-2L20 8 M4 16l2.3 3a7 7 0 0 0 11.6-2',search:'M21 21l-5-5 M18 10a8 8 0 1 1-16 0 8 8 0 0 1 16 0',file:'M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z M14 2v6h6 M8 13h8 M8 17h5'};
 function icon(name){const n=document.createElementNS('http://www.w3.org/2000/svg','svg');n.setAttribute('viewBox','0 0 24 24');n.setAttribute('class','icon');n.setAttribute('aria-hidden','true');const p=document.createElementNS(n.namespaceURI,'path');p.setAttribute('d',iconPaths[name]||iconPaths.grid);n.append(p);return n}
-const sectionIcon=s=>/security|auth|access|verification/i.test(s)?'shield':/invite/i.test(s)?'mail':/call|voice|exotel/i.test(s)?'phone':/client|customer|lead/i.test(s)?'users':/import|excel|export/i.test(s)?'file':/visit/i.test(s)?'calendar':/agent|AI/i.test(s)?'spark':'settings';
+const sectionIcon=s=>/security|auth|access|verification/i.test(s)?'shield':/invite/i.test(s)?'mail':/call|voice/i.test(s)?'phone':/client|customer|lead/i.test(s)?'users':/import|excel|export/i.test(s)?'file':/visit/i.test(s)?'calendar':/agent|AI/i.test(s)?'spark':'settings';
 const title=(s,tag='h2')=>node(tag,{},[icon(sectionIcon(s)),node('span',{text:s})]);
 const btn=(label,fn,secondary=false)=>node('button',{class:'btn'+(secondary?' secondary':''),type:'button',onclick:fn},[icon(/sign out/i.test(label)?'logout':/pause/i.test(label)?'pause':/start|resume|run|test/i.test(label)?'play':/refresh|^load/i.test(label)?'refresh':/search/i.test(label)?'search':/upload|import|download|export/i.test(label)?'upload':/create|add/i.test(label)?'plus':'arrow'),node('span',{text:label})]);
 const input=(name,type='text',placeholder='')=>node('input',{class:'field',name,type,placeholder,required:'required'});
@@ -122,364 +122,37 @@ function inviteView(token){
   div('stack',form,btn('Sign in with email and password',()=>openSignIn(email.value),true)))));
 }
 async function logout(){try{await api('/v1/human/logout','POST',{})}finally{state.me=null;openSignIn()}}
-function engineeringPanel(main){
-  const card=div('card',title('Production Readiness & Safe AI Calling Pilot'));
-  const status=div('stack',node('p',{class:'muted',text:'Engineering pilot. Exotel account may be connected; customer campaign dialing and payments remain blocked.'}));
-  const summary=div('stack');
-  const launch=btn('Run 100 Synthetic Calls (no dialing)',async()=>{
-    launch.disabled=true;summary.replaceChildren(node('p',{class:'muted',text:'Running local-in-Worker mock conversation tests...'}));
+function scriptedPhonePilotPanel(){
+  const card=div('card',title('AR3D Fixed-question Phone Pilot','h3'));
+  const language=node('select',{class:'field'},[
+    node('option',{value:'hi',text:'Hindi'}),
+    node('option',{value:'en',text:'English'})
+  ]);
+  const status=node('p',{class:'note',text:'Checking pilot configuration…'});
+  const results=div('stack');
+  let config;
+  const call=btn('Call the verified internal number once',async()=>{
+    if(!config?.configured||!window.confirm('Place one internal pilot call to the verified number ending '+config.destinationLast4+'? This uses phone credits and records short answers only after the recipient presses 1.'))return;
+    call.disabled=true;
     try{
-      const result=await api('/v1/human/engineering/pilot','POST',{count:100,scenario:'mixed',quotaCalls:100});
-      summary.replaceChildren(
-        node('p',{class:'success',text:'Synthetic calls: '+result.count+' | Real calls: '+result.realCallsStarted+' | Audio generated: '+result.realAudioGenerated}),
-        table(['Outcome','Count'],[['Completed',result.outcomes.completed],['Opted out',result.outcomes.opted_out],['Repeat prompts',result.outcomes.repeat_requested],['Pricing deferred',result.outcomes.pricing_deferred],['Low-confidence repeats',result.outcomes.low_confidence_repeated]]),
-        node('p',{class:'muted',text:'Hypothetical rounded minutes: '+result.usagePreview.hypotheticalRoundedMinutes+' | Real billing: disabled | Payment collected: no'}),
-        node('p',{class:'note',text:result.notice})
-      );
-    }catch(err){asError(err)}finally{launch.disabled=false}
+      await api('/v1/human/scripted-phone-pilot','POST',{language:language.value,confirm:'CALL_ONE_VERIFIED_INTERNAL_NUMBER'});
+      notice('Pilot submitted. Refresh status after the call.');
+      await refresh();
+    }catch(err){asError(err);await refresh().catch(asError)}
   });
-  const providerSummary=div('stack');
-  const providerLaunch=btn('Test Exotel Mock Provider (100 events)',async()=>{
-    providerLaunch.disabled=true;
-    providerSummary.replaceChildren(node('p',{class:'muted',text:'Validating provider contract and mock callback lifecycle...'}));
-    try{
-      const result=await api('/v1/human/engineering/provider-pilot','POST',{count:100,scenario:'mixed'});
-      providerSummary.replaceChildren(
-        node('p',{class:'success',text:'Provider mock events: '+result.count+' | Real calls: '+result.realCallsStarted+' | External requests: '+result.providerNetworkRequests}),
-        table(['Mock result','Count'],[
-          ['Completed',result.outcomes.completed],['Busy',result.outcomes.busy],
-          ['No answer',result.outcomes.no_answer],['Failed',result.outcomes.failed],
-          ['Opt-out blocked',result.outcomes.opt_out_blocked],
-          ['Consent/DND blocked',result.outcomes.consent_dnd_blocked]
-        ]),
-        node('p',{class:'note',text:result.notice})
-      );
-    }catch(err){asError(err)}finally{providerLaunch.disabled=false}
-  });
-  card.append(status,launch,summary,
-    title('Telecom Provider Integration — Mock Validation','h3'),
-    node('p',{class:'note',text:'This button runs a simulated provider contract check; it does not send real calls.'}),
-    providerLaunch,providerSummary);
-  const connectionSummary=div('stack');
-  const connectionButton=btn('Check Exotel Connection (read-only)',async()=>{
-    connectionButton.disabled=true;
-    connectionSummary.replaceChildren(node('p',{class:'muted',text:'Checking approved Exotel account connectivity with server-side secrets only...'}));
-    try{
-      const result=await api('/v1/human/engineering/provider-connectivity','POST',{});
-      connectionSummary.replaceChildren(
-        node('p',{class:result.verified?'success':'note',text:'Exotel API: '+(result.verified?'Connection verified':'Not verified')+' | Region: '+(result.apiRegion||'not configured')+' ('+(result.apiRegionStatus||'unknown')+') | Real dialing: disabled'}),
-        node('p',{class:'note',text:result.note})
-      );
-      if(typeof result.checkDiagnostic==='string')
-        connectionSummary.append(node('p',{class:'note',text:'Read-only diagnostic: '+result.checkDiagnostic}));
-    }catch(err){asError(err)}finally{connectionButton.disabled=false}
-  });
-  card.append(title('Exotel Account Connectivity (read-only)','h3'),
-    node('p',{class:'note',text:'Uses server-side Exotel credentials only after you add them. Never places calls or exposes keys.'}),
-    connectionButton,connectionSummary);
-  const cutoverOutput=div('stack');
-  const cutoverButton=btn('Run Production GO/NO-GO Audit (no calls)',async()=>{
-    cutoverButton.disabled=true;
-    cutoverOutput.replaceChildren(node('p',{class:'muted',text:
-      'Inspecting isolated Calling database guards and remaining independent approvals...'}));
-    try{
-      const r=await api('/v1/human/engineering/production-cutover');
-      cutoverOutput.replaceChildren(
-        node('p',{class:r.verdict==='NO_GO'?'note':'err',text:
-          'Customer launch: '+r.verdict+
-          ' | Control DB: '+r.databaseSafety.control+
-          ' | CRM safety: '+r.databaseSafety.crm+
-          ' | Customer calls: '+r.customerCallsPlaced+
-          ' | Provider requests: '+r.providerNetworkRequests}),
-        table(['Unverified production gate','Owner','Next required step'],
-          r.blockers.filter(item=>item.requiredForPilot).map(item=>
-            [item.title,item.owner,item.action])),
-        node('p',{class:'note',text:r.note})
-      );
-      if(r.databaseSafety.crmMissing.length||r.databaseSafety.controlMissing.length){
-        cutoverOutput.append(node('p',{class:'err',text:
-          'Critical: Missing database protections. Control: '+
-          (r.databaseSafety.controlMissing.join(', ')||'none')+
-          ' | CRM: '+(r.databaseSafety.crmMissing.join(', ')||'none')}));
-      }
-      if(r.verdict!=='NO_GO'||r.customerCampaignLaunchAuthorized||
-         r.hundredCustomerCallPilotAuthorized||r.customerCallsPlaced!==0)
-        throw Error('Unexpected unsafe production gate response');
-    }catch(err){asError(err)}finally{cutoverButton.disabled=false}
-  },true);
-  card.append(title('Customer Production Launch — GO / NO-GO','h3'),
-    node('p',{class:'note',text:
-      'A successful code deployment does not permit commercial customer calls. This audited, read-only report checks actual CRM no-dial and consent SQL protection, then lists outstanding Exotel, telecom, privacy, consent/DND, source authentication, backup and operational approvals. No switch can approve launch.'}),
-    cutoverButton,cutoverOutput);
-  const operatorPanel=div('stack',
-    node('p',{class:'note',text:'Software-initiated Exotel Voicebot test: only the one verified phone set privately on the Worker. OFF by default. Never calls Excel leads or runs campaigns. A real test may consume Exotel credits.'}));
-  const operatorStatus=node('p',{class:'muted',text:'Checking trial setup...'});
-  const operatorHistory=div('stack'),operatorFeedback=div('stack');
-  function confirmOperatorTest(){return new Promise(resolve=>{
-    const prompt=div('card stack',node('p',{text:'Start ONE real outgoing Exotel Voicebot call to your privately configured verified test number? This may use trial credits. No customer will be called.'}));
-    prompt.setAttribute('role','alertdialog');prompt.setAttribute('aria-label','Confirm verified test call');
-    function finish(approved){prompt.remove();resolve(approved)}
-    prompt.append(div('formrow',btn('Confirm one test call',()=>finish(true)),btn('Cancel test call',()=>finish(false),true)));operatorPanel.append(prompt);prompt.querySelector('button').focus();
-  })}
-  const operatorDial=btn('Call my verified test phone once',async()=>{
-    operatorDial.disabled=true;
-    if(!await confirmOperatorTest()){operatorDial.disabled=false;return}
-    try{
-      const data=await api('/v1/human/engineering/exotel-self-test','POST',
-        {confirm:'CALL_MY_VERIFIED_NUMBER_ONCE'});
-      operatorFeedback.replaceChildren(node('p',{class:'success',
-        text:'Exotel request: '+data.state+'. The call may ring your verified phone. Request ID: '+data.requestId}));
-    }catch(err){asError(err)}
-    finally{operatorDial.disabled=false;loadOperatorTest()}
-  },true);
-  async function loadOperatorTest(){
-    try{
-      const r=await api('/v1/human/engineering/exotel-self-test');
-      operatorStatus.textContent='Test dispatch: '+(r.configured?'Configured':'Blocked')+
-        ' | Current login MFA: '+(r.mfaEnabled?'Verified':'Sign out and sign in with authenticator')+
-        ' | Flow: '+(r.voicebotFlowId||'not configured')+
-        ' | Verified destination ending: '+(r.destinationLast4||'not configured');
-      operatorDial.disabled=!r.configured||!r.mfaEnabled;
-      operatorHistory.replaceChildren();
-      for(const item of r.recent||[]){
-        const entry=div('stack',node('p',{class:'muted',
-          text:item.createdAt+' — '+item.state+' — '+item.id+
-            (item.errorCode?' ('+item.errorCode+')':'')}));
-        if(item.checkState==='verified'){
-          entry.append(node('p',{class:'success',text:
-            'Verified Exotel Call Details: '+item.providerStatus+
-            (item.durationSeconds===null?' | duration pending':
-              ' | '+item.durationSeconds+' seconds')+
-            ' | checked '+item.checkedAt}));
-        }else if(item.checkState==='unknown'){
-          entry.append(node('p',{class:'muted',
-            text:'Latest Exotel status could not be verified ('+item.checkError+
-            '). No call was initiated by this check.'}));
-        }else if(item.checkState==='reserved'){
-          entry.append(node('p',{class:'muted',
-            text:'Previous Exotel status check still pending. No call initiated.'}));
-        }
-        if(item.webhookCandidate){
-          const c=item.webhookCandidate;
-          if(c.state==='candidate_only'){
-            entry.append(node('p',{class:'muted',text:
-              'Potential Exotel webhook matches (hashed metadata only): '+
-              c.uniqueReceipts+' unique events | '+c.completedTurns+
-              ' completed turns | '+c.sessionEnds+' session ends | '+
-              c.possibleOptOutEvents+' potential opt-out event flags'+
-              (c.lastReceivedAt?' | last '+c.lastReceivedAt:'')}));
-            entry.append(node('p',{class:'note',text:
-              'Candidate only: the webhook external_id must equal this registered test CallSid and its optional leg SID must not conflict. No independent vendor-origin proof, transcript text, CRM lead link, consent or verified opt-out follows. A zero count is NOT proof no webhook arrived.'}));
-          }else{
-            entry.append(node('p',{class:'muted',text:
-              'Webhook matching is unavailable (private token/schema missing or query failed); no conclusion about delivery.'}));
-          }
-        }
-        if(item.state==='submitted'&&r.mfaEnabled){
-          if(item.checkState==='verified'&&['failed','busy','no-answer'].includes(item.providerStatus)){
-            const retry=btn('Retry this failed test once',async()=>{
-              retry.disabled=true;
-              if(!await confirmOperatorTest()){retry.disabled=false;return}
-              try{const result=await api('/v1/human/engineering/exotel-self-test','POST',{confirm:'RETRY_MY_FAILED_VERIFIED_TEST_ONCE',failedRequestId:item.id});operatorFeedback.replaceChildren(node('p',{class:'success',text:'Reviewed retry: '+result.state+'. Request ID: '+result.requestId}))}catch(e){asError(e)}finally{await loadOperatorTest()}
-            },true);entry.append(retry);
-          }
-          const refresh=btn('Check existing Exotel call status (read-only)',async()=>{
-            refresh.disabled=true;
-            try{
-              const result=await api('/v1/human/engineering/exotel-status-check',
-                'POST',{requestId:item.id});
-              if(result.state==='verified')notice('Exotel verified: '+
-                result.providerStatus+(result.durationSeconds===null?
-                  ' | duration pending':' | '+result.durationSeconds+' sec')+
-                '. No new call started.');
-            }catch(err){asError(err)}
-            finally{loadOperatorTest()}
-          },true);
-          entry.append(refresh);
-        }
-        operatorHistory.append(entry);
-      }
-      if(!r.configured)operatorHistory.append(node('p',{class:'note',
-        text:'Operator setup missing: '+r.missing.join(', ')+
-          '. Store the verified test destination and explicit approval only in private Cloudflare Secrets.'}));
-    }catch(err){
-      operatorDial.disabled=true;
-      operatorStatus.textContent='Operator test status unavailable; dialing disabled.';
-    }
+  call.disabled=true;
+  async function refresh(){
+    config=await api('/v1/human/scripted-phone-pilot');
+    status.textContent=config.configured?'One internal verified number ending '+config.destinationLast4+
+      '. Complete answers update its configured test lead.':'Phone pilot is disabled or unconfigured.';
+    call.disabled=!config.configured;
+    results.replaceChildren(...(config.recent?.length?[table(['Started','Language','Status'],
+      config.recent.map(x=>[x.created_at,x.language,x.phase]))]:[]));
   }
-  operatorDial.disabled=true;
-  operatorPanel.append(operatorStatus,operatorDial,operatorFeedback,operatorHistory);
-  card.append(title('AR3D Software → Exotel: One Verified Outgoing Voice Test','h3'),
-    operatorPanel);
-  loadOperatorTest();
-  const ownSipPanel=div('stack',node('p',{class:'note',
-    text:'Yes, we can operate our own Asterisk PBX. A 140 caller number ALONE cannot place calls: an authorized telemarketing SIP Trunk and always-on PBX host are required. The lab has NO outbound routes.'}));
-  card.append(title('Our Own Calling Engine — No Exotel Required','h3'),ownSipPanel);
-  api('/v1/human/engineering/own-sip-setup').then(result=>{
-    const lab=node('p',{class:'success',
-      text:'Private Asterisk local-only lab: source ready for installation | Real 140 calls: NOT enabled | Automatic voice-to-CRM: NOT enabled'});
-    const steps=node('ol');
-    for(const task of result.steps||[])
-      steps.append(node('li',{text:task.title+' — '+task.owner}));
-    const link=node('a',{href:result.reference,target:'_blank',rel:'noopener noreferrer',
-      text:'Jio Business — official 140 SIP Trunk example'});
-    ownSipPanel.replaceChildren(lab,
-      node('p',{class:'note',text:'Do not buy a 140 number without an operator-authorized outbound SIP trunk. A PBX host, SIP routing, audio/STT, secure callbacks and real customer permissions are independent requirements.'}),
-      title('Needed for an actual outbound pilot','h3'),steps,link);
-  }).catch(asError);
-  const trialSetup=div('stack');
-  card.append(title('Exotel Trial Setup — What Is Ready?','h3'),
-    node('p',{class:'note',text:'This is an onboarding checklist, not a dialer. Setting API keys alone will NOT make live calls possible.'}),
-    trialSetup);
-  api('/v1/human/engineering/exotel-trial-setup').then(result=>{
-    const creds=result.credentialsPresent||{};
-    const credentials=div('stack',
-      node('p',{class:'muted',text:'Exotel account API region: '+(result.apiRegion||'not configured')+' | Setting: '+(result.apiRegionStatus||'unknown')+' (my.exotel.com usually means singapore)'}),
-      node('p',{class:'muted',text:'Private Worker secret bindings only (values never displayed):'}));
-    for(const [name,present] of Object.entries(creds)){
-      credentials.append(node('p',{class:present?'success':'muted',
-        text:(present?'Configured: ':'Missing: ')+name}));
-    }
-    const pending=node('ol');
-    for(const t of result.manualSteps||[])
-      pending.append(node('li',{text:t.title+' — '+t.owner}));
-    const codeTasks=node('ul');
-    for(const item of result.engineeringRemaining||[])
-      codeTasks.append(node('li',{text:item}));
-    const promptButton=btn('Copy 7-question Exotel Voicebot instructions',async()=>{
-      // User gesture only; contains fixed questions, never keys or customer PII.
-      try{
-        await navigator.clipboard.writeText(result.managedVoicebotPrompt);
-        notice('Draft 7-question instructions copied. Paste into an approved Exotel Voicebot editor; review before use.');
-      }catch{
-        // No clipboard permissions? Show editable text without app secrets.
-        const textarea=node('textarea',{class:'field',rows:14,readonly:'readonly'});
-        textarea.value=result.managedVoicebotPrompt;
-        trialSetup.append(lab('Copy this fixed bot template manually',textarea));
-        notice('Clipboard unavailable — copy the instructions from the text box.');
-      }
-    },true);
-    const docs=node('a',{href:result.managedVoicebotTrialDocs,target:'_blank',rel:'noopener noreferrer',
-      text:'Official Exotel Managed Voicebot Guide'});
-    trialSetup.replaceChildren(
-      node('p',{class:'note',text:'Customer campaigns: disabled | Operator-only self-test requires separate approval | Provider transcript auto-save: disabled'}),
-      credentials,
-      title('Manual setup (company/Exotel)','h3'),pending,
-      title('Still needs engineering after approved account/voice access','h3'),codeTasks,
-      node('p',{class:'muted',text:'Managed Voicebot may avoid building a separate WSS/STT gateway; its trial, export API, pricing and builder access must be confirmed.'}),
-      promptButton,docs);
-  }).catch(asError);
-  const webhookResults=div('stack');
-  const webhookCheck=btn('Test Exotel Voicebot Transcript Webhooks (offline)',async()=>{
-    webhookCheck.disabled=true;
-    webhookResults.replaceChildren(node('p',{class:'muted',text:'Checking the official Exotel transcript-event format with fictional data only...'}));
-    try{
-      const checks=[];
-      for(const name of ['seven_questions','out_of_order','retry_duplicate','opt_out']){
-        const result=await api('/v1/human/engineering/voicebot-fixture','POST',{scenario:name});
-        checks.push([name.replaceAll('_',' '),result.completedTurns,
-          result.duplicateEventsIgnored,result.optOutReviewNeeded?'Review':'No']);
-        if(result.crmWrites!==0||result.phoneCallsStarted!==0||result.providerWebhookAuthenticated)
-          throw Error('Unexpected real provider activity');
-      }
-      webhookResults.replaceChildren(
-        table(['Offline case','Turns','Replays ignored','Opt-out flag'],checks),
-        node('p',{class:'note',text:'Only fictional events were tested. Session-end does NOT contain the full transcript. This offline fixture does not authenticate provider callbacks. Production callbacks go to a separate Bearer-protected, metadata-only quarantine; call/lead matching and automatic CRM save remain disabled.'})
-      );
-    }catch(err){asError(err)}finally{webhookCheck.disabled=false}
-  },true);
-  card.append(title('Managed Exotel Voicebot — Transcript Webhook Checks','h3'),
-    node('p',{class:'note',text:'Seven fixed-question transcripts: validates Exotel vendor-format turn events, reordered delivery, retries and opt-out flags offline. No real calls, customer data or CRM edits.'}),
-    webhookCheck,webhookResults);
-  const webhookHealthOutput=div('stack');
-  const webhookHealthButton=btn('Check saved Exotel webhooks (read-only)',async()=>{
-    webhookHealthButton.disabled=true;
-    webhookHealthOutput.replaceChildren(node('p',{class:'muted',
-      text:'Reading safe Exotel webhook receipt counts from Control database...'}));
-    try{
-      const r=await api('/v1/human/engineering/exotel-webhook-health');
-      const m=r.metrics;
-      webhookHealthOutput.replaceChildren(
-        node('p',{class:'muted',text:
-          'Webhook Bearer token: '+(r.webhookTokenConfigured?'configured':'not configured')+
-          ' | Source IP guard: '+
-          (r.sourceNetworkPolicy==='cloudflare_ipv4_allowlist_enforced'?'network-restricted (not vendor-verified)':
-            r.sourceNetworkPolicy==='invalid_allowlist_fail_closed'?'invalid config — callbacks blocked':
-            'not configured (Bearer-only quarantine)')+
-          ' | Last saved event: '+(r.lastReceivedAt||'none')}),
-        table(['Quarantined metadata (unexpired only)','Unique stored receipts'],[
-          ['All events',m.uniqueReceipts],
-          ['Transcript events',m.transcriptReceipts],
-          ['Session end events',m.sessionEndReceipts],
-          ['Completed turns',m.completedTurns],
-          ['In-progress turns',m.inProgressTurns],
-          ['Distinct session fingerprints',m.distinctSessions],
-          ['Potential opt-out signals',m.possibleOptOutSignals]
-        ]),
-        node('p',{class:'note',text:
-          'These are unique saved Bearer-authenticated receipts, NOT all webhook attempts or verified provider-origin events. Exotel Test URL pings do not create receipts. A potential opt-out needs separate human investigation; this report has no caller identity or transcript. No CRM writes or calls are performed.'})
-      );
-    }catch(err){asError(err)}finally{webhookHealthButton.disabled=false}
-  },true);
-  card.append(title('Exotel Webhook Receipt Health (real saved metadata)','h3'),
-    node('p',{class:'note',text:
-      'See whether real webhook event metadata reached AR3D. Safe aggregate-only monitoring; it cannot identify a customer or confirm Exotel as the sender.'}),
-    webhookHealthButton,webhookHealthOutput);
-  const qualificationCheckOutput=div('stack');
-  const qualificationButton=btn('Test Voicebot Answers to CRM Review (offline)',async()=>{
-    qualificationButton.disabled=true;
-    qualificationCheckOutput.replaceChildren(node('p',{class:'muted',text:'Reconstructing fictional Exotel turns into reviewed property fields...'}));
-    try{
-      const summaries=[];
-      for(const scenario of ['plot_complete','flat_complete','not_interested','out_of_order','retry_duplicate','opt_out','incomplete']){
-        const r=await api('/v1/human/engineering/voicebot-qualification','POST',{scenario});
-        if(r.crmWrites!==0||r.realCallsStarted!==0||r.sourceAuthenticated||r.consentVerified||!r.humanReviewRequired)
-          throw Error('Unsafe provider qualification response');
-        summaries.push([scenario.replaceAll('_',' '),r.status,
-          r.provisionalSurvey?.propertyType||'—',
-          r.provisionalSurvey?.budgetInr==null?'—':String(r.provisionalSurvey.budgetInr)]);
-      }
-      qualificationCheckOutput.replaceChildren(
-        table(['Synthetic transcript','Review state','Type','Budget INR'],summaries),
-        node('p',{class:'note',text:'These are provisional fields only. This offline fixture does not authenticate vendor callbacks. Live bearer quarantine records only metadata; no lead, opt-out, CRM, call or site visit is modified.'})
-      );
-    }catch(err){asError(err)}finally{qualificationButton.disabled=false}
-  },true);
-  card.append(title('Voicebot Answers to CRM Review — Preflight','h3'),
-    node('p',{class:'note',text:'Parses Exotel-style completed turns into the seven fixed property fields. Catches retries, reversed event order, refusal and missing session-end before any live integration.'}),
-    qualificationButton,qualificationCheckOutput);
-  const mediaOutput=div('stack');
-  const mediaTest=btn('Test 100 PCM Audio Frames (offline)',async()=>{
-    mediaTest.disabled=true;
-    mediaOutput.replaceChildren(node('p',{class:'muted',text:'Validating raw PCM framing locally on Worker...'}));
-    try{
-      const result=await api('/v1/human/engineering/media-protocol','POST',{frames:100,sampleRate:8000});
-      mediaOutput.replaceChildren(
-        node('p',{class:'success',text:'PCM frames: '+result.decodedFrames+' received and '+result.encodedFrames+' returned | Real calls: '+result.realCallsStarted}),
-        node('p',{class:'note',text:'Media server connected: no | STT/TTS/LLM calls: 0 | Recording saved: 0'}),
-        node('p',{class:'note',text:result.notice})
-      );
-    }catch(err){asError(err)}finally{mediaTest.disabled=false}
-  });
-  card.append(title('AgentStream Audio Gateway — Protocol Acceptance','h3'),
-    node('p',{class:'note',text:'Tests Exotel raw PCM 16-bit mono frames and bidirectional packet formats. No public WebSocket or microphone.'}),
-    mediaTest,mediaOutput);
-  main.append(card);
-  api('/v1/human/engineering/status').then(result=>{
-    const states=result.gates.filter(g=>g.state!=='available');
-    const list=node('ul');
-    states.forEach(g=>list.append(node('li',{text:g.id.replace(/_/g,' ')+': '+g.description})));
-    status.append(node('p',{class:'note',text:'Commercial go-live blocked: '+states.length+' release gates still require verification, integration or approval.'}),list);
-    if(result.operational){
-      const o=result.operational,configured=o.credentialBindingsConfigured||{};
-      const binds=Object.entries(configured);
-      status.append(title('Operator Setup Checklist','h3'),
-        node('p',{class:'note',text:'Provider/API bindings configured: '+binds.filter(([,yes])=>yes).length+'/'+binds.length+' (presence only; not approval)'}));
-      const tasks=node('ul');
-      for(const t of o.operatorActions||[])tasks.append(node('li',{text:t.label+' — requires manual verification'}));
-      status.append(tasks);
-    }
-  }).catch(asError);
+  card.append(status,div('formrow',lab('Recorded prompt language',language),call,
+    btn('Refresh fixed-question pilot status',()=>refresh().catch(asError),true)),results);
+  refresh().catch(()=>{status.textContent='Pilot status requires a current MFA Super Admin session.'});
+  return card;
 }
 function dashboard(){
  root.replaceChildren();const admin=state.me.superAdmin;
@@ -500,28 +173,20 @@ function dashboard(){
  if(admin)aside.append(nav('Client access','mail','client-access'),nav('Security','shield','security-section'));
  else aside.append(nav('Company / AI','spark','client-ai'),nav('Results & activity','file','client-reports'));
  aside.append(div('sidebar-footer',div('account',div('avatar',node('span',{text:state.me.email.slice(0,2).toUpperCase()})),div('account-copy',node('strong',{text:admin?'Administrator':'Client workspace'}),node('p',{text:state.me.email}))),btn('Sign out',logout,true)));
- const main=div('main',div('topbar',div('',node('div',{class:'eyebrow',text:'WORKSPACE / '+(admin?'OVERVIEW':'DASHBOARD')}),title(admin?'Super Admin':'Personal AI Calling','h1'),node('p',{class:'page-description',text:admin?'Clients → AI → Exotel Gateway → Calling approval.':'Your customers, conversations and campaigns. All in one place.'})),div('topbar-right',node('span',{class:'pill'},[node('span',{class:'status-dot'}),'AR3D Client Platform']),div('avatar',node('span',{text:state.me.email.slice(0,2).toUpperCase()})))),div('',node('div',{id:'notice-anchor'})));main.id='workspace-top';root.append(div('layout',aside,main));
+ const main=div('main',div('topbar',div('',node('div',{class:'eyebrow',text:'WORKSPACE / '+(admin?'OVERVIEW':'DASHBOARD')}),title(admin?'Super Admin':'Personal AI Calling','h1'),node('p',{class:'page-description',text:admin?'Clients → Fixed questionnaire → Phone pilot → Calling approval.':'Your customers, conversations and campaigns. All in one place.'})),div('topbar-right',node('span',{class:'pill'},[node('span',{class:'status-dot'}),'AR3D Client Platform']),div('avatar',node('span',{text:state.me.email.slice(0,2).toUpperCase()})))),div('',node('div',{id:'notice-anchor'})));main.id='workspace-top';root.append(div('layout',aside,main));
  if(admin){
-  const guide=div('card',title('Simple Setup — Next Step','h2')),status=node('p',{class:'note',text:'Checking Shared Gateway…'});
-  guide.append(status,div('formrow',
-   btn('1. Shared Gateway',()=>reveal('gateway-panel')),
-   btn('2. Publish AI',()=>reveal('conversation-setup'),true),
-   btn('3. Calling Approval',()=>reveal('calling-setup'),true)));
+  const guide=div('card',title('Calling setup','h2'),
+   node('p',{class:'note',text:'First run the fixed-question pilot on the approved internal phone. Prepare customer campaigns separately.'}),
+   div('formrow',btn('1. Fixed-question Phone Pilot',()=>reveal('platform-settings')),
+    btn('2. Company information',()=>reveal('conversation-setup'),true),
+    btn('3. Calling approval',()=>reveal('calling-setup'),true)));
   main.append(guide);
-  api('/v1/human/voice-gateway').then(r=>{
-   status.textContent=r.gateway?.state==='ready'?'Shared Gateway ready. Review AI publication and calling approvals.'
-    :r.gateway?.state==='unknown'?'Shared Gateway setup failed with uncertain provider changes. Open Calling Setup → Review failed setup (read-only). Do NOT retry.'
-    :r.gateway?'Shared Gateway: '+r.gateway.state+'. Finish verification before client calls.'
-    :'Next: Exotel Flow saved. Open Shared Gateway, then click Inspect gateway contract. No calls yet.';
-  }).catch(()=>{status.textContent='Shared Gateway status unavailable. Check it before calling.'});
   const grid=div('admin-grid');main.append(grid);superAdmin(grid);
-  const settings=node('details',{class:'card',id:'platform-settings'},node('summary',{text:'3. Calling & Exotel Setup'}));main.append(settings);
-  voiceGatewayPanel(settings);
-  const approvals=node('details',{class:'card',id:'approval-section'},node('summary',{text:'Customer Calling Approval — after gateway verification'}));
+  const settings=node('details',{class:'card',id:'platform-settings'},node('summary',{text:'3. Calling Setup'}));main.append(settings);
+  settings.append(scriptedPhonePilotPanel());
+  const approvals=node('details',{class:'card',id:'approval-section'},node('summary',{text:'Customer Calling Approval'}));
   settings.append(approvals);callingAdminPanel(approvals);
   const security=node('details',{class:'card',id:'security-section'},node('summary',{text:'Account Security & Recovery'}));settings.append(security);mfaPanel(security);
-  const advanced=node('details',{class:'card',id:'engineering-advanced'},node('summary',{text:'Advanced developer diagnostics (optional)'}));settings.append(advanced);
-  advanced.addEventListener('toggle',()=>{if(advanced.open&&!advanced.dataset.loaded){advanced.dataset.loaded='1';engineeringPanel(advanced)}});
  }
  if(state.me.tenants.length)clientPanel(main);
 }
@@ -690,7 +355,7 @@ actionForm.addEventListener('submit',async e=>{e.preventDefault();try{
   reason.value='';await refresh();await refreshAccess();
 }catch(err){asError(err)}});
 await inviteSection(management);
- const ai=node('details',{class:'card client-directory',id:'ai-setup'},node('summary',{text:'2. Client AI Setup & Publish'}));
+ const ai=node('details',{class:'card client-directory',id:'ai-setup'},node('summary',{text:'2. Client Company & AI Setup'}));
  main.append(ai);await scriptAdminPanel(ai);
  const requests=node('details',{class:'card',id:'company-requests'},node('summary',{text:'Client change requests (optional)'}));
  ai.append(requests);await adminCompanyChangesPanel(requests);
@@ -747,18 +412,17 @@ async function adminCompanyChangesPanel(main){
 }
 async function clientCompanySummary(tenantId,content,role,companyName=''){
  const card=div('card',title('Your Company / AI','h3'),
-  node('p',{class:'note',text:'AR3D sets up and publishes your company AI. These details are view-only. To correct a price, project or location, use Request Changes below.'}));
+  node('p',{class:'note',text:'These company details are view-only. To correct a price, project or location, use Request Changes below.'}));
  content.append(card);
  try{
   const [company,script]=await Promise.all([
    api('/v1/human/company-profile?tenantId='+encodeURIComponent(tenantId)),
    api('/v1/human/calling-scripts?tenantId='+encodeURIComponent(tenantId))
   ]);
-  const latest=script.versions[0],publication=script.publication;
-  const published=publication?.state==='ready'&&publication.profileRevision===company.revision&&
-    publication.scriptRevision===latest?.revision;
-  card.append(node('p',{class:published?'success':'note',
-    text:published?'AI agent: Published and up to date':company.revision&&latest?'AI setup saved. Publishing or updates pending.':'AI setup pending — AR3D will complete it.'}));
+  const latest=script.versions[0];
+  card.append(node('p',{class:'note',text:company.revision&&latest?
+   'Company information and draft questions are saved. The phone pilot uses the fixed property questionnaire.':
+   'Company setup is pending.'}));
   const labels=[['companyName','Company name'],['locations','Location'],['projects','Projects and plots'],
    ['propertyTypes','Property types'],['pricing','Approved prices'],['amenities','Amenities'],
    ['contact','Sales contact'],['officeHours','Office hours'],['website','Website'],
@@ -767,7 +431,6 @@ async function clientCompanySummary(tenantId,content,role,companyName=''){
    .filter(([key,val])=>val&&val!=='—');
   card.append(rows.length?table(['Company information','Provided details'],rows):
    node('p',{class:'muted',text:'Company details have not yet been saved by AR3D.'}));
-  if(!published&&company.revision>0)card.append(node('p',{class:'muted',text:'Latest changes are not confirmed live until Admin publishes the AI.'}));
  }catch(e){card.append(node('p',{class:'err',text:'Company information unavailable. Please contact AR3D.'}))}
  const requestCard=div('card',title('Request Changes','h3'),
   node('p',{class:'muted',text:'Tell AR3D what needs correcting, for example: project, location, plot size or price. Submitting a request does not change live AI answers.'}));
@@ -824,85 +487,34 @@ async function renderClient(id,content){state.clientSetTab=null;content.replaceC
  selectTab(Object.hasOwn(sections,state.clientTab)?state.clientTab:'customers');
  await crmWorkflow(id,sections.customers,d.role,content);
  await customerCallingPanel(id,sections.calling,d.role);
- await clientCompanySummary(id,sections.company,d.role,d.tenant.name);const extra=node('details',{class:'card'},node('summary',{text:'Manual customer entry'}));sections.customers.append(extra);const leadCard=div('card',title('Leads','h3'),table(['Name','Mobile','Source','Consent'],d.leads.map(l=>[l.name,l.mobile,l.sourceType,l.consentStatus])));extra.append(leadCard);const name=input('name','text','Customer name'),mobile=input('mobile','tel','9876543210');const leadForm=node('form',{class:'formrow'},[lab('Name',name),lab('Mobile',mobile),node('button',{class:'btn',type:'submit',text:'Add lead'})]);leadForm.addEventListener('submit',async e=>{e.preventDefault();try{await api('/v1/human/leads','POST',{tenantId:id,name:name.value,mobile:mobile.value});notice('Lead saved without calling consent');await renderClient(id,content)}catch(err){asError(err)}});if(d.role==='client_admin')leadCard.append(leadForm);const planning=node('details',{class:'card'},node('summary',{text:'Advanced campaign planning and project links'}));sections.calling.append(planning);await planningPanels(id,planning,d.role);const reports=node('details',{class:'card'},node('summary',{text:'Exports, answer reviews and audit history'}));reports.id='client-reports';sections.results.append(reports);await usageAndExport(id,reports,d.role);if(d.role==='client_admin')await voicebotReviewPanel(id,reports,content);if(d.role==='client_admin')await auditPanel(id,reports)}catch(e){content.replaceChildren();asError(e)}}
-
-async function voicebotReviewPanel(tenantId,content,refreshContent=content){
-  const card=div('card',title('Verified Exotel Voicebot Review Queue','h3'),
-    node('p',{class:'note',text:'Pending staff review of independently verified Exotel answers. Speech answers are reviewed in Exotel. Automatic transcript import is not configured here.'}));
-  content.append(card);
-  try{
-    const res=await api('/v1/human/voicebot-reviews?tenantId='+encodeURIComponent(tenantId));
-    if(!res.reviews.length){
-      card.append(node('p',{class:'muted',text:'No verified Voicebot reviews yet. Exotel account/callback approval remains pending.'}));
-      return;
-    }
-    for(const item of res.reviews){
-      const survey=item.provisionalSurvey;
-      const info=div('stack',
-        node('p',{text:'Lead reference: '+item.leadId+' | Status: '+item.status}),
-        node('p',{class:'muted',text:item.possibleOptOut?
-          'Possible Do Not Call request — verify and use the separate CRM suppression action.':
-          'Type: '+(survey?.propertyType||'?')+' | City: '+(survey?.location||'?')+
-          ' | Size: '+(survey?.size||'?')+' | Budget INR: '+(survey?.budgetInr??'?')+
-          ' | Interest: '+(survey?.interest||'?')+' | Visit preference: '+(survey?.visitDate||'none')}));
-      const itemCard=div('card',info);
-      if(item.status==='pending'){
-        const buttons=div('formrow');
-        if(!item.possibleOptOut){
-          const apply=btn('Apply staff-reviewed answers',async()=>{
-            apply.disabled=true;
-            try{
-              await api('/v1/human/voicebot-reviews/'+encodeURIComponent(item.id)+'/apply','POST',{
-                tenantId,expectedUpdatedAt:item.leadUpdatedAt,acknowledged:true});
-              notice('Reviewed Voicebot answers applied. No call or site visit was created.');
-              await renderClient(tenantId,refreshContent);
-            }catch(e){asError(e)}finally{apply.disabled=false}
-          },true);
-          buttons.append(apply);
-        }
-        if(item.possibleOptOut&&!item.suppressionConfirmed){
-          buttons.append(node('p',{class:'note',text:'Possible opt-out: use the lead Do Not Call action and verify suppression before closing this review.'}));
-        }else{
-          const dismiss=btn('Dismiss review',async()=>{
-            dismiss.disabled=true;
-            try{
-              await api('/v1/human/voicebot-reviews/'+encodeURIComponent(item.id)+'/dismiss','POST',{tenantId});
-              notice('Review dismissed without changing CRM.');
-              await renderClient(tenantId,refreshContent);
-            }catch(e){asError(e)}finally{dismiss.disabled=false}
-          },true);
-          buttons.append(dismiss);
-        }
-        itemCard.append(buttons);
-      }
-      card.append(itemCard);
-    }
-  }catch(e){card.append(node('p',{class:'err',text:'Voicebot review queue could not load.'}));asError(e)}
-}
+ await clientCompanySummary(id,sections.company,d.role,d.tenant.name);const extra=node('details',{class:'card'},node('summary',{text:'Manual customer entry'}));sections.customers.append(extra);const leadCard=div('card',title('Leads','h3'),table(['Name','Mobile','Source','Consent'],d.leads.map(l=>[l.name,l.mobile,l.sourceType,l.consentStatus])));extra.append(leadCard);const name=input('name','text','Customer name'),mobile=input('mobile','tel','9876543210');const leadForm=node('form',{class:'formrow'},[lab('Name',name),lab('Mobile',mobile),node('button',{class:'btn',type:'submit',text:'Add lead'})]);leadForm.addEventListener('submit',async e=>{e.preventDefault();try{await api('/v1/human/leads','POST',{tenantId:id,name:name.value,mobile:mobile.value});notice('Lead saved without calling consent');await renderClient(id,content)}catch(err){asError(err)}});if(d.role==='client_admin')leadCard.append(leadForm);const planning=node('details',{class:'card'},node('summary',{text:'Advanced campaign planning and project links'}));sections.calling.append(planning);await planningPanels(id,planning,d.role);const reports=node('details',{class:'card'},node('summary',{text:'Exports and audit history'}));reports.id='client-reports';sections.results.append(reports);await usageAndExport(id,reports,d.role);if(d.role==='client_admin')await auditPanel(id,reports)}catch(e){content.replaceChildren();asError(e)}}
 
 async function customerCallingPanel(tenantId,content,role){
- const card=div('card',title('Exotel Customer Calling','h3'),node('p',{class:'note',text:'Excel import → campaign → Start. Calls continue in the background after closing this page. One call at a time per company; 09:00–20:00 India time. Super Admin must review company and customer permissions first.'}));
+ const card=div('card',title('Customer Calling','h3'),node('p',{class:'note',text:'Excel import → campaign → Start. Calls continue in the background after closing this page. One call at a time per company; 09:00–20:00 India time. Super Admin must review company and customer permissions first.'}));
  card.id='customer-calling';content.append(card);
  const area=div('stack');card.append(area);
  const pick=node('select',{class:'field','aria-label':'Calling campaign'});
+ let start=null;
  async function refresh(){
   const [data,campaigns]=await Promise.all([api('/v1/human/calling/state?tenantId='+tenantId),api('/v1/human/campaigns?tenantId='+tenantId)]);
   const prior=pick.value;pick.replaceChildren(...campaigns.campaigns.map(c=>node('option',{value:c.id,text:c.name})));if(prior)pick.value=prior;
-  area.replaceChildren(node('p',{class:'note',text:!data.configuration.ready?'Exotel dispatch disabled: '+data.configuration.missing.join(', '):!data.policy?.enabled?'Super Admin company approval required.':'Daily call limit: '+data.policy.dailyLimit+' | Approval expires: '+data.policy.expiresAt}),
+  if(start)start.disabled=!data.configuration.ready||!data.policy?.enabled||Date.parse(data.policy.expiresAt)<=Date.now()||!campaigns.campaigns.length;
+  area.replaceChildren(node('p',{class:'note',text:!data.configuration.ready?'Calling disabled: '+data.configuration.missing.join(', '):!data.policy?.enabled?'Super Admin company approval required.':'Daily call limit: '+data.policy.dailyLimit+' | Approval expires: '+data.policy.expiresAt}),
    table(['Campaign','State'],data.runs.map(r=>[r.name,r.state])),
-   table(['Customer','Call state','Exotel status','Seconds','Details'],data.jobs.map(j=>[j.name,j.state,j.providerStatus,j.durationSeconds,j.errorCode])));
+   table(['Customer','Call state','Provider status','Seconds','Details'],data.jobs.map(j=>[j.name,j.state,j.providerStatus,j.durationSeconds,j.errorCode])));
  }
  const refreshBtn=btn('Refresh call results',()=>refresh().catch(asError),true);
  card.append(refreshBtn);
  if(role==='client_admin'){
   const name=input('callCampaignName','text','November follow-up');
+  const language=node('select',{class:'field'},[node('option',{value:'hi',text:'Hindi'}),node('option',{value:'en',text:'English'})]);
   const customerType=node('select',{class:'field','aria-label':'Campaign customer type'},
     [['','All CRM customers'],['prior_inquiry','Previous enquiries'],['unknown_contact','Unknown/new contacts'],['unclassified','Unclassified']].map(([value,text])=>node('option',{value,text})));
    const create=btn('Create campaign with selected CRM customers',async()=>{
     create.disabled=true;
     try{
      if(!name.value.trim())throw Error('Enter a campaign name');
-     const campaign=await api('/v1/human/campaigns','POST',{tenantId,name:name.value,languageMode:'hi-en',purpose:'property_information'});
+     const campaign=await api('/v1/human/campaigns','POST',{tenantId,name:name.value,languageMode:language.value,purpose:'property_information'});
      const selection={tenantId};
      if(customerType.value)selection.customerSegment=customerType.value;
      const r=await api('/v1/human/campaigns/'+campaign.id+'/candidates/from-crm','POST',selection);
@@ -910,14 +522,15 @@ async function customerCallingPanel(tenantId,content,role){
      await refresh();pick.value=campaign.id;
     }catch(e){asError(e)}finally{create.disabled=false}
    });
-   const start=btn('Start / Resume calling',async()=>{
+   start=btn('Start / Resume calling',async()=>{
    if(!pick.value)return notice('Create a campaign first.',true);
-   if(!confirm('Start real Exotel calls to the approved customers in this campaign? This uses Exotel credits.'))return;
+   if(!confirm('Start phone calls to the approved customers in this campaign? This uses calling credits.'))return;
    start.disabled=true;
-   try{const r=await api('/v1/human/calling/runs','POST',{tenantId,campaignId:pick.value,action:'start'});notice('Campaign '+r.state+'. Results refresh below.');await refresh()}catch(e){asError(e)}finally{start.disabled=false}
+   try{const r=await api('/v1/human/calling/runs','POST',{tenantId,campaignId:pick.value,action:'start'});notice('Campaign '+r.state+'. Results refresh below.');await refresh()}catch(e){asError(e);await refresh().catch(asError)}
   });
-  const pause=btn('Pause campaign',async()=>{try{await api('/v1/human/calling/runs','POST',{tenantId,campaignId:pick.value,action:'pause'});notice('Paused. A call already sent to Exotel may finish.');await refresh()}catch(e){asError(e)}},true);
-  card.append(div('formrow',lab('Campaign name',name),lab('Customers',customerType),create),div('formrow',lab('Campaign',pick),start,pause));
+  start.disabled=true;
+  const pause=btn('Pause campaign',async()=>{try{await api('/v1/human/calling/runs','POST',{tenantId,campaignId:pick.value,action:'pause'});notice('Paused. A call already sent to the phone provider may finish.');await refresh()}catch(e){asError(e)}},true);
+  card.append(div('formrow',lab('Campaign name',name),lab('Customers',customerType),lab('Call language',language),create),div('formrow',lab('Campaign',pick),start,pause));
  }
  try{await refresh()}catch(e){area.append(node('p',{class:'err',text:e.message}))}
 }
@@ -925,28 +538,28 @@ async function callingAdminPanel(main){
  const card=div('card calling-settings',title('Client Calling Setup')),area=div('stack');card.id='calling-setup';main.append(card);
  const company=node('select',{class:'field','aria-label':'Calling setup company'});
  try{const d=await api('/v1/human/tenants');company.append(...d.tenants.map(t=>node('option',{value:t.id,text:t.display_name+' — '+t.status})))}catch(e){asError(e);return}
- const flow=input('flowId','text','Exotel Voicebot Flow ID'),approval=input('approval','text','Exotel approval / account reference');
+ const approval=input('approval','text','Approved phone provider and calling purpose reference');
  const days=input('days','number');days.value='7';days.min='1';days.max='30';
  const limit=input('dailyLimit','number');limit.value='10';limit.min='1';limit.max='100';
- const seconds=input('maxSeconds','number');seconds.value='120';seconds.min='30';seconds.max='600';
+ const seconds=input('maxSeconds','number');seconds.value='180';seconds.min='180';seconds.max='300';
  const enabled=node('input',{type:'checkbox','aria-label':'Enable company calling'});
- const policyForm=node('form',{class:'stack'},[lab('Exotel Voicebot Flow ID',flow),lab('Provider approval reference',approval),div('formrow',lab('Approval days (1–30)',days),lab('Daily calls (1–100)',limit),lab('Maximum call seconds',seconds)),lab('Enable company calling',enabled),node('button',{class:'btn',type:'submit',text:'Save company calling approval'})]);
+ const policyForm=node('form',{class:'stack'},[lab('Provider approval reference',approval),div('formrow',lab('Approval days (1–30)',days),lab('Daily calls (1–100)',limit),lab('Maximum call seconds (180–300)',seconds)),lab('Enable company calling',enabled),node('button',{class:'btn',type:'submit',text:'Save company calling approval'})]);
  const consent=input('consent','text','Purpose-specific opt-in evidence reference'),dnd=input('dnd','text','Provider DND check reference');
  const choices=div('stack approval-list');
  const purpose=node('select',{class:'field'},['property_information','site_visit'].map(x=>node('option',{value:x,text:x})));
  const clearanceForm=node('form',{class:'stack'},[title('Review customers for calling','h3'),node('p',{class:'note',text:'Select only customers covered by the consent evidence and current provider DND check. Excel upload alone does not supply these checks. Opted-out customers cannot be approved.'}),lab('Purpose',purpose),lab('Consent evidence reference',consent),lab('DND verification reference',dnd),choices,node('button',{class:'btn',type:'submit',text:'Approve selected customers'})]);
  const status=div('');
  const expires=()=>{const n=Number(days.value);if(!Number.isInteger(n)||n<1||n>30)throw Error('Approval days must be 1–30');return new Date(Date.now()+n*86400000).toISOString()};
- policyForm.addEventListener('submit',async e=>{e.preventDefault();try{await api('/v1/human/calling/policy','POST',{tenantId:company.value,enabled:enabled.checked,flowId:flow.value,approvalReference:approval.value,expiresAt:expires(),dailyLimit:Number(limit.value),maxSeconds:Number(seconds.value)});notice('Company approval saved.');await refresh()}catch(e){asError(e)}});
+ policyForm.addEventListener('submit',async e=>{e.preventDefault();try{await api('/v1/human/calling/policy','POST',{tenantId:company.value,enabled:enabled.checked,approvalReference:approval.value,expiresAt:expires(),dailyLimit:Number(limit.value),maxSeconds:Number(seconds.value)});notice('Company approval saved.');await refresh()}catch(e){asError(e)}});
  clearanceForm.addEventListener('submit',async e=>{e.preventDefault();try{const leadIds=[...choices.querySelectorAll('input:checked')].map(x=>x.value);const r=await api('/v1/human/calling/clearances','POST',{tenantId:company.value,leadIds,purpose:purpose.value,consentReference:consent.value,dndReference:dnd.value,expiresAt:expires()});notice(r.reviewed+' customer approvals saved.');await refresh()}catch(e){asError(e)}});
  async function refresh(){
   choices.replaceChildren();status.replaceChildren();
   if(!company.value)return;
   try{
    const [p,c]=await Promise.all([api('/v1/human/calling/policy?tenantId='+company.value),api('/v1/human/calling/clearances?tenantId='+company.value)]);
-   flow.value=p.policy?.flowId||'';approval.value=p.policy?.approvalReference||'';enabled.checked=!!p.policy?.enabled;
-   limit.value=String(p.policy?.dailyLimit||10);seconds.value=String(p.policy?.maxSeconds||120);
-   status.append(node('p',{class:'note',text:p.configuration.ready?'Exotel customer dispatcher configured.':p.configuration.missing.join(', ')}));
+   approval.value=p.policy?.approvalReference||'';enabled.checked=!!p.policy?.enabled;
+   limit.value=String(p.policy?.dailyLimit||10);seconds.value=String(p.policy?.maxSeconds||180);
+   status.append(node('p',{class:'note',text:p.configuration.ready?'Fixed-question customer calling configured.':p.configuration.missing.join(', ')}));
    for(const l of c.leads){const checkbox=node('input',{type:'checkbox',value:l.id});if(l.consentStatus==='denied'||l.dndStatus==='blocked')checkbox.disabled=true;choices.append(lab(l.name+' — '+l.id.slice(0,8),checkbox))}
    status.append(table(['Customer','Purpose','Approval expires'],c.clearances.map(x=>[x.name,x.purpose,x.expiresAt])));
   }catch(e){status.append(node('p',{class:'err',text:e.message+' — use a current Super Admin MFA login.'}))}
@@ -991,7 +604,7 @@ async function aiQuickSetupWizard(tenantId,content,refreshEditors,tenantLabel=''
   return true;
  }
  const useDefault=btn('Use ready-made Default AI (no form)',async()=>{
-  if(!confirm('Create the default Real Estate Enquiry AI as drafts for this unconfigured client? No Exotel publication, consent changes or calls.'))return;
+  if(!confirm('Create the default Real Estate Enquiry AI as drafts for this unconfigured client? Consent and calling approvals require separate review.'))return;
   useDefault.disabled=true;
   try{
    const r=await api('/v1/human/calling-scripts/apply-defaults','POST',{tenantId});
@@ -1088,7 +701,7 @@ async function aiQuickSetupWizard(tenantId,content,refreshEditors,tenantLabel=''
  return false;
 }
 async function scriptAdminPanel(main){
- const card=div('card client-directory',title('Client Company & AI Setup')),area=div('stack');card.id='conversation-setup';main.append(card);card.append(node('p',{class:'note',text:'Super Admin: choose the client, save approved company/project/price details and publish their AI. Clients can only view and request changes; this does not activate calling.'}));
+ const card=div('card client-directory',title('Client Company & AI Setup')),area=div('stack');card.id='conversation-setup';main.append(card);card.append(node('p',{class:'note',text:'Save company details and draft scripts. The current phone pilot uses the seven fixed property questions.'}));
  const company=node('select',{class:'field','aria-label':'Conversation company'});
  async function refreshCompanies(preferredId=''){
   const old=preferredId||company.value;
@@ -1105,31 +718,10 @@ async function scriptAdminPanel(main){
   if(!tenantId)return;
   try{
    const stage=div('stack');
-   const hasExisting=await aiQuickSetupWizard(tenantId,stage,()=>load(),label);
+   await aiQuickSetupWizard(tenantId,stage,()=>load(),label);
    if(generation!==loadGeneration||company.value!==tenantId)return;
    const advanced=node('details',{class:'card'},node('summary',{text:'Advanced: Company Knowledge & AI Questions'}));
    advanced.open=false;
-   if(hasExisting){
-    const inline=node('p',{class:'note',text:'AI questions are saved. First prepare Shared Gateway, then publish. Publishing does not call any customer.'});
-    const publish=btn('Publish this client AI',async()=>{
-     publish.disabled=true;
-     try{
-      const d=await api('/v1/human/calling-scripts?tenantId='+encodeURIComponent(tenantId));
-      const v=d.versions[0];if(!v)throw Error('No saved AI script. Open Advanced to edit.');
-      const published=d.publication?.state==='ready'&&d.publication.scriptRevision===v.revision&&d.publication.profileRevision===d.profileRevision;
-      if(published){inline.textContent='Latest approved AI is already published.';return}
-      const result=await api('/v1/human/calling-scripts/publish','POST',{tenantId,id:v.id,profileRevision:d.profileRevision});
-      inline.textContent=result.notice||'AI publish completed.';
-      notice(result.notice||'AI publish completed.');await load();
-     }catch(e){
-      inline.textContent=e.message==='shared_gateway_setup_required'
-       ?'Shared Gateway not ready: open Calling Setup → Shared Gateway → Inspect gateway contract.'
-       :'Publish is not complete: '+e.message;
-      asError(e);
-     }finally{publish.disabled=false}
-    });
-    stage.append(div('formrow',publish),inline);
-   }
    area.append(stage,advanced);
    await callingScriptEditor(tenantId,advanced,true,label);
   }catch(e){if(generation===loadGeneration)asError(e)}
@@ -1140,300 +732,6 @@ async function scriptAdminPanel(main){
   btn('Refresh client list',()=>refreshCompanies().catch(asError),true)),area);
  await refreshCompanies();
 }
-async function voiceGatewayPanel(main){
- const card=div('card stack',title('Shared Calling Gateway','h3')),status=node('p',{class:'note',text:'Checking shared calling connection…'}),result=div('stack');card.id='gateway-panel';main.append(card);card.append(status);
- const bot=input('gatewayBotId','text','Shared Voicebot UUID'),flow=input('gatewayFlowId','text','Shared Exotel flow ID'),authTemplate=input('gatewayAuthTemplate','text','Existing authenticated webhook bot UUID');
- const flowConfirmed=node('input',{type:'checkbox','aria-label':'I verified in Exotel that the copied Flow targets this shared Voicebot'});
- let inspectedBotId=null,repairReady=false;
- for(const control of [bot,flow,authTemplate])control.addEventListener('input',()=>{inspectedBotId=null;flowConfirmed.checked=false});
- const form=node('form',{class:'stack'},[
-  node('p',{class:'muted',text:'One-time platform connection. IDs from your earlier Exotel setup are prefilled automatically when no gateway exists. New clients will share this gateway with isolated company assistants. The old working bot and flow stay untouched.'}),
-  lab('Shared gateway bot',bot),lab('Shared gateway flow',flow),lab('Authenticated webhook template',authTemplate),
-  node('p',{class:'note',text:'First open this copied Flow in Exotel and confirm its Voicebot applet targets the NEW shared bot shown above, not the old working bot. Also run the read-only inspect below. A copied Flow ID alone does not prove correct routing.'}),
-  lab('I verified in Exotel that the copied Flow targets this shared Voicebot',flowConfirmed),
-  node('button',{class:'btn',type:'submit',text:'Prepare shared calling connection'})
- ]);
- const repairButton=btn('Repair saved Guard & stage Gateway (no calls)',async()=>{
-  if(!confirm('Repair the saved AR3D routing guard ONLY if required and create a PAUSED new Shared Voicebot version? This can create Exotel versions, but will NOT make calls, change the old working Bot, or roll out traffic. Any uncertain result stops without retry.'))return;
-  repairReady=false;repairButton.disabled=true;
-  try{
-   const r=await api('/v1/human/voice-gateway','POST',
-    {action:'recover',confirmation:'REPAIR_ONLY_SHARED_GUARD_NO_CALLS'});
-   result.replaceChildren(node('p',{class:'success',text:r.notice}));
-   notice('Shared gateway candidate staged: '+r.version+'. No calls or traffic rollout.');
-  }catch(e){
-   asError(e);
-   result.replaceChildren(node('p',{class:'err',text:
-    'Automatic repair did not complete. Do NOT retry this action. The new provider state may be partial. Details: '+e.message}));
-  }finally{await refresh().catch(asError)}
- },true);repairButton.disabled=true;
- const previewButton=btn('Check repair prerequisites (read-only)',async()=>{
-  repairReady=false;repairButton.disabled=true;previewButton.disabled=true;
-  try{
-   const r=await api('/v1/human/voice-gateway','POST',{action:'repair-preview'});
-   repairReady=r.eligible===true;
-   const reason={
-    saved_gateway_not_repairable:'The recorded setup is not eligible for the one-time repair.',
-    shared_voicebot_version_or_traffic_changed:'The shared Voicebot versions or traffic have changed; inspect in Exotel.',
-    shared_voicebot_template_changed:'The shared Voicebot no longer points to the saved source template.',
-    saved_guard_version_changed:'The recorded Guard version has changed; inspect in Exotel.',
-    saved_guard_identity_changed:'The saved Guard identity could not be confirmed.',
-    saved_template_not_safe_for_guard_repair:'The saved source template is missing its required single agent or has tools; do not repair automatically.',
-    provider_read_preflight_unavailable:'Exotel read-only preflight could not finish. Do not attempt a provider write.'
-   };
-   result.replaceChildren(
-    node('p',{class:repairReady?'success':'err',text:repairReady?
-     'Read-only prerequisites passed. Repair is now enabled for ONE confirmed attempt. Exotel versions may be written; no calls or traffic rollout.':(reason[r.reason]||'Repair is blocked; inspect the provider account without changing anything.')}),
-    node('p',{class:'note',text:repairReady?
-     (r.plan==='repair_saved_guard_then_stage_paused_bot'?
-      'Expected plan: repair the already saved Guard, verify its single safe agent, then stage a paused Shared Voicebot version.':
-      'Expected plan: the saved Guard is verified; stage only the paused Shared Voicebot version.')+
-      ' A preview cannot guarantee that Exotel will accept or complete the write.' :
-     'No Exotel or database changes were made. Do not click Repair, Prepare, Connect, Verify or Test Call.'})
-   );
-  }catch(e){asError(e)}
-  finally{previewButton.disabled=false;repairButton.disabled=!repairReady}
- },true);previewButton.disabled=true;
- const reconcileButton=btn('Review last Guard repair (read-only)',async()=>{
-  reconcileButton.disabled=true;
-  try{
-   const d=await api('/v1/human/voice-gateway','POST',{action:'repair-review'});
-   const reason={
-    shared_voicebot_changed_stop:'The Shared Voicebot traffic or stable template check did not pass. Review both the Voicebot and Guard observations below.',
-    shared_voicebot_version_read_unverified_stop:'Exotel did not return a verifiable exact Voicebot version for one or both requests. An Assistant version in the unselected response is not proof of the paused candidate binding.',
-    paused_candidate_origin_unconfirmed_stop:'The latest Voicebot is paused and binds the verified Guard. The saved error code does not link it to a Bot staging attempt.',
-    recorded_guard_identity_changed:'Exotel did not return the recorded Guard assistant.',
-    guard_version_unavailable:'Guard latest or stable version is missing.',
-    guard_version_identity_changed:'The selected Guard version identity could not be confirmed.',
-    guard_latest_differs_from_stable_stop:'Guard latest and stable versions differ; a Guard version may have been created without being finalized.',
-    saved_guard_verified_bot_not_staged:'The recorded Guard now has exactly one verified safe agent, but Shared Voicebot staging did not complete. Do not retry Repair; a separately reviewed continuation is needed.',
-    paused_candidate_verified_but_gateway_locked_stop:'A PAUSED Shared Voicebot candidate and its Guard appear correct by read-only checks. Gateway remains LOCKED. Do not retry or roll out; audited manual reconciliation is required.',
-    paused_candidate_guard_unverified_stop:'A paused Shared Voicebot candidate exists, but its Guard binding or safety contract is NOT verified. Do not retry or roll out.',
-    guard_still_has_zero_agents:'The exact version reports zero agents. Do not retry.',
-    guard_zero_agents_confirmed_multiple_reads:'Multiple Exotel read-only views report zero agents on the stable Guard. Do not retry.',
-    guard_agent_presence_not_confirmed:'Exotel returned an empty selected agent list, but other version views did not confirm the agent count. Do not retry.',
-    guard_response_shape_conflict_stop:'Exotel API returns conflicting agent counts between exact version, stable alias, and version-map views. Do not retry; inspect Exotel console or ask Exotel support for the correct version contract.',
-    guard_stable_alias_identity_changed:'Exotel stable-version alias does not confirm the recorded Guard. Do not retry.',
-    guard_not_verified_stop:'Exotel returned a Guard version, but its exact safety contract is not verified. Do not retry.',
-    provider_read_failed_stop:'Exotel read-only reconciliation could not complete.'
-   };
-   const g=d.guard||{},v=g.stable||{},b=d.sharedVoicebot||{};
-   const val=x=>x===true?'Yes':x===false?'No':'Not confirmed';
-   const percent=n=>n==null?'Unknown':String(n)+'%';
-   const trafficEvidence={
-    latest_omitted_from_full_stable_allocation:'Latest omitted. Stable accounts for 100% of traffic.',
-    allocation_verified:'Explicit percentages in Exotel allocation',
-    allocation_missing:'Exotel did not provide a traffic allocation',
-    allocation_malformed:'Exotel returned an unrecognized traffic allocation',
-    stable_allocation_missing:'Stable version is absent from the allocation',
-    traffic_outside_stable:'The allocation indicates traffic outside the stable version'
-   }[b.trafficStatus];
-   const versionRead=x=>x?.selectedVersion|| (x?.hasRequestedVersionMap?'Requested version in map':'Not confirmed');
-   const reads=[b.readError,b.versionReadErrors?.stable,b.versionReadErrors?.latest,
-    g.readError,v.readError,g.latest?.readError,g.evidence?.stableAliasReadError].filter(Boolean);
-   const phase={
-    guard_repair_unknown:'First Guard repair',
-    guard_agent_fix_unknown:'Agent-only Guard write or verification',
-    bot_agent_fix_unknown:'Bot staging, verification or database finalization after Guard verification'
-   }[d.savedErrorCode];
-   result.replaceChildren(
-    node('p',{class:'err',text:(reason[d.outcome]||'Guard reconciliation is uncertain; stop all writes.')+' No provider or database changes were made.'}),
-    table(['Read-only check','Result'],[
-     ['Saved failure code',d.savedErrorCode||'Unknown'],
-     ['Recorded phase',phase||'Unknown'],
-     ['Failure recorded (UTC)',d.savedUpdatedAt||'Unknown'],
-     ['Shared Voicebot stable version',b.stableVersion||'Unknown'],
-     ['Shared Voicebot latest version',b.latestVersion||'Unknown'],
-     ['Stable Voicebot traffic',percent(b.stableTrafficPercent)],
-     ['Latest Voicebot traffic',percent(b.latestTrafficPercent)],
-     ['Traffic allocation evidence',trafficEvidence||'Unknown'],
-     ['Shared Voicebot stable traffic preserved',val(b.stableTrafficPreserved)],
-     ['Stable Voicebot matches saved template and version',val(b.stableTemplateMatches)],
-     ['Paused Bot candidate exists',val(b.pausedCandidatePresent)],
-     ['Latest Voicebot uses recorded Guard',val(b.latestUsesRecordedGuard)],
-     ['Latest Voicebot Assistant version',b.latestAssistantVersion||'Unknown'],
-     ['Exact stable response selection',versionRead(b.versionResponses?.stable)],
-     ['Exact latest response selection',versionRead(b.versionResponses?.latest)],
-     ['Assistant version at response root for stable GET',b.versionResponses?.stable?.rootAssistantVersion||'Unknown'],
-     ['Assistant version at response root for latest GET',b.versionResponses?.latest?.rootAssistantVersion||'Unknown'],
-     ['Paused candidate references verified Guard',val(b.pausedCandidateReferencesGuard)],
-     ['Other Voicebot settings compared',b.comparedConfigFields?.join(', ')||'None returned in both versions'],
-     ['Other Voicebot settings with differences',b.changedConfigFields?.join(', ')||'None observed'],
-     ['Recorded Guard stable',g.stableVersion||'Unknown'],
-     ['Recorded Guard latest',g.latestVersion||'Unknown'],
-     ['Stable Guard agent count',v.agentCount||'Unknown'],
-     ['Overview version-map agent count',g.evidence?.overviewVersionMapCount||'Not confirmed'],
-     ['Stable alias root agent count',g.evidence?.stableAliasRootCount||'Not confirmed'],
-     ['Stable alias version-map count',g.evidence?.stableAliasVersionMapCount||'Not confirmed'],
-     ['Agent response shape conflict',val(g.evidence?.responseShapeConflict)],
-     ['Stable Guard root instruction safe',val(v.rootInstructionMatches)],
-     ['Stable Guard agent instruction safe',val(v.agentInstructionMatches)],
-     ['Stable Guard has no tools',val(v.noAgentTools)],
-     ['Stable Guard Agent model matches template',val(v.agentModelMatches)],
-     ['Strict Guard verification',val(v.strictGuardVerified)],
-     ['Read errors',[...new Set(reads)].join(', ')||'None observed'],
-     ['Any provider writes authorized','No']
-    ]),
-    ...(g.versions?.length?[node('h3',{text:'Guard version evidence'}),table(
-     ['Version','Selected agents','Root agents','Version-map agents','Root instruction safe',
-      'Agent instruction safe','No tools','Root model recorded','Agent model matches','Read error'],
-     g.versions.map(x=>[x.selectedVersion,x.agentCount||'Unknown',x.rootAgentCount||'Unknown',
-      x.versionMapAgentCount||'Unknown',val(x.rootInstructionMatches),val(x.agentInstructionMatches),
-      val(x.noAgentTools),val(x.rootModelPresent),val(x.agentModelMatches),x.readError||'—'])
-    )]:[]),
-    node('p',{class:'note',text:'This inspection NEVER retries an Exotel write, calls a customer, unlocks the gateway or authorizes staging/rollout. Save this report for review.'})
-   );
-  }catch(e){asError(e)}
-  finally{reconcileButton.disabled=false;await refresh().catch(asError)}
- },true);reconcileButton.disabled=true;
- const agentOnlyButton=btn('Try single-agent Guard fix (one time, no calls)',async()=>{
-  agentOnlyButton.disabled=true;
-  try{
-   const p=await api('/v1/human/voice-gateway','POST',{action:'agent-only-preview'});
-   if(!p.eligible){
-    result.replaceChildren(node('p',{class:'err',text:'Exotel provider checks BLOCKED the new agent-only fix: '+p.reason+'. No changes made.'}));
-    return;
-   }
-   if(!confirm('ONE EXOTEL WRITE ATTEMPT: Create one new version on the saved, currently incomplete routing Guard using ONLY a minimal agent payload (no copied Agent ID or client data). If verified, stage a paused Shared Voicebot candidate at 0% traffic. No calls/rollout. An uncertain result permanently blocks retry. Continue?'))return;
-   const d=await api('/v1/human/voice-gateway','POST',{action:'agent-only-fix',
-    confirmation:'CREATE_ONE_AGENT_ONLY_GUARD_VERSION_PAUSED_NO_CALLS'});
-   result.replaceChildren(node('p',{class:'success',text:d.notice}),
-    node('p',{class:'note',text:'Guard version '+d.guardVersion+' verified. Shared Voicebot version '+d.version+' is PAUSED. Do not start calls, rollout or connect routing until separately reviewed.'}));
-  }catch(e){
-   asError(e);
-   result.replaceChildren(node('p',{class:'err',text:'Agent-only fix was not verified. Do NOT retry any Guard or Bot write. Exotel may contain a partial version. Details: '+e.message}));
-  }finally{await refresh().catch(asError)}
- },true);agentOnlyButton.disabled=true;
- const reviewButton=btn('Review failed setup (read-only)',async()=>{
-  reviewButton.disabled=true;
-  try{
-   const d=await api('/v1/human/voice-gateway','POST',{action:'review'});
-   const flag=v=>v===true?'Yes':v===false?'No':'Not confirmed';
-   result.replaceChildren(
-    node('p',{class:'note',text:'Only read-only Exotel checks were performed. This report does not authorize rollout, retries, or live calling.'}),
-    table(['Check','Result'],[
-     ['Saved status',d.savedState],
-     ['AR3D guard assistant recorded',flag(d.guardAssistantRecorded)],
-     ['Guard assistant accessible via Exotel',flag(d.guardAssistantReadable)],
-     ['Guard stable version',d.guardAssistantStableVersion||'Not confirmed'],
-     ['Guard successfully finalized',flag(d.guardAssistantFinalized)],
-     ['Guard version has top-level agents',flag(d.guardVersionContract?.responseHasRootAgents)],
-     ['Guard version has version-map agents',flag(d.guardVersionContract?.responseHasVersionedAgents)],
-     ['Guard version has assistant-config agents',flag(d.guardVersionContract?.responseHasAssistantConfigAgents)],
-     ['Root agent count',d.guardVersionContract?.responseRootAgentCount||'Not confirmed'],
-     ['Selected version agent count',d.guardVersionContract?.responseSelectedAgentCount||'Not confirmed'],
-     ['Guard root safety instruction',flag(d.guardVersionContract?.rootInstructionMatchesGuard)],
-     ['Guard agent safety instruction',flag(d.guardVersionContract?.agentInstructionMatchesGuard)],
-     ['Guard explicit version matches selected stable',flag(d.guardVersionContract?.responseVersionMatchesRequested)],
-     ['Guard latest version matches selected stable',flag(d.guardVersionContract?.responseLatestMatchesRequested)],
-     ['Guard stable version matches selected stable',flag(d.guardVersionContract?.responseStableMatchesRequested)],
-     ['Gateway version recorded',d.gatewayVersionRecorded||'No'],
-     ['Exotel read succeeded',flag(d.providerReadable)],
-     ['Exotel latest version',d.latestVersion||'Unknown'],
-     ['Exotel stable version',d.stableVersion||'Unknown'],
-     ['Latest version matches AR3D guard',flag(d.latestVersionUsesRecordedGuard)],
-     ['Stable version matches AR3D guard',flag(d.stableVersionUsesRecordedGuard)]
-    ]),
-    node('p',{class:'note',text:d.guardAssistantReadError==='guard_version_not_confirmed'&&d.guardVersionContract?.responseHasRootAgents===true
-     ?'Exotel returned an agent-list field, but the selected guard version has not been verified as exactly one safe agent. Check the agent counts and safety-instruction flags above. A missing version label alone does not explain the failure; no changes have been made.'
-     :d.guardAssistantFinalized===true
-     ?'Guard assistant is verified, but the Exotel Voicebot has not adopted it. The bot-version creation or confirmation stage needs investigation.'
-     :d.guardAssistantReadable===false
-      ?'A guard ID was recorded, but Exotel did not confirm the guard assistant. Do not recreate it automatically.'
-      :d.guardAssistantFinalized===false
-       ?'The guard assistant was not confirmed as finalized. The guard-version stage needs investigation.'
-       :'The guard finalization stage is not fully verified. Do not guess or retry provider writes.'}),
-    node('p',{class:'err',text:'STOP: '+d.recommendation+
-     (d.providerError?' Provider check: '+d.providerError:'')+
-     (d.guardAssistantReadError?' Guard check: '+d.guardAssistantReadError:'')}
-    ));
-  }catch(e){asError(e)}
-  finally{await refresh().catch(asError)}
- },true);reviewButton.disabled=true;
- async function refresh(){
-  const r=await api('/v1/human/voice-gateway');
-  status.textContent=r.gateway?'Shared connection: '+r.gateway.state+' · Flow '+r.gateway.flowId+
-   (r.gateway.version?' · '+r.gateway.version:'')+(r.gateway.errorCode?' · '+r.gateway.errorCode:''):
-   'Shared connection needs one-time setup · known IDs prefilled';
-  if(r.gateway){
-   bot.value=r.gateway.botId;flow.value=r.gateway.flowId;
-   if(r.knownAuthTemplateBotId)authTemplate.value=r.knownAuthTemplateBotId;
-   form.querySelector('button[type=submit]').disabled=true;
-   if(r.gateway.state==='unknown'){
-    status.textContent=r.gateway.errorCode==='guard_agent_fix_unknown'||r.gateway.errorCode==='bot_agent_fix_unknown'?
-     'EXOTEL AGENT-ONLY WRITE UNCERTAIN — Stop. Do not try another write or call. Use read-only reconciliation or Exotel Support.':
-     r.gateway.errorCode==='guard_repair_unknown'?
-     'GUARD REPAIR UNCERTAIN — Stop all writes and calls. Do NOT retry Repair. Use Review last Guard repair (read-only) to reconcile Exotel versions.':
-     'SETUP NEEDS REVIEW — No calls. The old Prepare/Connect/Verify buttons are blocked. First run Check repair prerequisites (read-only), then consider the one-time paused Guard repair. Status: unknown'+(r.gateway.errorCode?' ('+r.gateway.errorCode+')':'')+'.';
-    status.className='note err';
-   }else status.className='note';
-  }else if(r.suggestedGateway){
-   bot.value=r.suggestedGateway.botId;flow.value=r.suggestedGateway.flowId;authTemplate.value=r.suggestedGateway.authTemplateBotId;
-   form.querySelector('button[type=submit]').disabled=false;status.className='note';
-  }
-  reviewButton.disabled=r.gateway?.state!=='unknown';
-  const repairable=r.gateway?.state==='unknown'&&r.gateway.errorCode==='provider_write_unknown';
-  if(!repairable)repairReady=false;
-  previewButton.disabled=!repairable;
-  repairButton.disabled=!(repairable&&repairReady);
-  reconcileButton.disabled=!(r.gateway?.state==='unknown'&&['guard_repair_unknown','guard_agent_fix_unknown','bot_agent_fix_unknown'].includes(r.gateway.errorCode));
-  agentOnlyButton.disabled=!(r.gateway?.state==='unknown'&&r.gateway.errorCode==='guard_repair_unknown');
-  previewButton.style.display=repairable?'':'none';
-  repairButton.style.display=repairable?'':'none';
-  agentOnlyButton.style.display=agentOnlyButton.disabled?'none':'';
-  const unsafe=['Connect authenticated session router','Verify shared gateway rollout',
-   'Test published client on my verified phone'];
-  for(const button of card.querySelectorAll('button'))
-   if(unsafe.includes(button.textContent.trim()))button.disabled=r.gateway?.state==='unknown';
-  return r;
- }
- form.addEventListener('submit',async e=>{
-  e.preventDefault();
-  const submit=form.querySelector('button[type=submit]');
-  if(!flowConfirmed.checked)return notice('First verify in Exotel that the copied Flow points to the new shared bot; do not change the old working bot.',true);
-  if(inspectedBotId!==bot.value)return notice('Run read-only Inspect gateway contract for the selected shared bot first.',true);
-  submit.disabled=true;
-  try{
-   const r=await api('/v1/human/voice-gateway','POST',{action:'configure',
-    botId:bot.value,flowId:flow.value,authTemplateBotId:authTemplate.value,flowTargetConfirmed:true});
-   result.replaceChildren(node('p',{class:'note',text:r.notice}));
-   await refresh();
-  }catch(e){
-   asError(e);
-   // Re-read the persisted gateway state: provider writes may have partially
-   // succeeded. Never automatically re-run a mutating Exotel request.
-   try{
-    const snapshot=await refresh();
-    if(snapshot.gateway?.state==='unknown')result.replaceChildren(node('p',{class:'err',text:'Provider changes are uncertain. Do not retry gateway setup or calls. Review the saved gateway version and Exotel rollout first.'}));
-   }catch{
-    result.replaceChildren(node('p',{class:'err',text:'Saved gateway state could not be read. Do not retry provider-changing actions until it has been reviewed.'}));
-   }
-   if(!form.querySelector('button[type=submit]').disabled)submit.disabled=false;
-  }
- });
- card.append(form,div('formrow',btn('Refresh saved gateway status (read-only)',async()=>{
-   try{await refresh();notice('Gateway status refreshed; no Exotel changes or calls made.')}catch(e){asError(e)}
- },true),reviewButton,reconcileButton,previewButton,repairButton,agentOnlyButton,btn('Inspect gateway contract',async()=>{
-   inspectedBotId=null;
-   try{
-    const r=await api('/v1/human/voice-gateway','POST',{action:'inspect',botId:bot.value});
-    if(r.botId!==bot.value||!r.legacyAvailable)throw Error('Exotel bot configuration could not be verified. Do not prepare the gateway.');
-    inspectedBotId=bot.value;
-    const advanced=node('details',{},node('summary',{text:'Technical inspection details (advanced)'}));
-    advanced.append(node('pre',{class:'note',text:JSON.stringify(r,null,2)}));
-    result.replaceChildren(node('p',{class:'success',text:'Read-only bot inspection succeeded. Legacy bot contract found: '+(r.legacyAvailable?'yes':'no')+'. Call duration limit: '+(r.callDurationLimit?.seconds??'unknown')+' seconds.'}),
-     node('p',{class:'note',text:'The new bot\'s webhook authentication is '+(r.hookAuthenticationMatchesAr3d?'detected':'not detected yet')+'. This inspection does not verify whether gateway preparation succeeded. Use Refresh saved gateway status.'}),advanced);
-   }catch(e){asError(e)}
-  },true),btn('Connect authenticated session router',async()=>{try{const r=await api('/v1/human/voice-gateway','POST',{action:'connect',authTemplateBotId:authTemplate.value});result.replaceChildren(node('p',{class:'note',text:r.notice}));await refresh()}catch(e){asError(e)}},true),btn('Verify shared gateway rollout',async()=>{try{const r=await api('/v1/human/voice-gateway','POST',{action:'verify'});result.replaceChildren(node('p',{class:'note',text:r.notice}));await refresh()}catch(e){asError(e)}},true)),result);
- const company=node('select',{class:'field','aria-label':'Gateway test company'});try{const r=await api('/v1/human/tenants');company.append(...r.tenants.filter(t=>['trial','active'].includes(t.status)).map(t=>node('option',{value:t.id,text:t.display_name})))}catch(e){asError(e)}
- const test=btn('Test published client on my verified phone',async()=>{
-  test.disabled=true;
-  const confirmation=div('card stack',node('p',{text:'Start one real gateway call to your privately configured verified test phone, using the selected client’s published agent?'}));confirmation.setAttribute('role','alertdialog');confirmation.setAttribute('aria-label','Confirm client gateway test');
-  const approved=await new Promise(resolve=>{function finish(ok){confirmation.remove();resolve(ok)}confirmation.append(div('formrow',btn('Confirm one gateway test',()=>finish(true)),btn('Cancel gateway test',()=>finish(false),true)));card.append(confirmation);confirmation.querySelector('button').focus()});
-  if(!approved){test.disabled=false;return}
-  try{const r=await api('/v1/human/engineering/exotel-self-test','POST',{confirm:'CALL_MY_VERIFIED_NUMBER_ONCE',publishedTenantId:company.value});result.replaceChildren(node('p',{class:r.routingRegistered?'success':'note',text:'Gateway test: '+r.state+' · routing '+(r.routingRegistered?'registered':'not confirmed')+' · '+r.requestId}))}catch(e){asError(e)}finally{test.disabled=false}
- },true);card.append(lab('Published client for verified-phone test',company),test);refresh().catch(asError);
-}
 async function companyProfileEditor(tenantId,content,admin=false,companyLabel=''){
  const card=div(admin?'stack':'card',title('Company Knowledge','h3'));content.append(card);
  let data;try{data=await api('/v1/human/company-profile?tenantId='+tenantId)}catch(e){card.append(node('p',{class:'err',text:e.message}));return}
@@ -1443,7 +741,7 @@ async function companyProfileEditor(tenantId,content,admin=false,companyLabel=''
  for(const [key,label,rows] of specs){const field=rows===1?input('company-'+key,'text',label):node('textarea',{class:'field',rows});field.required=key==='companyName';field.value=data.profile[key]||(admin&&key==='companyName'?companyLabel:'');field.disabled=!data.canEdit;controls[key]=field;if(rows===1){if(!row){row=div('formrow');form.append(row)}row.append(lab(label,field))}else{row=null;form.append(lab(label,field))}}
  const status=node('p',{class:'muted',text:data.revision?'Company information v'+data.revision+' saved':'Add your company information to get started'});form.append(status);
  if(data.canEdit)form.append(node('button',{class:'btn',type:'submit',text:'Save company information'}));
- form.addEventListener('submit',async e=>{e.preventDefault();const submit=form.querySelector('button[type=submit]');submit.disabled=true;try{const result=await api('/v1/human/company-profile','POST',{tenantId,baseRevision:data.revision,profile:Object.fromEntries(Object.entries(controls).map(([key,field])=>[key,field.value]))});data.revision=result.revision;status.textContent='Company information v'+data.revision+' saved. Publish the agent to use it in calls.';document.dispatchEvent(new CustomEvent('company-profile-saved',{detail:tenantId}));notice('Company information saved')}catch(e){asError(e)}finally{submit.disabled=false}});
+ form.addEventListener('submit',async e=>{e.preventDefault();const submit=form.querySelector('button[type=submit]');submit.disabled=true;try{const result=await api('/v1/human/company-profile','POST',{tenantId,baseRevision:data.revision,profile:Object.fromEntries(Object.entries(controls).map(([key,field])=>[key,field.value]))});data.revision=result.revision;status.textContent='Company information v'+data.revision+' saved. The fixed phone questionnaire is managed separately.';document.dispatchEvent(new CustomEvent('company-profile-saved',{detail:tenantId}));notice('Company information saved')}catch(e){asError(e)}finally{submit.disabled=false}});
 }
 async function callingScriptEditor(tenantId,content,admin=false,companyLabel=''){
  await companyProfileEditor(tenantId,content,admin,companyLabel);
@@ -1461,9 +759,17 @@ async function callingScriptEditor(tenantId,content,admin=false,companyLabel='')
   const config={name:name.value,language:language.value,greeting:greeting.value,questions:questions.value.split('\n').map(q=>q.trim()).filter(Boolean),faqs:[...faqRows.children].map(row=>({question:row._faq.q.value,answer:row._faq.a.value})),rules:rules.value,closing:closing.value};
   const saved=await api('/v1/human/calling-scripts','POST',{tenantId,baseRevision,config});baseRevision=saved.revision;notice('Script version '+saved.revision+' saved. Live calls have not changed.');await refreshHistory();
  }catch(e){asError(e)}finally{submit.disabled=false}});
- async function refreshHistory(){data=await api('/v1/human/calling-scripts?tenantId='+tenantId);baseRevision=data.versions[0]?.revision||0;history.replaceChildren();const published=data.publication?.state==='ready'&&data.publication.scriptRevision===baseRevision&&data.publication.profileRevision===data.profileRevision;status.replaceChildren(node('p',{class:published?'success':'note',text:published?'Latest company information and questions are published for calls.':baseRevision?'Version '+baseRevision+' saved in AR3D. Publish your AI agent below to apply the latest company information and questions to calls.':'No script saved yet. Edit the questions below and save your first version.'}));
-  const list=div('stack');for(const v of data.versions){const row=div('formrow',node('span',{text:'v'+v.revision+' · '+v.providerState+(v.providerVersion?' · Exotel '+v.providerVersion:'')+(v.errorCode?' · '+v.errorCode:'')}));if(data.canEdit)row.append(btn('Load v'+v.revision,()=>{fill(v.config);notice('Loaded v'+v.revision+'. Save to create a new version. Latest version remains in history.')},true));if(admin&&data.canStage&&['draft','failed'].includes(v.providerState))row.append(btn('Sync v'+v.revision+' to Exotel',async()=>{try{const r=await api('/v1/human/calling-scripts/stage','POST',{tenantId,id:v.id});notice(r.notice);await refreshHistory()}catch(e){asError(e);await refreshHistory()}},true));list.append(row)}history.append(list);
-  if(data.canEdit&&baseRevision){const publish=btn(published?'Agent published':'Publish AI agent for calls',async()=>{publish.disabled=true;try{const r=await api('/v1/human/calling-scripts/publish','POST',{tenantId,id:data.versions[0].id,profileRevision:data.profileRevision});notice(r.notice||'AI agent already published');await refreshHistory()}catch(e){asError(e);await refreshHistory()}finally{publish.disabled=false}});publish.disabled=published;status.append(publish);if(data.publication&&['failed','unknown','sending'].includes(data.publication.state))status.append(node('p',{class:'err',text:'Last publication: '+data.publication.state+(data.publication.errorCode?' — '+data.publication.errorCode:'')}))}
+ async function refreshHistory(){
+  data=await api('/v1/human/calling-scripts?tenantId='+tenantId);baseRevision=data.versions[0]?.revision||0;
+  status.replaceChildren(node('p',{class:'note',text:baseRevision?
+   'Draft v'+baseRevision+' saved. These drafts are separate from the fixed phone questionnaire.':'No script saved yet.'}));
+  const list=div('stack');
+  for(const v of data.versions){
+   const row=div('formrow',node('span',{text:'v'+v.revision}));
+   if(data.canEdit)row.append(btn('Load v'+v.revision,()=>fill(v.config),true));
+   list.append(row);
+  }
+  history.replaceChildren(list);
  }
  document.addEventListener('company-profile-saved',e=>{if(e.detail===tenantId&&card.isConnected)refreshHistory().catch(asError)});
  card.append(node('p',{class:'note',text:'Control the questions, approved answers, language and conversation rules here. Each save keeps a new version. Opt-out handling and honest answers remain required.'}),status,form,title('Version history','h3'),history);await refreshHistory();
@@ -1606,7 +912,7 @@ async function planningPanels(tenantId,content,role){
   const intentCard=div('card',
     title('Blocked Call Intents — planning only','h3'),
     node('p',{class:'note',text:
-      'An immutable proposal records which tenant draft and lead needs review. It is NOT consent approval, provider registration, call authorization or an Exotel dial request.'}));
+      'An immutable proposal records which tenant draft and lead needs review. Dialing requires company approval and customer clearance.'}));
   const intentList=div('stack');
   content.append(intentCard);
   intentCard.append(intentList);
@@ -1702,7 +1008,7 @@ async function auditPanel(tenantId,content){
 
 async function usageAndExport(tenantId,content,role){
   const card=div('card',title('CRM Usage & Data Portability','h3'),
-    node('p',{class:'note',text:'CRM record counts and private customer exports. Call charges are managed in Exotel.'}));
+    node('p',{class:'note',text:'CRM record counts and private customer exports. Call charges are managed by the phone provider.'}));
   content.append(card);
   const usage=await api('/v1/human/usage?tenantId='+encodeURIComponent(tenantId));
   const m=usage.crmStats;
@@ -2098,7 +1404,7 @@ function fixedSurveyPanel(tenantId,lead,onSave){
         div('formrow',lab('Fill from microphone',micField),dictate));
       form.append(speechArea);
       const voiceDemo=div('card',title('Question-by-question Voice Preview (no calls)','h3'),
-        node('p',{class:'note',text:'7 fixed turns only. Browser voice is optional and may use a browser speech service. All answers require review. No customer dial, recording or automatic consent.'}));
+        node('p',{class:'note',text:'Use fictional answers in this preview. Cloudflare transcribes each short microphone clip. Review the answers before saving them. No phone call is placed.'}));
       const questionText=node('p',{class:'banner',text:'Start to hear the first fixed question.'});
       const voiceHint=node('p',{class:'muted',text:'Review each answer. Unsupported or low-confidence speech will repeat the question.'});
       const voiceAnswer=input('demoVoiceAnswer','text','Type or dictate the answer');
@@ -2110,8 +1416,18 @@ function fixedSurveyPanel(tenantId,lead,onSave){
           displayTurn(out);
         }catch(err){asError(err)}
       },true);
+      const localPrompt=node('input',{class:'field',type:'file',accept:'audio/*'});
       const playVoice=btn('Speak current question',()=>{
-        if(!demoState||demoState.status!=='active'||!('speechSynthesis' in window)||
+        if(!demoState||demoState.status!=='active')return notice('Start the preview first',true);
+        if(localPrompt.files[0]){
+          const url=URL.createObjectURL(localPrompt.files[0]),audio=new Audio(url);
+          const release=()=>URL.revokeObjectURL(url);
+          audio.addEventListener('ended',release,{once:true});
+          audio.addEventListener('error',release,{once:true});
+          audio.play().catch(()=>{release();notice('Could not play the selected recording.',true)});
+          return;
+        }
+        if(!('speechSynthesis' in window)||
            !('SpeechSynthesisUtterance' in window))
           return notice('Browser question audio is unavailable',true);
         window.speechSynthesis.cancel();
@@ -2119,23 +1435,48 @@ function fixedSurveyPanel(tenantId,lead,onSave){
         utterance.lang=language.value==='en'?'en-IN':'hi-IN';
         window.speechSynthesis.speak(utterance);
       },true);
-      const voiceDictate=btn('Answer with browser microphone',()=>{
-        if(!demoState||demoState.status!=='active')
-          return notice('Start the preview first',true);
-        const R=window.SpeechRecognition||window.webkitSpeechRecognition;
-        if(!R)return notice('Browser speech recognition unavailable. Type your answer.',true);
-        const rec=new R();rec.lang=language.value==='en'?'en-IN':'hi-IN';
-        rec.interimResults=false;rec.maxAlternatives=1;
+      let answerRecorder=null;
+      const voiceDictate=btn('Record answer for Cloudflare',async()=>{
+        if(answerRecorder?.state==='recording'){answerRecorder.stop();return}
+        if(!demoState||demoState.status!=='active')return notice('Start the preview first',true);
+        if(!navigator.mediaDevices?.getUserMedia||!window.MediaRecorder)
+          return notice('Audio recording unavailable. Type the answer.',true);
+        const turn=demoState;
+        const label=voiceDictate.querySelector('span');
         voiceDictate.disabled=true;
-        rec.onend=()=>{voiceDictate.disabled=false};
-        rec.onerror=()=>{voiceDictate.disabled=false;
-          notice('Microphone recognition failed. Type the answer instead.',true)};
-        rec.onresult=e=>{
-          const heard=String(e.results?.[0]?.[0]?.transcript||'').trim();
-          voiceAnswer.value=heard.slice(0,220);
-          voiceHint.textContent='Recognized text is unverified. Check spelling and meaning before Next.';
-        };
-        rec.start();
+        let stream;
+        try{
+          stream=await navigator.mediaDevices.getUserMedia({audio:true});
+          if(demoState!==turn||!voiceDictate.isConnected){stream.getTracks().forEach(t=>t.stop());return}
+          const recorder=new MediaRecorder(stream),chunks=[];
+          answerRecorder=recorder;
+          recorder.addEventListener('dataavailable',event=>{if(event.data.size)chunks.push(event.data)});
+          const limit=setTimeout(()=>{if(recorder.state==='recording')recorder.stop()},12000);
+          recorder.addEventListener('stop',async()=>{
+            clearTimeout(limit);stream.getTracks().forEach(t=>t.stop());
+            answerRecorder=null;
+            voiceDictate.disabled=true;label.textContent='Transcribing…';
+            try{
+              if(demoState!==turn||!voiceDictate.isConnected||!chunks.length)return;
+              const type=recorder.mimeType||chunks[0].type;
+              const params=new URLSearchParams({tenantId,language:turn.language});
+              const response=await fetch('/v1/human/voice-preview/transcribe?'+params,{
+                method:'POST',headers:{'Content-Type':type},body:new Blob(chunks,{type}),cache:'no-store'
+              });
+              const result=await response.json();
+              if(!response.ok)throw Error(result.error||'Transcription failed');
+              if(demoState!==turn||!voiceDictate.isConnected)return;
+              if(result.text)voiceAnswer.value=result.text;
+              voiceHint.textContent=result.text?'Review the transcription, then click Next.':'No clear speech detected. Record again or type the answer.';
+            }catch(err){asError(err)}
+            finally{label.textContent='Record answer for Cloudflare';voiceDictate.disabled=false}
+          },{once:true});
+          recorder.start();
+          label.textContent='Stop recording';voiceDictate.disabled=false;
+        }catch{
+          stream?.getTracks().forEach(t=>t.stop());answerRecorder=null;
+          voiceDictate.disabled=false;notice('Microphone unavailable. Type the answer instead.',true);
+        }
       },true);
       const nextVoice=btn('Next fixed question',async()=>{
         if(!demoState||demoState.status!=='active')return;
@@ -2154,7 +1495,7 @@ function fixedSurveyPanel(tenantId,lead,onSave){
         const current=result.state;
         if(current.status==='active'){
           questionText.textContent='Question '+(current.index+1)+' of 7 — '+result.prompt;
-          voiceAnswer.value='';
+          localPrompt.value='';voiceAnswer.value='';
           voiceHint.textContent=result.warning||'Answer this question, then click Next.';
           nextVoice.disabled=false;
         }else if(current.status==='completed'){
@@ -2178,7 +1519,7 @@ function fixedSurveyPanel(tenantId,lead,onSave){
       }
       nextVoice.disabled=true;
       voiceDemo.append(questionText,voiceHint,
-        div('formrow',voiceStart,playVoice),
+        div('formrow',voiceStart,lab('Optional recording for this question',localPrompt),playVoice),
         div('formrow',lab('Customer answer for preview',voiceAnswer),voiceDictate,nextVoice));
       form.append(voiceDemo);
 
