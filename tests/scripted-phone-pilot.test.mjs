@@ -1,10 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createHmac} from 'node:crypto';
-import {fixture,tid,lead,admin,now,setup,accepted} from './helpers/calling-fixture.mjs';
+import {fixture,tid,lead,admin,client,now,until,route,configureScriptedCampaign,setup,accepted} from './helpers/calling-fixture.mjs';
 import {approvedCampaignPhone,handleScriptedPhoneAdmin,handleScriptedPhoneCallback} from '../src/scripted-phone-pilot.mjs';
 import {tickScriptedTenant} from '../src/scripted-campaign-dispatch.mjs';
 import worker from '../src/index.mjs';
+import {handleCrmRequest} from '../src/crm-routes.mjs';
 import {handleFixedVoicePreviewRequest} from '../src/fixed-voice-preview-routes.mjs';
 
 const origin='https://app.example.invalid';
@@ -149,5 +150,80 @@ test('retired provider endpoints stop before DB access or body handling',async()
   const response=await worker.fetch(new Request(origin+path,{method:'POST',body:'{}'}),{});
   assert.equal(response.status,410);
   assert.deepEqual(await response.json(),{error:'provider_route_retired'});
+ }
+});
+
+
+test('CSV campaign → approved dial → seven signed answers → client CRM result',async()=>{
+ for(const editDuringCall of [false,true]){
+  const f=fixture();
+  try{
+   const csv='Name,Mobile,Preferred Location\nNew CSV customer,9000000005,Old city';
+   const batch={tenantId:tid,csv,campaign:{name:'November CSV',language:'en',requestId:crypto.randomUUID()}};
+   const commit=user=>handleCrmRequest(new Request(origin+'/v1/human/import/commit',{
+    method:'POST',headers:{Origin:origin,'Content-Type':'application/json'},body:JSON.stringify(batch)
+   }),f.env,user);
+   assert.equal((await commit({id:'viewer'})).status,403);
+   const imported=await commit(client);
+   assert.equal(imported.status,201,await imported.clone().text());
+   const draft=await imported.json();
+   const replay=await (await commit(client)).json();
+   assert.equal(draft.campaignCustomers,1);
+   assert.equal(replay.campaignId,draft.campaignId);
+   assert.equal(replay.inserted,0);
+   const csvLead=f.r.db.prepare('SELECT id FROM leads WHERE mobile_e164=?').get('+919000000005').id;
+   assert.notEqual(csvLead,lead);
+   assert.deepEqual(f.r.db.prepare('SELECT lead_id FROM call_campaign_candidates WHERE campaign_id=?').all(draft.campaignId).map(v=>v.lead_id),[csvLead]);
+
+   configureScriptedCampaign(f);
+   const policy=await route(f,'policy',{tenantId:tid,enabled:true,approvalReference:'provider-approval-ref',expiresAt:until,dailyLimit:10,maxSeconds:180},admin);
+   assert.equal(policy.status,200,await policy.text());
+   const review=await (await route(f,'clearances',{tenantId:tid,campaignId:draft.campaignId},admin,'GET')).json();
+   assert.deepEqual(review.leads.map(x=>x.id),[csvLead]);
+   const start=await route(f,'runs',{tenantId:tid,campaignId:draft.campaignId,action:'start'});
+   assert.equal(start.status,202,await start.text());
+   const env=f.env,config=await approvedCampaignPhone(env);
+   const waiting=await tickScriptedTenant(env,f.r.wrap,tid,config,{now,apiFetch:()=>assert.fail('clearance is required')});
+   assert.equal(waiting.state,'idle_or_clearance_required');
+   const clearance=await route(f,'clearances',{tenantId:tid,leadIds:[csvLead],purpose:'property_information',
+    consentReference:'consent-ref',dndReference:'dnd-ref',expiresAt:until},admin);
+   assert.equal(clearance.status,200,await clearance.text());
+   let hook;
+   const responses=['flat','Raipur','Shankar Nagar','3BHK','35 lakh','yes','2027-01-12'];
+   env.AI.run=async()=>({text:responses.shift()});
+   const tick=await tickScriptedTenant(env,f.r.wrap,tid,config,{now,apiFetch:async (_url,opts)=>{
+    const payload=JSON.parse(opts.body);
+    assert.equal(payload.to,'+919000000005');
+    hook=payload.answer_url.replace(/\/answer$/,'');
+    return accepted();
+   }});
+   assert.equal(tick.state,'submitted');
+   const callback=(step,params)=>handleScriptedPhoneCallback(
+    signed(hook+'/'+step,{CallUUID:callId,...params},env.PLIVO_AUTH_TOKEN),env,{now,fetcher:async()=>new Response('RIFF',{headers:{'Content-Type':'audio/wav'}})}
+   );
+   assert.match(await (await callback('answer',{ALegRequestUUID:'synthetic-plivo-request-123',
+    To:'+919000000005',From:config.caller,Direction:'outbound'})).text(),/GetDigits/);
+   await callback('consent',{Digits:'1'});
+   if(editDuringCall)f.r.db.prepare("UPDATE leads SET updated_at=?,preferred_location='Staff city' WHERE id=?")
+    .run(new Date(now+500).toISOString(),csvLead);
+   for(let i=0;i<7;i++){
+    const response=await callback('turn/'+i,{RecordingID:'record-id-0'+i});
+    assert.equal(response.status,200,await response.clone().text());
+    assert.match(await response.text(),i===6?(editDuringCall?/review\.mp3/:/closing\.mp3/):/<Record/);
+   }
+   await callback('turn/6',{RecordingID:'record-id-06'});
+   assert.equal((await callback('hangup',{Duration:'70'})).status,204);
+   assert.equal((await tickScriptedTenant(env,f.r.wrap,tid,config,{now:now+60000,apiFetch:()=>assert.fail('no redial')})).state,'reconciled');
+   const data=await (await route(f,'results',{tenantId:tid,campaignId:draft.campaignId},client,'GET')).json();
+   assert.equal(data.total,1);
+   assert.equal(data.results[0].savedToLead,!editDuringCall);
+   assert.equal(data.results[0].answers.budgetInr,3500000);
+   assert.equal(data.results[0].answers.visitDate,'2027-01-12');
+   assert.equal(data.results[0].durationSeconds,70);
+   assert.equal(f.r.db.prepare('SELECT COUNT(*) AS n FROM scripted_call_results').get().n,1);
+   assert.equal(f.r.db.prepare('SELECT preferred_location FROM leads WHERE id=?').get(csvLead).preferred_location,editDuringCall?'Staff city':'Raipur');
+   assert.equal((await route(f,'results',{tenantId:tid},{id:'foreign'},'GET')).status,403);
+   assert.equal((await (await route(f,'results',{tenantId:tid,campaignId:crypto.randomUUID()},client,'GET')).json()).total,0);
+  }finally{f.close()}
  }
 });

@@ -60,9 +60,9 @@ test('import uses CRM-only tenant scope; never grants consent or creates a call'
   const response=await worker.fetch(request('/v1/human/import/commit','POST',{tenantId:tid,csv:spreadsheet}),f.env);
   assert.equal(response.status,201);
   const writes=f.log.filter(x=>x.db==='crm'&&x.sql.includes('INSERT INTO leads'));
-  assert.equal(writes.length,3);
+  assert.equal(writes.length,1);
   assert.ok(writes.every(x=>x.sql.includes('customer_segment,plot_size_preference,visit_date_preference')));
-  assert.deepEqual(writes.map(x=>x.params.at(-3)),['prior_inquiry','unknown_contact','unclassified']);
+  assert.deepEqual(JSON.parse(writes[0].params[3]).map(x=>x.customerSegment),['prior_inquiry','unknown_contact','unclassified']);
   assert.ok(writes.every(x=>x.sql.includes("'unknown','unknown'")));
   assert.ok(f.log.every(x=>!/INSERT INTO calls|UPDATE leads SET consent_status|UPDATE leads SET dnd_status/.test(x.sql)));
 });

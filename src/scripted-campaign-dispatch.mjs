@@ -51,17 +51,36 @@ export async function tickScriptedTenant(env,db,tid,config,{apiFetch=fetch,now=D
  if(!config||!inCallingWindow(now))return {state:'disabled_or_outside_hours'};
  const policy=await db.prepare('SELECT * FROM calling_policies WHERE tenant_id=? AND enabled=1 AND expires_at>? AND flow_id=?').bind(tid,at,SCRIPTED_CALLING_POLICY).first();
  if(!policy)return {state:'approval_required'};
- // Snapshot destination only at reservation; eligibility is rechecked atomically below.
- const job=await db.prepare("SELECT j.id,j.tenant_id,j.lead_id,l.mobile_e164 AS destination,l.updated_at AS lead_updated_at,c.purpose,c.language_mode AS language,r.created_by FROM calling_jobs j JOIN calling_runs r ON r.tenant_id=j.tenant_id AND r.id=j.run_id JOIN call_campaign_drafts c ON c.tenant_id=r.tenant_id AND c.id=r.campaign_id JOIN leads l ON l.tenant_id=j.tenant_id AND l.id=j.lead_id WHERE j.tenant_id=? AND j.state='queued' AND j.flow_id=? AND r.state='running' ORDER BY j.created_at,j.id LIMIT 1").bind(tid,SCRIPTED_CALLING_POLICY).first();
- if(!job){await db.prepare("UPDATE calling_runs SET state='completed',updated_at=? WHERE tenant_id=? AND state='running' AND NOT EXISTS(SELECT 1 FROM calling_jobs j WHERE j.tenant_id=calling_runs.tenant_id AND j.run_id=calling_runs.id AND j.state IN('queued','reserved','submitted','unknown'))").bind(at,tid).run();return {state:'idle'}}
+ // Permanent suppression is terminal. Missing/expired approval stays queued so a later review can release it.
+ await db.prepare(`UPDATE calling_jobs SET state='blocked',error_code='customer_suppressed',updated_at=?
+  WHERE tenant_id=? AND state='queued' AND flow_id=? AND EXISTS(
+   SELECT 1 FROM leads l WHERE l.tenant_id=calling_jobs.tenant_id AND l.id=calling_jobs.lead_id
+   AND (l.consent_status='denied' OR l.dnd_status='blocked' OR EXISTS(
+    SELECT 1 FROM lead_opt_out_events o WHERE o.tenant_id=l.tenant_id AND o.lead_id=l.id)))`)
+  .bind(at,tid,SCRIPTED_CALLING_POLICY).run();
+ // Choose the next eligible job, so an earlier unapproved lead cannot stall approved customers.
+ const job=await db.prepare(`SELECT j.id,j.tenant_id,j.lead_id,l.mobile_e164 AS destination,l.updated_at AS lead_updated_at,
+  c.purpose,c.language_mode AS language,r.created_by
+  FROM calling_jobs j JOIN calling_runs r ON r.tenant_id=j.tenant_id AND r.id=j.run_id
+  JOIN call_campaign_drafts c ON c.tenant_id=r.tenant_id AND c.id=r.campaign_id
+  JOIN leads l ON l.tenant_id=j.tenant_id AND l.id=j.lead_id
+  JOIN calling_clearances v ON v.tenant_id=j.tenant_id AND v.lead_id=j.lead_id AND v.purpose=c.purpose
+  WHERE j.tenant_id=? AND j.state='queued' AND j.flow_id=? AND r.state='running'
+  AND v.expires_at>? AND v.reviewed_at>=?
+  AND v.reviewed_at>COALESCE((SELECT MAX(h.reserved_at) FROM calling_jobs h WHERE h.tenant_id=j.tenant_id AND h.lead_id=j.lead_id),'')
+  ORDER BY j.created_at,j.id LIMIT 1`).bind(tid,SCRIPTED_CALLING_POLICY,at,policy.updated_at).first();
+ if(!job){
+  await db.prepare(`UPDATE calling_runs SET state='completed',updated_at=? WHERE tenant_id=? AND state='running'
+   AND NOT EXISTS(SELECT 1 FROM calling_jobs j WHERE j.tenant_id=calling_runs.tenant_id AND j.run_id=calling_runs.id
+     AND j.state IN('queued','reserved','submitted','unknown'))`).bind(at,tid).run();
+  return {state:'idle_or_clearance_required'};
+ }
  if(!/^\+91[6-9]\d{9}$/.test(job.destination||'')||!['hi','en'].includes(job.language)){
-  await db.prepare("UPDATE calling_jobs SET state='blocked',error_code='unsupported_destination_or_language',updated_at=? WHERE tenant_id=? AND id=? AND state='queued'").bind(at,tid,job.id).run();
+  await db.prepare("UPDATE calling_jobs SET state='blocked',error_code='unsupported_destination_or_language',updated_at=? WHERE tenant_id=? AND id=? AND state='queued'")
+   .bind(at,tid,job.id).run();
   return {state:'blocked'};
  }
  if(!await scriptedPromptsReady(env,job.language,tid))return {state:'prompts_incomplete'};
- const clearance=await db.prepare("SELECT v.lead_id FROM calling_clearances v JOIN leads l ON l.tenant_id=v.tenant_id AND l.id=v.lead_id WHERE v.tenant_id=? AND v.lead_id=? AND v.purpose=? AND v.expires_at>? AND v.reviewed_at>=? AND v.reviewed_at>COALESCE((SELECT MAX(h.reserved_at) FROM calling_jobs h WHERE h.tenant_id=v.tenant_id AND h.lead_id=v.lead_id),'') AND l.consent_status!='denied' AND l.dnd_status!='blocked' AND NOT EXISTS(SELECT 1 FROM lead_opt_out_events o WHERE o.tenant_id=l.tenant_id AND o.lead_id=l.id)")
- .bind(tid,job.lead_id,job.purpose,at,policy.updated_at).first();
- if(!clearance){await db.prepare("UPDATE calling_jobs SET state='blocked',error_code='clearance_required_or_opted_out',updated_at=? WHERE tenant_id=? AND id=? AND state='queued'").bind(at,tid,job.id).run();return {state:'blocked'}}
  const dayStart=new Date(Math.floor((now+330*60000)/86400000)*86400000-330*60000).toISOString();
  // D1 serializes this ONE reservation statement, including quotas and uniqueness.
  const reserved=await db.prepare("UPDATE calling_jobs SET state='reserved',reserved_at=?,updated_at=?,account_sid=?,caller_id=?,flow_id=?,destination=? WHERE tenant_id=? AND id=? AND state='queued' AND EXISTS(SELECT 1 FROM calling_runs r WHERE r.tenant_id=calling_jobs.tenant_id AND r.id=calling_jobs.run_id AND r.state='running') AND EXISTS(SELECT 1 FROM calling_policies p WHERE p.tenant_id=? AND p.enabled=1 AND p.expires_at>? AND p.updated_at=? AND p.flow_id=?) AND EXISTS(SELECT 1 FROM calling_clearances v JOIN leads l ON l.tenant_id=v.tenant_id AND l.id=v.lead_id WHERE v.tenant_id=? AND v.lead_id=? AND v.purpose=? AND v.expires_at>? AND v.reviewed_at>=? AND v.reviewed_at>COALESCE((SELECT MAX(h.reserved_at) FROM calling_jobs h WHERE h.tenant_id=v.tenant_id AND h.lead_id=v.lead_id),'') AND l.consent_status!='denied' AND l.dnd_status!='blocked' AND l.mobile_e164=? AND l.updated_at=? AND NOT EXISTS(SELECT 1 FROM lead_opt_out_events o WHERE o.tenant_id=l.tenant_id AND o.lead_id=l.id)) AND NOT EXISTS(SELECT 1 FROM calling_jobs x WHERE x.tenant_id=? AND x.state IN('reserved','submitted','unknown')) AND (SELECT COUNT(*) FROM calling_jobs x WHERE x.tenant_id=? AND x.reserved_at>=?)<?")

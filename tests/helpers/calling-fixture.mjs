@@ -34,7 +34,7 @@ export function fixture(){
  return {c,r,env,close(){c.db.close();r.db.close()}};
 }
 function request(action,data,method='POST'){
- return new Request('https://app.example.invalid/v1/human/calling/'+action+(method==='GET'?'?tenantId='+data.tenantId:''),{method,headers:{Origin:'https://app.example.invalid','Content-Type':'application/json'},...(method==='POST'?{body:JSON.stringify(data)}:{})});
+ return new Request('https://app.example.invalid/v1/human/calling/'+action+(method==='GET'?'?'+new URLSearchParams(data):''),{method,headers:{Origin:'https://app.example.invalid','Content-Type':'application/json'},...(method==='POST'?{body:JSON.stringify(data)}:{})});
 }
 export const route=(f,action,data,user=client,method='POST')=>handleScriptedCallingRequest(request(action,data,method),f.env,user,{now});
 export function configureScriptedCampaign(f){

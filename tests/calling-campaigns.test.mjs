@@ -79,7 +79,7 @@ test('a second campaign cannot recontact a customer on stale approval',async()=>
  f.r.db.prepare('INSERT INTO call_campaign_candidates VALUES(?,?,?,?)').run(tid,another,lead,at);
  assert.equal((await route(f,'runs',{tenantId:tid,campaignId:another,action:'start'})).status,202);
  let posted=0;await tickTenant(f.env,f.r.wrap,tid,{now:now+60000,apiFetch:async()=>{posted++;return accepted()}});
- assert.equal(posted,0);assert.equal(f.r.db.prepare("SELECT COUNT(*) AS n FROM calling_jobs WHERE state='blocked'").get().n,1);
+ assert.equal(posted,0);assert.equal(f.r.db.prepare("SELECT COUNT(*) AS n FROM calling_jobs WHERE state='queued'").get().n,1);
  }finally{f.close()}
 });
 test('only reviewed policy activation promotes a trial tenant, without touching other tenants',async()=>{
@@ -87,5 +87,28 @@ test('only reviewed policy activation promotes a trial tenant, without touching 
  f.c.db.exec("UPDATE tenants SET status='trial'");
  await setup(f);assert.equal(f.c.db.prepare('SELECT status FROM tenants').get().status,'active');
  assert.equal(f.c.db.prepare("SELECT COUNT(*) AS n FROM tenant_audit_events WHERE action='tenant.calling_activated'").get().n,1);
+ }finally{f.close()}
+});
+
+test('an uncertain dial stays locked until a Super Admin verifies and closes the paused attempt', async()=>{
+ const f=fixture();
+ try{
+  await setup(f);
+  assert.equal((await tickTenant(f.env,f.r.wrap,tid,{now,apiFetch:async()=>{throw Error('timeout')}})).state,'unknown');
+  const {locked}=await (await route(f,'reconcile',{tenantId:tid},admin,'GET')).json();
+  assert.equal(locked.canClose,0);
+  const payload={tenantId:tid,jobId:locked.id,evidenceReference:'carrier-final-log-checked'};
+  assert.equal((await route(f,'reconcile',payload,client)).status,403);
+  assert.equal((await route(f,'reconcile',payload,admin)).status,409);
+  await route(f,'runs',{tenantId:tid,campaignId:cid,action:'pause'});
+  f.r.db.prepare('UPDATE calling_jobs SET reserved_at=? WHERE id=?').run(new Date(now-31*60000).toISOString(),locked.id);
+  assert.equal((await route(f,'reconcile',payload,admin)).status,200);
+  assert.equal((await route(f,'reconcile',payload,admin)).status,409);
+  const job=f.r.db.prepare('SELECT state,error_code FROM calling_jobs WHERE id=?').get(locked.id);
+  assert.equal(job.state,'failed');
+  assert.equal(job.error_code,'closed_after_carrier_review');
+  assert.equal(f.r.db.prepare("SELECT COUNT(*) AS n FROM crm_audit_events WHERE action='calling.carrier_reviewed'").get().n,1);
+  await route(f,'runs',{tenantId:tid,campaignId:cid,action:'start'});
+  await tickTenant(f.env,f.r.wrap,tid,{now,apiFetch:()=>assert.fail('never redial the closed attempt')});
  }finally{f.close()}
 });

@@ -52,15 +52,35 @@ try{
  const file=page.locator('input[type=file]');await file.setInputFiles({name:'customers.csv',mimeType:'text/csv',buffer:Buffer.from('Name,Mobile\r\nFictional buyer,9000000001\r\n')});
  await page.getByRole('button',{name:'Validate & Preview',exact:true}).click();await page.getByText(/1 valid rows; 1 existing in CRM/).waitFor();
  await page.getByRole('button',{name:'Import to CRM',exact:true}).click();await page.getByText('Import finished: 0 new, 1 duplicates. No calls placed.',{exact:true}).waitFor();
- await page.getByRole('tab',{name:'Calling',exact:true}).click();
- await page.locator('[name=callCampaignName]').fill('Acceptance '+viewport.width);
- await page.getByRole('button',{name:'Create campaign with selected CRM customers',exact:true}).click();await page.getByText('1 customers added, 0 already selected. No calls placed. Review approvals before Start.',{exact:true}).waitFor();
+ await page.locator('input[type=file]').setInputFiles({name:'campaign.csv',mimeType:'text/csv',
+  buffer:Buffer.from('Name,Mobile\r\nUploaded buyer,9000000005\r\n')});
+ await page.getByRole('button',{name:'Validate & Preview',exact:true}).click();
+ await page.getByLabel('Campaign name for this file').fill('Acceptance '+viewport.width);
+ await page.getByRole('button',{name:'Import & prepare campaign'}).click();
+ await page.getByText(/Campaign prepared with 1 customers from this file/).waitFor();
+ const picker=page.getByRole('combobox',{name:'Calling campaign',exact:true});
+ const draft=f.r.db.prepare('SELECT id FROM call_campaign_drafts WHERE tenant_id=? AND name=?').get(tid,'Acceptance '+viewport.width);
+ await picker.locator('option[value="'+draft.id+'"]').waitFor({state:'attached'});
+ assert.equal(await picker.inputValue(),draft.id);
  assert.ok(await page.getByRole('button',{name:'Start / Resume calling',exact:true}).isDisabled());
  await page.getByText(/Calling disabled/).waitFor();
- await page.getByRole('button',{name:'Refresh call results',exact:true}).click();await page.getByRole('heading',{name:'Customer Calling',exact:true}).scrollIntoViewIfNeeded();
- await mkdir('artifacts',{recursive:true});await page.screenshot({path:'artifacts/calling-'+viewport.width+'.png',fullPage:true});await page.getByRole('heading',{name:'Customer Calling',exact:true}).locator('..').screenshot({path:'artifacts/calling-panel-'+viewport.width+'.png'});
+ const selected=f.r.db.prepare(`SELECT l.id,l.name FROM call_campaign_candidates c JOIN leads l
+   ON l.tenant_id=c.tenant_id AND l.id=c.lead_id WHERE c.tenant_id=? AND c.campaign_id=?`).all(tid,draft.id);
+ assert.deepEqual(selected.map(x=>x.name),['Uploaded buyer']);
+ const run=crypto.randomUUID(),job=crypto.randomUUID(),at=new Date().toISOString();
+ f.r.db.prepare("INSERT INTO calling_runs(tenant_id,id,campaign_id,state,created_by,created_at,updated_at) VALUES(?,?,?,'completed','client',?,?)").run(tid,run,draft.id,at,at);
+ f.r.db.prepare("INSERT INTO calling_jobs(tenant_id,id,run_id,lead_id,state,provider_status,duration_seconds,created_at,updated_at) VALUES(?,?,?,?,'completed','completed',50,?,?)").run(tid,job,run,selected[0].id,at,at);
+ f.r.db.prepare("INSERT INTO scripted_call_results VALUES(?,?,?,?,1,?)").run(tid,job,crypto.randomUUID(),
+  JSON.stringify({propertyType:'flat',location:'Raipur',area:'Shankar Nagar',size:'3BHK',budgetInr:3500000,interest:'interested',visitDate:'2027-01-12'}),at);
+ await page.getByRole('tab',{name:'Results / CRM',exact:true}).click();
+ await page.getByRole('heading',{name:'Campaign results & customer answers'}).waitFor();
+ await page.getByRole('button',{name:'Refresh customer answers'}).waitFor();
+ await page.getByRole('combobox',{name:'Filter results by campaign'}).selectOption(draft.id);
+ await page.getByRole('row',{name:new RegExp('Uploaded buyer Acceptance '+viewport.width+'.*Raipur.*3BHK.*Saved to lead')}).waitFor();
+ assert.equal(await page.getByRole('row',{name:/Fictional buyer/}).count(),0);
+ await page.screenshot({path:'artifacts/calling-results-'+viewport.width+'.png',fullPage:true});
  assert.deepEqual(errors,[]);await context.close();
- console.log('Calling UI '+viewport.width+': Excel duplicate import, campaign creation, disabled calling guard, actual SQL routes PASS');
+ console.log('Calling UI '+viewport.width+': CSV-only campaign, disabled calling guard, saved answers in Results / CRM PASS');
  }
  const adminContext=await browser.newContext({viewport:{width:1440,height:1000}});
  const adminToken=await newSession(f.env.CONTROL_DB,'admin');await adminContext.addCookies([{name:COOKIE,value:adminToken,url:origin}]);

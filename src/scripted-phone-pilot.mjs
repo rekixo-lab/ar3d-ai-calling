@@ -201,31 +201,52 @@ async function verifiedPlivoGet(req,config,url){
 async function saveVerifiedPilot(env,row,now){
  const db=await pilotCrm(env,row.tenant_id);
  if(!db)return false;
+ if(row.job_id){
+  const result=await db.prepare('SELECT session_id,saved_to_lead FROM scripted_call_results WHERE tenant_id=? AND job_id=?')
+   .bind(row.tenant_id,row.job_id).first();
+  if(result)return result.session_id===row.id&&result.saved_to_lead===1;
+ }
  const existing=await db.prepare('SELECT updated_at,requirements_json FROM leads WHERE tenant_id=? AND id=? AND mobile_e164=?')
   .bind(row.tenant_id,row.lead_id,row.destination).first();
  if(!existing)return false;
- const prior=JSON.parse(existing.requirements_json||'{}');
- if(!prior||typeof prior!=='object'||Array.isArray(prior))return false;
- if(prior.scriptedCallPilot?.id===row.id)return true;
- if(existing.updated_at!==row.lead_updated_at)return false;
+ let prior;
+ try{prior=JSON.parse(existing.requirements_json||'{}')}catch{}
+ if(prior?.scriptedCallPilot?.id===row.id&&!row.job_id)return true;
  const survey=normalizePropertySurvey(JSON.parse(row.survey_json).answers,{now}),crm=surveyToCrm(survey);
- const at=iso(Math.max(now,Date.parse(existing.updated_at)+1));
- const stored=JSON.stringify({...prior,scriptedCallPilot:{id:row.id,recordedAt:at,answers:survey}});
- if(stored.length>8000)return false;
- const statements=[
-  db.prepare(`UPDATE leads SET preferred_location=?,plot_size_preference=?,budget_min_inr=NULL,budget_max_inr=?,
-   interest_status=?,visit_date_preference=?,requirements_json=?,updated_at=?
-   WHERE tenant_id=? AND id=? AND mobile_e164=? AND updated_at=? AND consent_status!='denied' AND dnd_status!='blocked'
-   AND NOT EXISTS(SELECT 1 FROM lead_opt_out_events o WHERE o.tenant_id=leads.tenant_id AND o.lead_id=leads.id)`)
-   .bind(crm.preferredLocation,crm.plotSizePreference,crm.budgetMaxInr,crm.interestStatus,
-    crm.visitDatePreference,stored,at,row.tenant_id,row.lead_id,row.destination,existing.updated_at),
-  db.prepare(`INSERT INTO crm_audit_events(tenant_id,id,actor,action,target_id,created_at)
-   SELECT tenant_id,?,'scripted_phone_pilot','lead.scripted_phone_pilot_saved',id,?
-   FROM leads WHERE tenant_id=? AND id=? AND updated_at=? AND json_extract(requirements_json,'$.scriptedCallPilot.id')=?`)
-   .bind(crypto.randomUUID(),at,row.tenant_id,row.lead_id,at,row.id)
- ];
- const results=await db.batch(statements);
- return results[0].meta.changes===1;
+ const at=iso(Math.max(now,(Date.parse(existing.updated_at)||0)+1));
+ const stored=prior&&typeof prior==='object'&&!Array.isArray(prior)?
+  JSON.stringify({...prior,scriptedCallPilot:{id:row.id,recordedAt:at,answers:survey}}):null;
+ const statements=[];
+ if(existing.updated_at===row.lead_updated_at&&stored&&stored.length<=8000){
+  statements.push(
+   db.prepare(`UPDATE leads SET preferred_location=COALESCE(?,preferred_location),plot_size_preference=?,
+    budget_min_inr=CASE WHEN ? IS NULL THEN budget_min_inr ELSE NULL END,budget_max_inr=COALESCE(?,budget_max_inr),
+    interest_status=CASE WHEN interest_status='converted' THEN interest_status ELSE ? END,
+    visit_date_preference=?,requirements_json=?,updated_at=?
+    WHERE tenant_id=? AND id=? AND mobile_e164=? AND updated_at=? AND consent_status!='denied' AND dnd_status!='blocked'
+    AND NOT EXISTS(SELECT 1 FROM lead_opt_out_events o WHERE o.tenant_id=leads.tenant_id AND o.lead_id=leads.id)`)
+    .bind(crm.preferredLocation,crm.plotSizePreference,crm.budgetMaxInr,crm.budgetMaxInr,crm.interestStatus,
+     crm.visitDatePreference,stored,at,row.tenant_id,row.lead_id,row.destination,existing.updated_at),
+   db.prepare(`INSERT INTO crm_audit_events(tenant_id,id,actor,action,target_id,created_at)
+    SELECT tenant_id,?,'scripted_phone_pilot','lead.scripted_phone_pilot_saved',id,?
+    FROM leads WHERE tenant_id=? AND id=? AND changes()=1`)
+    .bind(crypto.randomUUID(),at,row.tenant_id,row.lead_id)
+  );
+ }
+ if(!row.job_id)return statements.length>0&&(await db.batch(statements))[0].meta.changes===1;
+ // Keep the captured answers per attempt even if staff edited the lead during the call.
+ // The immutable result and optional lead update commit in one CRM transaction.
+ statements.push(db.prepare(`INSERT INTO scripted_call_results(tenant_id,job_id,session_id,answers_json,saved_to_lead,captured_at)
+   SELECT j.tenant_id,j.id,?,?,CASE WHEN l.updated_at=? AND json_valid(l.requirements_json)
+    THEN COALESCE(json_extract(l.requirements_json,'$.scriptedCallPilot.id')=?,0) ELSE 0 END,?
+   FROM calling_jobs j JOIN leads l ON l.tenant_id=j.tenant_id AND l.id=j.lead_id
+   WHERE j.tenant_id=? AND j.id=? AND l.id=? AND l.mobile_e164=?
+   ON CONFLICT(tenant_id,job_id) DO NOTHING`)
+  .bind(row.id,JSON.stringify(survey),at,row.id,iso(now),row.tenant_id,row.job_id,row.lead_id,row.destination));
+ await db.batch(statements);
+ const result=await db.prepare('SELECT session_id,saved_to_lead FROM scripted_call_results WHERE tenant_id=? AND job_id=?')
+  .bind(row.tenant_id,row.job_id).first();
+ return result?.session_id===row.id&&result.saved_to_lead===1;
 }
 
 async function saveCampaignOptOut(env,row,now){
@@ -353,8 +374,9 @@ export async function handleScriptedPhoneCallback(req,env,{now=Date.now(),fetche
   }
   const phase={active:'question',completed:'finishing',opted_out:'declined',needs_review:'needs_review'}[result.state.status];
   const survey_json=JSON.stringify(result.state);
-  const changed=await control.prepare("UPDATE scripted_phone_pilots SET phase=?,survey_json=?,turn=turn+1 WHERE id=? AND phase='transcribing' AND turn=?")
-   .bind(phase,survey_json,id,turn).run();
+  const changed=await control.prepare(`UPDATE scripted_phone_pilots SET phase=CASE WHEN ?='question' AND hangup_at IS NOT NULL THEN 'ended' ELSE ? END,
+   survey_json=?,turn=turn+1 WHERE id=? AND phase='transcribing' AND turn=?`)
+   .bind(phase,phase,survey_json,id,turn).run();
   if(changed.meta.changes!==1)return end();
   const next={...row,phase,survey_json,turn:turn+1};
   return responseFor(config,phase==='finishing'?await completePilot(env,next,now):next);

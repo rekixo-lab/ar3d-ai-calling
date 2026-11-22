@@ -71,7 +71,8 @@ test('CSV import inserts with tenant scope, no overwrite and unknown consent/DND
   assert.equal(r.status,201);const body=await r.json();
   assert.equal(body.processed,2);assert.equal(body.inserted,1);assert.equal(body.skipped,1);
   const inserts=log.filter(x=>x.sql.includes('INSERT INTO leads'));
-  assert.equal(inserts.length,2);
+  assert.equal(inserts.length,1);
+  assert.equal(JSON.parse(inserts[0].params[3]).length,2);
   assert.ok(inserts.every(x=>x.sql.includes('ON CONFLICT(tenant_id,mobile_e164) DO NOTHING')));
   assert.ok(inserts.every(x=>x.sql.includes("'unknown','unknown'")));
   assert.ok(inserts.every(x=>x.params[0]===tenantId));
