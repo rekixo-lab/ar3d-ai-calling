@@ -131,11 +131,11 @@ try{
     await page.getByPlaceholder('you@company.com').fill(TEST_EMAIL);
     await page.getByPlaceholder('Enter your password').fill(TEST_PASSWORD);
     await page.getByRole('button',{name:'Sign in',exact:true}).click();
-    await page.getByRole('heading',{name:'Super Admin',exact:true}).waitFor();
-    await page.getByRole('heading',{name:'Calling setup',exact:true}).waitFor();
-    await page.getByText('3. Calling Setup',{exact:true}).click();
-    await page.getByRole('heading',{name:'AR3D Fixed-question Phone Pilot'}).waitFor();
-    await page.getByText('Phone pilot is disabled or unconfigured.',{exact:true}).waitFor();
+    await page.getByText('Super Admin',{exact:true}).waitFor();
+    await page.getByRole('heading',{name:'Clients',exact:true}).waitFor();
+    await page.getByRole('link',{name:'Calling Setup',exact:true}).click();
+    await page.getByRole('heading',{name:'Internal phone test'}).waitFor();
+    await page.getByText('Waiting for Plivo: approve a caller number and configure the internal test.',{exact:true}).waitFor();
     const nav=page.getByRole('link',{name:'Security',exact:true});
     const signout=page.getByRole('button',{name:'Sign out'});
     await nav.waitFor();await signout.waitFor();

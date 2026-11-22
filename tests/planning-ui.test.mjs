@@ -2,29 +2,20 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import vm from 'node:vm';
 import {js,css} from '../src/app-assets.mjs';
-test('planning UI has valid browser JS and no call launch UI',()=>{
+test('workspace exposes actual campaign controls and bounded customer browsing',()=>{
   assert.doesNotThrow(()=>new vm.Script(js));
-  assert.match(js,/Calling Campaign Drafts/);
-  assert.match(js,/AR3D Project Links/);
-  assert.match(js,/No call started/);
-  assert.doesNotMatch(js,/\/v1\/human\/calls\/start/);
+  assert.match(js,/Campaign controls/);
+  assert.match(js,/Previous results/);
+  assert.match(js,/Next results/);
+  assert.match(js,/offset:String\(offset\)/);
+  assert.doesNotMatch(js,/Calling Campaign Drafts|AR3D Project Links/);
 });
 
-test('CRM campaign editor has bounded candidate and lead paging controls',()=>{
-  assert.match(js,/Previous candidates/);
-  assert.match(js,/Next candidates/);
-  assert.match(js,/candidateSearch/);
-  assert.match(js,/offset='\+candidateOffset/);
-});
-
-
-test('dashboard sidebar has distinct block navigation and accessible sign-out spacing',async()=>{
-  const {css,js}=await import('../src/app-assets.mjs');
-  assert.match(css,/\.sidebar-footer\{margin-top:auto/);
+test('dashboard has role-specific navigation and separate account actions',()=>{
+  assert.match(css,/\.sidebar-footer\s*\{\s*margin-top: auto/);
   assert.match(css,/:focus-visible/);
-  assert.match(js,/nav\('Security','shield','security-section'\)/);
-  assert.match(js,/nav\('AI Setup','spark','ai-setup'\)/);
-  assert.match(js,/nav\('Calling Setup','phone','platform-settings'\)/);
+  assert.match(js,/\['security','Security','shield'/);
+  assert.match(js,/\['calling','Calling Setup','phone'/);
   assert.match(js,/btn\('Sign out',logout,true\)/);
 });
 

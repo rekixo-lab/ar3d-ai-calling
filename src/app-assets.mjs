@@ -1,5 +1,5 @@
 export const html=`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#0b1120"><title>AR3D AI Calling</title><link rel="stylesheet" href="/app/assets/style.css"></head><body><div id="app" role="main"><p>Loading AR3D AI Calling…</p></div><script src="/app/assets/app.js" defer></script></body></html>`;
-export const css=`:root{font-family:Inter,ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#243148;background:#e3e8f0;font-size:13px;font-synthesis:none;--accent:#6558e8;--line:#b9c4d5;--muted:#60718b}*{box-sizing:border-box}body{margin:0;min-height:100vh;background:#e3e8f0}button,input,select,textarea{font:inherit}button{cursor:pointer}a{color:var(--accent)}.layout{display:grid;grid-template-columns:220px minmax(0,1fr);min-height:100vh}.sidebar{background:#111624;color:#aab2c7;padding:26px 16px;display:flex;flex-direction:column;gap:7px;position:sticky;top:0;height:100vh;min-width:0;border-right:1px solid #202637}.brand{display:flex;gap:10px;align-items:center;color:#fff;font-size:16px;font-weight:750;letter-spacing:-.5px;padding:0 8px 28px}.brand-mark{display:grid;place-items:center;width:34px;height:34px;border-radius:11px;background:linear-gradient(140deg,#8b7bff,#6254df);box-shadow:0 4px 16px #6558e840;color:white;flex-shrink:0}.brand-mark .icon{width:20px;height:20px}.brand small{display:block;color:#707d97;font-size:8px;letter-spacing:1.8px;margin-top:5px;font-weight:650}.nav-caption{font-size:9px;letter-spacing:1.6px;color:#63708a;padding:14px 12px 7px;font-weight:700}.navitem{display:flex;align-items:center;gap:11px;min-height:39px;padding:10px 12px;border-radius:9px;text-decoration:none;color:#929db5;font-size:12px;font-weight:550;border:1px solid transparent}.navitem:hover{background:#1b2234;color:#e9eaff}.navitem.active{background:#282441;color:#c1b9ff;border-color:#43386a}.navitem .icon{width:16px;height:16px;flex-shrink:0}.sidebar-footer{margin-top:auto;border-top:1px solid #252c3c;padding:17px 8px 0;display:grid;gap:12px}.account{display:flex;gap:9px;align-items:center;min-width:0}.avatar{display:grid;place-items:center;width:31px;height:31px;border-radius:10px;background:#252d42;color:#c9c2ff;font-size:11px;font-weight:700;flex-shrink:0}.account-copy{min-width:0}.account-copy strong{display:block;font-size:11px;color:#e2e6f1}.account-copy p{font-size:10px;margin:4px 0 0;overflow-wrap:anywhere;color:#7d8ba7}.sidebar-footer .btn{justify-content:flex-start;background:transparent;color:#a3adc3;box-shadow:none;padding:6px 0;font-weight:500;font-size:11px}.main{padding:28px 32px 40px;min-width:0;width:100%;max-width:1560px;margin:0 auto;align-self:start}.topbar{display:flex;justify-content:space-between;align-items:center;gap:14px;margin-bottom:23px}.eyebrow{font-size:9px;letter-spacing:1.7px;font-weight:750;color:#6e7e96;text-transform:uppercase;margin-bottom:7px}h1,h2,h3{margin:0;letter-spacing:-.45px;color:#202b40}h1{font-size:25px;line-height:1.25;font-weight:730;display:flex;gap:10px;align-items:center}h1>.icon{display:none}h2{font-size:14px;font-weight:700;margin-bottom:16px;display:flex;gap:9px;align-items:center}h3{font-size:12px;font-weight:650;margin:18px 0 11px;display:flex;gap:8px;align-items:center}h2>.icon,h3>.icon{width:16px;height:16px;color:#796ac2;flex-shrink:0}.page-description{font-size:11px;color:#61728b;margin:7px 0 0}.topbar-right{display:flex;align-items:center;gap:12px}.topbar-right>.avatar{background:#eae7fd;color:#6755d6}.status-dot{display:inline-block;width:6px;height:6px;background:#28a88a;border-radius:50%;margin-right:7px;box-shadow:0 0 0 3px #28a88a0c}.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}.between{justify-content:space-between}.card{background:#f8f9fc;border:1px solid var(--line);border-radius:13px;padding:19px;margin:0 0 16px;box-shadow:0 3px 10px #17284c0c;min-width:0}.admin-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;align-items:start}.admin-grid>.card{margin:0}.client-directory{grid-column:1/-1;order:0}.invite-card{order:1}.security-card{order:2}.calling-settings{grid-column:1/-1;order:3}.access-card{grid-column:1/-1;order:4}.access-card>.stack{grid-template-columns:1fr 1fr auto;align-items:end}.access-card>.note{margin-bottom:13px}.cards{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin:0 0 19px}.metric{padding:15px 17px;position:relative;overflow:hidden}.metric .metric-symbol{position:absolute;right:15px;top:17px;display:grid;place-items:center;width:32px;height:32px;background:#f0edff;color:#8071dd;border-radius:10px}.metric:nth-child(2) .metric-symbol{background:#e8f5f0;color:#3ca589}.metric:nth-child(3) .metric-symbol{background:#fff3e9;color:#d9a06e}.metric .muted{font-size:10px;font-weight:550}.metric strong{display:block;font-size:25px;color:#263148;font-weight:700;margin-top:8px;letter-spacing:-1px}.metric small{display:block;color:#74839b;font-size:9px;margin-top:6px}.client-directory .cards{margin-bottom:16px}.client-directory .metric{background:#eaf0f7;box-shadow:none}.label{display:block;font-size:10px;font-weight:600;color:#50617b;margin-bottom:6px;letter-spacing:.05px}.field{width:100%;min-width:0;max-width:100%;min-height:36px;border:1px solid #aebbd0;background:#edf2f8;border-radius:7px;color:#354159;padding:8px 10px;outline:none;transition:border-color .15s,box-shadow .15s}.field:focus{border-color:#a198ed;box-shadow:0 0 0 3px #6558e811;background:#fff}.field::placeholder{color:#6d7e96}select.field{padding-right:23px}textarea.field{min-height:74px;resize:vertical}input[type=checkbox]{accent-color:var(--accent)}input[type=file]{padding:7px;font-size:10px}input[type=file]::file-selector-button{background:#eeebfb;color:#6557bf;border:0;border-radius:4px;padding:4px 7px;margin-right:7px}.btn{display:inline-flex;align-items:center;justify-content:center;gap:7px;border:1px solid transparent;border-radius:7px;padding:9px 12px;min-height:35px;background:var(--accent);color:#fff;font-size:10px;font-weight:650;line-height:1.4;box-shadow:0 2px 4px #6558e817;transition:background .15s,transform .15s}.btn:hover{background:#574acb}.btn:active{transform:translateY(1px)}.btn .icon{width:13px;height:13px;flex-shrink:0}.btn.secondary{background:#fff;border-color:#b1bed1;color:#52627e;box-shadow:none}.btn.secondary:hover{background:#f7f7fc;border-color:#cdc7ed;color:#6557be}.btn:disabled{opacity:.45;cursor:not-allowed;transform:none}.formrow{display:flex;flex-wrap:wrap;gap:11px;align-items:flex-end}.formrow label{flex:1;min-width:130px}.formrow .field{width:100%}.stack{display:grid;gap:12px}.stack>label .field{width:100%}.tablewrap{overflow-x:auto;width:100%;border:1px solid #bac6d7;border-radius:8px}.table{width:100%;border-collapse:collapse;font-size:10px;white-space:nowrap}.table th,.table td{padding:11px 12px;text-align:left;border-bottom:1px solid #c7d0df}.table th{font-weight:600;color:#52637d;background:#e5ebf3;font-size:9px;letter-spacing:.1px}.table td{color:#455671}.table tr:last-child td{border-bottom:0}.table tbody tr:hover{background:#fcfbff}.table td:first-child{font-weight:550;color:#35435c}.empty-state{text-align:center!important;padding:23px!important;color:#70809a!important;font-weight:400!important}.pill{display:inline-flex;align-items:center;white-space:nowrap;background:#eff8f4;color:#40977b;border:1px solid #deeee5;border-radius:6px;padding:6px 9px;font-size:9px;font-weight:550}.badge{display:inline-block;padding:3px 7px;border-radius:5px;font-size:9px;font-weight:600;background:#eef0f6;color:#7c879b}.badge.positive{background:#e9f7f0;color:#369878}.badge.pending{background:#fff5e7;color:#bd9655}.badge.negative{background:#ffeded;color:#ce7272}.note{background:#eaf0f8;border:1px solid #c3cce0;border-left:2px solid #978acb;border-radius:6px;padding:9px 11px;color:#536680;font-size:10px;line-height:1.7;margin:0 0 13px}.muted{color:#62738d;font-size:11px;line-height:1.6}.err{color:#c75d72}.success{color:#2d947b}.banner{padding:10px 13px;border:1px solid #d9ece2;background:#f0f9f4;border-radius:7px;margin:0 0 16px;overflow-wrap:anywhere;font-size:11px}.banner.err{background:#fff2f3;border-color:#f2dce1}.auth{min-height:100vh;display:grid;place-items:center;padding:24px;background:radial-gradient(ellipse at top,#eae7fc 0,transparent 60%),#f5f6fa}.auth .card{width:min(420px,100%);padding:28px;box-shadow:0 16px 60px #3a306314}.auth h1{font-size:22px;margin-bottom:8px}.auth .stack{gap:17px}.foot{margin-top:18px;font-size:10px;color:#a3abba}.icon{width:17px;height:17px;vertical-align:middle;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:11px}details.card{padding:14px 17px;background:#f8f9fc}details>summary{font-size:11px;font-weight:600;color:#596b85;cursor:pointer;list-style:none;display:flex;align-items:center;gap:8px}details>summary:before{content:'›';font-size:18px;color:#9c93d5;line-height:14px;transition:transform .15s}details[open]>summary:before{transform:rotate(90deg)}details[open]>summary{margin-bottom:17px}details>summary::-webkit-details-marker{display:none}.main>details.card{margin-top:16px}.client-workspace{padding:0;background:transparent;border:0;box-shadow:none}.client-workspace>h2{display:none}.client-workspace>label{display:inline-block;min-width:230px;margin-bottom:17px}.client-content{display:grid;grid-template-columns:minmax(0,1.05fr) minmax(0,1fr);gap:16px;align-items:start}.client-content>.cards,.client-content>.note,.client-content>details{grid-column:1/-1;margin:0}.client-content>.card{margin:0}.client-content>.cards .metric{margin:0;background:#f8f9fc}.client-content>.cards{margin-bottom:0}.client-content .tablewrap{margin:11px 0}.client-content>.card h3:first-child{margin-top:0}.client-content>.card .formrow{gap:9px}.client-content .formrow .btn{flex-shrink:0}.calling-settings>.stack{display:grid;grid-template-columns:1fr 1fr;align-items:start;gap:23px;margin-top:17px;border-top:1px solid var(--line);padding-top:18px}.calling-settings>.stack>form+form{border-left:1px solid var(--line);padding-left:23px}.calling-settings>.stack>div:last-child{grid-column:1/-1}.calling-settings>.stack h3{margin-top:0}.calling-settings>label{display:inline-block;min-width:230px;max-width:65%;margin-right:10px;vertical-align:bottom}.approval-list{max-height:146px;overflow-y:auto;padding:8px 10px;border:1px solid var(--line);border-radius:7px;gap:8px}.approval-list:empty{display:none}.approval-list label{display:flex;flex-direction:row-reverse;justify-content:flex-end;align-items:center;gap:8px}.approval-list .label{margin:0}.security-card .stack .formrow{display:flex}.security-card .note{margin-bottom:0}:focus-visible{outline:2px solid #9e92e9;outline-offset:3px}button:focus-visible{outline-offset:3px}[id]{scroll-margin-top:22px}@media(min-width:1400px){.main{padding:32px 40px}.layout{grid-template-columns:230px minmax(0,1fr)}}@media(max-width:1100px){.main{padding:24px 22px}.layout{grid-template-columns:195px minmax(0,1fr)}.calling-settings>.stack{gap:16px}.calling-settings>.stack>form+form{padding-left:16px}.formrow label{min-width:110px}}@media(max-width:860px){.client-content{grid-template-columns:1fr}.client-content>*{grid-column:1!important}.admin-grid{grid-template-columns:1fr}.admin-grid>.card{grid-column:1}.calling-settings>.stack{grid-template-columns:1fr}.calling-settings>.stack>form+form{padding-left:0;border-left:0;border-top:1px solid var(--line);padding-top:17px}.access-card>.stack{grid-template-columns:1fr 1fr}.access-card>.stack>.btn{grid-column:1/-1;justify-self:start}}@media(max-width:640px){.layout{display:block}.sidebar{position:relative;height:auto;padding:15px 17px;display:grid;grid-template-columns:1fr 1fr;gap:6px}.brand{grid-column:1/-1;padding:0 0 9px;font-size:16px}.brand small{display:none}.brand-mark{width:29px;height:29px;border-radius:9px}.nav-caption{display:none}.navitem{min-height:34px;padding:8px 10px;font-size:10px}.sidebar-footer{grid-column:1/-1;margin-top:6px;padding:10px 0 0;display:flex;align-items:center;justify-content:space-between}.account-copy p{font-size:9px}.account-copy strong{font-size:10px}.sidebar-footer>.btn{font-size:10px}.main{padding:20px 15px}.topbar{margin-bottom:18px}h1{font-size:22px}.topbar-right>.avatar{display:none}.topbar .pill{font-size:8px;padding:6px}.page-description{font-size:10px;max-width:230px;line-height:1.6}.card{padding:15px;border-radius:11px}.cards{gap:8px}.metric{padding:12px}.metric strong{font-size:22px}.metric small,.metric .metric-symbol{display:none}.metric .muted{font-size:9px}.formrow{gap:9px}.formrow label{min-width:calc(50% - 9px)}.field{font-size:12px;min-height:38px}.btn{font-size:10px;min-height:36px}.calling-settings>label{min-width:0;max-width:none;width:100%;margin-bottom:10px}.calling-settings>.stack{padding-top:15px;margin-top:15px}.client-workspace>label{width:100%}.access-card>.stack{grid-template-columns:1fr}.access-card>.stack>.btn{grid-column:1}.table th,.table td{padding:10px}.admin-grid,.client-content{gap:12px}.stack{gap:11px}.eyebrow{font-size:8px}.client-directory .cards{gap:7px}.client-directory .metric{padding:11px}.approval-list{max-height:150px}}.sidebar-footer .btn.secondary{background:transparent;border:0;color:#a3adc3;justify-content:flex-start;width:auto}.security-card details{margin-top:2px}.security-card details[open]>.stack{margin-top:14px}@media(prefers-reduced-motion:reduce){*,*:before{transition:none!important;scroll-behavior:auto!important}}`;
+export {css} from './dashboard-styles.mjs';
 export const js=String.raw`'use strict';
 const root=document.getElementById('app');
 const state={me:null,tenant:null,notice:'',clientTab:'customers',clientSetTab:null};
@@ -15,7 +15,7 @@ const lab=(text,control)=>node('label',{},[node('span',{class:'label',text}),con
 function notice(msg,isError=false){state.notice=msg;const old=document.getElementById('notice');if(old)old.remove();const area=document.getElementById('notice-anchor')||root;area.prepend(node('div',{id:'notice',class:'banner '+(isError?'err':'success'),text:msg}))}
 async function api(path,method='GET',payload){const r=await fetch(path,{method,credentials:'same-origin',headers:payload?{'Content-Type':'application/json'}:{},body:payload?JSON.stringify(payload):undefined,cache:'no-store'});const data=await r.json();if(!r.ok)throw Error(data.error||data.code||data.notice||'Request failed');return data}
 function asError(e){notice(e instanceof Error?e.message:'Unexpected error',true)}
-function table(headers,rows){const t=node('table',{class:'table'});const h=node('tr');headers.forEach(v=>h.append(node('th',{text:v})));t.append(node('thead',{},h));const b=node('tbody');rows.forEach(row=>{const tr=node('tr');row.forEach(v=>{const text=String(v??'—');const cell=node('td');if(['active','completed','submitted','running','trial','paused','queued','draft','suspended','failed','unknown','blocked'].includes(text))cell.append(node('span',{class:'badge '+(['active','completed','running'].includes(text)?'positive':['trial','paused','queued','draft','submitted'].includes(text)?'pending':'negative'),text}));else cell.textContent=text;tr.append(cell)});b.append(tr)});if(!rows.length)b.append(node('tr',{},node('td',{class:'empty-state',colspan:headers.length,text:'No records yet'})));t.append(b);return div('tablewrap',t)}
+function table(headers,rows){const t=node('table',{class:'table'});const h=node('tr');headers.forEach(v=>h.append(node('th',{text:v})));t.append(node('thead',{},h));const b=node('tbody');rows.forEach(row=>{const tr=node('tr');row.forEach(v=>{const text=String(v??'—');const cell=node('td');if(v instanceof Node){cell.append(v);tr.append(cell);return}if(['active','completed','submitted','running','trial','paused','queued','draft','suspended','failed','unknown','blocked'].includes(text))cell.append(node('span',{class:'badge '+(['active','completed','running'].includes(text)?'positive':['trial','paused','queued','draft','submitted'].includes(text)?'pending':'negative'),text}));else cell.textContent=text;tr.append(cell)});b.append(tr)});if(!rows.length)b.append(node('tr',{},node('td',{class:'empty-state',colspan:headers.length,text:'No records yet'})));t.append(b);return div('tablewrap',t)}
 async function load(){
  const invite=location.hash.match(/^#invite=([a-f0-9]{64})$/);
  if(invite){
@@ -121,14 +121,18 @@ function inviteView(token){
   node('p',{class:'muted',text:'Use this one-time link to activate your client account.'}),
   div('stack',form,btn('Sign in with email and password',()=>openSignIn(email.value),true)))));
 }
-async function logout(){try{await api('/v1/human/logout','POST',{})}finally{state.me=null;openSignIn()}}
+async function logout(){
+ try{await api('/v1/human/logout','POST',{})}
+ finally{state.me=null;state.clientTab='customers';state.adminTab='clients';state.importCampaign=null;openSignIn()}
+}
 function scriptedPhonePilotPanel(){
-  const card=div('card',title('AR3D Fixed-question Phone Pilot','h3'));
+  const card=div('card',title('Internal phone test'));
   const language=node('select',{class:'field'},[
     node('option',{value:'hi',text:'Hindi'}),
     node('option',{value:'en',text:'English'})
   ]);
-  const status=node('p',{class:'note',text:'Checking pilot configuration…'});
+  language.value='en';
+  const status=node('p',{class:'note',role:'status',text:'Checking pilot configuration…'});
   const results=div('stack');
   let config;
   const call=btn('Call the verified internal number once',async()=>{
@@ -144,7 +148,8 @@ function scriptedPhonePilotPanel(){
   async function refresh(){
     config=await api('/v1/human/scripted-phone-pilot');
     status.textContent=config.configured?'One internal verified number ending '+config.destinationLast4+
-      '. Complete answers update its configured test lead.':'Phone pilot is disabled or unconfigured.';
+      '. Complete answers update its configured test lead.':'Waiting for Plivo: approve a caller number and configure the internal test.';
+
     call.disabled=!config.configured;
     results.replaceChildren(...(config.recent?.length?[table(['Started','Language','Status'],
       config.recent.map(x=>[x.created_at,x.language,x.phase]))]:[]));
@@ -155,40 +160,78 @@ function scriptedPhonePilotPanel(){
   return card;
 }
 function dashboard(){
- root.replaceChildren();const admin=state.me.superAdmin;
- function reveal(target){
-  const el=document.getElementById(target);if(!el){notice('Section is loading. Retry shortly.',true);return}
-  for(let p=el;p;p=p.parentElement)if(p.tagName==='DETAILS')p.open=true;
-  el.scrollIntoView({behavior:matchMedia('(prefers-reduced-motion: reduce)').matches?'instant':'smooth',block:'start'});
+ root.replaceChildren();
+ const admin=state.me.superAdmin;
+ state.clientSetTab=null;
+ const items=admin?[
+  ['clients','Clients','users','Client companies and sign-in invitations.'],
+  ['calling','Calling Setup','phone','Check Plivo, test the internal number and approve customer calls.'],
+  ['company','Company details','file','Manage company information and client requests.'],
+  ['security','Security','shield','Manage two-factor authentication and recovery codes.']
+ ]:[
+  ['customers','Customers / Excel','users','Import customers and prepare a calling campaign.'],
+  ['calling','Calling','phone','Review your campaign and start or pause approved calls.'],
+  ['results','Results / CRM','grid','See call outcomes and answers saved to your CRM.'],
+  ['company','Company details','file','Review your company information and request changes.']
+ ];
+ const heading=title(admin?'Clients':items[0][1],'h1');
+ heading.tabIndex=-1;
+ const subtitle=node('p',{class:'page-description'});
+ const nav=node('nav',{'aria-label':admin?'Admin sections':'Client workspace sections',class:'workspace-nav'});
+ const links=new Map(),areas=new Map(),loaded=new Set();
+ const main=div('main',div('topbar',div('page-heading',node('p',{class:'workspace-role',text:admin?'Super Admin':state.me.tenants.some(t=>t.role==='client_admin')?'Client Admin':'Client viewer'}),heading,subtitle)),
+  node('div',{id:'notice-anchor','aria-live':'polite'}));
+ const account=div('sidebar-footer',div('account',div('avatar',node('span',{text:state.me.email.slice(0,2).toUpperCase()})),
+  div('account-copy',node('strong',{text:state.me.email}))),
+  btn('Sign out',logout,true));
+ const brand=div('brand',div('brand-mark',icon('phone')),div('',node('strong',{text:'AR3D'}),node('small',{text:'AI Calling'})));
+ root.append(div('layout',node('aside',{class:'sidebar'},[brand,nav,account]),main));
+ function openView(key,{focus=false,resetScroll=false}={}){
+  const item=items.find(x=>x[0]===key);
+  if(!item)return;
+  if(admin)state.adminTab=key;else state.clientTab=key;
+  for(const [id,link] of links){
+   if(id===key)link.setAttribute('aria-current','page');else link.removeAttribute('aria-current');
+  }
+  heading.querySelector('span').textContent=item[1];
+  subtitle.textContent=item[3];
+  if(admin){
+   for(const [id,area] of areas)area.hidden=id!==key;
+   if(!loaded.has(key)){
+    loaded.add(key);
+    const area=areas.get(key);
+    const renderers={
+     clients:()=>superAdmin(area),
+     calling:async()=>{area.append(scriptedPhonePilotPanel());await callingAdminPanel(area)},
+     company:async()=>{await companyAdminPanel(area);await adminCompanyChangesPanel(area)},
+     security:()=>mfaPanel(area)
+    };
+    Promise.resolve(renderers[key]()).catch(err=>{
+     loaded.delete(key);
+     area.replaceChildren(node('p',{class:'banner err',role:'alert',text:'Could not load this section.'}),
+      btn('Retry',()=>{area.replaceChildren();openView(key)},true));
+    });
+   }
+  }else state.clientSetTab?.(key);
+  if(resetScroll)window.scrollTo(0,0);
+  if(focus)document.getElementById('notice')?.remove();
+  if(focus)heading.focus({preventScroll:true});
  }
- const nav=(label,name,target,active=false)=>node('a',{href:'#'+target,class:'navitem'+(active?' active':''),onclick:e=>{
-  e.preventDefault();document.querySelectorAll('.sidebar a[href^="#"]').forEach(n=>n.classList.remove('active'));e.currentTarget.classList.add('active');
-  if(!admin&&state.clientSetTab){const tab=target==='customer-workflow'?'customers':target==='customer-calling'?'calling':target==='client-ai'?'company':target==='client-reports'?'results':null;if(tab)state.clientSetTab(tab)}
-  reveal(target);
- }},[icon(name),node('span',{text:label})]);
- const aside=div('sidebar',div('brand',div('brand-mark',icon('spark')),node('div',{},['AR3D',node('small',{text:'AI CALLING WORKSPACE'})])),node('div',{class:'nav-caption',text:'WORKSPACE'}),nav(admin?'Overview':'Dashboard','grid','workspace-top',true),nav(admin?'Clients':'Customers','users',admin?'clients-panel':'customer-workflow'));
- if(admin)aside.append(nav('AI Setup','spark','ai-setup'),nav('Calling Setup','phone','platform-settings'));
- else aside.append(nav('Calling','phone','customer-calling'));
- aside.append(node('div',{class:'nav-caption',text:'MANAGEMENT'}));
- if(admin)aside.append(nav('Client access','mail','client-access'),nav('Security','shield','security-section'));
- else aside.append(nav('Company / AI','spark','client-ai'),nav('Results & activity','file','client-reports'));
- aside.append(div('sidebar-footer',div('account',div('avatar',node('span',{text:state.me.email.slice(0,2).toUpperCase()})),div('account-copy',node('strong',{text:admin?'Administrator':'Client workspace'}),node('p',{text:state.me.email}))),btn('Sign out',logout,true)));
- const main=div('main',div('topbar',div('',node('div',{class:'eyebrow',text:'WORKSPACE / '+(admin?'OVERVIEW':'DASHBOARD')}),title(admin?'Super Admin':'Personal AI Calling','h1'),node('p',{class:'page-description',text:admin?'Clients → Fixed questionnaire → Phone pilot → Calling approval.':'Your customers, conversations and campaigns. All in one place.'})),div('topbar-right',node('span',{class:'pill'},[node('span',{class:'status-dot'}),'AR3D Client Platform']),div('avatar',node('span',{text:state.me.email.slice(0,2).toUpperCase()})))),div('',node('div',{id:'notice-anchor'})));main.id='workspace-top';root.append(div('layout',aside,main));
- if(admin){
-  const guide=div('card',title('Calling setup','h2'),
-   node('p',{class:'note',text:'First run the fixed-question pilot on the approved internal phone. Prepare customer campaigns separately.'}),
-   div('formrow',btn('1. Fixed-question Phone Pilot',()=>reveal('platform-settings')),
-    btn('2. Company information',()=>reveal('conversation-setup'),true),
-    btn('3. Calling approval',()=>reveal('calling-setup'),true)));
-  main.append(guide);
-  const grid=div('admin-grid');main.append(grid);superAdmin(grid);
-  const settings=node('details',{class:'card',id:'platform-settings'},node('summary',{text:'3. Calling Setup'}));main.append(settings);
-  settings.append(scriptedPhonePilotPanel());
-  const approvals=node('details',{class:'card',id:'approval-section'},node('summary',{text:'Customer Calling Approval'}));
-  settings.append(approvals);callingAdminPanel(approvals);
-  const security=node('details',{class:'card',id:'security-section'},node('summary',{text:'Account Security & Recovery'}));settings.append(security);mfaPanel(security);
+ for(const [key,label,symbol] of items){
+  const link=node('a',{href:'#'+key,class:'navitem',onclick:e=>{e.preventDefault();openView(key,{focus:true,resetScroll:true})}},
+   [icon(symbol),node('span',{text:label})]);
+  links.set(key,link);nav.append(link);
+  if(admin){
+   const area=node('section',{class:'workspace-section',id:key,hidden:true});
+   areas.set(key,area);main.append(area);
+  }
  }
- if(state.me.tenants.length)clientPanel(main);
+ if(admin)openView(state.adminTab||'clients');
+ else{
+  openView(state.clientTab||'customers');
+  if(state.me.tenants.length)clientPanel(main,openView);
+  else main.append(div('card',title('No company assigned'),node('p',{class:'muted',text:'Ask your administrator to invite this email address.'})));
+ }
 }
 function showRecoveryCodes(target,codes){
   target.replaceChildren(node('p',{class:'success',text:'Save these one-time recovery codes now. Each works only once. They will not be displayed again.'}));
@@ -198,7 +241,7 @@ function showRecoveryCodes(target,codes){
     node('p',{class:'note',text:'Do not send these codes in messages or screenshots. Store them in a trusted password manager or secure offline record.'}));
 }
 async function mfaPanel(main){
-  const card=div('card security-card',title('Super Admin Two-Factor Authentication'));
+  const card=div('card security-card',title('Two-factor authentication'));
   card.id='security-panel';main.append(card);
   try{
     const status=await api('/v1/human/mfa');
@@ -257,7 +300,7 @@ async function mfaPanel(main){
   }catch(err){asError(err)}
 }
 async function superAdmin(main){
- const panel=div('card client-directory',title('Clients'));panel.id='clients-panel';main.append(panel);
+ const panel=div('card client-directory',title('Client directory'));panel.id='clients-panel';main.append(panel);
  const list=div('');panel.append(list);
  let existing=null,tenantRowsAll=[];
  async function refresh(){
@@ -269,16 +312,8 @@ async function superAdmin(main){
       ['Active clients',d.tenants.filter(t=>t.status==='active').length,'phone'],
       ['Team members',d.tenants.reduce((n,t)=>n+Number(t.member_count||0),0),'shield']
     ].map(([label,value,symbol])=>div('card metric',div('metric-symbol',icon(symbol)),node('span',{class:'muted',text:label}),node('strong',{text:String(value)})))),
-    table(['Company','Contact email','Mobile','Status','Members'],d.tenants.map(t=>[t.display_name,t.contact_email||'—',t.contact_mobile||'—',t.status,t.member_count])),
-    node('details',{class:'stack'},[
-     node('summary',{text:'Detailed usage & provider records (optional)'}),
-     table(['Company','Customers','Excel imports','Reserved attempts','Provider accepted','Completed + duration','Recorded seconds','Uncertain'],d.tenants.map(t=>{
-       const x=t.usage;return [t.display_name,x?.customers??'—',x?.uploads??'—',x?.reservedAttempts??'—',
-         x?.providerAccepted??'—',x?.providerCompletedWithDuration??'—',x?.completedSeconds??'—',x?.uncertain??'—'];
-     })),
-     node('p',{class:'note',text:d.reportingUnavailable?'Calling CRM reporting is temporarily unavailable; blank values are unknown.':
-       'Provider call status is not proof that AI answers or a transcript were saved.'})
-    ])
+    table(['Company','Contact email','Mobile','Status','Members'],d.tenants.map(t=>[t.display_name,t.contact_email||'—',t.contact_mobile||'—',t.status,t.member_count]))
+
    );
    if(existing){
     const old=existing.value;
@@ -317,6 +352,7 @@ async function superAdmin(main){
     node('strong',{text:d.existingTenant?'Existing company linked':'New company created'}),
     node('p',{text:'Invitation is not sent automatically. Copy this private one-time link and share it only with the intended client. The client chooses their own password.'}),
     node('input',{class:'field',value:d.inviteUrl,readonly:'readonly','aria-label':'Private client invitation link'}),
+    btn('Copy private link',async()=>{try{await navigator.clipboard.writeText(d.inviteUrl);notice('Private link copied.')}catch{notice('Select and copy the invitation link above.',true)}},true),
     node('p',{text:'After activation, use the permanent sign-in link with the existing email and password.'}),
     node('input',{class:'field',value:location.origin+'/app',readonly:'readonly','aria-label':'Permanent client sign-in link'})
    ));
@@ -327,8 +363,8 @@ async function superAdmin(main){
  });
  panel.append(node('details',{class:'card'},[node('summary',{text:'Create / invite a new client'}),f,inviteResult]));
 const accessCard=div('card access-card',title('Tenant Access: Suspend / Resume','h3'),
-  node('p',{class:'note',text:'Suspension immediately blocks the company CRM and API keys. Resume restores its prior status, not a paid subscription.'}));
-const management=node('details',{class:'card client-directory',id:'client-access'},node('summary',{text:'Client access and invitations'}));main.append(management);management.append(accessCard);
+  node('p',{class:'note',text:'Suspending access blocks the company CRM and API keys.'}));
+const management=node('details',{class:'card client-directory',id:'client-access'},node('summary',{text:'Manage existing access'}));main.append(management);management.append(accessCard);
 const accessSelect=node('select',{class:'field'});
 const reason=input('tenantActionReason','text','Required reason, at least 10 characters');
 reason.maxLength=240;
@@ -351,19 +387,15 @@ actionForm.addEventListener('submit',async e=>{e.preventDefault();try{
   const verb=t.status==='suspended'?'resume':'suspend';
   if(!confirm((verb==='suspend'?'Suspend':'Resume')+' access for '+t.display_name+'?'))return;
   const result=await api('/v1/human/tenants/'+t.id+'/'+verb,'POST',{reason:reason.value});
-  notice('Tenant '+result.status+'. This is not a payment transaction.');
+  notice('Client access updated: '+result.status+'.');
   reason.value='';await refresh();await refreshAccess();
 }catch(err){asError(err)}});
 await inviteSection(management);
- const ai=node('details',{class:'card client-directory',id:'ai-setup'},node('summary',{text:'2. Client Company & AI Setup'}));
- main.append(ai);await scriptAdminPanel(ai);
- const requests=node('details',{class:'card',id:'company-requests'},node('summary',{text:'Client change requests (optional)'}));
- ai.append(requests);await adminCompanyChangesPanel(requests);
 }
-async function inviteSection(main){const previous=document.getElementById('invite-card');if(previous)previous.remove();const card=div('card invite-card');card.id='invite-card';card.append(title('Invite client admin','h2'),node('p',{class:'muted',text:'Invitation link shown once. Share privately with the intended client.'}));const select=node('select',{class:'field'},[node('option',{value:'',text:'Choose company'})]);const tenants=await api('/v1/human/tenants');tenants.tenants.forEach(t=>select.append(node('option',{value:t.id,text:t.display_name})));const email=input('email','email','client@builder.com');const role=node('select',{class:'field'},['client_admin','viewer'].map(x=>node('option',{value:x,text:x})));const f=node('form',{class:'formrow'},[lab('Company',select),lab('Client email',email),lab('Role',role),node('button',{type:'submit',class:'btn',text:'Create invitation'})]);f.addEventListener('submit',async e=>{e.preventDefault();try{const d=await api('/v1/human/invitations','POST',{tenantId:select.value,email:email.value,role:role.value});const share=node('input',{class:'field',value:d.inviteUrl,readonly:'readonly',style:'width:100%'});card.append(div('banner',node('p',{text:'Share this one-time link securely:'}),share));notice('Invitation generated for '+email.value)}catch(err){asError(err)}});card.append(f);main.append(card)}
+async function inviteSection(main){const previous=document.getElementById('invite-card');if(previous)previous.remove();const card=div('card invite-card');card.id='invite-card';card.append(title('Invite an existing client user','h3'),node('p',{class:'muted',text:'Create a new invitation for an existing company.'}));const select=node('select',{class:'field'},[node('option',{value:'',text:'Choose company'})]);const tenants=await api('/v1/human/tenants');tenants.tenants.forEach(t=>select.append(node('option',{value:t.id,text:t.display_name})));const email=input('email','email','client@builder.com');const role=node('select',{class:'field'},['client_admin','viewer'].map(x=>node('option',{value:x,text:x})));const f=node('form',{class:'formrow'},[lab('Company',select),lab('Client email',email),lab('Role',role),node('button',{type:'submit',class:'btn',text:'Create invitation'})]);f.addEventListener('submit',async e=>{e.preventDefault();try{const d=await api('/v1/human/invitations','POST',{tenantId:select.value,email:email.value,role:role.value});const share=node('input',{class:'field',value:d.inviteUrl,readonly:'readonly',style:'width:100%'});card.append(div('banner',node('p',{text:'Share this one-time link securely:'}),share));notice('Invitation generated for '+email.value)}catch(err){asError(err)}});card.append(f);main.append(card)}
 async function adminCompanyChangesPanel(main){
  const card=div('card client-directory',title('Client Change Requests','h3'),
-  node('p',{class:'note',text:'Clients request corrections here. First update the approved Company / AI facts above and publish the latest AI version. Mark handled only afterwards; a request never changes live information automatically.'}));
+  node('p',{class:'note',text:'Clients request corrections here. Update the company profile before marking a change request handled.'}));
  card.id='company-change-inbox';main.append(card);
  const company=node('select',{class:'field','aria-label':'Review client company'}),items=div('stack');
  const refreshList=async()=>{
@@ -411,18 +443,11 @@ async function adminCompanyChangesPanel(main){
  await refreshCompanies();
 }
 async function clientCompanySummary(tenantId,content,role,companyName=''){
- const card=div('card',title('Your Company / AI','h3'),
+ const card=div('card',title('Company information'),
   node('p',{class:'note',text:'These company details are view-only. To correct a price, project or location, use Request Changes below.'}));
  content.append(card);
  try{
-  const [company,script]=await Promise.all([
-   api('/v1/human/company-profile?tenantId='+encodeURIComponent(tenantId)),
-   api('/v1/human/calling-scripts?tenantId='+encodeURIComponent(tenantId))
-  ]);
-  const latest=script.versions[0];
-  card.append(node('p',{class:'note',text:company.revision&&latest?
-   'Company information and draft questions are saved. The phone pilot uses the fixed property questionnaire.':
-   'Company setup is pending.'}));
+  const company=await api('/v1/human/company-profile?tenantId='+encodeURIComponent(tenantId));
   const labels=[['companyName','Company name'],['locations','Location'],['projects','Projects and plots'],
    ['propertyTypes','Property types'],['pricing','Approved prices'],['amenities','Amenities'],
    ['contact','Sales contact'],['officeHours','Office hours'],['website','Website'],
@@ -433,7 +458,7 @@ async function clientCompanySummary(tenantId,content,role,companyName=''){
    node('p',{class:'muted',text:'Company details have not yet been saved by AR3D.'}));
  }catch(e){card.append(node('p',{class:'err',text:'Company information unavailable. Please contact AR3D.'}))}
  const requestCard=div('card',title('Request Changes','h3'),
-  node('p',{class:'muted',text:'Tell AR3D what needs correcting, for example: project, location, plot size or price. Submitting a request does not change live AI answers.'}));
+  node('p',{class:'muted',text:'Tell AR3D what needs correcting, for example: project, location, plot size or price. AR3D reviews each request before updating the profile.'}));
  content.append(requestCard);
  const history=div('stack');
  async function refresh(){
@@ -453,45 +478,99 @@ async function clientCompanySummary(tenantId,content,role,companyName=''){
    e.preventDefault();
    const send=form.querySelector('button[type=submit]');send.disabled=true;
    try{await api('/v1/human/company-change-requests','POST',{tenantId,message:message.value});
-    message.value='';notice('Request sent to AR3D. The AI is unchanged until review and publication.');await refresh()}
+    message.value='';notice('Request sent to AR3D.');await refresh()}
    catch(err){asError(err)}finally{send.disabled=false}
   });
   requestCard.append(form);
  }
  requestCard.append(history);try{await refresh()}catch(e){history.append(node('p',{class:'err',text:'Change request history unavailable.'}))}
 }
-async function clientPanel(main){const panel=div('client-workspace',title('Personal CRM & AI Agent'));main.append(panel);const select=node('select',{class:'field'},state.me.tenants.map(t=>node('option',{value:t.id,text:t.name+' — '+t.plan})));const content=div('client-content');panel.append(lab('Your company',select),content);select.addEventListener('change',()=>renderClient(select.value,content));await renderClient(select.value,content)}
-async function renderClient(id,content){state.clientSetTab=null;content.replaceChildren(node('p',{class:'muted',text:'Loading client dashboard…'}));try{const d=await api('/v1/human/overview?tenantId='+encodeURIComponent(id));content.replaceChildren();const cards=div('cards',...[['Customers',d.metrics.leads],['Call attempts',d.metrics.calls],['Site Visits',d.metrics.siteVisits]].map(([name,val])=>div('card metric',div('metric-symbol',icon(sectionIcon(name))),node('span',{class:'muted',text:name}),node('strong',{text:String(val)}),node('small',{text:'Workspace total'}))));content.append(cards);content.append(node('p',{class:'note',text:'AR3D manages your company AI. Upload customers, prepare calling campaigns, review results and request corrections when needed.'}));
- const sections={customers:div('client-tab-panel'),calling:div('client-tab-panel'),company:div('client-tab-panel'),results:div('client-tab-panel')};
- for(const section of Object.values(sections))section.style.gridColumn='1 / -1';
- sections.company.id='client-ai';
- const tabs=div('card formrow');tabs.setAttribute('role','tablist');tabs.setAttribute('aria-label','Client workspace sections');
- const tabButtons={};
- const labels={customers:'Customers / Excel',calling:'Calling',company:'Company / AI',results:'Results / CRM'};
- function selectTab(key){
+async function clientPanel(main,openView){
+ const tenants=state.me.tenants;
+ const panel=div('client-workspace'),content=div('client-content');
+ const choice=node('select',{class:'field'},tenants.map(t=>node('option',{value:t.id,text:t.name})));
+ if(tenants.length>1){
+  panel.append(div('company-switch',lab('Company',choice)));
+  choice.addEventListener('change',()=>renderClient(choice.value,content));
+ }else panel.append(node('p',{class:'company-context',text:tenants[0].name}));
+ panel.append(content);main.append(panel);
+ content.openView=openView;
+ await renderClient(choice.value,content);
+}
+
+async function renderClient(id,content){
+ const version=(content.renderVersion||0)+1;
+ content.renderVersion=version;
+ state.clientSetTab=null;
+ content.replaceChildren(node('p',{class:'muted',text:'Loading workspace…'}));
+ let d;
+ try{d=await api('/v1/human/overview?tenantId='+encodeURIComponent(id))}
+ catch(e){
+  if(content.isConnected&&content.renderVersion===version)content.replaceChildren(
+   node('p',{class:'banner err',role:'alert',text:'Could not load this company.'}),
+   btn('Retry',()=>renderClient(id,content),true));
+  return;
+ }
+ if(!content.isConnected||content.renderVersion!==version)return;
+ const sections=Object.fromEntries(['customers','calling','results','company'].map(key=>[
+  key,node('section',{class:'workspace-section',id:key,hidden:true})
+ ]));
+ const loaded=new Set();
+ const renderers={
+  customers:async section=>{
+   if(d.role==='client_admin')section.append(manualCustomerPanel(id,content));
+   await crmWorkflow(id,section,d.role,content);
+  },
+  calling:section=>customerCallingPanel(id,section,d.role,content.openView),
+  results:async section=>{
+   campaignResultsPanel(id,section);
+   if(d.role==='client_admin'){
+    const reports=node('details',{class:'card'},node('summary',{text:'Export and audit history'}));
+    section.append(reports);
+    reports.addEventListener('toggle',()=>{
+     if(!reports.open||reports.dataset.loaded)return;
+     reports.dataset.loaded='true';
+     Promise.all([usageAndExport(id,reports,d.role),auditPanel(id,reports)]).catch(asError);
+    });
+   }
+  },
+  company:section=>clientCompanySummary(id,section,d.role,d.tenant.name)
+ };
+ content.replaceChildren(...Object.values(sections));
+ function selectSection(key){
   if(!Object.hasOwn(sections,key))return;
-  state.clientTab=key;
-  for(const [name,section] of Object.entries(sections)){
-   section.hidden=name!==key;
-   tabButtons[name].setAttribute('aria-selected',String(name===key));
-   tabButtons[name].className='btn'+(name===key?'':' secondary');
-  }
-  sections[key].dispatchEvent(new Event('workspace-tab-shown'));
+  for(const [name,section] of Object.entries(sections))section.hidden=name!==key;
+  const section=sections[key];
+  if(loaded.has(key)){section.dispatchEvent(new Event('workspace-tab-shown'));return}
+  loaded.add(key);
+  Promise.resolve(renderers[key](section)).catch(()=>{
+   loaded.delete(key);
+   section.replaceChildren(node('p',{class:'banner err',role:'alert',text:'Could not load this section.'}),
+    btn('Retry',()=>{section.replaceChildren();selectSection(key)},true));
+  });
  }
- for(const [key,label] of Object.entries(labels)){
-  const tab=node('button',{class:'btn secondary',type:'button',onclick:()=>selectTab(key),text:label});
-  tab.setAttribute('role','tab');
-  tabButtons[key]=tab;tabs.append(tab);
- }
- content.append(tabs,...Object.values(sections));
- state.clientSetTab=selectTab;
- selectTab(Object.hasOwn(sections,state.clientTab)?state.clientTab:'customers');
- await crmWorkflow(id,sections.customers,d.role,content);
- await customerCallingPanel(id,sections.calling,d.role);
- await clientCompanySummary(id,sections.company,d.role,d.tenant.name);const extra=node('details',{class:'card'},node('summary',{text:'Manual customer entry'}));sections.customers.append(extra);const leadCard=div('card',title('Leads','h3'),table(['Name','Mobile','Source','Consent'],d.leads.map(l=>[l.name,l.mobile,l.sourceType,l.consentStatus])));extra.append(leadCard);const name=input('name','text','Customer name'),mobile=input('mobile','tel','9876543210');const leadForm=node('form',{class:'formrow'},[lab('Name',name),lab('Mobile',mobile),node('button',{class:'btn',type:'submit',text:'Add lead'})]);leadForm.addEventListener('submit',async e=>{e.preventDefault();try{await api('/v1/human/leads','POST',{tenantId:id,name:name.value,mobile:mobile.value});notice('Lead saved without calling consent');await renderClient(id,content)}catch(err){asError(err)}});if(d.role==='client_admin')leadCard.append(leadForm);const planning=node('details',{class:'card'},node('summary',{text:'Advanced campaign planning and project links'}));sections.calling.append(planning);await planningPanels(id,planning,d.role);const reports=node('details',{class:'card'},node('summary',{text:'Exports and audit history'}));campaignResultsPanel(id,sections.results);sections.results.append(reports);await usageAndExport(id,reports,d.role);if(d.role==='client_admin')await auditPanel(id,reports)}catch(e){content.replaceChildren();asError(e)}}
+ state.clientSetTab=selectSection;
+ content.openView(state.clientTab||'customers');
+}
+
+function manualCustomerPanel(tenantId,content){
+ const details=node('details',{class:'card'},node('summary',{text:'Add one customer manually'}));
+ const name=input('customerName','text','Full name'),mobile=input('customerMobile','tel','Indian mobile number');
+ const submit=node('button',{class:'btn',type:'submit',text:'Add customer'});
+ const form=node('form',{class:'formrow'},[lab('Name',name),lab('Mobile',mobile),submit]);
+ form.addEventListener('submit',async e=>{
+  e.preventDefault();submit.disabled=true;
+  try{
+   await api('/v1/human/leads','POST',{tenantId,name:name.value,mobile:mobile.value});
+   notice('Customer added. Calling clearance still requires review.');await renderClient(tenantId,content);
+  }catch(e){asError(e)}finally{submit.disabled=false}
+ });
+ details.append(form);return details;
+}
 
 function campaignResultsPanel(tenantId,content){
- const card=div('card',title('Campaign results & customer answers','h3')),output=div('stack');
+ const card=div('card',title('Campaign results & customer answers')),output=div('stack');
+ const answer=div('answer-sheet');answer.hidden=true;
  card.id='client-reports';
  content.append(card);
  const campaign=node('select',{class:'field','aria-label':'Filter results by campaign'});
@@ -501,7 +580,7 @@ function campaignResultsPanel(tenantId,content){
  const refreshBtn=btn('Refresh customer answers',()=>refresh().catch(asError),true);
  back.disabled=true;next.disabled=true;
  function answerBudget(amount){return amount==null?'—':new Intl.NumberFormat('en-IN',{style:'currency',currency:'INR',maximumFractionDigits:0}).format(amount)}
- const outcomes={completed:'Answers saved',declined:'Declined or opted out',ended:'Ended before completion',needs_review:'Review needed',rejected:'Provider rejected',
+ const outcomes={completed:'Answers saved',declined:'Declined or opted out',ended:'Ended before completion',needs_review:'Review needed',rejected:'Provider rejected',operator_reviewed:'Reviewed by admin',
   queued:'Queued / awaiting clearance',reserved:'Preparing call',submitted:'Call sent',failed:'Call unsuccessful',unknown:'Awaiting verification',blocked:'Blocked'};
  async function refresh(){
   if(fetching)return;
@@ -515,71 +594,103 @@ function campaignResultsPanel(tenantId,content){
    const query=new URLSearchParams({tenantId,offset:String(offset)});
    if(campaign.value)query.set('campaignId',campaign.value);
    const {results,total}=await api('/v1/human/calling/results?'+query);
+   answer.hidden=true;
    output.replaceChildren(
-    node('p',{class:'note',text:total?(offset+1)+'–'+(offset+results.length)+' of '+total+' customers':'Campaign call attempts will appear here.'}),
-    table(['Customer','Campaign','Outcome','Property','City','Area','Size','Budget','Interest','Visit preference','CRM'],
-     results.map(r=>[r.name,r.campaign,outcomes[r.outcome]||outcomes[r.state]||r.state,r.answers?.propertyType,
-      r.answers?.location,r.answers?.area,r.answers?.size,answerBudget(r.answers?.budgetInr),r.answers?.interest,
-      r.answers?.visitDate,r.answers?(r.savedToLead?'Saved to lead':'Answers captured · lead needs review'):'—']))
+    node('p',{class:'muted',text:total?(offset+1)+'–'+(offset+results.length)+' of '+total+' customers':'Campaign call attempts will appear here.'}),
+    table(['Customer','Campaign','Outcome','CRM','Answers'],results.map(r=>[
+     r.name,r.campaign,outcomes[r.outcome]||outcomes[r.state]||r.state,
+     r.answers?(r.savedToLead?'Saved to lead':'Lead needs review'):'—',
+     r.answers?btn('View answers',()=>showAnswers(r),true):'—'
+    ]))
    );
    back.disabled=offset===0;next.disabled=offset+results.length>=total;
   }finally{fetching=false;refreshBtn.disabled=false;campaign.disabled=false}
  }
+ function showAnswers(result){
+  const trigger=document.activeElement,q=result.answers;
+  const fields=[
+   ['Property type',q.propertyType],['City or location',q.location],['Area',q.area],['Property size',q.size],
+   ['Budget',answerBudget(q.budgetInr)],['Interest',({interested:'Interested',later:'Follow up later',not_interested:'Not interested'})[q.interest]],
+   ['Preferred visit date',q.visitDate]
+  ];
+  answer.replaceChildren(div('row between',title(result.name+' — call answers','h3'),
+   btn('Close answers',()=>{answer.hidden=true;trigger?.focus()},true)),node('dl',{class:'answer-fields'},
+   fields.map(([label,value])=>div('',node('dt',{text:label}),node('dd',{text:value||'—'})))));
+  answer.hidden=false;
+  answer.tabIndex=-1;
+  answer.focus();
+ }
  campaign.addEventListener('change',()=>{offset=0;refresh().catch(asError)});
- card.append(div('formrow',lab('Campaign',campaign),refreshBtn),output,div('formrow',back,next));
+ card.append(div('formrow',lab('Campaign',campaign),refreshBtn),answer,output,div('formrow',back,next));
  content.addEventListener('workspace-tab-shown',()=>refresh().catch(asError));
  if(!content.hidden)refresh().catch(asError);
 }
 
-async function customerCallingPanel(tenantId,content,role){
- const card=div('card',title('Customer Calling','h3'),node('p',{class:'note',text:'Excel import → campaign → Start. Calls continue in the background after closing this page. One call at a time per company; 09:00–20:00 India time. Super Admin must review company and customer permissions first.'}));
- card.id='customer-calling';content.append(card);
- const area=div('stack');card.append(area);
+async function customerCallingPanel(tenantId,content,role,openView){
+ const card=div('card',title('Campaign controls'));
  const pick=node('select',{class:'field','aria-label':'Calling campaign'});
- let start=null;
+ const status=node('p',{class:'note',role:'status',text:'Loading calling status…'});
+ const summary=div('campaign-info');
+ let snapshot=null,busy=false;
+ const start=btn('Start calling',()=>changeRun('start'));
+ const pause=btn('Pause campaign',()=>changeRun('pause'),true);
+ const refreshBtn=btn('Refresh status',()=>refresh().catch(asError),true);
+ const options=div('formrow',lab('Campaign',pick),refreshBtn);
+ const actions=div('formrow',btn('Import customers',()=>openView('customers',{resetScroll:true}),true),
+  btn('View customer answers',()=>openView('results',{resetScroll:true}),true));
+ if(role==='client_admin')actions.prepend(start,pause);
+ card.append(status,options,summary,actions);content.append(card);
+ async function changeRun(action){
+  if(busy||!pick.value)return;
+  if(action==='start'&&!confirm('Call the approved customers in this campaign? This uses calling credits.'))return;
+  const campaignId=pick.value;
+  busy=true;render();
+  try{
+   const res=await api('/v1/human/calling/runs','POST',{tenantId,campaignId,action});
+   notice(action==='pause'?'Campaign paused. A call already with Plivo may finish.':'Campaign '+res.state+'.');
+   await refresh();
+  }catch(e){asError(e)}finally{busy=false;render()}
+ }
+ function render(){
+  const campaign=snapshot?.campaigns.find(c=>c.id===pick.value);
+  const run=snapshot?.data.runs.find(r=>r.campaignId===campaign?.id);
+  const policy=snapshot?.data.policy;
+  const policyReady=policy?.enabled&&Date.parse(policy.expiresAt)>Date.now();
+  const ready=snapshot?.data.configuration.ready&&policyReady;
+  const languageOK=campaign&&['hi','en'].includes(campaign.languageMode);
+  pick.disabled=busy||!snapshot?.campaigns.length;
+  refreshBtn.disabled=busy;
+  start.disabled=busy||!ready||!languageOK||['running','completed'].includes(run?.state);
+  pause.disabled=busy||run?.state!=='running';
+  start.querySelector('span').textContent=run?.state==='paused'?'Resume calling':'Start calling';
+  if(!snapshot)return;
+  status.textContent=!snapshot.data.configuration.ready?'Calling disabled until Plivo setup and the internal pilot are complete.':
+   !policyReady?'Super Admin calling approval is required for this company.':
+   'Calling approved · up to '+policy.dailyLimit+' calls per day · 09:00–20:00 India time';
+  status.className='note '+(ready?'ready-note':'');
+  summary.replaceChildren(campaign?div('between row',
+   node('strong',{text:campaign.name}),
+   node('span',{class:'badge '+(run?.state==='completed'||run?.state==='running'?'positive':'pending'),text:run?.state||'draft'}),
+   node('span',{class:'muted',text:languageOK?(campaign.languageMode==='hi'?'Hindi':'English'):'Use a Hindi or English campaign for the phone flow.'})
+  ):node('p',{class:'muted',text:'Import a customer file to prepare your first campaign.'}));
+ }
  async function refresh(){
-  const [data,campaigns]=await Promise.all([api('/v1/human/calling/state?tenantId='+tenantId),api('/v1/human/campaigns?tenantId='+tenantId)]);
-  const prior=pick.value;pick.replaceChildren(...campaigns.campaigns.map(c=>node('option',{value:c.id,text:c.name})));const imported=state.importCampaign?.tenantId===tenantId?state.importCampaign.id:null;
-  const selection=prior||imported;
-  if(selection&&campaigns.campaigns.some(c=>c.id===selection))pick.value=selection;
-  if(start)start.disabled=!data.configuration.ready||!data.policy?.enabled||Date.parse(data.policy.expiresAt)<=Date.now()||!campaigns.campaigns.length;
-  area.replaceChildren(node('p',{class:'note',text:!data.configuration.ready?'Calling disabled: '+data.configuration.missing.join(', '):!data.policy?.enabled?'Super Admin company approval required.':'Daily call limit: '+data.policy.dailyLimit+' | Approval expires: '+data.policy.expiresAt}),
-   table(['Campaign','State'],data.runs.map(r=>[r.name,r.state])),
-   table(['Customer','Call state','Provider status','Seconds','Details'],data.jobs.map(j=>[j.name,j.state,j.providerStatus,j.durationSeconds,j.errorCode])));
+  refreshBtn.disabled=true;
+  try{
+   const [data,list]=await Promise.all([api('/v1/human/calling/state?tenantId='+tenantId),api('/v1/human/campaigns?tenantId='+tenantId)]);
+   const prior=pick.value||(state.importCampaign?.tenantId===tenantId?state.importCampaign.id:'');
+   snapshot={data,campaigns:list.campaigns};
+   pick.replaceChildren(...snapshot.campaigns.map(c=>node('option',{value:c.id,text:c.name})));
+   if(prior&&snapshot.campaigns.some(c=>c.id===prior))pick.value=prior;
+  }finally{render()}
  }
- const refreshBtn=btn('Refresh call results',()=>refresh().catch(asError),true);
- card.append(div('formrow',refreshBtn,btn('View customer answers',()=>state.clientSetTab?.('results'),true)));
- if(role==='client_admin'){
-  const name=input('callCampaignName','text','November follow-up');
-  const language=node('select',{class:'field'},[node('option',{value:'hi',text:'Hindi'}),node('option',{value:'en',text:'English'})]);
-  const customerType=node('select',{class:'field','aria-label':'Campaign customer type'},
-    [['','All CRM customers'],['prior_inquiry','Previous enquiries'],['unknown_contact','Unknown/new contacts'],['unclassified','Unclassified']].map(([value,text])=>node('option',{value,text})));
-   const create=btn('Create campaign with selected CRM customers',async()=>{
-    create.disabled=true;
-    try{
-     if(!name.value.trim())throw Error('Enter a campaign name');
-     const campaign=await api('/v1/human/campaigns','POST',{tenantId,name:name.value,languageMode:language.value,purpose:'property_information'});
-     const selection={tenantId};
-     if(customerType.value)selection.customerSegment=customerType.value;
-     const r=await api('/v1/human/campaigns/'+campaign.id+'/candidates/from-crm','POST',selection);
-     notice(r.inserted+' customers added, '+r.alreadyInCampaign+' already selected. No calls placed. Review approvals before Start.');
-     await refresh();pick.value=campaign.id;
-    }catch(e){asError(e)}finally{create.disabled=false}
-   });
-   start=btn('Start / Resume calling',async()=>{
-   if(!pick.value)return notice('Create a campaign first.',true);
-   if(!confirm('Start phone calls to the approved customers in this campaign? This uses calling credits.'))return;
-   start.disabled=true;
-   try{const r=await api('/v1/human/calling/runs','POST',{tenantId,campaignId:pick.value,action:'start'});notice('Campaign '+r.state+'. Results refresh below.');await refresh()}catch(e){asError(e);await refresh().catch(asError)}
-  });
-  start.disabled=true;
-  const pause=btn('Pause campaign',async()=>{try{await api('/v1/human/calling/runs','POST',{tenantId,campaignId:pick.value,action:'pause'});notice('Paused. A call already sent to the phone provider may finish.');await refresh()}catch(e){asError(e)}},true);
-  card.append(div('formrow',lab('Campaign name',name),lab('Customers',customerType),lab('Call language',language),create),div('formrow',lab('Campaign',pick),start,pause));
- }
- try{await refresh()}catch(e){area.append(node('p',{class:'err',text:e.message}))}
+ pick.addEventListener('change',render);
+ content.addEventListener('workspace-tab-shown',()=>refresh().catch(asError));
+ render();await refresh();
 }
+
 async function callingAdminPanel(main){
- const card=div('card calling-settings',title('Client Calling Setup')),area=div('stack');card.id='calling-setup';main.append(card);
+ const card=div('card calling-settings',title('Client calling approval')),area=div('approval-grid');card.id='calling-setup';main.append(card);
  const company=node('select',{class:'field','aria-label':'Calling setup company'});
  try{const d=await api('/v1/human/tenants');company.append(...d.tenants.map(t=>node('option',{value:t.id,text:t.display_name+' — '+t.status})))}catch(e){asError(e);return}
  const approval=input('approval','text','Approved phone provider and calling purpose reference');
@@ -587,28 +698,30 @@ async function callingAdminPanel(main){
  const limit=input('dailyLimit','number');limit.value='10';limit.min='1';limit.max='100';
  const seconds=input('maxSeconds','number');seconds.value='180';seconds.min='180';seconds.max='300';
  const enabled=node('input',{type:'checkbox','aria-label':'Enable company calling'});
- const policyForm=node('form',{class:'stack'},[lab('Provider approval reference',approval),div('formrow',lab('Approval days (1–30)',days),lab('Daily calls (1–100)',limit),lab('Maximum call seconds (180–300)',seconds)),lab('Enable company calling',enabled),node('button',{class:'btn',type:'submit',text:'Save company calling approval'})]);
+ const policyForm=node('form',{class:'stack'},[title('Company approval','h3'),lab('Provider approval reference',approval),div('formrow',lab('Approval days (1–30)',days),lab('Daily calls (1–100)',limit),lab('Maximum call seconds (180–300)',seconds)),lab('Enable company calling',enabled),node('button',{class:'btn',type:'submit',text:'Save company calling approval'})]);
  const consent=input('consent','text','Purpose-specific opt-in evidence reference'),dnd=input('dnd','text','Provider DND check reference');
  const choices=div('stack approval-list');
  const draft=node('select',{class:'field','aria-label':'Uploaded campaign'});
- let clearanceOffset=0;
+ let clearanceOffset=0,requestGeneration=0;
  const older=btn('Next customers',()=>{clearanceOffset+=200;refresh().catch(asError)},true);
  const newer=btn('Previous customers',()=>{clearanceOffset=Math.max(0,clearanceOffset-200);refresh().catch(asError)},true);
  older.disabled=true;newer.disabled=true;
  const purpose=node('select',{class:'field'},['property_information','site_visit'].map(x=>node('option',{value:x,text:x})));
- const clearanceForm=node('form',{class:'stack'},[title('Review customers for calling','h3'),node('p',{class:'note',text:'Select only customers covered by the consent evidence and current provider DND check. Excel upload alone does not supply these checks. Opted-out customers cannot be approved.'}),lab('Uploaded campaign',draft),lab('Purpose',purpose),lab('Consent evidence reference',consent),lab('DND verification reference',dnd),choices,div('formrow',newer,older),node('button',{class:'btn',type:'submit',text:'Approve selected customers'})]);
+ const clearanceForm=node('form',{class:'stack'},[title('Customer clearance','h3'),node('p',{class:'note',text:'Select only customers covered by the consent evidence and current provider DND check. Excel upload alone does not supply these checks. Opted-out customers cannot be approved.'}),lab('Uploaded campaign',draft),lab('Purpose',purpose),lab('Consent evidence reference',consent),lab('DND verification reference',dnd),choices,div('formrow',newer,older),node('button',{class:'btn',type:'submit',text:'Approve selected customers'})]);
  const status=div(''),recovery=div('stack');
  const expires=()=>{const n=Number(days.value);if(!Number.isInteger(n)||n<1||n>30)throw Error('Approval days must be 1–30');return new Date(Date.now()+n*86400000).toISOString()};
  policyForm.addEventListener('submit',async e=>{e.preventDefault();try{await api('/v1/human/calling/policy','POST',{tenantId:company.value,enabled:enabled.checked,approvalReference:approval.value,expiresAt:expires(),dailyLimit:Number(limit.value),maxSeconds:Number(seconds.value)});notice('Company approval saved.');await refresh()}catch(e){asError(e)}});
  clearanceForm.addEventListener('submit',async e=>{e.preventDefault();try{const leadIds=[...choices.querySelectorAll('input:checked')].map(x=>x.value);const r=await api('/v1/human/calling/clearances','POST',{tenantId:company.value,leadIds,purpose:purpose.value,consentReference:consent.value,dndReference:dnd.value,expiresAt:expires()});notice(r.reviewed+' customer approvals saved.');await refresh()}catch(e){asError(e)}});
  async function refresh(){
+  const generation=++requestGeneration,tenantId=company.value;
   choices.replaceChildren();status.replaceChildren();recovery.replaceChildren();
-  if(!company.value)return;
+  if(!tenantId)return;
   try{
    const selected=draft.value;
-   const query=new URLSearchParams({tenantId:company.value,offset:String(clearanceOffset)});
+   const query=new URLSearchParams({tenantId,offset:String(clearanceOffset)});
    if(selected)query.set('campaignId',selected);
-   const [p,c]=await Promise.all([api('/v1/human/calling/policy?tenantId='+company.value),api('/v1/human/calling/clearances?'+query)]);
+   const [p,c,{locked}]=await Promise.all([api('/v1/human/calling/policy?tenantId='+tenantId),api('/v1/human/calling/clearances?'+query),api('/v1/human/calling/reconcile?tenantId='+tenantId)]);
+   if(generation!==requestGeneration)return;
    draft.replaceChildren(node('option',{value:'',text:'All customers'}),...c.campaigns.map(x=>node('option',{value:x.id,text:x.name})));
    draft.value=selected;newer.disabled=clearanceOffset===0;older.disabled=!c.hasMore;
    approval.value=p.policy?.approvalReference||'';enabled.checked=!!p.policy?.enabled;
@@ -616,7 +729,6 @@ async function callingAdminPanel(main){
    status.append(node('p',{class:'note',text:p.configuration.ready?'Fixed-question customer calling configured.':p.configuration.missing.join(', ')}));
    for(const l of c.leads){const checkbox=node('input',{type:'checkbox',value:l.id});if(l.consentStatus==='denied'||l.dndStatus==='blocked')checkbox.disabled=true;choices.append(lab(l.name+' — '+l.id.slice(0,8),checkbox))}
    status.append(table(['Customer','Purpose','Approval expires'],c.clearances.map(x=>[x.name,x.purpose,x.expiresAt])));
-   const {locked}=await api('/v1/human/calling/reconcile?tenantId='+encodeURIComponent(company.value));
    if(locked){
     const evidence=input('carrierEvidence','text','Carrier verification reference');
     evidence.maxLength=160;
@@ -624,7 +736,7 @@ async function callingAdminPanel(main){
      if(!window.confirm('Confirm that Plivo shows this attempt has ended. Closing will not dial this customer again.'))return;
      close.disabled=true;
      try{
-      await api('/v1/human/calling/reconcile','POST',{tenantId:company.value,jobId:locked.id,evidenceReference:evidence.value});
+      await api('/v1/human/calling/reconcile','POST',{tenantId,jobId:locked.id,evidenceReference:evidence.value});
       notice('Reviewed attempt closed. The client can resume the paused campaign.');
       await refresh();
      }catch(e){asError(e);close.disabled=false}
@@ -635,432 +747,40 @@ async function callingAdminPanel(main){
        '. Pause the campaign and verify the final status in Plivo. Review can close the attempt after 30 minutes.'}),
       lab('Carrier verification reference',evidence),close);
    }
-  }catch(e){status.append(node('p',{class:'err',text:e.message+' — use a current Super Admin MFA login.'}))}
+  }catch(e){if(generation===requestGeneration)status.append(node('p',{class:'err',text:e.message+' — use a current Super Admin MFA login.'}))}
  }
- company.addEventListener('change',()=>{draft.value='';clearanceOffset=0;refresh().catch(asError)});
+ company.addEventListener('change',()=>{draft.value='';clearanceOffset=0;approval.value='';enabled.checked=false;consent.value='';dnd.value='';refresh().catch(asError)});
  draft.addEventListener('change',()=>{clearanceOffset=0;refresh().catch(asError)});
  card.append(lab('Client company',company),btn('Load calling setup',()=>refresh().catch(asError),true),area);
  area.append(policyForm,clearanceForm,recovery,status);await refresh();
 }
 
-async function aiQuickSetupWizard(tenantId,content,refreshEditors,tenantLabel=''){
- const [profileState,scriptState]=await Promise.all([
-  api('/v1/human/company-profile?tenantId='+encodeURIComponent(tenantId)),
-  api('/v1/human/calling-scripts?tenantId='+encodeURIComponent(tenantId))
- ]);
- const existing=profileState.revision>0||scriptState.versions.length>0;
- const card=div('card stack',title('Quick AI Setup — Master Templates','h3'),
-  node('p',{class:'note',text:'New clients get their Real Estate Enquiry AI questions, greeting, safe conversation rules and a company-name-only draft automatically. Review the correct builder name and optional business facts before separately publishing. These defaults never grant consent, make calls or change existing clients.'}));
- content.append(card);
- if(existing){
-  card.append(node('p',{class:'success',text:'AI company details v'+profileState.revision+' and conversation v'+(scriptState.versions[0]?.revision||0)+' are saved. No repeated prompt entry required. Review the actual company name, then Publish separately. Existing versions are protected from automatic replacement.'}));
-  if(profileState.revision>0){
-   const priceField=input('quickPriceUpdate','text','Approved price or range');
-   priceField.required=false;priceField.maxLength=160;priceField.value=profileState.profile.pricing||'';
-   const update=btn('Save price change (draft only)',async()=>{
-    if(priceField.value.trim()===(profileState.profile.pricing||''))return notice('Price is unchanged. Nothing saved.');
-    if(!confirm('Save only the approved price change as a new version? Existing AI publication will NOT be silently replaced.'))return;
-    update.disabled=true;
-    try{
-     const result=await api('/v1/human/company-profile','POST',{
-      tenantId,baseRevision:profileState.revision,
-      profile:{...profileState.profile,pricing:priceField.value.trim()}
-     });
-     if(!result.saved)throw Error('Price update could not be confirmed');
-     notice('Approved price saved as a new company version. Review and Publish the AI again before further calls.');
-     await refreshEditors();
-    }catch(e){asError(e);update.disabled=false}
-   });
-   const optional=node('details',{},node('summary',{text:'Optional: change approved price only'}));
-   optional.append(div('formrow',lab('Quick update: Approved price',priceField),update));
-   card.append(optional);
-  }
-  return true;
+async function companyAdminPanel(main){
+ const card=div('card',title('Company profile'));
+ const company=node('select',{class:'field','aria-label':'Company profile'});
+ const area=div('stack');
+ card.append(div('formrow',lab('Choose company',company)),area);main.append(card);
+ const result=await api('/v1/human/tenants');
+ company.replaceChildren(...result.tenants.filter(t=>['active','trial'].includes(t.status))
+  .map(t=>node('option',{value:t.id,text:t.display_name})));
+ function load(){
+  if(!company.value){area.replaceChildren(node('p',{class:'muted',text:'Create a client before editing a company profile.'}));return}
+  const profile=div('stack');
+  area.replaceChildren(profile);
+  companyProfileEditor(company.value,profile,true,company.selectedOptions[0]?.textContent||'').catch(asError);
  }
- const useDefault=btn('Use ready-made Default AI (no form)',async()=>{
-  if(!confirm('Create the default Real Estate Enquiry AI as drafts for this unconfigured client? Consent and calling approvals require separate review.'))return;
-  useDefault.disabled=true;
-  try{
-   const r=await api('/v1/human/calling-scripts/apply-defaults','POST',{tenantId});
-   if(!r.created||r.published!==false||r.customerCallsStarted!==0)throw Error('Default setup unconfirmed');
-   notice('Default AI ready as drafts. Check the builder name and Publish separately.');
-   await refreshEditors();
-  }catch(e){asError(e);useDefault.disabled=false}
- });
- card.append(useDefault,node('p',{class:'muted',text:'Or choose Plot / Flat / Follow-up below. Location, price, project and size are optional; AI will not invent them.'}));
- const companyName=input('quickCompanyName','text','Approved builder/company name');
- companyName.value=tenantLabel;companyName.maxLength=160;companyName.required=true;
- const template=node('select',{class:'field','aria-label':'Master AI Template'},[
-  node('option',{value:'plot_sales',text:'Plot Sales — प्लॉट'}),
-  node('option',{value:'flat_sales',text:'Flat Sales — फ्लैट'}),
-  node('option',{value:'property_followup',text:'Property Follow-up — फॉलोअप'}),
-  node('option',{value:'property_enquiry',text:'Real Estate Enquiry — default'})
- ]);
- template.value='property_enquiry';
- const project=input('quickProject','text','Optional project name'),
-  city=input('quickLocation','text','Approved city / location'),
-  price=input('quickPrice','text','Optional approved price or price range'),
-  size=input('quickSize','text','Optional size / BHK');
- for(const [control,max] of [[project,120],[city,160],[price,160],[size,120]]){
-  control.required=false;control.maxLength=max;
- }
- const language=node('select',{class:'field','aria-label':'AI Language'},[
-  node('option',{value:'hi-en',text:'Hindi + English'}),
-  node('option',{value:'hi',text:'Hindi'}),
-  node('option',{value:'en',text:'English'})
- ]);
- const form=node('form',{class:'stack'},[
-  lab('Approved company name (check builder name)',companyName),
-  div('formrow',lab('Master Template',template),lab('AI Language',language)),
-  div('formrow',lab('Project name (optional)',project),lab('Project location (optional)',city)),
-  div('formrow',lab('Approved price (optional)',price),lab('Property size / BHK (optional)',size))
- ]);
- const review=div('stack'),preview=btn('Preview generated AI',async()=>{
-  const button=preview;button.disabled=true;
-  try{
-   const details=currentDetails();
-   const result=await api('/v1/human/calling-scripts/quick-setup','POST',
-    {tenantId,mode:'preview',details});
-   snapshot={details,previewDigest:result.previewDigest,templateVersion:result.templateVersion};
-   review.replaceChildren(title('Generated AI Preview','h3'),
-    node('p',{class:'note',text:result.notice}),
-    table(['Company / project information','Approved value'],[
-     ['Company',result.profile.companyName],['Project',result.profile.projects||'Not provided'],
-     ['Location',result.profile.locations||'Not provided'],
-     ['Property type',result.profile.propertyTypes],
-     ['Price',result.profile.pricing||'Not provided'],
-     ['Size',result.profile.additionalFacts||'Not provided']
-    ]),
-    node('p',{class:'muted',text:'Template: '+result.templateId+' · '+result.templateVersion}),
-    node('p',{text:'Greeting: '+result.script.greeting}),
-    node('p',{text:'The AI will ask '+result.script.questions.length+' approved qualification questions.'}));
-   const questions=node('ol');
-   result.script.questions.forEach(q=>questions.append(node('li',{text:q})));
-   review.append(questions);
-   if(result.warnings.length){
-    const warningList=node('ul');result.warnings.forEach(w=>warningList.append(node('li',{text:w})));
-    review.append(node('p',{class:'note',text:'Missing facts are deliberately NOT invented:'}),warningList);
-   }
-   const full=node('details',{},node('summary',{text:'Review full generated AI instructions'}));
-   full.append(node('pre',{class:'note',style:'white-space:pre-wrap;overflow-wrap:anywhere;max-height:350px;overflow:auto',text:result.promptPreview}));
-   review.append(full);
-   if(result.canCreate){
-    const create=btn('Generate AI Draft (no calls)',async()=>{
-     if(!snapshot)return;
-     if(!confirm('Create the approved company facts and AI script as immutable drafts for this client? This will NOT publish or start calling.'))return;
-     create.disabled=true;
-     try{
-      const saved=await api('/v1/human/calling-scripts/quick-setup','POST',
-       {tenantId,mode:'create',details:snapshot.details,templateVersion:snapshot.templateVersion,
-        previewDigest:snapshot.previewDigest,acknowledgedReview:true});
-      if(!saved.created||saved.published!==false||saved.customerCallsStarted!==0)
-       throw Error('Unexpected AI setup response');
-      snapshot=null;notice('Master AI draft generated. Review it and click Publish AI agent for calls when approved.');
-      await refreshEditors();
-     }catch(e){asError(e);create.disabled=false}
-    });
-    review.append(create);
-   }
-  }catch(e){snapshot=null;review.replaceChildren();asError(e)}
-  finally{button.disabled=false}
- },true);
- let snapshot=null;
- const currentDetails=()=>({
-  templateId:template.value,language:language.value,companyName:companyName.value,projectName:project.value,
-  location:city.value,price:price.value,size:size.value
- });
- form.addEventListener('input',()=>{snapshot=null;review.replaceChildren()});
- form.addEventListener('change',()=>{snapshot=null;review.replaceChildren()});
- card.append(form,preview,review);
- return false;
-}
-async function scriptAdminPanel(main){
- const card=div('card client-directory',title('Client Company & AI Setup')),area=div('stack');card.id='conversation-setup';main.append(card);card.append(node('p',{class:'note',text:'Save company details and draft scripts. The current phone pilot uses the seven fixed property questions.'}));
- const company=node('select',{class:'field','aria-label':'Conversation company'});
- async function refreshCompanies(preferredId=''){
-  const old=preferredId||company.value;
-  const result=await api('/v1/human/tenants');
-  company.replaceChildren(...result.tenants.filter(t=>['trial','active'].includes(t.status))
-   .map(t=>node('option',{value:t.id,text:t.display_name})));
-  if([...company.options].some(option=>option.value===old))company.value=old;
-  await load();
- }
- let loadGeneration=0;
- async function load(){
-  const generation=++loadGeneration,tenantId=company.value,label=company.selectedOptions[0]?.textContent||'';
-  area.replaceChildren();
-  if(!tenantId)return;
-  try{
-   const stage=div('stack');
-   await aiQuickSetupWizard(tenantId,stage,()=>load(),label);
-   if(generation!==loadGeneration||company.value!==tenantId)return;
-   const advanced=node('details',{class:'card'},node('summary',{text:'Advanced: Company Knowledge & AI Questions'}));
-   advanced.open=false;
-   area.append(stage,advanced);
-   await callingScriptEditor(tenantId,advanced,true,label);
-  }catch(e){if(generation===loadGeneration)asError(e)}
- }
- company.addEventListener('change',()=>load().catch(asError));
- document.addEventListener('client-created',e=>refreshCompanies(e.detail||'').catch(asError));
- card.append(div('formrow',lab('Company',company),
-  btn('Refresh client list',()=>refreshCompanies().catch(asError),true)),area);
- await refreshCompanies();
+ company.addEventListener('change',load);load();
 }
 async function companyProfileEditor(tenantId,content,admin=false,companyLabel=''){
  const card=div(admin?'stack':'card',title('Company Knowledge','h3'));content.append(card);
  let data;try{data=await api('/v1/human/company-profile?tenantId='+tenantId)}catch(e){card.append(node('p',{class:'err',text:e.message}));return}
  const specs=[['companyName','Company name',1],['website','Website',1],['about','About your company',3],['locations','Cities / locations served',2],['propertyTypes','Property types',2],['projects','Projects and property details',4],['pricing','Approved prices / budget ranges',3],['amenities','Amenities and facilities',2],['officeHours','Office hours',1],['contact','Sales contact / office address',2],['additionalFacts','Other approved information',3]];
- const controls={},form=node('form',{class:'stack'}),summary=node('p',{class:'note',text:'Save company details for your AI agent. Enter only information you want the agent to use with customers. Publishing the agent applies these details to calls.'});card.append(summary,form);
+ const controls={},form=node('form',{class:'stack'}),summary=node('p',{class:'note',text:'These details appear in the client workspace. Phone calls use the fixed property questionnaire.'});card.append(summary,form);
  let row;
  for(const [key,label,rows] of specs){const field=rows===1?input('company-'+key,'text',label):node('textarea',{class:'field',rows});field.required=key==='companyName';field.value=data.profile[key]||(admin&&key==='companyName'?companyLabel:'');field.disabled=!data.canEdit;controls[key]=field;if(rows===1){if(!row){row=div('formrow');form.append(row)}row.append(lab(label,field))}else{row=null;form.append(lab(label,field))}}
  const status=node('p',{class:'muted',text:data.revision?'Company information v'+data.revision+' saved':'Add your company information to get started'});form.append(status);
  if(data.canEdit)form.append(node('button',{class:'btn',type:'submit',text:'Save company information'}));
  form.addEventListener('submit',async e=>{e.preventDefault();const submit=form.querySelector('button[type=submit]');submit.disabled=true;try{const result=await api('/v1/human/company-profile','POST',{tenantId,baseRevision:data.revision,profile:Object.fromEntries(Object.entries(controls).map(([key,field])=>[key,field.value]))});data.revision=result.revision;status.textContent='Company information v'+data.revision+' saved. The fixed phone questionnaire is managed separately.';document.dispatchEvent(new CustomEvent('company-profile-saved',{detail:tenantId}));notice('Company information saved')}catch(e){asError(e)}finally{submit.disabled=false}});
-}
-async function callingScriptEditor(tenantId,content,admin=false,companyLabel=''){
- await companyProfileEditor(tenantId,content,admin,companyLabel);
- const card=div(admin?'stack':'card',title('AI Questions & Answers','h3')),status=div(''),history=div(''),faqRows=div('stack');content.append(card);
- let data;
- try{data=await api('/v1/human/calling-scripts?tenantId='+tenantId)}catch(e){card.append(node('p',{class:'err',text:e.message}));return}
- const name=input('scriptName','text','Conversation name'),language=node('select',{class:'field'},['hi-en','hi','en'].map(x=>node('option',{value:x,text:x}))),greeting=node('textarea',{class:'field',rows:2,'aria-label':'Opening message'}),questions=node('textarea',{class:'field',rows:5,'aria-label':'Call questions'}),rules=node('textarea',{class:'field',rows:4,'aria-label':'Conversation rules'}),closing=node('textarea',{class:'field',rows:2,'aria-label':'Closing message'});
- const fields=[name,language,greeting,questions,rules,closing];let baseRevision=data.versions[0]?.revision||0;
- function addFaq(f={question:'',answer:''}){const q=input('faqQuestion','text','Customer question'),a=node('textarea',{class:'field',rows:2,placeholder:'Approved answer'});q.value=f.question;a.value=f.answer;const row=div('stack',lab('Customer question',q),lab('Approved answer',a));row._faq={q,a};if(data.canEdit)row.append(btn('Remove answer',()=>row.remove(),true));faqRows.append(row)}
- function fill(c){name.value=c.name;language.value=c.language;greeting.value=c.greeting;questions.value=c.questions.join('\n');rules.value=c.rules;closing.value=c.closing;faqRows.replaceChildren();c.faqs.forEach(addFaq);fields.forEach(f=>f.disabled=!data.canEdit)}
- fill(data.versions[0]?.config||data.defaults);
- const form=node('form',{class:'stack'},[div('formrow',lab('Conversation name',name),lab('Language',language)),lab('Opening message',greeting),lab('Questions — one per line',questions),title('Approved answers','h3'),faqRows,lab('Conversation rules / follow-up logic',rules),lab('Closing message',closing)]);
- if(data.canEdit){form.insertBefore(btn('Add approved answer',()=>{if(faqRows.children.length<25)addFaq();else notice('Up to 25 approved answers')},true),rules.parentElement);form.append(node('button',{class:'btn',type:'submit',text:'Save new script version'}))}
- form.addEventListener('submit',async e=>{e.preventDefault();const submit=form.querySelector('button[type=submit]');submit.disabled=true;try{
-  const config={name:name.value,language:language.value,greeting:greeting.value,questions:questions.value.split('\n').map(q=>q.trim()).filter(Boolean),faqs:[...faqRows.children].map(row=>({question:row._faq.q.value,answer:row._faq.a.value})),rules:rules.value,closing:closing.value};
-  const saved=await api('/v1/human/calling-scripts','POST',{tenantId,baseRevision,config});baseRevision=saved.revision;notice('Script version '+saved.revision+' saved. Live calls have not changed.');await refreshHistory();
- }catch(e){asError(e)}finally{submit.disabled=false}});
- async function refreshHistory(){
-  data=await api('/v1/human/calling-scripts?tenantId='+tenantId);baseRevision=data.versions[0]?.revision||0;
-  status.replaceChildren(node('p',{class:'note',text:baseRevision?
-   'Draft v'+baseRevision+' saved. These drafts are separate from the fixed phone questionnaire.':'No script saved yet.'}));
-  const list=div('stack');
-  for(const v of data.versions){
-   const row=div('formrow',node('span',{text:'v'+v.revision}));
-   if(data.canEdit)row.append(btn('Load v'+v.revision,()=>fill(v.config),true));
-   list.append(row);
-  }
-  history.replaceChildren(list);
- }
- document.addEventListener('company-profile-saved',e=>{if(e.detail===tenantId&&card.isConnected)refreshHistory().catch(asError)});
- card.append(node('p',{class:'note',text:'Control the questions, approved answers, language and conversation rules here. Each save keeps a new version. Opt-out handling and honest answers remain required.'}),status,form,title('Version history','h3'),history);await refreshHistory();
-
-}
-
-async function planningPanels(tenantId,content,role){
-  const editable=role==='client_admin';
-  const campaignCard=div('card',title('Calling Campaign Drafts — not executable','h3'),
-    node('p',{class:'note',text:'Planning only. No call launch, verified consent or telecom provider is available.'}));
-  content.append(campaignCard);
-  const campaignList=div('');campaignCard.append(campaignList);
-  async function refreshCampaigns(){
-    const result=await api('/v1/human/campaigns?tenantId='+encodeURIComponent(tenantId));
-    campaignList.replaceChildren(table(['Campaign','Language','Purpose','Status'],result.campaigns.map(c=>
-      [c.name,c.languageMode,c.purpose,c.status])));
-    return result.campaigns;
-  }
-  const campaignData=await refreshCampaigns();
-  if(editable){
-    const name=input('campaignName','text','Site visit follow-up');
-    name.maxLength=80;
-    const language=node('select',{class:'field'},['hi-en','hi','en'].map(value=>node('option',{value,text:value})));
-    const purpose=node('select',{class:'field'},['property_information','site_visit'].map(value=>node('option',{value,text:value})));
-    const form=node('form',{class:'formrow'},[lab('Name',name),lab('Language',language),lab('Purpose',purpose),
-      node('button',{class:'btn',type:'submit',text:'Create draft'})]);
-    form.addEventListener('submit',async e=>{e.preventDefault();try{
-      await api('/v1/human/campaigns','POST',{tenantId,name:name.value,languageMode:language.value,purpose:purpose.value});
-      name.value='';await loadPicks();await refreshCandidateList();notice('Draft saved. Calls are still disabled.');
-    }catch(err){asError(err)}});
-    campaignCard.append(form);
-    const campaignPick=node('select',{class:'field'});
-    const candidatePick=node('select',{class:'field'});
-    const candidateSearch=input('candidateSearch','search','Search eligible leads by name, phone or location');
-    candidateSearch.required=false;
-    let leadOffset=0;
-    const leadPageNote=node('span',{class:'muted'});
-    const prevLead=btn('← Previous leads',()=>{leadOffset=Math.max(0,leadOffset-50);loadPicks().catch(asError)},true);
-    const nextLead=btn('Next leads →',()=>{leadOffset+=50;loadPicks().catch(asError)},true);
-    const searchLead=btn('Find leads',()=>{leadOffset=0;loadPicks().catch(asError)},true);
-    campaignCard.append(div('formrow',candidateSearch,searchLead,prevLead,leadPageNote,nextLead));
-    const pickForm=node('form',{class:'formrow'},[lab('Draft campaign',campaignPick),lab('Candidate lead',candidatePick),
-      node('button',{class:'btn secondary',type:'submit',text:'Add candidate (no calling)'})]);
-    const loadPicks=async()=>{
-      const campaigns=await refreshCampaigns();
-      const leads=await api('/v1/human/leads?tenantId='+encodeURIComponent(tenantId)+
-        '&limit=50&offset='+String(leadOffset)+'&q='+encodeURIComponent(candidateSearch.value.trim()));
-      leadPageNote.textContent='Page '+(Math.floor(leadOffset/50)+1)+' / '+Math.max(1,Math.ceil(leads.total/50));
-      prevLead.disabled=leadOffset===0;nextLead.disabled=leadOffset+leads.leads.length>=leads.total;
-      campaignPick.replaceChildren(...campaigns.map(c=>node('option',{value:c.id,text:c.name})));
-      candidatePick.replaceChildren(...leads.leads.filter(l=>l.consentStatus!=='denied'&&l.dndStatus!=='blocked')
-        .map(l=>node('option',{value:l.id,text:l.name+' · '+l.mobile})));
-    };
-    await loadPicks();
-    const currentCandidate=node('select',{class:'field'});
-    let candidateOffset=0;
-    const pageHint=node('span',{class:'muted'});
-    const prevCandidate=btn('← Previous candidates',()=>{
-      candidateOffset=Math.max(0,candidateOffset-50);refreshCandidateList().catch(asError)},true);
-    const nextCandidate=btn('Next candidates →',()=>{
-      candidateOffset+=50;refreshCandidateList().catch(asError)},true);
-    const removeCandidate=btn('Remove from draft',async()=>{
-      if(!campaignPick.value||!currentCandidate.value)return;
-      try{
-        const result=await api('/v1/human/campaigns/'+campaignPick.value+'/candidates/'+currentCandidate.value+
-          '?tenantId='+encodeURIComponent(tenantId),'DELETE');
-        notice(result.removed?'Candidate removed from draft; no call started.':'Candidate was already absent.');
-        await refreshCandidateList();
-      }catch(err){asError(err)}
-    },true);
-    const refreshCandidateList=async()=>{
-      currentCandidate.replaceChildren();
-      if(!campaignPick.value){removeCandidate.disabled=true;return}
-      const d=await api('/v1/human/campaigns/'+campaignPick.value+'/candidates?tenantId='+
-        encodeURIComponent(tenantId)+'&limit=50&offset='+candidateOffset);
-      if(candidateOffset>0&&d.candidates.length===0){
-        candidateOffset=Math.max(0,candidateOffset-50);return refreshCandidateList();
-      }
-      pageHint.textContent='Page '+(Math.floor(candidateOffset/50)+1)+' / '+
-        Math.max(1,Math.ceil(d.total/50));
-      prevCandidate.disabled=candidateOffset===0;
-      nextCandidate.disabled=candidateOffset+d.candidates.length>=d.total;
-      currentCandidate.replaceChildren(...d.candidates.map(c=>
-        node('option',{value:c.leadId,text:c.name+' — '+c.consentStatus+'/'+c.dndStatus})));
-      removeCandidate.disabled=d.candidates.length===0;
-    };
-    campaignPick.addEventListener('change',()=>{
-      candidateOffset=0;refreshCandidateList().catch(asError)});
-    const candidateActions=div('formrow',lab('Candidates in selected draft',currentCandidate),
-      removeCandidate,prevCandidate,pageHint,nextCandidate);
-    campaignCard.append(candidateActions);
-    const campaignRisk=div('stack');
-    const checkCampaign=btn('Check draft calling readiness (no calls)',async()=>{
-      if(!campaignPick.value)return notice('Create a campaign draft first.');
-      checkCampaign.disabled=true;
-      try{
-        const result=await api('/v1/human/campaigns/'+campaignPick.value+
-          '/readiness?tenantId='+encodeURIComponent(tenantId));
-        const c=result.stats;
-        campaignRisk.replaceChildren(
-          node('p',{class:'err',text:'NOT APPROVED FOR CALLING — '+c.total+
-            ' candidates | '+c.blocked+' explicitly blocked | '+c.optedOut+
-            ' opt-outs | '+c.unverified+' unverified | '+c.pendingEvidence+
-            ' pending consent evidence | '+c.unclassified+' unclassified'}),
-          ...result.reasons.map(reason=>node('p',{class:'note',text:reason})),
-          ...result.nextActions.map(action=>node('p',{class:'muted',text:action}))
-        );
-      }catch(err){asError(err)}
-      finally{checkCampaign.disabled=false}
-    },true);
-    campaignCard.append(checkCampaign,campaignRisk);
-    await refreshCandidateList();
-    pickForm.addEventListener('submit',async e=>{e.preventDefault();try{
-      if(!campaignPick.value||!candidatePick.value)throw Error('Create a draft and a lead first');
-      const result=await api('/v1/human/campaigns/'+campaignPick.value+'/candidates','POST',
-        {tenantId,leadIds:[candidatePick.value]});
-      notice('Candidate references added: '+result.inserted+'. No call started.');await refreshCandidateList();
-    }catch(err){asError(err)}});
-    campaignCard.append(pickForm);
-    const addIntent=btn('Record blocked call intent for selected candidate (no call)',async()=>{
-      if(!campaignPick.value||!currentCandidate.value){
-        notice('Choose an existing draft candidate first. No call can start.');
-        return;
-      }
-      if(!confirm('Record a BLOCKED planning-only intent for this candidate? This does NOT authorize or start a real call.'))return;
-      addIntent.disabled=true;
-      try{
-        const r=await api('/v1/human/call-intent-proposals','POST',{
-          tenantId,campaignId:campaignPick.value,leadId:currentCandidate.value,
-          acknowledgeNoDial:true
-        });
-        if(r.state!=='blocked'||r.executionAllowed||r.customerCallsStarted!==0)
-          throw Error('Unsafe intent response');
-        notice('Blocked planning intent recorded. No dial request created.');
-        await refreshIntentProposals();
-      }catch(err){asError(err)}finally{addIntent.disabled=false}
-    },true);
-    campaignCard.append(addIntent);
-  }
-  const intentCard=div('card',
-    title('Blocked Call Intents — planning only','h3'),
-    node('p',{class:'note',text:
-      'An immutable proposal records which tenant draft and lead needs review. Dialing requires company approval and customer clearance.'}));
-  const intentList=div('stack');
-  content.append(intentCard);
-  intentCard.append(intentList);
-  async function refreshIntentProposals(){
-    try{
-      const result=await api('/v1/human/call-intent-proposals?tenantId='+
-        encodeURIComponent(tenantId)+'&limit=50');
-      if(result.executionAllowed!==false||result.customerCallsStarted!==0)
-        throw Error('Unexpected intent readiness');
-      intentList.replaceChildren(
-        table(['Draft','Lead reference','Purpose','State','Consent','DND','Opt-out'],
-          result.proposals.map(p=>[
-            p.campaignName,p.leadId.slice(0,8),p.purpose,
-            p.state,p.consentStatus,p.dndStatus,p.optOutRecorded?'Yes':'No'
-          ])),
-        node('p',{class:'muted',text:
-          'All proposals remain blocked, including when an earlier lead later revokes permission. This list contains no phone numbers or transcripts.'})
-      );
-    }catch(err){intentList.replaceChildren(
-      node('p',{class:'err',text:'Blocked intent history unavailable.'}));asError(err)}
-  }
-  await refreshIntentProposals();
-  const projectCard=div('card',title('AR3D Project Links — pending verification','h3'),
-    node('p',{class:'note',text:'Metadata only. No Platform/Engine data is fetched.'}));
-  content.append(projectCard);
-  const links=div('');projectCard.append(links);
-  async function refreshLinks(){
-    const result=await api('/v1/human/project-links?tenantId='+encodeURIComponent(tenantId));
-    links.replaceChildren(table(['Source','Project ID','Slug','Status'],result.links.map(link=>
-      [link.source,link.externalProjectId,link.externalSlug,link.status])));
-  }
-  await refreshLinks();
-  if(editable){
-    const source=node('select',{class:'field'},['ar3d-platform','ar3d-engine'].map(value=>node('option',{value,text:value})));
-    const id=input('projectId','text','External project ID');
-    const slug=input('projectSlug','text','External project slug');
-    const form=node('form',{class:'formrow'},[lab('Source',source),lab('Project ID',id),lab('Slug',slug),
-      node('button',{class:'btn secondary',type:'submit',text:'Register pending link'})]);
-    form.addEventListener('submit',async e=>{e.preventDefault();try{
-      await api('/v1/human/project-links','POST',{tenantId,source:source.value,externalProjectId:id.value,externalSlug:slug.value});
-      id.value='';slug.value='';await refreshLinks();notice('Pending project link recorded; not verified.');
-    }catch(err){asError(err)}});
-    projectCard.append(form);
-  }
-}
-
-async function agentEditor(tenantId,card){
-  const result=await api('/v1/human/agents?tenantId='+encodeURIComponent(tenantId));
-  if(!result.agents.length)return;
-  const select=node('select',{class:'field'},result.agents.map(a=>node('option',{value:a.id,text:a.displayName+' ('+a.status+')'})));
-  const name=input('editAgentName','text','Agent display name');name.maxLength=120;
-  const language=node('select',{class:'field'},['hi-en','hi','en'].map(s=>node('option',{value:s,text:s})));
-  const status=node('select',{class:'field'},['draft','paused'].map(s=>node('option',{value:s,text:s})));
-  const questions=node('textarea',{class:'field',placeholder:'One question per line',rows:5});
-  const form=node('form',{class:'stack'},[lab('Agent',select),lab('Name',name),lab('Language',language),
-    lab('Status',status),lab('Questions (1–25)',questions),
-    node('button',{class:'btn secondary',type:'submit',text:'Save agent changes'})]);
-  function loadSelected(){
-    const a=result.agents.find(x=>x.id===select.value);if(!a)return;
-    name.value=a.displayName;language.value=a.languageMode;
-    status.value=a.status==='paused'?'paused':'draft';questions.value=a.questions.join('\n');
-    form.querySelector('button[type=submit]').disabled=a.status==='active';
-  }
-  select.addEventListener('change',loadSelected);loadSelected();
-  form.addEventListener('submit',async e=>{e.preventDefault();try{
-    const q=questions.value.split('\n').map(x=>x.trim()).filter(Boolean);
-    await api('/v1/human/agents/'+select.value,'PATCH',{tenantId,displayName:name.value,
-      languageMode:language.value,questions:q,status:status.value});
-    notice('Agent saved as a non-calling draft/paused agent.');
-    const a=result.agents.find(x=>x.id===select.value);
-    if(a){a.displayName=name.value;a.languageMode=language.value;a.questions=q;a.status=status.value}
-  }catch(err){asError(err)}});
-  card.append(title('Edit or pause an AI Agent','h3'),
-    node('p',{class:'note',text:'No active/live AI agents are permitted yet.'}),form);
 }
 async function auditPanel(tenantId,content){
   const card=div('card',title('CRM Audit History','h3'),
@@ -1081,17 +801,9 @@ async function auditPanel(tenantId,content){
 }
 
 async function usageAndExport(tenantId,content,role){
-  const card=div('card',title('CRM Usage & Data Portability','h3'),
-    node('p',{class:'note',text:'CRM record counts and private customer exports. Call charges are managed by the phone provider.'}));
+  const card=div('card',title('Export customers','h3'),
+    node('p',{class:'note',text:'Download your customer records securely.'}));
   content.append(card);
-  const usage=await api('/v1/human/usage?tenantId='+encodeURIComponent(tenantId));
-  const m=usage.crmStats;
-  card.append(table(['Metric','Current total'],[
-    ['Plan (not a payment subscription)',usage.planCode],
-    ['Leads',String(m.leads)],['AI agent drafts',String(m.agents)],
-    ['Draft campaigns',String(m.draftCampaigns)],['Site visits',String(m.siteVisits)],
-    ['Synthetic conversation demos',String(m.syntheticDemos)]
-  ]));
   if(role!=='client_admin')return;
   const info=node('p',{class:'note',text:'Export leads privately in JSON pages (up to 200 per file). Lead notes and recordings are not included.'});
   const exportBtn=btn('Export next 200 leads (private JSON)',async()=>{
@@ -1113,11 +825,12 @@ async function usageAndExport(tenantId,content,role){
 // CRM workflows: CSV/XLSX Preview/Import, statuses, notes and requested site visits.
 async function crmWorkflow(tenantId,content,role,refreshContent=content){
   const editable=role==='client_admin';
-  const workflow=div('card',title('Lead Workflow & Excel Import','h3'));workflow.id='customer-workflow';
-  workflow.append(node('p',{class:'note',text:'Excel .xlsx या CSV UTF-8 अपलोड करें (अधिकतम 200 leads)। Import से calling consent नहीं मिलता; consent/DND unknown रहेगा।'}));
-  content.append(workflow);
+  const workflow=div('card',title('Customer list'));workflow.id='customer-workflow';
   if(editable){
-    const template=btn('Download customer Excel template (CSV)',()=>{const href=URL.createObjectURL(new Blob(['Name,Mobile\r\n'],{type:'text/csv;charset=utf-8'}));const a=node('a',{href,download:'ar3d-customer-template.csv'});document.body.append(a);a.click();a.remove();URL.revokeObjectURL(href)},true);workflow.append(template);
+    const upload=div('card import-card',title('Upload customer file'),
+      node('p',{class:'muted',text:'CSV or Excel (.xlsx) · up to 200 rows · Name and Mobile columns'}));
+    content.prepend(upload);
+    const template=btn('Download customer Excel template (CSV)',()=>{const href=URL.createObjectURL(new Blob(['Name,Mobile\r\n'],{type:'text/csv;charset=utf-8'}));const a=node('a',{href,download:'ar3d-customer-template.csv'});document.body.append(a);a.click();a.remove();URL.revokeObjectURL(href)},true);upload.append(template);
     const picker=node('input',{class:'field',type:'file',accept:'.csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}),previewBox=div(''),csvBox=div('formrow',lab('Excel .xlsx or CSV file',picker));
     let importData=null,requestId=null;
     const importName=input('importCampaignName','text','Campaign name');
@@ -1142,8 +855,8 @@ async function crmWorkflow(tenantId,content,role,refreshContent=content){
         previewBox.replaceChildren(node('p',{class:'success',text:result.rows+' valid rows; '+result.existingCount+' existing in CRM; '+result.wouldInsert+' potentially new.'}),
           table(['Name','Mobile','Customer type','Plot size','Visit preference'],result.preview.map(r=>
             [r.name,r.mobile,r.customerSegment,r.plotSizePreference||'—',r.visitDatePreference||'—'])));
-        requestId=crypto.randomUUID();commitBtn.disabled=false;campaignBtn.disabled=false;
-      }catch(e){importData=null;commitBtn.disabled=true;campaignBtn.disabled=true;previewBox.replaceChildren();asError(e)}
+        requestId=crypto.randomUUID();importActions.hidden=false;commitBtn.disabled=false;campaignBtn.disabled=false;
+      }catch(e){importData=null;importActions.hidden=true;commitBtn.disabled=true;campaignBtn.disabled=true;previewBox.replaceChildren();asError(e)}
     });
     async function commit(makeCampaign){
       if(importData===null)return;
@@ -1164,10 +877,15 @@ async function crmWorkflow(tenantId,content,role,refreshContent=content){
     const commitBtn=btn('Import to CRM',()=>commit(false),true);
     const campaignBtn=btn('Import & prepare campaign',()=>commit(true));
     commitBtn.disabled=true;campaignBtn.disabled=true;
-    picker.addEventListener('change',()=>{importData=null;requestId=null;commitBtn.disabled=true;campaignBtn.disabled=true;previewBox.replaceChildren()});
-    csvBox.append(previewBtn,commitBtn);workflow.append(csvBox,previewBox,
-      div('formrow',lab('Campaign name for this file',importName),lab('Call language',importLanguage),campaignBtn));
+    const importActions=div('formrow',lab('Campaign name for this file',importName),lab('Call language',importLanguage),commitBtn,campaignBtn);
+    importActions.hidden=true;
+    picker.addEventListener('change',()=>{
+      importData=null;requestId=null;importActions.hidden=true;commitBtn.disabled=true;campaignBtn.disabled=true;previewBox.replaceChildren();
+    });
+    csvBox.append(previewBtn);upload.append(csvBox,previewBox,importActions);
+    upload.append(node('p',{class:'muted',text:'A prepared campaign needs calling clearance before any customer is dialed.'}));
   }
+  content.append(workflow);
   const search=input('search','search','Name, number or location');search.required=false;
   const filter=node('select',{class:'field'},['','new','contacted','interested','followup','not_interested','converted']
     .map(s=>node('option',{value:s,text:s||'All statuses'})));
@@ -1179,7 +897,8 @@ async function crmWorkflow(tenantId,content,role,refreshContent=content){
   const searchBtn=btn('Search',()=>{offset=0;refresh().catch(asError)},true);
   const tableArea=div(''),details=div(''),visitArea=div('');
   workflow.append(div('formrow',lab('Search leads',search),lab('Interest status',filter),lab('Customer type',segmentFilter),searchBtn),tableArea,details);
-  const schedule=div('card',title('Site Visits','h3'));workflow.append(schedule,visitArea);
+  const schedule=node('details',{class:'card'},[node('summary',{text:'Site visits'}),visitArea]);
+  content.append(schedule);
   async function visitList(){
     const result=await api('/v1/human/visits?tenantId='+encodeURIComponent(tenantId));
     visitArea.replaceChildren(table(['Lead','Scheduled','Status','Note'],result.visits.map(v=>[
@@ -1246,7 +965,7 @@ async function crmWorkflow(tenantId,content,role,refreshContent=content){
     const blocked=lead.consentStatus==='denied'||lead.dndStatus==='blocked';
     const callPrefs=div('card',title('Calling Preferences / कॉलिंग अनुमति','h3'),
       node('p',{class:'note',text:blocked?'DO NOT CALL — this lead is blocked. No client-side reactivation is available.':
-        'Consent is not verified. No outbound calling is available. Record an opt-out if requested.'}));
+        'Calling eligibility is reviewed for each campaign. Record any request to stop calls here.'}));
     if(editable&&!blocked){
       const origin=node('select',{class:'field'},
         [['customer_request','Customer asked not to call'],['admin_action','Manual/internal block'],['other','Other']].map(([value,text])=>node('option',{value,text})));
@@ -1299,12 +1018,6 @@ async function crmWorkflow(tenantId,content,role,refreshContent=content){
       }catch(err){asError(err)}});
       evidenceCard.insertBefore(f,evidenceHistory);
     }
-    const readiness=div('card',title('Calling readiness','h3'));details.append(readiness);
-    api('/v1/human/leads/'+lead.id+'/call-readiness?tenantId='+encodeURIComponent(tenantId))
-      .then(result=>readiness.append(node('p',{class:'err',text:'BLOCKED — '+
-        (result.optOutRecorded?'Opt-out recorded. ':'')+
-        result.pendingEvidenceCount+' pending evidence reference(s). '+result.reasons.join('; ')})))
-      .catch(asError);
     const notesArea=div('');details.append(title('Private Notes','h3'),notesArea);
     const fetchNotes=async()=>{const notes=await api('/v1/human/notes?tenantId='+encodeURIComponent(tenantId)+'&leadId='+lead.id);
       notesArea.replaceChildren(table(['Note','Added'],notes.notes.map(n=>[n.text,new Date(n.createdAt).toLocaleString()])))};
@@ -1335,6 +1048,7 @@ async function crmWorkflow(tenantId,content,role,refreshContent=content){
       [lead.name,lead.mobile,lead.customerSegment,lead.plotSizePreference,
         lead.preferredLocation,lead.budgetMaxInr,lead.interestStatus].forEach(t=>row.append(node('td',{text:String(t??'—')})));
       row.append(node('td',{},btn('Details',()=>selectLead(lead),true)));body.append(row)}
+    if(!result.leads.length)body.append(node('tr',{},node('td',{class:'empty-state',colspan:'8',text:'No customers match these filters.'})));
     tbl.append(body);
     const prev=btn('← Previous',()=>{offset=Math.max(0,offset-50);refresh().catch(asError)},true);
     const next=btn('Next →',()=>{offset+=50;refresh().catch(asError)},true);
