@@ -3,18 +3,14 @@ import assert from 'node:assert/strict';
 import vm from 'node:vm';
 import {js,css} from '../src/app-assets.mjs';
 
-test('client workspace is divided into four practical tabs without dropping any previous workflow',()=>{
+test('client workspace shows the four primary views through one navigation',()=>{
   assert.doesNotThrow(()=>new vm.Script(js));
-  for(const name of ['Customers / Excel','Calling','Company / AI','Results / CRM'])assert.ok(js.includes(name));
+  for(const name of ['Customers / Excel','Calling','Company details','Results / CRM'])assert.ok(js.includes(name));
   assert.match(js,/section\.hidden=name!==key/);
-  assert.match(js,/await crmWorkflow\(id,sections\.customers,d\.role,content\)/);
-  assert.match(js,/await customerCallingPanel\(id,sections\.calling,d\.role\)/);
-  assert.match(js,/await clientCompanySummary\(id,sections\.company,d\.role,d\.tenant\.name\)/);
-  assert.match(js,/adminCompanyChangesPanel\(main\)/);
-  assert.doesNotMatch(js,/await callingScriptEditor\(id,sections\.company\)/);
-  assert.match(js,/await usageAndExport\(id,reports,d\.role\)/);
-  assert.doesNotMatch(js,/await voicebotReviewPanel\(id,reports,content\)/);
-  assert.match(js,/state\.clientTab=key/);
-  assert.ok(js.includes('client-reports'));
+  assert.match(js,/aria-current/);
+  assert.match(js,/campaignResultsPanel\(id,section\)/);
+  assert.match(js,/Import & prepare campaign/);
+  assert.match(js,/client-reports/);
+  assert.doesNotMatch(js,/Advanced campaign planning and project links|Publish AI agent for calls/);
   assert.match(css,/\.client-content/);
 });

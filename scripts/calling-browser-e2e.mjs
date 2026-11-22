@@ -31,10 +31,10 @@ try{
  const context=await browser.newContext({viewport});await context.addCookies([{name:COOKIE,value:token,url:origin}]);
  const page=await context.newPage(),errors=[];lastPage=page;page.setDefaultTimeout(10000);page.on('pageerror',e=>errors.push(e.message));
  await page.goto(origin+'/app');
- await page.getByRole('tab',{name:'Calling',exact:true}).click();
- await page.getByRole('heading',{name:'Customer Calling',exact:true}).waitFor();
- await page.getByRole('tab',{name:'Company / AI',exact:true}).click();
- await page.getByRole('heading',{name:'Your Company / AI',exact:true}).waitFor();
+ await page.getByRole('link',{name:'Calling',exact:true}).click();
+ await page.getByRole('heading',{name:'Campaign controls',exact:true}).waitFor();
+ await page.getByRole('link',{name:'Company details',exact:true}).click();
+ await page.getByRole('heading',{name:'Company information',exact:true}).waitFor();
  await page.getByRole('heading',{name:'Request Changes',exact:true}).waitFor();
  assert.equal(await page.getByRole('button',{name:'Save company information'}).count(),0);
  assert.equal(await page.getByRole('button',{name:'Save new script version'}).count(),0);
@@ -47,8 +47,10 @@ try{
  await page.getByText('Please update our fictional Raipur plot price from 12 lakh to 14 lakh.').waitFor();
  await page.getByRole('heading',{name:'Request Changes'}).locator('..').screenshot({path:'artifacts/script-editor-'+viewport.width+'.png'});
 
- await page.getByRole('tab',{name:'Customers / Excel',exact:true}).click();
+ await page.getByRole('link',{name:'Customers / Excel',exact:true}).click();
  await page.getByRole('button',{name:'Download customer Excel template (CSV)',exact:true}).waitFor();
+ await page.screenshot({path:'artifacts/calling-customers-'+viewport.width+'.png',fullPage:true});
+ assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
  const file=page.locator('input[type=file]');await file.setInputFiles({name:'customers.csv',mimeType:'text/csv',buffer:Buffer.from('Name,Mobile\r\nFictional buyer,9000000001\r\n')});
  await page.getByRole('button',{name:'Validate & Preview',exact:true}).click();await page.getByText(/1 valid rows; 1 existing in CRM/).waitFor();
  await page.getByRole('button',{name:'Import to CRM',exact:true}).click();await page.getByText('Import finished: 0 new, 1 duplicates. No calls placed.',{exact:true}).waitFor();
@@ -62,7 +64,7 @@ try{
  const draft=f.r.db.prepare('SELECT id FROM call_campaign_drafts WHERE tenant_id=? AND name=?').get(tid,'Acceptance '+viewport.width);
  await picker.locator('option[value="'+draft.id+'"]').waitFor({state:'attached'});
  assert.equal(await picker.inputValue(),draft.id);
- assert.ok(await page.getByRole('button',{name:'Start / Resume calling',exact:true}).isDisabled());
+ assert.ok(await page.getByRole('button',{name:'Start calling',exact:true}).isDisabled());
  await page.getByText(/Calling disabled/).waitFor();
  const selected=f.r.db.prepare(`SELECT l.id,l.name FROM call_campaign_candidates c JOIN leads l
    ON l.tenant_id=c.tenant_id AND l.id=c.lead_id WHERE c.tenant_id=? AND c.campaign_id=?`).all(tid,draft.id);
@@ -72,11 +74,14 @@ try{
  f.r.db.prepare("INSERT INTO calling_jobs(tenant_id,id,run_id,lead_id,state,provider_status,duration_seconds,created_at,updated_at) VALUES(?,?,?,?,'completed','completed',50,?,?)").run(tid,job,run,selected[0].id,at,at);
  f.r.db.prepare("INSERT INTO scripted_call_results VALUES(?,?,?,?,1,?)").run(tid,job,crypto.randomUUID(),
   JSON.stringify({propertyType:'flat',location:'Raipur',area:'Shankar Nagar',size:'3BHK',budgetInr:3500000,interest:'interested',visitDate:'2027-01-12'}),at);
- await page.getByRole('tab',{name:'Results / CRM',exact:true}).click();
+ await page.getByRole('link',{name:'Results / CRM',exact:true}).click();
  await page.getByRole('heading',{name:'Campaign results & customer answers'}).waitFor();
  await page.getByRole('button',{name:'Refresh customer answers'}).waitFor();
  await page.getByRole('combobox',{name:'Filter results by campaign'}).selectOption(draft.id);
- await page.getByRole('row',{name:new RegExp('Uploaded buyer Acceptance '+viewport.width+'.*Raipur.*3BHK.*Saved to lead')}).waitFor();
+ await page.getByRole('row',{name:new RegExp('Uploaded buyer Acceptance '+viewport.width+'.*Saved to lead')}).waitFor();
+ await page.getByRole('row',{name:new RegExp('Uploaded buyer Acceptance '+viewport.width)}).getByRole('button',{name:'View answers'}).click();
+ await page.getByRole('heading',{name:'Uploaded buyer — call answers'}).waitFor();
+ await page.getByText('3BHK',{exact:true}).waitFor();
  assert.equal(await page.getByRole('row',{name:/Fictional buyer/}).count(),0);
  await page.screenshot({path:'artifacts/calling-results-'+viewport.width+'.png',fullPage:true});
  assert.deepEqual(errors,[]);await context.close();
@@ -86,52 +91,22 @@ try{
  const adminToken=await newSession(f.env.CONTROL_DB,'admin');await adminContext.addCookies([{name:COOKIE,value:adminToken,url:origin}]);
  const adminPage=await adminContext.newPage();lastPage=adminPage;adminPage.setDefaultTimeout(10000);
  await adminPage.goto(origin+'/app');
- await adminPage.getByText('3. Calling Setup',{exact:true}).click();
- await adminPage.getByText('Customer Calling Approval',{exact:true}).click();
- await adminPage.getByRole('heading',{name:'Client Calling Setup',exact:true}).waitFor();
+ await adminPage.getByRole('heading',{name:'Client directory'}).waitFor();
+ await adminPage.screenshot({path:'artifacts/calling-admin-clients.png',fullPage:true});
+ await adminPage.getByRole('link',{name:'Calling Setup'}).click();
+ await adminPage.getByRole('heading',{name:'Client calling approval',exact:true}).waitFor();
  assert.ok(await adminPage.getByRole('button',{name:'Call the verified internal number once'}).isDisabled());
- // Client AI details open only when specifically selected.
- await adminPage.getByText('2. Client Company & AI Setup',{exact:true}).click();
- await adminPage.getByRole('heading',{name:'Client Company & AI Setup',exact:true}).waitFor();
- await adminPage.getByRole('heading',{name:'Quick AI Setup — Master Templates',exact:true}).waitFor();
- await adminPage.getByPlaceholder('Optional project name').fill('Demo Heights');
- await adminPage.getByPlaceholder('Approved city / location').fill('Raipur, Chhattisgarh');
- await adminPage.getByPlaceholder('Optional approved price or price range').fill('12-18 lakh');
- await adminPage.getByRole('button',{name:'Preview generated AI'}).click();
- await adminPage.getByRole('heading',{name:'Generated AI Preview'}).waitFor();
- assert.equal(f.c.db.prepare('SELECT COUNT(*) AS n FROM calling_script_versions').get().n,0);
- assert.equal(f.c.db.prepare('SELECT COUNT(*) AS n FROM calling_agent_publications').get().n,0);
- adminPage.once('dialog',dialog=>dialog.accept());
- await adminPage.getByRole('button',{name:'Generate AI Draft (no calls)'}).click();
- await adminPage.getByText(/Master AI draft generated/).waitFor();
- assert.equal(f.c.db.prepare('SELECT COUNT(*) AS n FROM company_profile_versions').get().n,1);
- assert.equal(f.c.db.prepare('SELECT COUNT(*) AS n FROM calling_script_versions').get().n,1);
- assert.equal(f.c.db.prepare('SELECT COUNT(*) AS n FROM calling_agent_publications').get().n,0);
- // Optional price updates are hidden until requested.
- await adminPage.getByText('Optional: change approved price only',{exact:true}).click();
- await adminPage.getByPlaceholder('Approved price or range').fill('14-19 lakh');
- adminPage.once('dialog',dialog=>dialog.accept());
- await adminPage.getByRole('button',{name:'Save price change (draft only)'}).click();
- await adminPage.getByText(/Approved price saved as a new company version/).waitFor();
- assert.equal(f.c.db.prepare('SELECT COUNT(*) AS n FROM company_profile_versions').get().n,2);
- assert.equal(f.c.db.prepare('SELECT COUNT(*) AS n FROM calling_script_versions').get().n,1);
- assert.equal(f.c.db.prepare('SELECT COUNT(*) AS n FROM calling_agent_publications').get().n,0);
- const latestPricing=JSON.parse(f.c.db.prepare('SELECT config_json FROM company_profile_versions WHERE tenant_id=? ORDER BY revision DESC LIMIT 1').get(tid).config_json).pricing;
- assert.equal(latestPricing,'14-19 lakh');
- const generatedScript=JSON.parse(f.c.db.prepare('SELECT config_json FROM calling_script_versions WHERE tenant_id=? ORDER BY revision DESC LIMIT 1').get(tid).config_json);
- assert.ok(!JSON.stringify(generatedScript).includes('12-18 lakh'));
- await adminPage.getByText('Advanced: Company Knowledge & AI Questions',{exact:true}).click();
- await adminPage.getByRole('heading',{name:'AI Questions & Answers',exact:true}).waitFor();
- await adminPage.getByRole('button',{name:'Save new script version'}).waitFor();
+ assert.equal(await adminPage.getByRole('combobox',{name:'Recorded prompt language'}).inputValue(),'en');
+ await adminPage.getByRole('link',{name:'Company details'}).click();
+ await adminPage.getByRole('heading',{name:'Company profile',exact:true}).waitFor();
  await adminPage.locator('[name=company-companyName]').fill('Fictional Builder');
  await adminPage.getByRole('button',{name:'Save company information',exact:true}).click();
  await adminPage.getByText('Company information saved',{exact:true}).waitFor();
- await adminPage.locator('[name=scriptName]').fill('Admin approved script');
- await adminPage.getByRole('button',{name:'Save new script version',exact:true}).click();
- await adminPage.getByText(/Script version .* saved. Live calls have not changed./).waitFor();
- await adminPage.getByText('Client change requests (optional)',{exact:true}).click();
+ assert.equal(await adminPage.getByRole('button',{name:'Save new script version'}).count(),0);
+ assert.equal(f.c.db.prepare('SELECT COUNT(*) AS n FROM calling_agent_publications').get().n,0);
  await adminPage.getByRole('heading',{name:'Client Change Requests',exact:true}).waitFor();
  await adminPage.getByText('Please update our fictional Raipur plot price from 12 lakh to 14 lakh.').waitFor();
+ await adminPage.getByRole('link',{name:'Calling Setup'}).click();
 
  await adminPage.getByLabel('Provider approval reference',{exact:true}).fill('browser-reviewed-provider-reference');
  await adminPage.getByRole('button',{name:'Save company calling approval',exact:true}).click();
@@ -153,7 +128,7 @@ try{
  addInvite.run(await sha256hex(invite),tid,loginEmail,start+3600000,new Date(start).toISOString());
  addInvite.run(await sha256hex(expiredInvite),tid,loginEmail,start-1000,new Date(start).toISOString());
  const visitInvite=token=>loginPage.goto(origin+'/app#invite='+token);
- const dashboard=()=>loginPage.getByRole('heading',{name:'Personal AI Calling',exact:true}).waitFor();
+ const dashboard=()=>loginPage.getByRole('heading',{name:'Customers / Excel',exact:true}).waitFor();
  const logout=async()=>{
   await loginPage.getByRole('button',{name:'Sign out',exact:true}).click();
   await loginPage.getByRole('button',{name:'Sign in',exact:true}).waitFor();
