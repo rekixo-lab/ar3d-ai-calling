@@ -5,11 +5,13 @@ import {mkdir} from 'node:fs/promises';
 import assert from 'node:assert/strict';
 import {chromium} from 'playwright';
 import worker from '../src/index.mjs';
-import {newSession,COOKIE} from '../src/human-auth.mjs';
+import {newSession,COOKIE,randomSecret} from '../src/human-auth.mjs';
+import {sha256hex} from '../src/core.mjs';
 import {fixture,route,tid,lead,admin,accepted} from '../tests/helpers/calling-fixture.mjs';
 import {tickTenant} from '../src/campaign-dispatch.mjs';
 await mkdir('artifacts',{recursive:true});
 const f=fixture();
+f.env.LOGIN_RATE_LIMIT_SECRET='synthetic-browser-test-rate-limit-secret';
 const token=await newSession(f.env.CONTROL_DB,'client');
 const expiresAt=new Date(Date.now()+7*86400000).toISOString();
 assert.equal((await route(f,'policy',{tenantId:tid,enabled:true,flowId:'123456',approvalReference:'fictional-provider-reference',expiresAt,dailyLimit:10,maxSeconds:120},admin)).status,200);
@@ -18,7 +20,9 @@ let origin;
 const server=http.createServer(async(req,res)=>{
  try{
   const chunks=[];for await(const chunk of req)chunks.push(chunk);
-  const request=new Request(origin+req.url,{method:req.method,headers:req.headers,...(['GET','HEAD'].includes(req.method)?{}:{body:Buffer.concat(chunks)})});
+  // Emulate the Cloudflare-provided client IP on the isolated localhost Worker.
+  const headers={...req.headers,'cf-connecting-ip':'192.0.2.17'};
+  const request=new Request(origin+req.url,{method:req.method,headers,...(['GET','HEAD'].includes(req.method)?{}:{body:Buffer.concat(chunks)})});
   const response=await worker.fetch(request,f.env);
   res.writeHead(response.status,Object.fromEntries(response.headers));res.end(Buffer.from(await response.arrayBuffer()));
  }catch{res.writeHead(500);res.end('{}')}
@@ -173,4 +177,62 @@ try{
  assert.equal(reviews,1);
  await adminPage.evaluate(()=>window.scrollTo(0,0));await adminPage.screenshot({path:'artifacts/premium-super-admin.png',fullPage:true});
  await adminContext.close();console.log('Super Admin UI: current MFA session, company policy and selected customer clearances PASS');
+
+ // Real email/password lifecycle against migrated SQLite and the actual Worker.
+ const loginContext=await browser.newContext({viewport:{width:390,height:844}});
+ const loginPage=await loginContext.newPage();lastPage=loginPage;loginPage.setDefaultTimeout(10000);
+ const loginEmail='invited-browser-client@example.invalid',loginPassword='synthetic-client-password-42';
+ const invite=randomSecret(),expiredInvite=randomSecret(),start=Date.now();
+ const addInvite=f.c.db.prepare("INSERT INTO human_invitations(token_hash,tenant_id,email,role,expires_at,created_by,created_at) VALUES(?,?,?,'client_admin',?,'admin',?)");
+ addInvite.run(await sha256hex(invite),tid,loginEmail,start+3600000,new Date(start).toISOString());
+ addInvite.run(await sha256hex(expiredInvite),tid,loginEmail,start-1000,new Date(start).toISOString());
+ const visitInvite=token=>loginPage.goto(origin+'/app#invite='+token);
+ const dashboard=()=>loginPage.getByRole('heading',{name:'Personal AI Calling',exact:true}).waitFor();
+ const logout=async()=>{
+  await loginPage.getByRole('button',{name:'Sign out',exact:true}).click();
+  await loginPage.getByRole('button',{name:'Sign in',exact:true}).waitFor();
+ };
+ const fillInvitation=async password=>{
+  await loginPage.getByLabel('Invited email',{exact:true}).fill(loginEmail);
+  await loginPage.getByLabel('Create password',{exact:true}).fill(password);
+  await loginPage.getByRole('button',{name:'Activate client account',exact:true}).click();
+ };
+ const signIn=async()=>{
+  await loginPage.getByLabel('Email address',{exact:true}).fill(loginEmail);
+  await loginPage.getByLabel('Password',{exact:true}).fill(loginPassword);
+  await loginPage.getByRole('button',{name:'Sign in',exact:true}).click();
+  await dashboard();
+  assert.equal(loginPage.url(),origin+'/app');
+  assert.equal(await loginPage.getByRole('heading',{name:'Super Admin',exact:true}).count(),0);
+ };
+ await visitInvite(invite);
+ await fillInvitation(loginPassword);
+ await dashboard();
+ assert.equal(loginPage.url(),origin+'/app');
+ await logout();
+ await visitInvite(invite);
+ await fillInvitation('different-password-must-not-replace-existing');
+ await loginPage.getByText(/This invitation has already been used, expired/).waitFor();
+ assert.equal(loginPage.url(),origin+'/app');
+ assert.equal(await loginPage.getByLabel('Email address',{exact:true}).inputValue(),loginEmail);
+ assert.equal(await loginPage.getByLabel('Password',{exact:true}).inputValue(),'');
+ await signIn();
+ await logout();
+ await visitInvite(expiredInvite);
+ await fillInvitation('different-password-must-not-replace-existing');
+ await loginPage.getByText(/This invitation has already been used, expired/).waitFor();
+ await signIn();
+ await logout();
+ await visitInvite(invite);
+ await loginPage.getByRole('button',{name:'Sign in with email and password',exact:true}).click();
+ await signIn();
+ await logout();
+ await loginPage.goto(origin+'/app');
+ await signIn();
+ await logout();
+ await visitInvite('malformed');
+ await loginPage.getByRole('button',{name:'Sign in',exact:true}).waitFor();
+ assert.equal(loginPage.url(),origin+'/app');
+ await loginContext.close();
+ console.log('Client login: activation, reused and expired invitation recovery, direct sign-in, and repeated sign-in with the existing password PASS');
 }catch(e){console.error(await lastPage?.locator('body').innerText());await lastPage?.screenshot({path:'/tmp/ar3d-calling-failure.png',fullPage:true});throw e}finally{await browser.close();server.close();f.close()}
