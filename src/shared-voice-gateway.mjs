@@ -91,8 +91,9 @@ export async function reviewUnknownGateway(env,runtime,{fetcher=fetch}={}){
    if(!v)return null;
    try{
     const data=unwrapVoicebot(await voicebotRequest(env,path+'?version='+v,{fetcher}));
-    if((data.id||data.bot_id)!==runtime.bot_id)return null;
-    return (data.assistant_config?.id||data.assistant_config?.assistant_id)===savedGuard;
+    const cfg=selectedBotConfig(data,runtime.bot_id,v);
+    const assistantId=cfg?.assistant_config?.id||cfg?.assistant_config?.assistant_id;
+    return uuid(assistantId)?assistantId===savedGuard:null;
    }catch{return null}
   };
   result.latestVersionUsesRecordedGuard=await examine(latest);
@@ -234,9 +235,17 @@ function assistantBinding(config){
  return {id,version:v};
 }
 
+function selectedBotConfig(data,botId,v){
+ if((data?.id||data?.bot_id)!==botId||data.version!=null&&data.version!==v)return null;
+ // The Exotel Bot GET advertises latest_version even when its untagged root
+ // describes the stable Assistant. A separate latest label is not selection.
+ if(object(data.versions?.[v]))return data.versions[v];
+ if(data.version===v||data.stable_version===v&&data.latest_version===v)return data;
+ return null;
+}
+
 function botVersionConfig(data,botId,v){
- if((data?.id||data?.bot_id)!==botId)return null;
- const config=exactConfig(data,v),binding=assistantBinding(config);
+ const config=selectedBotConfig(data,botId,v),binding=assistantBinding(config);
  if(!binding)return null;
  if(config!==data&&data.version===v&&data.assistant_config){
   const root=assistantBinding(data);
@@ -261,7 +270,7 @@ async function inspectRepairVoicebot(read,runtime){
  const report={stableVersion:null,latestVersion:null,trafficStatus:null,stableTrafficPercent:null,
   latestTrafficPercent:null,stableTrafficPreserved:null,unchangedAndPaused:null,
   pausedCandidatePresent:null,pausedCandidateReferencesGuard:null,stableTemplateMatches:null,
-  latestUsesRecordedGuard:null,latestAssistantVersion:null,
+  latestUsesRecordedGuard:null,latestAssistantVersion:null,versionResponses:null,
   versionReadErrors:{stable:null,latest:null},comparedConfigFields:[],changedConfigFields:[]};
  if(!bot)return {report:{...report,readError:base.error}};
  if((bot.id||bot.bot_id)!==runtime.bot_id)return {report:{...report,readError:'provider_bot_identity_mismatch'}};
@@ -279,6 +288,13 @@ async function inspectRepairVoicebot(read,runtime){
  const [source,candidate]=await Promise.all([stableRead,latest===stable?stableRead:read(path+'?version='+latest)]);
  const sourceConfig=botVersionConfig(source.data,runtime.bot_id,stable);
  const candidateConfig=botVersionConfig(candidate.data,runtime.bot_id,latest);
+ const versionResponse=(data,v)=>{
+  if((data?.id||data?.bot_id)!==runtime.bot_id)return null;
+  return {selectedVersion:version(data.version)?data.version:null,
+   hasRequestedVersionMap:object(data.versions?.[v]),
+   rootAssistantVersion:assistantBinding(data)?.version??null};
+ };
+ report.versionResponses={stable:versionResponse(source.data,stable),latest:versionResponse(candidate.data,latest)};
  report.versionReadErrors={
   stable:source.error??(!sourceConfig?'provider_bot_version_unverified':null),
   latest:candidate.error??(!candidateConfig?'provider_bot_version_unverified':null)};
@@ -409,8 +425,10 @@ export async function inspectUnknownGuardRepair(env,runtime,{fetcher=fetch}={}){
  const confirmedZero=guard.stable?.agentCount==='zero'&&
   [guard.evidence?.stableAliasRootCount,guard.evidence?.stableAliasVersionMapCount].includes('zero');
  let outcome='guard_not_verified_stop';
- if(bot.readError||bot.stableTrafficPreserved!==true||bot.stableTemplateMatches!==true)
+ if(bot.readError||bot.stableTrafficPreserved!==true||bot.stableTemplateMatches===false)
   outcome='shared_voicebot_changed_stop';
+ else if(bot.versionReadErrors.stable||bot.versionReadErrors.latest)
+  outcome='shared_voicebot_version_read_unverified_stop';
  else if(guard.readError||guard.stable?.readError||guard.latest?.readError||guard.evidence?.stableAliasReadError)
   outcome='provider_read_failed_stop';
  else if(guard.stableVersion!==guard.latestVersion)outcome='guard_latest_differs_from_stable_stop';
