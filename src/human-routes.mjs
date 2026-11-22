@@ -1,3 +1,4 @@
+import {handleScriptedPhoneAdmin} from './scripted-phone-pilot.mjs';
 import {handleCallingRequest} from './calling-routes.mjs';
 import {handleVoiceGatewayRequest} from './voice-gateway-routes.mjs';
 import {handleClientAccountRequest} from './client-account-routes.mjs';
@@ -225,7 +226,7 @@ async function addAgent(req,env,user){
 }
 export async function handleHumanRequest(req,env){
   const u=new URL(req.url),path=u.pathname,method=req.method;
-  if(path==='/app'&&method==='GET')return new Response(html,{headers:{...headers,'Content-Type':'text/html;charset=utf-8','Content-Security-Policy':"default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'"}});
+  if(path==='/app'&&method==='GET')return new Response(html,{headers:{...headers,'Permissions-Policy':'camera=(),microphone=(self)','Content-Type':'text/html;charset=utf-8','Content-Security-Policy':"default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; media-src 'self' blob:; form-action 'self'; base-uri 'none'; frame-ancestors 'none'"}});
   if(path==='/app/simulator'&&method==='GET')return new Response(simulatorHtml,{headers:{...headers,'Permissions-Policy':'camera=(),microphone=(self)','Content-Type':'text/html;charset=utf-8','Content-Security-Policy':"default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'"}});
   if(path==='/app/assets/simulator.js'&&method==='GET')return new Response(simulatorJs,{headers:{...headers,'Content-Type':'text/javascript;charset=utf-8'}});
   if(path==='/app/assets/simulator.css'&&method==='GET')return new Response(simulatorCss,{headers:{...headers,'Content-Type':'text/css;charset=utf-8'}});
@@ -253,6 +254,8 @@ export async function handleHumanRequest(req,env){
     if(!user)return fail('sign in required',401);
     if(path==='/v1/human/mfa'||path==='/v1/human/mfa/setup'||path==='/v1/human/mfa/enable'||path==='/v1/human/mfa/recovery/regenerate')
       return await handleMfaSettings(req,env,user,method==='POST'?await payload(req):null);
+    const scriptedPhone=await handleScriptedPhoneAdmin(req,env,user);
+    if(scriptedPhone)return scriptedPhone;
     const accounts=await handleClientAccountRequest(req,env,user);
     if(accounts)return accounts;
     const gateway=await handleVoiceGatewayRequest(req,env,user);
@@ -291,7 +294,7 @@ export async function handleHumanRequest(req,env){
     if(auditResponse)return auditResponse;
     const dataResponse=await handleDataPortabilityRequest(req,env,user);
     if(dataResponse)return dataResponse;
-    const voicePreviewResponse=await handleFixedVoicePreviewRequest(req);
+    const voicePreviewResponse=await handleFixedVoicePreviewRequest(req,env,user);
     if(voicePreviewResponse)return voicePreviewResponse;
     const voicebotReviewResponse=await handleVoicebotReviewRequest(req,env,user);
     if(voicebotReviewResponse)return voicebotReviewResponse;

@@ -128,6 +128,7 @@ function cloudflareMock({ controlTables=[],crmTables=[],controlName='ar3d-callin
         else if(sql.includes('company_profile_versions')) rows=REQUIRED_COLUMNS.CONTROL_DB.company_profile_versions.map(name=>({name}));
         else if(sql.includes('client_account_contacts')) rows=REQUIRED_COLUMNS.CONTROL_DB.client_account_contacts.map(name=>({name}));
         else if(sql.includes('company_change_requests')) rows=REQUIRED_COLUMNS.CONTROL_DB.company_change_requests.map(name=>({name}));
+        else if(sql.includes('scripted_phone_pilots')) rows=REQUIRED_COLUMNS.CONTROL_DB.scripted_phone_pilots.map(name=>({name}));
         else if(sql.includes('shared_voice_gateway')) rows=REQUIRED_COLUMNS.CONTROL_DB.shared_voice_gateway.map(name=>({name}));
         else if(sql.includes('voice_call_routes')) rows=REQUIRED_COLUMNS.CONTROL_DB.voice_call_routes.map(name=>({name}));
         else if(sql.includes('calling_agent_')) {const t=sql.match(/PRAGMA table_info\(([^)]+)\)/)[1];rows=REQUIRED_COLUMNS.CONTROL_DB[t].map(name=>({name}));}

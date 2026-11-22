@@ -1,3 +1,4 @@
+import {handleScriptedPhoneCallback} from './scripted-phone-pilot.mjs';
 import {handleHumanRequest} from './human-routes.mjs';
 import {handleVoiceGatewaySession} from './voice-gateway-session.mjs';
 import {handleExotelVoicebotWebhookRequest} from './exotel-voicebot-inbound.mjs';
@@ -168,6 +169,8 @@ export default {
   async fetch(req,env){
     const path=new URL(req.url).pathname;
     if(path==='/health'&&isGet(req))return json({service:'AR3D AI Calling',status:'foundation'});
+    const scriptedPhone=await handleScriptedPhoneCallback(req,env);
+    if(scriptedPhone)return scriptedPhone;
     const gatewaySession=await handleVoiceGatewaySession(req,env);
     if(gatewaySession)return gatewaySession;
     const voicebotWebhook=await handleExotelVoicebotWebhookRequest(req,env);

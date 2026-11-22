@@ -122,8 +122,41 @@ function inviteView(token){
   div('stack',form,btn('Sign in with email and password',()=>openSignIn(email.value),true)))));
 }
 async function logout(){try{await api('/v1/human/logout','POST',{})}finally{state.me=null;openSignIn()}}
+function scriptedPhonePilotPanel(){
+  const card=div('card',title('AR3D Fixed-question Phone Pilot','h3'));
+  const language=node('select',{class:'field'},[
+    node('option',{value:'hi',text:'Hindi'}),
+    node('option',{value:'en',text:'English'})
+  ]);
+  const status=node('p',{class:'note',text:'Checking pilot configuration…'});
+  const results=div('stack');
+  let config;
+  const call=btn('Call the verified internal number once',async()=>{
+    if(!config?.configured||!window.confirm('Place one internal pilot call to the verified number ending '+config.destinationLast4+'? This uses phone credits and records short answers only after the recipient presses 1.'))return;
+    call.disabled=true;
+    try{
+      await api('/v1/human/scripted-phone-pilot','POST',{language:language.value,confirm:'CALL_ONE_VERIFIED_INTERNAL_NUMBER'});
+      notice('Pilot submitted. Refresh status after the call.');
+      await refresh();
+    }catch(err){asError(err);await refresh().catch(asError)}
+  });
+  call.disabled=true;
+  async function refresh(){
+    config=await api('/v1/human/scripted-phone-pilot');
+    status.textContent=config.configured?'One internal verified number ending '+config.destinationLast4+
+      '. Complete answers update its configured test lead.':'Phone pilot is disabled or unconfigured.';
+    call.disabled=!config.configured;
+    results.replaceChildren(...(config.recent?.length?[table(['Started','Language','Status'],
+      config.recent.map(x=>[x.created_at,x.language,x.phase]))]:[]));
+  }
+  card.append(status,div('formrow',lab('Recorded prompt language',language),call,
+    btn('Refresh fixed-question pilot status',()=>refresh().catch(asError),true)),results);
+  refresh().catch(()=>{status.textContent='Pilot status requires a current MFA Super Admin session.'});
+  return card;
+}
 function engineeringPanel(main){
   const card=div('card',title('Production Readiness & Safe AI Calling Pilot'));
+  main.append(scriptedPhonePilotPanel());
   const status=div('stack',node('p',{class:'muted',text:'Engineering pilot. Exotel account may be connected; customer campaign dialing and payments remain blocked.'}));
   const summary=div('stack');
   const launch=btn('Run 100 Synthetic Calls (no dialing)',async()=>{
@@ -2098,7 +2131,7 @@ function fixedSurveyPanel(tenantId,lead,onSave){
         div('formrow',lab('Fill from microphone',micField),dictate));
       form.append(speechArea);
       const voiceDemo=div('card',title('Question-by-question Voice Preview (no calls)','h3'),
-        node('p',{class:'note',text:'7 fixed turns only. Browser voice is optional and may use a browser speech service. All answers require review. No customer dial, recording or automatic consent.'}));
+        node('p',{class:'note',text:'Use fictional answers in this preview. Cloudflare transcribes each short microphone clip. Review the answers before saving them. No phone call is placed.'}));
       const questionText=node('p',{class:'banner',text:'Start to hear the first fixed question.'});
       const voiceHint=node('p',{class:'muted',text:'Review each answer. Unsupported or low-confidence speech will repeat the question.'});
       const voiceAnswer=input('demoVoiceAnswer','text','Type or dictate the answer');
@@ -2110,8 +2143,18 @@ function fixedSurveyPanel(tenantId,lead,onSave){
           displayTurn(out);
         }catch(err){asError(err)}
       },true);
+      const localPrompt=node('input',{class:'field',type:'file',accept:'audio/*'});
       const playVoice=btn('Speak current question',()=>{
-        if(!demoState||demoState.status!=='active'||!('speechSynthesis' in window)||
+        if(!demoState||demoState.status!=='active')return notice('Start the preview first',true);
+        if(localPrompt.files[0]){
+          const url=URL.createObjectURL(localPrompt.files[0]),audio=new Audio(url);
+          const release=()=>URL.revokeObjectURL(url);
+          audio.addEventListener('ended',release,{once:true});
+          audio.addEventListener('error',release,{once:true});
+          audio.play().catch(()=>{release();notice('Could not play the selected recording.',true)});
+          return;
+        }
+        if(!('speechSynthesis' in window)||
            !('SpeechSynthesisUtterance' in window))
           return notice('Browser question audio is unavailable',true);
         window.speechSynthesis.cancel();
@@ -2119,23 +2162,48 @@ function fixedSurveyPanel(tenantId,lead,onSave){
         utterance.lang=language.value==='en'?'en-IN':'hi-IN';
         window.speechSynthesis.speak(utterance);
       },true);
-      const voiceDictate=btn('Answer with browser microphone',()=>{
-        if(!demoState||demoState.status!=='active')
-          return notice('Start the preview first',true);
-        const R=window.SpeechRecognition||window.webkitSpeechRecognition;
-        if(!R)return notice('Browser speech recognition unavailable. Type your answer.',true);
-        const rec=new R();rec.lang=language.value==='en'?'en-IN':'hi-IN';
-        rec.interimResults=false;rec.maxAlternatives=1;
+      let answerRecorder=null;
+      const voiceDictate=btn('Record answer for Cloudflare',async()=>{
+        if(answerRecorder?.state==='recording'){answerRecorder.stop();return}
+        if(!demoState||demoState.status!=='active')return notice('Start the preview first',true);
+        if(!navigator.mediaDevices?.getUserMedia||!window.MediaRecorder)
+          return notice('Audio recording unavailable. Type the answer.',true);
+        const turn=demoState;
+        const label=voiceDictate.querySelector('span');
         voiceDictate.disabled=true;
-        rec.onend=()=>{voiceDictate.disabled=false};
-        rec.onerror=()=>{voiceDictate.disabled=false;
-          notice('Microphone recognition failed. Type the answer instead.',true)};
-        rec.onresult=e=>{
-          const heard=String(e.results?.[0]?.[0]?.transcript||'').trim();
-          voiceAnswer.value=heard.slice(0,220);
-          voiceHint.textContent='Recognized text is unverified. Check spelling and meaning before Next.';
-        };
-        rec.start();
+        let stream;
+        try{
+          stream=await navigator.mediaDevices.getUserMedia({audio:true});
+          if(demoState!==turn||!voiceDictate.isConnected){stream.getTracks().forEach(t=>t.stop());return}
+          const recorder=new MediaRecorder(stream),chunks=[];
+          answerRecorder=recorder;
+          recorder.addEventListener('dataavailable',event=>{if(event.data.size)chunks.push(event.data)});
+          const limit=setTimeout(()=>{if(recorder.state==='recording')recorder.stop()},12000);
+          recorder.addEventListener('stop',async()=>{
+            clearTimeout(limit);stream.getTracks().forEach(t=>t.stop());
+            answerRecorder=null;
+            voiceDictate.disabled=true;label.textContent='Transcribing…';
+            try{
+              if(demoState!==turn||!voiceDictate.isConnected||!chunks.length)return;
+              const type=recorder.mimeType||chunks[0].type;
+              const params=new URLSearchParams({tenantId,language:turn.language});
+              const response=await fetch('/v1/human/voice-preview/transcribe?'+params,{
+                method:'POST',headers:{'Content-Type':type},body:new Blob(chunks,{type}),cache:'no-store'
+              });
+              const result=await response.json();
+              if(!response.ok)throw Error(result.error||'Transcription failed');
+              if(demoState!==turn||!voiceDictate.isConnected)return;
+              if(result.text)voiceAnswer.value=result.text;
+              voiceHint.textContent=result.text?'Review the transcription, then click Next.':'No clear speech detected. Record again or type the answer.';
+            }catch(err){asError(err)}
+            finally{label.textContent='Record answer for Cloudflare';voiceDictate.disabled=false}
+          },{once:true});
+          recorder.start();
+          label.textContent='Stop recording';voiceDictate.disabled=false;
+        }catch{
+          stream?.getTracks().forEach(t=>t.stop());answerRecorder=null;
+          voiceDictate.disabled=false;notice('Microphone unavailable. Type the answer instead.',true);
+        }
       },true);
       const nextVoice=btn('Next fixed question',async()=>{
         if(!demoState||demoState.status!=='active')return;
@@ -2154,7 +2222,7 @@ function fixedSurveyPanel(tenantId,lead,onSave){
         const current=result.state;
         if(current.status==='active'){
           questionText.textContent='Question '+(current.index+1)+' of 7 — '+result.prompt;
-          voiceAnswer.value='';
+          localPrompt.value='';voiceAnswer.value='';
           voiceHint.textContent=result.warning||'Answer this question, then click Next.';
           nextVoice.disabled=false;
         }else if(current.status==='completed'){
@@ -2178,7 +2246,7 @@ function fixedSurveyPanel(tenantId,lead,onSave){
       }
       nextVoice.disabled=true;
       voiceDemo.append(questionText,voiceHint,
-        div('formrow',voiceStart,playVoice),
+        div('formrow',voiceStart,lab('Optional recording for this question',localPrompt),playVoice),
         div('formrow',lab('Customer answer for preview',voiceAnswer),voiceDictate,nextVoice));
       form.append(voiceDemo);
 
