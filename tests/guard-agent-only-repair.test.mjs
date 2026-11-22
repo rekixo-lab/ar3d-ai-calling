@@ -14,7 +14,7 @@ function seed(f){
  f.c.db.prepare("INSERT INTO shared_voice_gateway(id,bot_id,flow_id,template_assistant_id,template_version,guard_assistant_id,gateway_version,state,error_code,updated_by,updated_at) VALUES(1,?,?,?,?,?,NULL,'unknown','guard_repair_unknown','admin',?)")
  .run(bot,'1393135',template,'v1',guard,at);
 }
-function provider({dropSavedAgent=false,changedBot=false,sourceUnsafe=false,sourceNoModel=false}={}){
+function provider({dropSavedAgent=false,changedBot=false,sourceUnsafe=false,sourceNoModel=false,botWriteTimeout=false}={}){
  let guardStable='v3',botLatest=changedBot?'v3':'v2',writtenAgent=null,writes=[],reads=[];
  const fetcher=async(url,init)=>{
   const p=new URL(url),path=p.pathname,v=p.searchParams.get('version');
@@ -40,7 +40,9 @@ function provider({dropSavedAgent=false,changedBot=false,sourceUnsafe=false,sour
     assert.equal(data.source_version,'v2');
     assert.equal(data.data.assistant_config.id,guard);
     assert.equal(data.data.assistant_config.version,'v4');
-    botLatest='v3';return Response.json({response:{version:'v3'}});
+    botLatest='v3';
+    if(botWriteTimeout)throw Error('simulated timeout after Bot persisted');
+    return Response.json({response:{version:'v3'}});
    }
    throw Error('unexpected write');
   }
@@ -139,4 +141,39 @@ test('changed Shared Voicebot or unsafe source aborts all provider writes',async
    assert.equal(f.c.db.prepare('SELECT error_code FROM shared_voice_gateway WHERE id=1').get().error_code,'guard_repair_unknown');
   }finally{f.close()}
  }
+});
+
+test('concurrent agent-only repair submits one sequence; persisted Bot timeout stays locked',async()=>{
+ const f=fixture();try{
+  seed(f);const p=provider({botWriteTimeout:true});
+  const fix=()=>handleVoiceGatewayRequest(action('agent-only-fix','CREATE_ONE_AGENT_ONLY_GUARD_VERSION_PAUSED_NO_CALLS'),
+   f.env,admin,{now,fetcher:p.fetcher});
+  const results=await Promise.all([fix(),fix()]);
+  assert.ok(results.every(r=>r.status===503));
+  assert.equal(p.writes.length,2);
+  assert.equal(f.c.db.prepare('SELECT error_code FROM shared_voice_gateway').get().error_code,'bot_agent_fix_unknown');
+  const d=await (await handleVoiceGatewayRequest(action('repair-review'),f.env,admin,{now,fetcher:p.fetcher})).json();
+  assert.equal(d.outcome,'paused_candidate_verified_but_gateway_locked_stop');
+  assert.equal(d.guard.stable.agentCount,'one');
+  assert.equal(d.sharedVoicebot.latestTrafficPercent,0);
+  assert.equal(p.writes.length,2);
+ }finally{f.close()}
+});
+
+test('Bot and Guard persist before a failed database finalization; review reuses evidence and preserves lock',async()=>{
+ const f=fixture();try{
+  seed(f);const p=provider();
+  f.c.db.exec("CREATE TRIGGER reject_gateway_finalize BEFORE UPDATE OF state ON shared_voice_gateway WHEN NEW.state='staged' BEGIN SELECT RAISE(IGNORE); END;");
+  const fix=()=>handleVoiceGatewayRequest(action('agent-only-fix','CREATE_ONE_AGENT_ONLY_GUARD_VERSION_PAUSED_NO_CALLS'),
+   f.env,admin,{now,fetcher:p.fetcher});
+  assert.equal((await fix()).status,503);
+  assert.deepEqual({...f.c.db.prepare('SELECT state,error_code,gateway_version FROM shared_voice_gateway').get()},
+   {state:'unknown',error_code:'bot_agent_fix_unknown',gateway_version:null});
+  const d=await (await handleVoiceGatewayRequest(action('repair-review'),f.env,admin,{now,fetcher:p.fetcher})).json();
+  assert.equal(d.outcome,'paused_candidate_verified_but_gateway_locked_stop');
+  assert.equal(d.writeOperationsAllowed,false);
+  assert.equal((await fix()).status,503);
+  assert.equal(p.writes.length,2);
+  assert.equal(f.c.db.prepare('SELECT COUNT(*) AS n FROM voice_call_routes').get().n,0);
+ }finally{f.close()}
 });
