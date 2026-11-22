@@ -7,9 +7,9 @@ AR3D runs the property questionnaire, validates answers and saves them to the te
 ## Workflow
 
 1. A Super Admin creates a client and sends its private invitation. The client sets a password and can return at any time via the dashboard.
-2. The client previews and imports an Excel or CSV file with **Name** and **Mobile**, then creates a calling campaign. Importing data or creating a campaign does not call anyone.
+2. The client previews and imports an Excel or CSV file with **Name** and **Mobile**, then uses **Import & prepare campaign** to select only the customers in that file. Importing data or creating a campaign does not call anyone.
 3. A Super Admin runs an approved internal number through the seven-question test and verifies the CRM result. Customer campaigns require separate activation and tenant approval.
-4. An authorized client can start or pause approved campaigns. The application runs the queue in the background and displays call status. Customers can opt out by pressing 2 or stating a supported stop request. Valid, complete answers update the CRM.
+4. An authorized client can start or pause approved campaigns. The application runs the queue in the background. **Results / CRM** shows call status and captured answers per customer. Customers can opt out by pressing 2 or stating a supported stop request. Valid, complete answers update the CRM.
 
 See [phone setup and pilot verification](docs/scripted-phone-pilot.md), [campaign operations](docs/CUSTOMER-CALLING.md), and [production deployment](docs/MAIN-DEPLOYMENT.md).
 

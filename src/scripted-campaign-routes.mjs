@@ -31,8 +31,8 @@ export async function handleScriptedCallingRequest(req,env,user,{now=Date.now()}
  const action=path.slice(BASE.length+1);
  if(!['GET','POST'].includes(req.method))return fail('method_not_allowed',405);
  if(req.method==='POST'&&!mutationOriginAllowed(req))return fail('same_origin_required',403);
- const admin=['policy','clearances'].includes(action);
- if(!['policy','clearances','runs','state'].includes(action))return fail('not_found',404);
+ const admin=['policy','clearances','reconcile'].includes(action);
+ if(!['policy','clearances','runs','state','results','reconcile'].includes(action))return fail('not_found',404);
  try{
   const d=req.method==='POST'?await body(req):Object.fromEntries(url.searchParams);
   if(!UUID.test(d.tenantId||''))return fail('invalid_tenant');
@@ -67,17 +67,85 @@ export async function handleScriptedCallingRequest(req,env,user,{now=Date.now()}
   }
   if(action==='clearances'&&req.method==='GET'){
    const rows=await db.prepare('SELECT v.lead_id AS leadId,l.name,v.purpose,v.expires_at AS expiresAt,v.consent_reference AS consentReference,v.dnd_reference AS dndReference FROM calling_clearances v JOIN leads l ON l.tenant_id=v.tenant_id AND l.id=v.lead_id WHERE v.tenant_id=? ORDER BY v.reviewed_at DESC LIMIT 200').bind(tid).all();
-   const leads=await db.prepare('SELECT id,name,consent_status AS consentStatus,dnd_status AS dndStatus FROM leads WHERE tenant_id=? ORDER BY created_at DESC,id DESC LIMIT 200').bind(tid).all();
-   return json({clearances:rows.results,leads:leads.results});
+   if(d.campaignId!==undefined&&!UUID.test(d.campaignId))return fail('invalid_campaign');
+   const campaign=d.campaignId??null,offset=Number(d.offset??0);
+   if(!Number.isSafeInteger(offset)||offset<0||offset>100000)return fail('invalid_pagination');
+   const leads=await db.prepare(`SELECT l.id,l.name,l.consent_status AS consentStatus,l.dnd_status AS dndStatus
+    FROM leads l WHERE l.tenant_id=? AND (? IS NULL OR EXISTS(
+     SELECT 1 FROM call_campaign_candidates c WHERE c.tenant_id=l.tenant_id AND c.lead_id=l.id AND c.campaign_id=?
+    )) ORDER BY l.created_at DESC,l.id DESC LIMIT 201 OFFSET ?`).bind(tid,campaign,campaign,offset).all();
+   const drafts=await db.prepare('SELECT id,name FROM call_campaign_drafts WHERE tenant_id=? ORDER BY created_at DESC,id DESC LIMIT 100').bind(tid).all();
+   return json({campaigns:drafts.results,clearances:rows.results,leads:leads.results.slice(0,200),hasMore:leads.results.length>200});
   }
   if(action==='clearances'){
    if(Object.keys(d).some(k=>!['tenantId','leadIds','purpose','consentReference','dndReference','expiresAt'].includes(k))||
     !Array.isArray(d.leadIds)||d.leadIds.length<1||d.leadIds.length>200||d.leadIds.some(x=>!UUID.test(x))||new Set(d.leadIds).size!==d.leadIds.length||
     !['property_information','site_visit'].includes(d.purpose)||!reference(d.consentReference)||!reference(d.dndReference)||!expiry(d.expiresAt,now))return fail('invalid_clearance');
-   const results=await db.batch(d.leadIds.map(id=>db.prepare("INSERT INTO calling_clearances(tenant_id,lead_id,purpose,consent_reference,dnd_reference,expires_at,reviewed_by,reviewed_at) SELECT tenant_id,id,?,?,?,?,?,? FROM leads WHERE tenant_id=? AND id=? AND consent_status!='denied' AND dnd_status!='blocked' AND NOT EXISTS(SELECT 1 FROM lead_opt_out_events o WHERE o.tenant_id=leads.tenant_id AND o.lead_id=leads.id) ON CONFLICT(tenant_id,lead_id,purpose) DO UPDATE SET consent_reference=excluded.consent_reference,dnd_reference=excluded.dnd_reference,expires_at=excluded.expires_at,reviewed_by=excluded.reviewed_by,reviewed_at=excluded.reviewed_at")
-    .bind(d.purpose,d.consentReference,d.dndReference,d.expiresAt,user.id,at,tid,id)));
-   await audit(db,tid,user,'calling.clearances_reviewed',tid,at);
-   return json({reviewed:results.reduce((n,r)=>n+Number(r.meta?.changes||0),0)});
+   const reviewed=await db.batch([
+    db.prepare(`INSERT INTO calling_clearances(tenant_id,lead_id,purpose,consent_reference,dnd_reference,expires_at,reviewed_by,reviewed_at)
+     SELECT tenant_id,id,?,?,?,?,?,? FROM leads WHERE tenant_id=? AND id IN (SELECT value FROM json_each(?))
+     AND consent_status!='denied' AND dnd_status!='blocked' AND NOT EXISTS(
+       SELECT 1 FROM lead_opt_out_events o WHERE o.tenant_id=leads.tenant_id AND o.lead_id=leads.id)
+     ON CONFLICT(tenant_id,lead_id,purpose) DO UPDATE SET consent_reference=excluded.consent_reference,dnd_reference=excluded.dnd_reference,
+      expires_at=excluded.expires_at,reviewed_by=excluded.reviewed_by,reviewed_at=excluded.reviewed_at`)
+     .bind(d.purpose,d.consentReference,d.dndReference,d.expiresAt,user.id,at,tid,JSON.stringify(d.leadIds)),
+    db.prepare(`INSERT INTO crm_audit_events(tenant_id,id,actor,action,target_id,created_at)
+     VALUES(?,?,'human:'||?,'calling.clearances_reviewed',?,?)`).bind(tid,crypto.randomUUID(),user.id,tid,at)
+   ]);
+   return json({reviewed:Number(reviewed[0].meta?.changes||0)});
+  }
+  if(action==='reconcile'){
+   const cutoff=new Date(now-30*60000).toISOString();
+   if(req.method==='GET'){
+    const locked=await db.prepare(`SELECT j.id,l.name AS customer,c.name AS campaign,j.reserved_at AS reservedAt,
+     r.state AS runState,j.reserved_at<=? AS canClose
+     FROM calling_jobs j JOIN calling_runs r ON r.tenant_id=j.tenant_id AND r.id=j.run_id
+     JOIN call_campaign_drafts c ON c.tenant_id=r.tenant_id AND c.id=r.campaign_id
+     JOIN leads l ON l.tenant_id=j.tenant_id AND l.id=j.lead_id
+     WHERE j.tenant_id=? AND j.flow_id=? AND j.state='unknown' LIMIT 1`).bind(cutoff,tid,SCRIPTED_CALLING_POLICY).first();
+    return json({locked});
+   }
+   if(Object.keys(d).some(key=>!['tenantId','jobId','evidenceReference'].includes(key))||
+      !/^[a-f0-9]{32}$/.test(d.jobId||'')||!reference(d.evidenceReference))return fail('invalid_carrier_review');
+   // Only a paused run may be unlocked, and only after the provider has had time to finish.
+   // The original attempt is closed, preserving its reservation for future consent checks.
+   const result=await db.batch([
+    db.prepare(`UPDATE calling_jobs SET state=CASE WHEN EXISTS(SELECT 1 FROM scripted_call_results a
+      WHERE a.tenant_id=calling_jobs.tenant_id AND a.job_id=calling_jobs.id AND a.saved_to_lead=1) THEN 'completed' ELSE 'failed' END,
+      error_code='closed_after_carrier_review',provider_status='operator_reviewed',updated_at=?
+      WHERE tenant_id=? AND id=? AND flow_id=? AND state='unknown' AND reserved_at<=? AND EXISTS(
+       SELECT 1 FROM calling_runs r WHERE r.tenant_id=calling_jobs.tenant_id AND r.id=calling_jobs.run_id AND r.state='paused')`)
+     .bind(at,tid,d.jobId,SCRIPTED_CALLING_POLICY,cutoff),
+    db.prepare(`INSERT INTO crm_audit_events(tenant_id,id,actor,action,target_id,created_at)
+      SELECT tenant_id,?,'human:'||?,'calling.carrier_reviewed',id||':'||?,? FROM calling_jobs
+      WHERE tenant_id=? AND id=? AND changes()=1`).bind(crypto.randomUUID(),user.id,d.evidenceReference.trim(),at,tid,d.jobId)
+   ]);
+   return result[0].meta.changes===1?json({closed:true}):fail('pause_campaign_and_verify_carrier_status_before_closing',409);
+  }
+  if(action==='results'){
+   if(req.method!=='GET')return fail('method_not_allowed',405);
+   const offset=Number(d.offset??0),limit=50;
+   if(!Number.isSafeInteger(offset)||offset<0||offset>100000||
+      (d.campaignId!==undefined&&!UUID.test(d.campaignId)))return fail('invalid_results_filter');
+   const campaign=d.campaignId??null;
+   const scope=`FROM calling_jobs j JOIN calling_runs r ON r.tenant_id=j.tenant_id AND r.id=j.run_id
+    WHERE j.tenant_id=? AND (? IS NULL OR r.campaign_id=?)`;
+   const [rows,count]=await Promise.all([
+    db.prepare(`SELECT j.id,j.lead_id AS leadId,l.name,c.name AS campaign,j.state,j.provider_status AS outcome,
+     j.duration_seconds AS durationSeconds,j.error_code AS errorCode,j.updated_at AS updatedAt,
+     a.answers_json AS answersJson,a.saved_to_lead AS savedToLead,a.captured_at AS capturedAt
+     FROM calling_jobs j JOIN calling_runs r ON r.tenant_id=j.tenant_id AND r.id=j.run_id
+     JOIN call_campaign_drafts c ON c.tenant_id=r.tenant_id AND c.id=r.campaign_id
+     JOIN leads l ON l.tenant_id=j.tenant_id AND l.id=j.lead_id
+     LEFT JOIN scripted_call_results a ON a.tenant_id=j.tenant_id AND a.job_id=j.id
+     WHERE j.tenant_id=? AND (? IS NULL OR r.campaign_id=?)
+     ORDER BY j.created_at DESC,j.id DESC LIMIT ? OFFSET ?`).bind(tid,campaign,campaign,limit,offset).all(),
+    db.prepare('SELECT COUNT(*) AS total '+scope).bind(tid,campaign,campaign).first()
+   ]);
+   const results=rows.results.map(({answersJson,savedToLead,...row})=>({
+    ...row,answers:answersJson?JSON.parse(answersJson):null,savedToLead:savedToLead===1
+   }));
+   return json({results,total:count.total,limit,offset});
   }
   if(action==='state'){
    if(req.method!=='GET')return fail('method_not_allowed',405);

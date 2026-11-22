@@ -1,7 +1,7 @@
 // Human-session CRM endpoints. Every query derives tenant scope from membership,
 // not from the URL alone. Calling is deliberately not implemented here.
 import {requireMembership} from './human-auth.mjs';
-import {resolveCrmDb,parseJsonBody} from './core.mjs';
+import {resolveCrmDb,parseJsonBody,sha256hex} from './core.mjs';
 import {MAX_CSV_BYTES,parseLeadCsv} from './csv-import.mjs';
 import {MAX_XLSX_BYTES,parseLeadXlsxBase64} from './xlsx-import.mjs';
 
@@ -75,33 +75,60 @@ export async function handleCrmRequest(req,env,user){
       if(isXlsx&&typeof d.xlsxBase64!=='string')return fail('XLSX file data required');
       if(!isXlsx&&typeof d.csv!=='string')return fail('CSV text required');
       const rows=isXlsx?await parseLeadXlsxBase64(d.xlsxBase64):parseLeadCsv(d.csv),{db,tid}=access;
+      const campaign=d.campaign;
+      if(campaign!==undefined&&(!campaign||typeof campaign!=='object'||Array.isArray(campaign)||
+         Object.keys(campaign).some(key=>!['name','language','requestId'].includes(key))||
+         typeof campaign.name!=='string'||!campaign.name.trim()||campaign.name.trim().length>80||
+         /[\u0000-\u001f]/.test(campaign.name)||!['hi','en'].includes(campaign.language)||
+         !/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i.test(campaign.requestId||'')||
+         path.endsWith('/preview')))return fail('invalid import campaign');
+      const mobiles=JSON.stringify(rows.map(row=>row.mobile));
       if(path.endsWith('/preview')){
-        // Each import has <=200 unique mobiles. Only query the authenticated
-        // tenant: never return existing lead details or modify calling flags.
-        const placeholders=rows.map(()=>'?').join(',');
-        const found=await db.prepare('SELECT mobile_e164 AS mobile FROM leads WHERE tenant_id=? AND mobile_e164 IN ('+placeholders+')')
-          .bind(tid,...rows.map(row=>row.mobile)).all();
+        const found=await db.prepare(`SELECT mobile_e164 AS mobile FROM leads
+          WHERE tenant_id=? AND mobile_e164 IN (SELECT value FROM json_each(?))`).bind(tid,mobiles).all();
         const existing=new Set(found.results.map(row=>row.mobile));
         return json({valid:true,rows:rows.length,existingCount:existing.size,
           wouldInsert:rows.length-existing.size,preview:rows.slice(0,10).map(row=>({
             ...row,alreadyInCrm:existing.has(row.mobile)
           })),notice:'Preview is advisory; concurrent CRM imports can change actual inserted count. Consent/DND remains unknown.'});
       }
-      const stamp=now(),statements=rows.map(row=>db.prepare(`INSERT INTO leads
+      const stamp=now(),leadRows=rows.map(row=>({...row,id:crypto.randomUUID(),
+        requirementsJson:JSON.stringify(row.requirement?{raw:row.requirement}:{})}));
+      const statements=[db.prepare(`INSERT INTO leads
         (tenant_id,id,name,mobile_e164,source_type,consent_status,dnd_status,
          preferred_location,budget_min_inr,budget_max_inr,requirements_json,created_at,updated_at,
          customer_segment,plot_size_preference,visit_date_preference)
-        VALUES(?,?,?,?,'excel','unknown','unknown',?,?,?,?,?,?,?,?,?)
-        ON CONFLICT(tenant_id,mobile_e164) DO NOTHING`).bind(
-          tid,crypto.randomUUID(),row.name,row.mobile,row.location,row.budgetMinInr,
-          row.budgetMaxInr,JSON.stringify(row.requirement?{raw:row.requirement}:{}),stamp,stamp,
-          row.customerSegment,row.plotSizePreference,row.visitDatePreference));
+        SELECT ?,row.value->>'$.id',row.value->>'$.name',row.value->>'$.mobile','excel','unknown','unknown',
+         row.value->>'$.location',row.value->>'$.budgetMinInr',row.value->>'$.budgetMaxInr',
+         row.value->>'$.requirementsJson',?,?,row.value->>'$.customerSegment',row.value->>'$.plotSizePreference',
+         row.value->>'$.visitDatePreference'
+        FROM json_each(?) row WHERE 1
+        ON CONFLICT(tenant_id,mobile_e164) DO NOTHING`).bind(tid,stamp,stamp,JSON.stringify(leadRows))];
       // D1.batch is transactional: either the entire file succeeds or none is committed.
       statements.push(db.prepare(`INSERT INTO crm_audit_events(tenant_id,id,actor,action,target_id,created_at)
         VALUES(?,?,'human:'||?,?,?,?)`).bind(tid,crypto.randomUUID(),user.id,isXlsx?'leads.xlsx_import':'leads.csv_import',String(rows.length),stamp));
+      let campaignId;
+      if(campaign){
+        const hash=await sha256hex(JSON.stringify([tid,user.id,campaign.name.trim(),campaign.language,campaign.requestId,rows]));
+        campaignId=hash.slice(0,8)+'-'+hash.slice(8,12)+'-4'+hash.slice(13,16)+'-8'+hash.slice(17,20)+'-'+hash.slice(20,32);
+        statements.push(
+          db.prepare(`INSERT INTO call_campaign_drafts(tenant_id,id,name,language_mode,purpose,status,created_by,created_at,updated_at)
+            VALUES(?,?,?,?,'property_information','draft',?,?,?) ON CONFLICT(tenant_id,id) DO NOTHING`)
+            .bind(tid,campaignId,campaign.name.trim(),campaign.language,user.id,stamp,stamp),
+          db.prepare(`INSERT OR IGNORE INTO call_campaign_candidates(tenant_id,campaign_id,lead_id,created_at)
+            SELECT l.tenant_id,?,l.id,? FROM leads l WHERE l.tenant_id=? AND l.mobile_e164 IN (SELECT value FROM json_each(?))
+            AND l.consent_status!='denied' AND l.dnd_status!='blocked'
+            AND NOT EXISTS (SELECT 1 FROM lead_opt_out_events o WHERE o.tenant_id=l.tenant_id AND o.lead_id=l.id)
+            AND NOT EXISTS (SELECT 1 FROM calling_runs r WHERE r.tenant_id=l.tenant_id AND r.campaign_id=?)`)
+            .bind(campaignId,stamp,tid,mobiles,campaignId)
+        );
+      }
       const result=await db.batch(statements);
-      const inserted=result.slice(0,rows.length).reduce((total,r)=>total+Number(r.meta?.changes||0),0);
+      const selected=campaignId?await db.prepare('SELECT COUNT(*) AS total FROM call_campaign_candidates WHERE tenant_id=? AND campaign_id=?')
+        .bind(tid,campaignId).first():null;
+      const inserted=Number(result[0].meta?.changes||0);
       return json({processed:rows.length,inserted,skipped:rows.length-inserted,
+        ...(campaignId?{campaignId,campaignCustomers:selected.total}:{}),
         notice:'Imported records have unknown consent and DND status. No calls were placed.'},201);
     }
     if(path==='/v1/human/leads'&&method==='GET'){

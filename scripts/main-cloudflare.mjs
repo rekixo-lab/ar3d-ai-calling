@@ -19,7 +19,7 @@ export const REQUIRED_TABLES = Object.freeze({
   ]),
   CRM_DB: Object.freeze([
     'leads','agents','calls','site_visits','crm_audit_events',
-    'lead_notes','conversation_simulations','lead_opt_out_events','lead_consent_evidence','call_campaign_drafts','call_campaign_candidates','voicebot_qualification_reviews','call_intent_proposals','calling_policies','calling_clearances','calling_runs','calling_jobs','voicebot_verified_turns',
+    'lead_notes','conversation_simulations','lead_opt_out_events','lead_consent_evidence','call_campaign_drafts','call_campaign_candidates','voicebot_qualification_reviews','call_intent_proposals','calling_policies','calling_clearances','calling_runs','calling_jobs','voicebot_verified_turns','scripted_call_results',
   ]),
 });
 export const REQUIRED_COLUMNS = Object.freeze({
@@ -58,6 +58,7 @@ export const REQUIRED_COLUMNS = Object.freeze({
     calling_policies: Object.freeze(['tenant_id','enabled','flow_id','expires_at','daily_limit','max_seconds']),
     calling_clearances: Object.freeze(['tenant_id','lead_id','purpose','expires_at']),
     calling_runs: Object.freeze(['tenant_id','id','campaign_id','state']),
+    scripted_call_results: Object.freeze(['tenant_id','job_id','session_id','answers_json','saved_to_lead','captured_at']),
     calling_jobs: Object.freeze(['tenant_id','id','run_id','lead_id','state','provider_call_sid','reserved_at']),
     call_intent_proposals: Object.freeze(['tenant_id','id','campaign_id','lead_id','purpose','state','created_by','created_at']),
   }),
@@ -164,6 +165,7 @@ export function checkTables(tables, binding, mode) {
   if(mode==='preflight'&&binding==='CONTROL_DB'&&missing.length===1&&missing[0]==='company_profile_versions')return 'control_profile_upgrade';
   if(mode==='preflight'&&binding==='CONTROL_DB'&&missing.length===3&&['calling_agent_publications','shared_voice_gateway','voice_call_routes'].every(t=>missing.includes(t)))return 'control_publication_upgrade';
   const dispatchTables=['calling_policies','calling_clearances','calling_runs','calling_jobs'];
+  if(mode==='preflight'&&binding==='CRM_DB'&&missing.length===1&&missing[0]==='scripted_call_results')return 'crm_scripted_results_upgrade';
   if(mode==='preflight'&&binding==='CRM_DB'&&missing.length===1&&missing[0]==='voicebot_verified_turns')return 'crm_voice_turn_upgrade';
   if(mode==='preflight'&&binding==='CRM_DB'&&missing.length===4&&dispatchTables.every(x=>missing.includes(x)))return 'crm_dispatch_upgrade';
   if(mode==='preflight'&&binding==='CONTROL_DB'&&missing.length===2&&['calling_script_bindings','calling_script_versions'].every(t=>missing.includes(t)))return 'control_script_upgrade';
@@ -232,7 +234,7 @@ export async function inspectCloudflare({ credentials, mode, apiFetch = fetch, t
     const state = checkTables(names, binding, mode);
     modes[binding] = state;
     if (state === 'control_client_accounts_upgrade' || state === 'control_publication_upgrade' || state === 'control_profile_upgrade' || state === 'control_script_upgrade' || state === 'crm_dispatch_upgrade' || state === 'ready' || state === 'crm_additive_upgrade' ||
-        state === 'crm_call_intent_upgrade' || state === 'crm_voice_turn_upgrade' ||
+        state === 'crm_call_intent_upgrade' || state === 'crm_voice_turn_upgrade' || state === 'crm_scripted_results_upgrade' ||
         state === 'control_additive_upgrade' ||
         state === 'control_operator_test_upgrade' ||
         state === 'control_operator_status_upgrade' ||
@@ -254,6 +256,7 @@ export async function inspectCloudflare({ credentials, mode, apiFetch = fetch, t
         if(state==='crm_dispatch_upgrade'&&table.startsWith('calling_'))continue;
         if (state === 'crm_additive_upgrade' && table === 'voicebot_qualification_reviews')continue;
         if (state === 'crm_call_intent_upgrade' && table === 'call_intent_proposals')continue;
+        if (state === 'crm_scripted_results_upgrade' && table === 'scripted_call_results')continue;
         if (state === 'crm_voice_turn_upgrade' && table === 'voicebot_verified_turns')continue;
         if (state === 'control_additive_upgrade' && table === 'exotel_voicebot_event_receipts')continue;
         if (state === 'control_operator_test_upgrade' && table === 'exotel_operator_test_calls')continue;
@@ -286,6 +289,7 @@ export function verifiedSchemaState(modes) {
   if(modes?.CONTROL_DB==='ready'&&modes?.CRM_DB==='crm_dispatch_upgrade')return 'crm_dispatch_upgrade';
   if (modes?.CONTROL_DB === 'ready' && modes?.CRM_DB === 'crm_additive_upgrade')
     return 'crm_additive_upgrade';
+  if (modes?.CONTROL_DB === 'ready' && modes?.CRM_DB === 'crm_scripted_results_upgrade')return 'crm_scripted_results_upgrade';
   if (modes?.CONTROL_DB === 'ready' && modes?.CRM_DB === 'crm_voice_turn_upgrade')return 'crm_voice_turn_upgrade';
   if (modes?.CONTROL_DB === 'ready' && modes?.CRM_DB === 'crm_call_intent_upgrade')
     return 'crm_call_intent_upgrade';

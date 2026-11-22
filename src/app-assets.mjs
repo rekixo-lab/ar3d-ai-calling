@@ -476,6 +476,7 @@ async function renderClient(id,content){state.clientSetTab=null;content.replaceC
    tabButtons[name].setAttribute('aria-selected',String(name===key));
    tabButtons[name].className='btn'+(name===key?'':' secondary');
   }
+  sections[key].dispatchEvent(new Event('workspace-tab-shown'));
  }
  for(const [key,label] of Object.entries(labels)){
   const tab=node('button',{class:'btn secondary',type:'button',onclick:()=>selectTab(key),text:label});
@@ -487,7 +488,48 @@ async function renderClient(id,content){state.clientSetTab=null;content.replaceC
  selectTab(Object.hasOwn(sections,state.clientTab)?state.clientTab:'customers');
  await crmWorkflow(id,sections.customers,d.role,content);
  await customerCallingPanel(id,sections.calling,d.role);
- await clientCompanySummary(id,sections.company,d.role,d.tenant.name);const extra=node('details',{class:'card'},node('summary',{text:'Manual customer entry'}));sections.customers.append(extra);const leadCard=div('card',title('Leads','h3'),table(['Name','Mobile','Source','Consent'],d.leads.map(l=>[l.name,l.mobile,l.sourceType,l.consentStatus])));extra.append(leadCard);const name=input('name','text','Customer name'),mobile=input('mobile','tel','9876543210');const leadForm=node('form',{class:'formrow'},[lab('Name',name),lab('Mobile',mobile),node('button',{class:'btn',type:'submit',text:'Add lead'})]);leadForm.addEventListener('submit',async e=>{e.preventDefault();try{await api('/v1/human/leads','POST',{tenantId:id,name:name.value,mobile:mobile.value});notice('Lead saved without calling consent');await renderClient(id,content)}catch(err){asError(err)}});if(d.role==='client_admin')leadCard.append(leadForm);const planning=node('details',{class:'card'},node('summary',{text:'Advanced campaign planning and project links'}));sections.calling.append(planning);await planningPanels(id,planning,d.role);const reports=node('details',{class:'card'},node('summary',{text:'Exports and audit history'}));reports.id='client-reports';sections.results.append(reports);await usageAndExport(id,reports,d.role);if(d.role==='client_admin')await auditPanel(id,reports)}catch(e){content.replaceChildren();asError(e)}}
+ await clientCompanySummary(id,sections.company,d.role,d.tenant.name);const extra=node('details',{class:'card'},node('summary',{text:'Manual customer entry'}));sections.customers.append(extra);const leadCard=div('card',title('Leads','h3'),table(['Name','Mobile','Source','Consent'],d.leads.map(l=>[l.name,l.mobile,l.sourceType,l.consentStatus])));extra.append(leadCard);const name=input('name','text','Customer name'),mobile=input('mobile','tel','9876543210');const leadForm=node('form',{class:'formrow'},[lab('Name',name),lab('Mobile',mobile),node('button',{class:'btn',type:'submit',text:'Add lead'})]);leadForm.addEventListener('submit',async e=>{e.preventDefault();try{await api('/v1/human/leads','POST',{tenantId:id,name:name.value,mobile:mobile.value});notice('Lead saved without calling consent');await renderClient(id,content)}catch(err){asError(err)}});if(d.role==='client_admin')leadCard.append(leadForm);const planning=node('details',{class:'card'},node('summary',{text:'Advanced campaign planning and project links'}));sections.calling.append(planning);await planningPanels(id,planning,d.role);const reports=node('details',{class:'card'},node('summary',{text:'Exports and audit history'}));campaignResultsPanel(id,sections.results);sections.results.append(reports);await usageAndExport(id,reports,d.role);if(d.role==='client_admin')await auditPanel(id,reports)}catch(e){content.replaceChildren();asError(e)}}
+
+function campaignResultsPanel(tenantId,content){
+ const card=div('card',title('Campaign results & customer answers','h3')),output=div('stack');
+ card.id='client-reports';
+ content.append(card);
+ const campaign=node('select',{class:'field','aria-label':'Filter results by campaign'});
+ let offset=0,fetching=false,loaded=false;
+ const back=btn('Previous results',()=>{offset=Math.max(0,offset-50);refresh().catch(asError)},true);
+ const next=btn('Next results',()=>{offset+=50;refresh().catch(asError)},true);
+ const refreshBtn=btn('Refresh customer answers',()=>refresh().catch(asError),true);
+ back.disabled=true;next.disabled=true;
+ function answerBudget(amount){return amount==null?'—':new Intl.NumberFormat('en-IN',{style:'currency',currency:'INR',maximumFractionDigits:0}).format(amount)}
+ const outcomes={completed:'Answers saved',declined:'Declined or opted out',ended:'Ended before completion',needs_review:'Review needed',rejected:'Provider rejected',
+  queued:'Queued / awaiting clearance',reserved:'Preparing call',submitted:'Call sent',failed:'Call unsuccessful',unknown:'Awaiting verification',blocked:'Blocked'};
+ async function refresh(){
+  if(fetching)return;
+  fetching=true;refreshBtn.disabled=true;campaign.disabled=true;back.disabled=true;next.disabled=true;
+  try{
+   if(!loaded){
+    const {campaigns}=await api('/v1/human/campaigns?tenantId='+encodeURIComponent(tenantId));
+    campaign.replaceChildren(node('option',{value:'',text:'All campaigns'}),...campaigns.map(c=>node('option',{value:c.id,text:c.name})));
+    loaded=true;
+   }
+   const query=new URLSearchParams({tenantId,offset:String(offset)});
+   if(campaign.value)query.set('campaignId',campaign.value);
+   const {results,total}=await api('/v1/human/calling/results?'+query);
+   output.replaceChildren(
+    node('p',{class:'note',text:total?(offset+1)+'–'+(offset+results.length)+' of '+total+' customers':'Campaign call attempts will appear here.'}),
+    table(['Customer','Campaign','Outcome','Property','City','Area','Size','Budget','Interest','Visit preference','CRM'],
+     results.map(r=>[r.name,r.campaign,outcomes[r.outcome]||outcomes[r.state]||r.state,r.answers?.propertyType,
+      r.answers?.location,r.answers?.area,r.answers?.size,answerBudget(r.answers?.budgetInr),r.answers?.interest,
+      r.answers?.visitDate,r.answers?(r.savedToLead?'Saved to lead':'Answers captured · lead needs review'):'—']))
+   );
+   back.disabled=offset===0;next.disabled=offset+results.length>=total;
+  }finally{fetching=false;refreshBtn.disabled=false;campaign.disabled=false}
+ }
+ campaign.addEventListener('change',()=>{offset=0;refresh().catch(asError)});
+ card.append(div('formrow',lab('Campaign',campaign),refreshBtn),output,div('formrow',back,next));
+ content.addEventListener('workspace-tab-shown',()=>refresh().catch(asError));
+ if(!content.hidden)refresh().catch(asError);
+}
 
 async function customerCallingPanel(tenantId,content,role){
  const card=div('card',title('Customer Calling','h3'),node('p',{class:'note',text:'Excel import → campaign → Start. Calls continue in the background after closing this page. One call at a time per company; 09:00–20:00 India time. Super Admin must review company and customer permissions first.'}));
@@ -497,14 +539,16 @@ async function customerCallingPanel(tenantId,content,role){
  let start=null;
  async function refresh(){
   const [data,campaigns]=await Promise.all([api('/v1/human/calling/state?tenantId='+tenantId),api('/v1/human/campaigns?tenantId='+tenantId)]);
-  const prior=pick.value;pick.replaceChildren(...campaigns.campaigns.map(c=>node('option',{value:c.id,text:c.name})));if(prior)pick.value=prior;
+  const prior=pick.value;pick.replaceChildren(...campaigns.campaigns.map(c=>node('option',{value:c.id,text:c.name})));const imported=state.importCampaign?.tenantId===tenantId?state.importCampaign.id:null;
+  const selection=prior||imported;
+  if(selection&&campaigns.campaigns.some(c=>c.id===selection))pick.value=selection;
   if(start)start.disabled=!data.configuration.ready||!data.policy?.enabled||Date.parse(data.policy.expiresAt)<=Date.now()||!campaigns.campaigns.length;
   area.replaceChildren(node('p',{class:'note',text:!data.configuration.ready?'Calling disabled: '+data.configuration.missing.join(', '):!data.policy?.enabled?'Super Admin company approval required.':'Daily call limit: '+data.policy.dailyLimit+' | Approval expires: '+data.policy.expiresAt}),
    table(['Campaign','State'],data.runs.map(r=>[r.name,r.state])),
    table(['Customer','Call state','Provider status','Seconds','Details'],data.jobs.map(j=>[j.name,j.state,j.providerStatus,j.durationSeconds,j.errorCode])));
  }
  const refreshBtn=btn('Refresh call results',()=>refresh().catch(asError),true);
- card.append(refreshBtn);
+ card.append(div('formrow',refreshBtn,btn('View customer answers',()=>state.clientSetTab?.('results'),true)));
  if(role==='client_admin'){
   const name=input('callCampaignName','text','November follow-up');
   const language=node('select',{class:'field'},[node('option',{value:'hi',text:'Hindi'}),node('option',{value:'en',text:'English'})]);
@@ -546,27 +590,57 @@ async function callingAdminPanel(main){
  const policyForm=node('form',{class:'stack'},[lab('Provider approval reference',approval),div('formrow',lab('Approval days (1–30)',days),lab('Daily calls (1–100)',limit),lab('Maximum call seconds (180–300)',seconds)),lab('Enable company calling',enabled),node('button',{class:'btn',type:'submit',text:'Save company calling approval'})]);
  const consent=input('consent','text','Purpose-specific opt-in evidence reference'),dnd=input('dnd','text','Provider DND check reference');
  const choices=div('stack approval-list');
+ const draft=node('select',{class:'field','aria-label':'Uploaded campaign'});
+ let clearanceOffset=0;
+ const older=btn('Next customers',()=>{clearanceOffset+=200;refresh().catch(asError)},true);
+ const newer=btn('Previous customers',()=>{clearanceOffset=Math.max(0,clearanceOffset-200);refresh().catch(asError)},true);
+ older.disabled=true;newer.disabled=true;
  const purpose=node('select',{class:'field'},['property_information','site_visit'].map(x=>node('option',{value:x,text:x})));
- const clearanceForm=node('form',{class:'stack'},[title('Review customers for calling','h3'),node('p',{class:'note',text:'Select only customers covered by the consent evidence and current provider DND check. Excel upload alone does not supply these checks. Opted-out customers cannot be approved.'}),lab('Purpose',purpose),lab('Consent evidence reference',consent),lab('DND verification reference',dnd),choices,node('button',{class:'btn',type:'submit',text:'Approve selected customers'})]);
- const status=div('');
+ const clearanceForm=node('form',{class:'stack'},[title('Review customers for calling','h3'),node('p',{class:'note',text:'Select only customers covered by the consent evidence and current provider DND check. Excel upload alone does not supply these checks. Opted-out customers cannot be approved.'}),lab('Uploaded campaign',draft),lab('Purpose',purpose),lab('Consent evidence reference',consent),lab('DND verification reference',dnd),choices,div('formrow',newer,older),node('button',{class:'btn',type:'submit',text:'Approve selected customers'})]);
+ const status=div(''),recovery=div('stack');
  const expires=()=>{const n=Number(days.value);if(!Number.isInteger(n)||n<1||n>30)throw Error('Approval days must be 1–30');return new Date(Date.now()+n*86400000).toISOString()};
  policyForm.addEventListener('submit',async e=>{e.preventDefault();try{await api('/v1/human/calling/policy','POST',{tenantId:company.value,enabled:enabled.checked,approvalReference:approval.value,expiresAt:expires(),dailyLimit:Number(limit.value),maxSeconds:Number(seconds.value)});notice('Company approval saved.');await refresh()}catch(e){asError(e)}});
  clearanceForm.addEventListener('submit',async e=>{e.preventDefault();try{const leadIds=[...choices.querySelectorAll('input:checked')].map(x=>x.value);const r=await api('/v1/human/calling/clearances','POST',{tenantId:company.value,leadIds,purpose:purpose.value,consentReference:consent.value,dndReference:dnd.value,expiresAt:expires()});notice(r.reviewed+' customer approvals saved.');await refresh()}catch(e){asError(e)}});
  async function refresh(){
-  choices.replaceChildren();status.replaceChildren();
+  choices.replaceChildren();status.replaceChildren();recovery.replaceChildren();
   if(!company.value)return;
   try{
-   const [p,c]=await Promise.all([api('/v1/human/calling/policy?tenantId='+company.value),api('/v1/human/calling/clearances?tenantId='+company.value)]);
+   const selected=draft.value;
+   const query=new URLSearchParams({tenantId:company.value,offset:String(clearanceOffset)});
+   if(selected)query.set('campaignId',selected);
+   const [p,c]=await Promise.all([api('/v1/human/calling/policy?tenantId='+company.value),api('/v1/human/calling/clearances?'+query)]);
+   draft.replaceChildren(node('option',{value:'',text:'All customers'}),...c.campaigns.map(x=>node('option',{value:x.id,text:x.name})));
+   draft.value=selected;newer.disabled=clearanceOffset===0;older.disabled=!c.hasMore;
    approval.value=p.policy?.approvalReference||'';enabled.checked=!!p.policy?.enabled;
    limit.value=String(p.policy?.dailyLimit||10);seconds.value=String(p.policy?.maxSeconds||180);
    status.append(node('p',{class:'note',text:p.configuration.ready?'Fixed-question customer calling configured.':p.configuration.missing.join(', ')}));
    for(const l of c.leads){const checkbox=node('input',{type:'checkbox',value:l.id});if(l.consentStatus==='denied'||l.dndStatus==='blocked')checkbox.disabled=true;choices.append(lab(l.name+' — '+l.id.slice(0,8),checkbox))}
    status.append(table(['Customer','Purpose','Approval expires'],c.clearances.map(x=>[x.name,x.purpose,x.expiresAt])));
+   const {locked}=await api('/v1/human/calling/reconcile?tenantId='+encodeURIComponent(company.value));
+   if(locked){
+    const evidence=input('carrierEvidence','text','Carrier verification reference');
+    evidence.maxLength=160;
+    const close=btn('Close verified attempt',async()=>{
+     if(!window.confirm('Confirm that Plivo shows this attempt has ended. Closing will not dial this customer again.'))return;
+     close.disabled=true;
+     try{
+      await api('/v1/human/calling/reconcile','POST',{tenantId:company.value,jobId:locked.id,evidenceReference:evidence.value});
+      notice('Reviewed attempt closed. The client can resume the paused campaign.');
+      await refresh();
+     }catch(e){asError(e);close.disabled=false}
+    },true);
+    close.disabled=locked.runState!=='paused'||!locked.canClose;
+    recovery.append(title('Attempt awaiting carrier verification','h3'),
+      node('p',{class:'note',text:locked.customer+' | '+locked.campaign+' | '+locked.reservedAt+
+       '. Pause the campaign and verify the final status in Plivo. Review can close the attempt after 30 minutes.'}),
+      lab('Carrier verification reference',evidence),close);
+   }
   }catch(e){status.append(node('p',{class:'err',text:e.message+' — use a current Super Admin MFA login.'}))}
  }
- company.addEventListener('change',()=>refresh().catch(asError));
+ company.addEventListener('change',()=>{draft.value='';clearanceOffset=0;refresh().catch(asError)});
+ draft.addEventListener('change',()=>{clearanceOffset=0;refresh().catch(asError)});
  card.append(lab('Client company',company),btn('Load calling setup',()=>refresh().catch(asError),true),area);
- area.append(policyForm,clearanceForm,status);await refresh();
+ area.append(policyForm,clearanceForm,recovery,status);await refresh();
 }
 
 async function aiQuickSetupWizard(tenantId,content,refreshEditors,tenantLabel=''){
@@ -1045,7 +1119,10 @@ async function crmWorkflow(tenantId,content,role,refreshContent=content){
   if(editable){
     const template=btn('Download customer Excel template (CSV)',()=>{const href=URL.createObjectURL(new Blob(['Name,Mobile\r\n'],{type:'text/csv;charset=utf-8'}));const a=node('a',{href,download:'ar3d-customer-template.csv'});document.body.append(a);a.click();a.remove();URL.revokeObjectURL(href)},true);workflow.append(template);
     const picker=node('input',{class:'field',type:'file',accept:'.csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}),previewBox=div(''),csvBox=div('formrow',lab('Excel .xlsx or CSV file',picker));
-    let importData=null;
+    let importData=null,requestId=null;
+    const importName=input('importCampaignName','text','Campaign name');
+    importName.maxLength=80;
+    const importLanguage=node('select',{class:'field'},[node('option',{value:'hi',text:'Hindi'}),node('option',{value:'en',text:'English'})]);
     async function makeImportPayload(file){
       const lower=file.name.toLowerCase();
       if(lower.endsWith('.csv')){
@@ -1065,19 +1142,31 @@ async function crmWorkflow(tenantId,content,role,refreshContent=content){
         previewBox.replaceChildren(node('p',{class:'success',text:result.rows+' valid rows; '+result.existingCount+' existing in CRM; '+result.wouldInsert+' potentially new.'}),
           table(['Name','Mobile','Customer type','Plot size','Visit preference'],result.preview.map(r=>
             [r.name,r.mobile,r.customerSegment,r.plotSizePreference||'—',r.visitDatePreference||'—'])));
-        commitBtn.disabled=false;
-      }catch(e){importData=null;commitBtn.disabled=true;previewBox.replaceChildren();asError(e)}
+        requestId=crypto.randomUUID();commitBtn.disabled=false;campaignBtn.disabled=false;
+      }catch(e){importData=null;commitBtn.disabled=true;campaignBtn.disabled=true;previewBox.replaceChildren();asError(e)}
     });
-    const commitBtn=btn('Import to CRM',async()=>{
+    async function commit(makeCampaign){
       if(importData===null)return;
-      commitBtn.disabled=true;
-      try{const result=await api('/v1/human/import/commit','POST',importData);
-        notice('Import finished: '+result.inserted+' new, '+result.skipped+' duplicates. No calls placed.');
+      const name=importName.value.trim();
+      if(makeCampaign&&!name)return notice('Enter a campaign name.',true);
+      commitBtn.disabled=true;campaignBtn.disabled=true;previewBtn.disabled=true;picker.disabled=true;
+      try{
+        const data=makeCampaign?{...importData,campaign:{name,language:importLanguage.value,requestId}}:importData;
+        const result=await api('/v1/human/import/commit','POST',data);
+        if(result.campaignId){
+          state.importCampaign={tenantId,id:result.campaignId};state.clientTab='calling';
+          notice('Campaign prepared with '+result.campaignCustomers+' customers from this file. Review calling approvals before Start.');
+        }else notice('Import finished: '+result.inserted+' new, '+result.skipped+' duplicates. No calls placed.');
         await renderClient(tenantId,refreshContent);
-      }catch(e){asError(e);commitBtn.disabled=false}
-    });commitBtn.disabled=true;
-    picker.addEventListener('change',()=>{importData=null;commitBtn.disabled=true;previewBox.replaceChildren()});
-    csvBox.append(previewBtn,commitBtn);workflow.append(csvBox,previewBox);
+      }catch(e){asError(e);commitBtn.disabled=false;campaignBtn.disabled=false}
+      finally{previewBtn.disabled=false;picker.disabled=false}
+    }
+    const commitBtn=btn('Import to CRM',()=>commit(false),true);
+    const campaignBtn=btn('Import & prepare campaign',()=>commit(true));
+    commitBtn.disabled=true;campaignBtn.disabled=true;
+    picker.addEventListener('change',()=>{importData=null;requestId=null;commitBtn.disabled=true;campaignBtn.disabled=true;previewBox.replaceChildren()});
+    csvBox.append(previewBtn,commitBtn);workflow.append(csvBox,previewBox,
+      div('formrow',lab('Campaign name for this file',importName),lab('Call language',importLanguage),campaignBtn));
   }
   const search=input('search','search','Name, number or location');search.required=false;
   const filter=node('select',{class:'field'},['','new','contacted','interested','followup','not_interested','converted']

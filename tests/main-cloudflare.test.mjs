@@ -123,6 +123,7 @@ function cloudflareMock({ controlTables=[],crmTables=[],controlName='ar3d-callin
         else if(sql.includes('call_campaign_drafts')) rows=['tenant_id','status','language_mode'].map(name=>({name}));
         else if(sql.includes('call_campaign_candidates')) rows=['tenant_id','campaign_id','lead_id'].map(name=>({name}));
         else if(sql.includes('voicebot_qualification_reviews')) rows=['tenant_id','lead_id','provider','status','survey_json','source_verified','mapping_verified','possible_opt_out'].map(name=>({name}));
+        else if(sql.includes('scripted_call_results')) rows=REQUIRED_COLUMNS.CRM_DB.scripted_call_results.map(name=>({name}));
         else if(sql.includes('voicebot_verified_turns')) rows=REQUIRED_COLUMNS.CRM_DB.voicebot_verified_turns.map(name=>({name}));
         else if(sql.includes('call_intent_proposals')) rows=['tenant_id','id','campaign_id','lead_id','purpose','state','created_by','created_at'].map(name=>({name}));
         else if(sql.includes('company_profile_versions')) rows=REQUIRED_COLUMNS.CONTROL_DB.company_profile_versions.map(name=>({name}));
@@ -347,4 +348,12 @@ test('agent publication upgrade requires exactly three missing tables on the com
  assert.throws(()=>checkTables(old.filter(x=>x!=='company_profile_versions'),'CONTROL_DB','preflight'),/partial/);
  assert.throws(()=>checkTables([...old,added[0]],'CONTROL_DB','preflight'),/partial/);
  const result=await inspectCloudflare({credentials:getCredentials(env),mode:'preflight',template,apiFetch:cloudflareMock({controlTables:old,crmTables:REQUIRED_TABLES.CRM_DB})});assert.equal(result.modes.CONTROL_DB,'control_publication_upgrade');
+});
+
+test('production preflight accepts the exact scripted results CRM upgrade', async () => {
+  const crmTables=REQUIRED_TABLES.CRM_DB.filter(name=>name!=='scripted_call_results');
+  const {modes}=await inspectCloudflare({credentials:getCredentials(env),mode:'preflight',template,
+    apiFetch:cloudflareMock({controlTables:REQUIRED_TABLES.CONTROL_DB,crmTables})});
+  assert.equal(verifiedSchemaState(modes),'crm_scripted_results_upgrade');
+  assert.throws(()=>checkTables(crmTables,'CRM_DB','ready'),/scripted_call_results/);
 });
