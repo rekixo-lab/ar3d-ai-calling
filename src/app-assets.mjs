@@ -17,17 +17,44 @@ async function api(path,method='GET',payload){const r=await fetch(path,{method,c
 function asError(e){notice(e instanceof Error?e.message:'Unexpected error',true)}
 function table(headers,rows){const t=node('table',{class:'table'});const h=node('tr');headers.forEach(v=>h.append(node('th',{text:v})));t.append(node('thead',{},h));const b=node('tbody');rows.forEach(row=>{const tr=node('tr');row.forEach(v=>{const text=String(v??'—');const cell=node('td');if(['active','completed','submitted','running','trial','paused','queued','draft','suspended','failed','unknown','blocked'].includes(text))cell.append(node('span',{class:'badge '+(['active','completed','running'].includes(text)?'positive':['trial','paused','queued','draft','submitted'].includes(text)?'pending':'negative'),text}));else cell.textContent=text;tr.append(cell)});b.append(tr)});if(!rows.length)b.append(node('tr',{},node('td',{class:'empty-state',colspan:headers.length,text:'No records yet'})));t.append(b);return div('tablewrap',t)}
 async function load(){
- const invite=location.hash.match(/^#invite=([a-f0-9]{64})$/i);
+ const invite=location.hash.match(/^#invite=([a-f0-9]{64})$/);
  if(invite){
-  // An existing Super Admin session must never silently mask the invitation.
-  // Do not switch the signed-in browser session or consume the one-time link.
+  // Opening an invitation must never replace an existing session.
   try{state.me=await api('/v1/human/me');inviteSessionNotice()}
   catch{state.me=null;inviteView(invite[1])}
   return;
  }
- try{state.me=await api('/v1/human/me');dashboard()}catch{login()}
+ const malformedInvitation=location.hash.startsWith('#invite=');
+ if(malformedInvitation)history.replaceState(null,'','/app');
+ try{state.me=await api('/v1/human/me');dashboard()}
+ catch{state.me=null;login('',malformedInvitation?unavailableInvitationMessage:'')}
+
 }
-function login(){root.replaceChildren();const email=input('email','email','you@company.com'),pass=input('password','password','Enter your password');email.autocomplete='username';pass.autocomplete='current-password';const form=node('form',{class:'stack'},[lab('Email address',email),lab('Password',pass),node('button',{class:'btn',type:'submit',text:'Sign in'})]);form.addEventListener('submit',async e=>{e.preventDefault();try{const res=await api('/v1/human/login','POST',{email:email.value,password:pass.value});if(res.mfaRequired){mfaChallengeView(res.challenge);return}await load()}catch(err){asError(err)}});root.append(div('auth',div('card',title('AR3D AI Calling','h1'),node('p',{class:'muted',text:'Secure Super Admin & Client Login'}),div('stack',form),node('p',{class:'foot',text:'Human login is separate from backend API keys.'}))));if(location.hash.startsWith('#invite='))inviteView(location.hash.slice(8))}
+const unavailableInvitationMessage='This invitation has already been used, expired, or does not match the invited email. If you have activated your account, sign in with your existing password. For first-time access, ask your administrator to check the invited email and share a new link if needed.';
+function openSignIn(email='',message=''){
+ history.replaceState(null,'','/app');
+ if(state.me){dashboard();return}
+ login(email,message);
+}
+function login(emailValue='',message=''){
+ root.replaceChildren();
+ const email=input('email','email','you@company.com'),pass=input('password','password','Enter your password');
+ email.value=emailValue;email.autocomplete='username';pass.autocomplete='current-password';
+ const submit=node('button',{class:'btn',type:'submit',text:'Sign in'});
+ const form=node('form',{class:'stack'},[lab('Email address',email),lab('Password',pass),submit]);
+ form.addEventListener('submit',async e=>{
+  e.preventDefault();if(submit.disabled)return;submit.disabled=true;
+  try{
+   const res=await api('/v1/human/login','POST',{email:email.value,password:pass.value});
+   if(res.mfaRequired){mfaChallengeView(res.challenge);return}
+   await load();
+  }catch(err){asError(err)}
+  finally{submit.disabled=false}
+ });
+ root.append(div('auth',div('card',title('AR3D AI Calling','h1'),
+  node('p',{class:'muted',text:'Sign in to your dashboard with your email and password.'}),
+  message?node('p',{class:'note',role:'status',text:message}):null,div('stack',form))));
+}
 function mfaChallengeView(challenge){
   root.replaceChildren();
   const mode=node('select',{class:'field'},[
@@ -57,7 +84,7 @@ function mfaChallengeView(challenge){
   });
   root.append(div('auth',div('card',title('Two-factor verification','h1'),
     node('p',{class:'muted',text:'Use your authenticator or an unused recovery code. The challenge expires after 5 minutes.'}),
-    f,btn('Back to login',login,true))));
+    f,btn('Back to login',()=>openSignIn(),true))));
 }
 function inviteSessionNotice(){
  root.replaceChildren();
@@ -71,8 +98,30 @@ function inviteSessionNotice(){
   node('p',{class:'muted',text:'To keep both accounts separate, open the invitation in an Incognito window or a different Chrome profile. If it was already activated on mobile, open /app there and sign in with the client email and existing password; the invitation is one-time.'}),
   openLogin)));
 }
-function inviteView(token){root.replaceChildren();const email=input('email','email','invited@company.com'),pass=input('password','password','Minimum 8 characters');pass.minLength=8;pass.maxLength=128;pass.autocomplete='new-password';const form=node('form',{class:'stack'},[lab('Invited email',email),lab('Create password',pass),node('button',{class:'btn',type:'submit',text:'Activate client account'})]);form.addEventListener('submit',async e=>{e.preventDefault();try{await api('/v1/human/accept-invite','POST',{token,email:email.value,password:pass.value});history.replaceState(null,'','/app');await load()}catch(err){asError(err)}});root.append(div('auth',div('card',title('Accept client invitation','h1'),node('p',{class:'muted',text:'Only accept an invitation you were expecting.'}),form)))}
-async function logout(){try{await api('/v1/human/logout','POST',{})}finally{state.me=null;login()}}
+function inviteView(token){
+ root.replaceChildren();
+ const email=input('email','email','invited@company.com'),pass=input('password','password','Minimum 8 characters');
+ email.autocomplete='username';pass.minLength=8;pass.maxLength=128;pass.autocomplete='new-password';
+ const submit=node('button',{class:'btn',type:'submit',text:'Activate client account'});
+ const form=node('form',{class:'stack'},[lab('Invited email',email),lab('Create password',pass),submit]);
+ form.addEventListener('submit',async e=>{
+  e.preventDefault();if(submit.disabled)return;submit.disabled=true;
+  try{
+   const result=await api('/v1/human/accept-invite','POST',{token,email:email.value,password:pass.value});
+   history.replaceState(null,'','/app');
+   if(result.mfaRequired)mfaChallengeView(result.challenge);
+   else await load();
+  }catch(err){
+   if(['invalid or expired invitation','invitation has already been used'].includes(err.message))
+    openSignIn(email.value,unavailableInvitationMessage);
+   else asError(err);
+  }finally{submit.disabled=false}
+ });
+ root.append(div('auth',div('card',title('Accept client invitation','h1'),
+  node('p',{class:'muted',text:'Use this one-time link to activate your client account.'}),
+  div('stack',form,btn('Sign in with email and password',()=>openSignIn(email.value),true)))));
+}
+async function logout(){try{await api('/v1/human/logout','POST',{})}finally{state.me=null;openSignIn()}}
 function engineeringPanel(main){
   const card=div('card',title('Production Readiness & Safe AI Calling Pilot'));
   const status=div('stack',node('p',{class:'muted',text:'Engineering pilot. Exotel account may be connected; customer campaign dialing and payments remain blocked.'}));
@@ -602,7 +651,9 @@ async function superAdmin(main){
    inviteResult.replaceChildren(div('banner',
     node('strong',{text:d.existingTenant?'Existing company linked':'New company created'}),
     node('p',{text:'Invitation is not sent automatically. Copy this private one-time link and share it only with the intended client. The client chooses their own password.'}),
-    node('input',{class:'field',value:d.inviteUrl,readonly:'readonly','aria-label':'Private client invitation link'})
+    node('input',{class:'field',value:d.inviteUrl,readonly:'readonly','aria-label':'Private client invitation link'}),
+    node('p',{text:'After activation, use the permanent sign-in link with the existing email and password.'}),
+    node('input',{class:'field',value:location.origin+'/app',readonly:'readonly','aria-label':'Permanent client sign-in link'})
    ));
    notice('Invitation prepared; client account activates after invitation acceptance.');
    f.reset();await refresh();await refreshAccess();document.dispatchEvent(new CustomEvent('client-created',{detail:d.id}));
@@ -2172,4 +2223,8 @@ function fixedSurveyPanel(tenantId,lead,onSave){
   return card;
 }
 
+// Following a second invitation in the same tab can change only the hash.
+window.addEventListener('hashchange',event=>{
+ if(location.hash.startsWith('#invite=')||new URL(event.oldURL).hash.startsWith('#invite='))load();
+});
 load();`;
