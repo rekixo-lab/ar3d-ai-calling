@@ -195,119 +195,235 @@ export async function previewUnknownSharedGatewayRecovery(env,runtime,{fetcher=f
 }
 
 
-/**
- * Reconcile an uncertain first Guard-repair write using ONLY provider GETs.
- * Never changes Exotel, the caller's DB row, traffic, or registered calls.
- * A green observation is NOT permission to retry the rejected recovery action.
- * Never return full prompts, agent configs, credentials, or resource IDs.
- */
+const agentCount=agents=>!Array.isArray(agents)?'absent':agents.length===0?'zero':
+ agents.length===1?'one':'multiple';
+const modelId=model=>typeof model?.model_id==='string'&&model.model_id.trim()?model.model_id:null;
+const noTools=x=>x==null||(typeof x==='object'&&Object.keys(x).length===0);
+const guardToolsAbsent=(cfg,agent)=>[cfg?.tools,cfg?.mcp_tools,cfg?.mcp_servers,agent?.tools,
+ agent?.mcp_tools,agent?.mcp_servers,agent?.sub_agents].every(noTools);
+const object=x=>x!==null&&typeof x==='object'&&!Array.isArray(x);
+
+function inspectTraffic(raw,stable,latest){
+ const unknown=status=>({status,stablePercent:null,latestPercent:null,stableTrafficPreserved:null});
+ if(raw==null)return unknown('allocation_missing');
+ if(!object(raw))return unknown('allocation_malformed');
+ const entries=Object.entries(raw);
+ if(!entries.length||entries.some(([v,pct])=>!version(v)||!Number.isFinite(pct)||pct<0||pct>100))
+  return unknown('allocation_malformed');
+ const stablePercent=raw[stable]??null,latestPercent=raw[latest]??null;
+ if(entries.some(([v,pct])=>v!==stable&&pct>0)||stablePercent!==null&&stablePercent<100)
+  return {status:'traffic_outside_stable',stablePercent,latestPercent,stableTrafficPreserved:false};
+ if(stablePercent!==100)return unknown('stable_allocation_missing');
+ // Exotel's allocation lists traffic-bearing versions. An omitted latest
+ // version gets 0% once the complete 100% is accounted for by stable.
+ return {status:latestPercent===null?'latest_omitted_from_full_stable_allocation':'allocation_verified',
+  stablePercent,latestPercent:latestPercent??0,stableTrafficPreserved:true};
+}
+
+function exactConfig(data,v){
+ if(!v||!data||data.version!=null&&data.version!==v)return null;
+ return assistantVersionConfig(data,v);
+}
+
+function assistantBinding(config){
+ const bind=config?.assistant_config;
+ if(!bind)return null;
+ const id=bind.id??bind.assistant_id,v=bind.version??bind.assistant_version;
+ if(!uuid(id)||!version(v)||bind.id!=null&&bind.assistant_id!=null&&bind.id!==bind.assistant_id||
+    bind.version!=null&&bind.assistant_version!=null&&bind.version!==bind.assistant_version)return null;
+ return {id,version:v};
+}
+
+function botVersionConfig(data,botId,v){
+ if((data?.id||data?.bot_id)!==botId)return null;
+ const config=exactConfig(data,v),binding=assistantBinding(config);
+ if(!binding)return null;
+ if(config!==data&&data.version===v&&data.assistant_config){
+  const root=assistantBinding(data);
+  if(root?.id!==binding.id||root?.version!==binding.version)return null;
+ }
+ return config;
+}
+
+// Compare known Voicebot settings without echoing their values, including webhooks.
+const comparedBotFields=['voice_config','tts_config','asr_config','vad_config','audio_processing',
+ 'denoiser_config','supported_languages','post_session_insights','webhook_config','greeting',
+ 'greeting_config','enable_greeting_interruption','enable_call_threshold','call_duration_threshold_sec'];
+function sameSetting(a,b){
+ if(a===b)return true;
+ if(Array.isArray(a)!==Array.isArray(b)||!a||!b||typeof a!=='object'||typeof b!=='object')return false;
+ const keys=Object.keys(a);
+ return keys.length===Object.keys(b).length&&keys.every(k=>Object.hasOwn(b,k)&&sameSetting(a[k],b[k]));
+}
+
+async function inspectRepairVoicebot(read,runtime){
+ const path='/voicebots/'+runtime.bot_id,base=await read(path),bot=base.data;
+ const report={stableVersion:null,latestVersion:null,trafficStatus:null,stableTrafficPercent:null,
+  latestTrafficPercent:null,stableTrafficPreserved:null,unchangedAndPaused:null,
+  pausedCandidatePresent:null,pausedCandidateReferencesGuard:null,stableTemplateMatches:null,
+  latestUsesRecordedGuard:null,latestAssistantVersion:null,
+  versionReadErrors:{stable:null,latest:null},comparedConfigFields:[],changedConfigFields:[]};
+ if(!bot)return {report:{...report,readError:base.error}};
+ if((bot.id||bot.bot_id)!==runtime.bot_id)return {report:{...report,readError:'provider_bot_identity_mismatch'}};
+ const stable=version(bot.stable_version)?bot.stable_version:null;
+ const latest=version(bot.latest_version)?bot.latest_version:null;
+ report.stableVersion=stable;report.latestVersion=latest;
+ if(!stable||!latest)return {report:{...report,readError:'provider_bot_versions_unavailable'}};
+ const traffic=inspectTraffic(bot.traffic_allocation,stable,latest);
+ report.trafficStatus=traffic.status;
+ report.stableTrafficPercent=traffic.stablePercent;report.latestTrafficPercent=traffic.latestPercent;
+ report.stableTrafficPreserved=traffic.stableTrafficPreserved;
+ report.pausedCandidatePresent=latest===stable||traffic.latestPercent>0?false:
+  traffic.stableTrafficPreserved===true&&traffic.latestPercent===0?true:null;
+ const stableRead=read(path+'?version='+stable);
+ const [source,candidate]=await Promise.all([stableRead,latest===stable?stableRead:read(path+'?version='+latest)]);
+ const sourceConfig=botVersionConfig(source.data,runtime.bot_id,stable);
+ const candidateConfig=botVersionConfig(candidate.data,runtime.bot_id,latest);
+ report.versionReadErrors={
+  stable:source.error??(!sourceConfig?'provider_bot_version_unverified':null),
+  latest:candidate.error??(!candidateConfig?'provider_bot_version_unverified':null)};
+ const sourceBinding=assistantBinding(sourceConfig),candidateBinding=assistantBinding(candidateConfig);
+ if(sourceBinding)report.stableTemplateMatches=sourceBinding.id===runtime.template_assistant_id&&
+  sourceBinding.version===runtime.template_version;
+ if(candidateBinding){
+  report.latestUsesRecordedGuard=candidateBinding.id===runtime.guard_assistant_id;
+  report.latestAssistantVersion=candidateBinding.version;
+ }
+ if(sourceConfig&&candidateConfig&&latest!==stable){
+  report.comparedConfigFields=comparedBotFields.filter(k=>Object.hasOwn(sourceConfig,k)&&Object.hasOwn(candidateConfig,k));
+  report.changedConfigFields=comparedBotFields.filter(k=>!sameSetting(sourceConfig[k],candidateConfig[k]));
+  const assistantOptions=cfg=>Object.fromEntries(Object.entries(cfg.assistant_config)
+   .filter(([k])=>!['id','assistant_id','version','assistant_version'].includes(k)));
+  report.comparedConfigFields.push('assistant_config options');
+  if(!sameSetting(assistantOptions(sourceConfig),assistantOptions(candidateConfig)))
+   report.changedConfigFields.push('assistant_config options');
+ }
+ report.unchangedAndPaused=latest!==stable||report.stableTemplateMatches===false||
+  report.stableTrafficPreserved===false?false:
+  report.stableTemplateMatches===true&&report.stableTrafficPreserved===true?true:null;
+ return {report,candidateBinding};
+}
+
+function inspectGuardVersion(data,guardId,v,expectedModel,checkModel){
+ const cfg=(data?.id||data?.assistant_id)===guardId?exactConfig(data,v):null;
+ if(!cfg)return null;
+ const agents=cfg.agents,agent=Array.isArray(agents)&&agents.length===1&&object(agents[0])?agents[0]:null;
+ const actualModel=modelId(agent?.llm_config);
+ const agentModelMatches=actualModel&&expectedModel?actualModel===expectedModel:null;
+ const rootInstructionMatches=typeof cfg.instruction==='string'?cfg.instruction===GUARD_PROMPT:null;
+ const agentInstructionMatches=typeof agent?.instruction==='string'?agent.instruction===GUARD_PROMPT:null;
+ const noAgentTools=agent?guardToolsAbsent(cfg,agent):null;
+ return {selectedVersion:v,agentCount:agentCount(agents),rootAgentCount:agentCount(data.agents),
+  versionMapAgentCount:agentCount(data.versions?.[v]?.agents),rootInstructionMatches,agentInstructionMatches,
+  noAgentTools,agentModelPresent:Boolean(actualModel),rootModelPresent:Boolean(modelId(cfg.llm_config)),
+  agentModelMatches,stableVersionMatch:data.stable_version===v,
+  strictGuardVerified:data.stable_version===v&&rootInstructionMatches===true&&agentInstructionMatches===true&&
+   noAgentTools===true&&(!checkModel||agentModelMatches===true)};
+}
+
+async function inspectRecordedGuard(read,runtime,candidateVersion){
+ const path='/assistants/'+runtime.guard_assistant_id,base=await read(path),guard=base.data;
+ if(!guard)return {readError:base.error};
+ if((guard.id||guard.assistant_id)!==runtime.guard_assistant_id)
+  return {readError:'recorded_guard_identity_changed'};
+ const stable=version(guard.stable_version)?guard.stable_version:null;
+ const latest=version(guard.latest_version)?guard.latest_version:null;
+ const report={stableVersion:stable,latestVersion:latest};
+ if(!stable||!latest)return {...report,readError:'guard_version_unavailable'};
+ const checkModel=runtime.error_code!=='guard_repair_unknown';
+ const historical=Object.keys(guard.versions||{}).filter(version).sort((a,b)=>Number(b.slice(1))-Number(a.slice(1)));
+ // v3 was the recorded source of the second repair. Always read it when that repair was attempted.
+ const versions=[...new Set([stable,latest,candidateVersion,...(checkModel?['v3']:[]),...historical]
+  .filter(version))].slice(0,8);
+ const [results,aliasRead,templateRead]=await Promise.all([
+  Promise.all(versions.map(v=>read(path+'?version='+v))),
+  read(path+'?version=stable'),
+  checkModel&&version(runtime.template_version)?
+   read('/assistants/'+runtime.template_assistant_id+'?version='+runtime.template_version):null
+ ]);
+ const template=templateRead?.data;
+ const templateConfig=(template?.id||template?.assistant_id)===runtime.template_assistant_id?
+  exactConfig(template,runtime.template_version):null;
+ const expectedModel=templateConfig?.agents?.length===1?
+  modelId(templateConfig.agents[0]?.llm_config||templateConfig.llm_config):null;
+ const versionReports=versions.map((v,i)=>inspectGuardVersion(results[i].data,runtime.guard_assistant_id,v,expectedModel,checkModel)
+  ||{selectedVersion:v,readError:results[i].error||'guard_version_identity_changed'});
+ const [stableReport]=versionReports,latestReport=versionReports.find(v=>v.selectedVersion===latest);
+ const alias=aliasRead.data;
+ const aliasVerified=(alias?.id||alias?.assistant_id)===runtime.guard_assistant_id&&
+  alias.stable_version===stable&&(alias.version==null||alias.version===stable);
+ const aliasRootMatches=aliasVerified&&(alias.version===stable||alias.latest_version===stable);
+ const aliasRootCount=aliasRootMatches?agentCount(alias.agents):null;
+ const aliasMappedCount=aliasVerified?agentCount(alias.versions?.[stable]?.agents):null;
+ const mappedCount=agentCount(guard.versions?.[stable]?.agents);
+ // Root fields describing a different version cannot corroborate the selected version.
+ const exactStable=results[0].data;
+ const exactRootCount=exactStable?.version===stable||exactStable?.latest_version===stable?
+  stableReport.rootAgentCount:null;
+ const counts=[stableReport.agentCount,exactRootCount,mappedCount,aliasRootCount,aliasMappedCount]
+  .filter(c=>c&&c!=='absent');
+ const aliasConfigs=aliasVerified?[aliasRootMatches?alias:null,alias.versions?.[stable]]:[];
+ const exactRootConfig=exactRootCount?[exactStable]:[];
+ const extraConfigs=[guard.versions?.[stable],...aliasConfigs,...exactRootConfig];
+ const conflictingContent=stableReport.strictGuardVerified===true&&extraConfigs.some(cfg=>{
+  const agent=cfg?.agents?.length===1?cfg.agents[0]:null;
+  return (typeof cfg?.instruction==='string'&&cfg.instruction!==GUARD_PROMPT)||
+   (agent&&((typeof agent.instruction==='string'&&agent.instruction!==GUARD_PROMPT)||
+    checkModel&&modelId(agent.llm_config)!=null&&modelId(agent.llm_config)!==expectedModel))||
+   !guardToolsAbsent(cfg,agent);
+ });
+ const responseShapeConflict=new Set(counts).size>1||conflictingContent;
+ if(!aliasVerified||responseShapeConflict)stableReport.strictGuardVerified=false;
+ const evidence={overviewVersionMapCount:mappedCount,stableAliasRootCount:aliasRootCount,
+  stableAliasVersionMapCount:aliasMappedCount,responseShapeConflict,
+  stableAliasReadError:aliasRead.error??(!aliasVerified?'guard_stable_alias_identity_changed':null),
+  expectedAgentModelAvailable:checkModel?Boolean(expectedModel):null};
+ return {...report,latest:latestReport,stable:stableReport,evidence,versions:versionReports};
+}
+
+/** Reconcile the recorded resources using provider GETs only. */
 export async function inspectUnknownGuardRepair(env,runtime,{fetcher=fetch}={}){
  if(!runtime||runtime.state!=='unknown'||!['guard_repair_unknown','guard_agent_fix_unknown','bot_agent_fix_unknown'].includes(runtime.error_code)||
     !uuid(runtime.guard_assistant_id)||!uuid(runtime.bot_id)||
     !uuid(runtime.template_assistant_id)||runtime.gateway_version!=null)
   throw Error('guard_repair_review_requires_uncertain_state');
- const blocked=reason=>({outcome:reason,writeOperationsAllowed:false});
- const opts={fetcher},botPath='/voicebots/'+runtime.bot_id,guardPath='/assistants/'+runtime.guard_assistant_id;
- try{
-  const bot=unwrapVoicebot(await voicebotRequest(env,botPath,opts));
-  const stableBot=version(bot.stable_version)?bot.stable_version:null;
-  const latestBot=version(bot.latest_version)?bot.latest_version:null;
-  const traffic=bot.traffic_allocation||{};
-  const stableTrafficSafe=(bot.id||bot.bot_id)===runtime.bot_id&&
-   stableBot!=null&&version(latestBot)&&traffic[stableBot]===100&&
-   Object.entries(traffic).every(([v,pct])=>v===stableBot||Number(pct)===0);
-  // Only a post-BOT-write unknown state can have a paused candidate (latest
-  // differs from stable). A "guard write" uncertainty must never accept it.
-  const pausedCandidate=runtime.error_code==='bot_agent_fix_unknown'&&
-   stableTrafficSafe&&latestBot!==stableBot&&traffic[latestBot]===0;
-  const botTrafficSafe=stableTrafficSafe&&(latestBot===stableBot||pausedCandidate);
-  let sourceBotMatches=false;
-  if(botTrafficSafe){
-   const source=unwrapVoicebot(await voicebotRequest(env,botPath+'?version='+stableBot,opts));
-   sourceBotMatches=(source.id||source.bot_id)===runtime.bot_id&&
-    (source.assistant_config?.id||source.assistant_config?.assistant_id)===runtime.template_assistant_id;
+ const read=async path=>{
+  try{
+   const data=unwrapVoicebot(await voicebotRequest(env,path,{fetcher}));
+   return object(data)?{data}:{error:'provider_invalid_response'};
+  }catch(e){
+   const error=e?.message;
+   return {error:/^(?:provider_http_[1-5][0-9]{2}|provider_unreachable|provider_invalid_response|voicebot_management_access_denied|voicebot_management_credentials_required)$/.test(error)?
+    error:'provider_read_unavailable'};
   }
-  const botReport={stableVersion:stableBot,latestVersion:latestBot,
-   unchangedAndPaused:botTrafficSafe&&sourceBotMatches&&latestBot===stableBot,
-   stableTrafficPreserved:botTrafficSafe&&sourceBotMatches,
-   pausedCandidatePresent:pausedCandidate&&sourceBotMatches,
-   pausedCandidateReferencesGuard:null};
-  if(!botReport.stableTrafficPreserved)
-   return {...blocked('shared_voicebot_changed_stop'),sharedVoicebot:botReport};
-  const guard=unwrapVoicebot(await voicebotRequest(env,guardPath,opts));
-  if((guard.id||guard.assistant_id)!==runtime.guard_assistant_id)
-   return {...blocked('recorded_guard_identity_changed'),sharedVoicebot:botReport};
-  const latest=version(guard.latest_version)?guard.latest_version:null;
-  const stable=version(guard.stable_version)?guard.stable_version:null;
-  if(!latest||!stable)return {...blocked('guard_version_unavailable'),
-   sharedVoicebot:botReport,guard:{stableVersion:stable,latestVersion:latest}};
-  // Read latest and stable independently if different, never trust a v3 label
-  // alone. The existing exact content+tool guard verifier remains authoritative.
-  const inspect=async v=>{
-   const data=unwrapVoicebot(await voicebotRequest(env,guardPath+'?version='+v,opts));
-   if((data.id||data.assistant_id)!==runtime.guard_assistant_id)return null;
-   const cfg=assistantVersionConfig(data,v);
-   const agents=cfg?.agents;
-   const empty=x=>x==null||(typeof x==='object'&&Object.keys(x).length===0);
-   const toolFree=cfg&&Array.isArray(agents)&&agents.length===1&&
-    [cfg.tools,cfg.mcp_servers,agents[0]?.tools,agents[0]?.mcp_tools,agents[0]?.sub_agents].every(empty);
-   return {
-    selectedVersion:v,
-    agentCount:!Array.isArray(agents)?'absent':agents.length===0?'zero':agents.length===1?'one':'multiple',
-    rootInstructionMatches:typeof cfg?.instruction==='string'?cfg.instruction===GUARD_PROMPT:null,
-    agentInstructionMatches:agents?.length===1?agents[0]?.instruction===GUARD_PROMPT:null,
-    noAgentTools:toolFree===true,
-    stableVersionMatch:data.stable_version===v,
-    strictGuardVerified:validRoutingGuard(data,runtime.guard_assistant_id,v)
-   };
-  };
-  const latestReport=await inspect(latest);
-  const stableReport=latest===stable?latestReport:await inspect(stable);
-  if(!latestReport||!stableReport)return {...blocked('guard_version_identity_changed'),
-   sharedVoicebot:botReport,guard:{stableVersion:stable,latestVersion:latest}};
-  // The Exotel MCP implementation documents agents in data.versions[v].agents,
-  // even when version-specific responses have a different root layout.
-  // Cross-check the base version map AND the 'stable' alias. Never assume that
-  // an empty root agent array proves the stored version has no agents.
-  const count=agents=>!Array.isArray(agents)?'absent':agents.length===0?'zero':
-   agents.length===1?'one':'multiple';
-  const mappedCount=count(guard.versions?.[stable]?.agents);
-  const alias=unwrapVoicebot(await voicebotRequest(env,guardPath+'?version=stable',opts));
-  if((alias.id||alias.assistant_id)!==runtime.guard_assistant_id)
-   return {...blocked('guard_stable_alias_identity_changed'),sharedVoicebot:botReport,
-    guard:{stableVersion:stable,latestVersion:latest}};
-  const aliasRootCount=count(alias.agents);
-  const aliasMappedCount=count(alias.versions?.[stable]?.agents);
-  const aliases=[mappedCount,aliasRootCount,aliasMappedCount];
-  const conflictingAgents=aliases.some(c=>c==='multiple'||(stableReport.agentCount==='zero'&&c==='one')||
-   (stableReport.agentCount==='one'&&c==='zero'));
-  const evidence={overviewVersionMapCount:mappedCount,stableAliasRootCount:aliasRootCount,
-   stableAliasVersionMapCount:aliasMappedCount,
-   responseShapeConflict:conflictingAgents};
-  if(botReport.pausedCandidatePresent){
-   // Verify the already existing paused Bot candidate with GET only. Never
-   // treat 0% traffic as proof of a correct Guard binding.
-   const candidate=unwrapVoicebot(await voicebotRequest(env,botPath+'?version='+latestBot,opts));
-   botReport.pausedCandidateReferencesGuard=
-    (candidate.id||candidate.bot_id)===runtime.bot_id&&
-    (candidate.assistant_config?.id||candidate.assistant_config?.assistant_id)===runtime.guard_assistant_id&&
-    (candidate.assistant_config?.version||candidate.assistant_config?.assistant_version)===stable;
-  }
-  let outcome='guard_not_verified_stop';
-  if(latest!==stable)outcome='guard_latest_differs_from_stable_stop';
-  else if(conflictingAgents)outcome='guard_response_shape_conflict_stop';
-  else if(botReport.pausedCandidatePresent)
-   outcome=stableReport.strictGuardVerified&&botReport.pausedCandidateReferencesGuard?
-    'paused_candidate_verified_but_gateway_locked_stop':
-    'paused_candidate_guard_unverified_stop';
-  else if(stableReport.strictGuardVerified)outcome='saved_guard_verified_bot_not_staged';
-  else if(stableReport.agentCount==='zero'&&aliasRootCount==='zero')
-   outcome='guard_zero_agents_confirmed_multiple_reads';
-  else if(stableReport.agentCount==='zero')outcome='guard_agent_presence_not_confirmed';
-  return {outcome,writeOperationsAllowed:false,sharedVoicebot:botReport,
-   guard:{stableVersion:stable,latestVersion:latest,
-    latest:latestReport,stable:stableReport,evidence}};
- }catch{return blocked('provider_read_failed_stop')}
+ };
+ // A Bot read failure must not drop independent Guard evidence, or vice versa.
+ const {report:bot,candidateBinding}=await inspectRepairVoicebot(read,runtime);
+ const guard=await inspectRecordedGuard(read,runtime,bot.latestUsesRecordedGuard?candidateBinding.version:null);
+ if(bot.pausedCandidatePresent===true&&candidateBinding){
+  if(!bot.latestUsesRecordedGuard)bot.pausedCandidateReferencesGuard=false;
+  else if(guard.stableVersion&&candidateBinding.version!==guard.stableVersion)bot.pausedCandidateReferencesGuard=false;
+  else if(guard.stable?.readError==null&&guard.evidence?.stableAliasReadError==null)
+   bot.pausedCandidateReferencesGuard=guard.stable?.strictGuardVerified??null;
+ }
+ const confirmedZero=guard.stable?.agentCount==='zero'&&
+  [guard.evidence?.stableAliasRootCount,guard.evidence?.stableAliasVersionMapCount].includes('zero');
+ let outcome='guard_not_verified_stop';
+ if(bot.readError||bot.stableTrafficPreserved!==true||bot.stableTemplateMatches!==true)
+  outcome='shared_voicebot_changed_stop';
+ else if(guard.readError||guard.stable?.readError||guard.latest?.readError||guard.evidence?.stableAliasReadError)
+  outcome='provider_read_failed_stop';
+ else if(guard.stableVersion!==guard.latestVersion)outcome='guard_latest_differs_from_stable_stop';
+ else if(guard.evidence?.responseShapeConflict)outcome='guard_response_shape_conflict_stop';
+ else if(bot.pausedCandidatePresent)
+  outcome=bot.pausedCandidateReferencesGuard&&bot.changedConfigFields.length===0?
+   (runtime.error_code==='bot_agent_fix_unknown'?'paused_candidate_verified_but_gateway_locked_stop':
+    'paused_candidate_origin_unconfirmed_stop'):'paused_candidate_guard_unverified_stop';
+ else if(guard.stable?.strictGuardVerified)outcome='saved_guard_verified_bot_not_staged';
+ else if(confirmedZero)outcome='guard_zero_agents_confirmed_multiple_reads';
+ else if(guard.stable?.agentCount==='zero')outcome='guard_agent_presence_not_confirmed';
+ return {outcome,writeOperationsAllowed:false,savedErrorCode:runtime.error_code,
+  savedUpdatedAt:runtime.updated_at,sharedVoicebot:bot,guard};
 }
 
 
@@ -437,9 +553,14 @@ export async function fixGuardAgentOnlyOnce(env,{actorId,now=Date.now()},{fetche
   if(done.meta.changes!==1)throw Error('guard_agent_fix_db_unconfirmed');
   return {state:'staged',version:candidate,guardVersion:approved,
    notice:'Exactly one Guard Agent was verified. Shared Voicebot '+candidate+' staged at 0% traffic. No calls or rollout were made; authenticated router is still pending.'};
- }catch{
-  // A POST may have succeeded even if confirmation/read-back failed. Never
-  // retry or automatically roll back a potentially created Exotel version.
+ }catch(e){
+  // Keep the existing lock family. Future Worker logs can locate the failed
+  // checkpoint without recording provider bodies, credentials or resource IDs.
+  const error=e?.message;
+  const reason=/^(?:provider_http_[1-5][0-9]{2}|provider_write_unknown|provider_unreachable|provider_invalid_response|voicebot_management_access_denied|guard_agent_only_version_unknown|guard_agent_only_version_unverified|guard_agent_only_model_mismatch|shared_bot_changed_after_guard_fix|shared_bot_candidate_version_unknown|shared_bot_paused_candidate_unverified|guard_agent_fix_db_unconfirmed)$/.test(error)?
+   error:'unclassified';
+  console.warn('shared_gateway_agent_only_fix_stopped',{phase,reason});
+  // A POST may already have persisted. Keep the attempt locked.
   await db.prepare("UPDATE shared_voice_gateway SET error_code=?,updated_at=? WHERE id=1 AND state='unknown' AND error_code='guard_agent_fix_in_progress'")
    .bind(phase.startsWith('guard_')?'guard_agent_fix_unknown':'bot_agent_fix_unknown',at).run();
   throw Error('guard_agent_only_fix_unknown_stop');
@@ -450,13 +571,7 @@ export async function fixGuardAgentOnlyOnce(env,{actorId,now=Date.now()},{fetche
 // A version label alone is insufficient: require precisely one verified agent
 // and the approved root + agent instruction. Never expose those instructions.
 function validRoutingGuard(data,guardId,v){
- const config=assistantVersionConfig(data,v);
- const empty=x=>x==null||(typeof x==='object'&&Object.keys(x).length===0);
- return (data?.id||data?.assistant_id)===guardId&&data.stable_version===v&&
-   config?.instruction===GUARD_PROMPT&&Array.isArray(config.agents)&&config.agents.length===1&&
-   config.agents[0]?.instruction===GUARD_PROMPT&&
-   [config.tools,config.mcp_servers,config.agents[0].tools,config.agents[0].mcp_tools,
-    config.agents[0].sub_agents].every(empty);
+ return inspectGuardVersion(data,guardId,v,null,false)?.strictGuardVerified===true;
 }
 // Operator-confirmed one-time recovery of an already persisted, failed
 // shared gateway. Never creates another assistant. Never touches the legacy

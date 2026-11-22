@@ -1148,7 +1148,8 @@ async function voiceGatewayPanel(main){
   try{
    const d=await api('/v1/human/voice-gateway','POST',{action:'repair-review'});
    const reason={
-    shared_voicebot_changed_stop:'The Shared Voicebot has changed or its stable traffic is unverified. Stop and review Exotel.',
+    shared_voicebot_changed_stop:'The Shared Voicebot traffic or stable template check did not pass. Review both the Voicebot and Guard observations below.',
+    paused_candidate_origin_unconfirmed_stop:'The latest Voicebot is paused and binds the verified Guard. The saved error code does not link it to a Bot staging attempt.',
     recorded_guard_identity_changed:'Exotel did not return the recorded Guard assistant.',
     guard_version_unavailable:'Guard latest or stable version is missing.',
     guard_version_identity_changed:'The selected Guard version identity could not be confirmed.',
@@ -1157,18 +1158,50 @@ async function voiceGatewayPanel(main){
     paused_candidate_verified_but_gateway_locked_stop:'A PAUSED Shared Voicebot candidate and its Guard appear correct by read-only checks. Gateway remains LOCKED. Do not retry or roll out; audited manual reconciliation is required.',
     paused_candidate_guard_unverified_stop:'A paused Shared Voicebot candidate exists, but its Guard binding or safety contract is NOT verified. Do not retry or roll out.',
     guard_still_has_zero_agents:'The exact version reports zero agents. Do not retry.',
-    guard_zero_agents_confirmed_multiple_reads:'The Guard has version v3 but multiple Exotel read-only views report zero agents. The previous write did not leave a verifiable agent. Do not retry.',
+    guard_zero_agents_confirmed_multiple_reads:'Multiple Exotel read-only views report zero agents on the stable Guard. Do not retry.',
     guard_agent_presence_not_confirmed:'Exotel returned an empty selected agent list, but other version views did not confirm the agent count. Do not retry.',
     guard_response_shape_conflict_stop:'Exotel API returns conflicting agent counts between exact version, stable alias, and version-map views. Do not retry; inspect Exotel console or ask Exotel support for the correct version contract.',
     guard_stable_alias_identity_changed:'Exotel stable-version alias does not confirm the recorded Guard. Do not retry.',
     guard_not_verified_stop:'Exotel returned a Guard version, but its exact safety contract is not verified. Do not retry.',
     provider_read_failed_stop:'Exotel read-only reconciliation could not complete.'
    };
-   const g=d.guard||{},v=g.stable||{};
+   const g=d.guard||{},v=g.stable||{},b=d.sharedVoicebot||{};
    const val=x=>x===true?'Yes':x===false?'No':'Not confirmed';
+   const percent=n=>n==null?'Unknown':String(n)+'%';
+   const trafficEvidence={
+    latest_omitted_from_full_stable_allocation:'Latest omitted. Stable accounts for 100% of traffic.',
+    allocation_verified:'Explicit percentages in Exotel allocation',
+    allocation_missing:'Exotel did not provide a traffic allocation',
+    allocation_malformed:'Exotel returned an unrecognized traffic allocation',
+    stable_allocation_missing:'Stable version is absent from the allocation',
+    traffic_outside_stable:'The allocation indicates traffic outside the stable version'
+   }[b.trafficStatus];
+   const reads=[b.readError,b.versionReadErrors?.stable,b.versionReadErrors?.latest,
+    g.readError,v.readError,g.latest?.readError,g.evidence?.stableAliasReadError].filter(Boolean);
+   const phase={
+    guard_repair_unknown:'First Guard repair',
+    guard_agent_fix_unknown:'Agent-only Guard write or verification',
+    bot_agent_fix_unknown:'Bot staging, verification or database finalization after Guard verification'
+   }[d.savedErrorCode];
    result.replaceChildren(
     node('p',{class:'err',text:(reason[d.outcome]||'Guard reconciliation is uncertain; stop all writes.')+' No provider or database changes were made.'}),
     table(['Read-only check','Result'],[
+     ['Saved failure code',d.savedErrorCode||'Unknown'],
+     ['Recorded phase',phase||'Unknown'],
+     ['Failure recorded (UTC)',d.savedUpdatedAt||'Unknown'],
+     ['Shared Voicebot stable version',b.stableVersion||'Unknown'],
+     ['Shared Voicebot latest version',b.latestVersion||'Unknown'],
+     ['Stable Voicebot traffic',percent(b.stableTrafficPercent)],
+     ['Latest Voicebot traffic',percent(b.latestTrafficPercent)],
+     ['Traffic allocation evidence',trafficEvidence||'Unknown'],
+     ['Shared Voicebot stable traffic preserved',val(b.stableTrafficPreserved)],
+     ['Stable Voicebot matches saved template and version',val(b.stableTemplateMatches)],
+     ['Paused Bot candidate exists',val(b.pausedCandidatePresent)],
+     ['Latest Voicebot uses recorded Guard',val(b.latestUsesRecordedGuard)],
+     ['Latest Voicebot Assistant version',b.latestAssistantVersion||'Unknown'],
+     ['Paused candidate references verified Guard',val(b.pausedCandidateReferencesGuard)],
+     ['Other Voicebot settings compared',b.comparedConfigFields?.join(', ')||'None returned in both versions'],
+     ['Other Voicebot settings with differences',b.changedConfigFields?.join(', ')||'None observed'],
      ['Recorded Guard stable',g.stableVersion||'Unknown'],
      ['Recorded Guard latest',g.latestVersion||'Unknown'],
      ['Stable Guard agent count',v.agentCount||'Unknown'],
@@ -1179,15 +1212,18 @@ async function voiceGatewayPanel(main){
      ['Stable Guard root instruction safe',val(v.rootInstructionMatches)],
      ['Stable Guard agent instruction safe',val(v.agentInstructionMatches)],
      ['Stable Guard has no tools',val(v.noAgentTools)],
+     ['Stable Guard Agent model matches template',val(v.agentModelMatches)],
      ['Strict Guard verification',val(v.strictGuardVerified)],
-     ['Shared Voicebot stable version',d.sharedVoicebot?.stableVersion||'Unknown'],
-     ['Shared Voicebot latest version',d.sharedVoicebot?.latestVersion||'Unknown'],
-     ['Shared Voicebot unchanged at 100% stable',val(d.sharedVoicebot?.unchangedAndPaused)],
-     ['Shared Voicebot stable traffic preserved',val(d.sharedVoicebot?.stableTrafficPreserved)],
-     ['Paused Bot candidate exists',val(d.sharedVoicebot?.pausedCandidatePresent)],
-     ['Paused candidate references verified Guard',val(d.sharedVoicebot?.pausedCandidateReferencesGuard)],
-     ['Any provider writes authorized', 'No']
+     ['Read errors',[...new Set(reads)].join(', ')||'None observed'],
+     ['Any provider writes authorized','No']
     ]),
+    ...(g.versions?.length?[node('h3',{text:'Guard version evidence'}),table(
+     ['Version','Selected agents','Root agents','Version-map agents','Root instruction safe',
+      'Agent instruction safe','No tools','Root model recorded','Agent model matches','Read error'],
+     g.versions.map(x=>[x.selectedVersion,x.agentCount||'Unknown',x.rootAgentCount||'Unknown',
+      x.versionMapAgentCount||'Unknown',val(x.rootInstructionMatches),val(x.agentInstructionMatches),
+      val(x.noAgentTools),val(x.rootModelPresent),val(x.agentModelMatches),x.readError||'—'])
+    )]:[]),
     node('p',{class:'note',text:'This inspection NEVER retries an Exotel write, calls a customer, unlocks the gateway or authorizes staging/rollout. Save this report for review.'})
    );
   }catch(e){asError(e)}
@@ -1285,6 +1321,9 @@ async function voiceGatewayPanel(main){
   repairButton.disabled=!(repairable&&repairReady);
   reconcileButton.disabled=!(r.gateway?.state==='unknown'&&['guard_repair_unknown','guard_agent_fix_unknown','bot_agent_fix_unknown'].includes(r.gateway.errorCode));
   agentOnlyButton.disabled=!(r.gateway?.state==='unknown'&&r.gateway.errorCode==='guard_repair_unknown');
+  previewButton.style.display=repairable?'':'none';
+  repairButton.style.display=repairable?'':'none';
+  agentOnlyButton.style.display=agentOnlyButton.disabled?'none':'';
   const unsafe=['Connect authenticated session router','Verify shared gateway rollout',
    'Test published client on my verified phone'];
   for(const button of card.querySelectorAll('button'))

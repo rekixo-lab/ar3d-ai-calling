@@ -145,6 +145,29 @@ try{
  await adminPage.getByRole('button',{name:'Confirm one test call',exact:true}).click();
  await adminPage.getByText(/Exotel request: submitted/).waitFor();assert.equal(operatorRequests,1);
  await adminPage.getByText('Advanced developer diagnostics (optional)',{exact:true}).click();
+ // A locked Gateway shows independently verified Bot allocation and Guard observations.
+ f.c.db.prepare("INSERT INTO shared_voice_gateway(id,bot_id,flow_id,template_assistant_id,template_version,guard_assistant_id,state,error_code,updated_by,updated_at) VALUES(1,?,?,?,?,?,'unknown','bot_agent_fix_unknown','admin',?)")
+  .run('66cbf4f6-a52d-4df0-abf0-db5e3b365836','1393135','66666666-6666-4666-8666-666666666666','v2',
+   '55555555-5555-4555-8555-555555555555',new Date().toISOString());
+ let reviews=0;
+ await adminPage.route('**/v1/human/voice-gateway',async route=>{
+  if(route.request().method()==='GET')return route.continue();
+  assert.deepEqual(route.request().postDataJSON(),{action:'repair-review'});
+  reviews++;
+  await route.fulfill({json:{outcome:'paused_candidate_verified_but_gateway_locked_stop',
+   savedErrorCode:'bot_agent_fix_unknown',sharedVoicebot:{stableVersion:'v2',latestVersion:'v3',
+    stableTrafficPercent:100,latestTrafficPercent:0,trafficStatus:'latest_omitted_from_full_stable_allocation',
+    stableTrafficPreserved:true,latestUsesRecordedGuard:true},
+   guard:{stableVersion:'v4',latestVersion:'v4',stable:{agentCount:'one',strictGuardVerified:true}}}});
+ });
+ await adminPage.getByRole('button',{name:'Refresh saved gateway status (read-only)',exact:true}).click();
+ await adminPage.getByText(/EXOTEL AGENT-ONLY WRITE UNCERTAIN/).waitFor();
+ assert.equal(await adminPage.getByRole('button',{name:'Try single-agent Guard fix (one time, no calls)'}).count(),0);
+ await adminPage.getByRole('button',{name:'Review last Guard repair (read-only)',exact:true}).click();
+ await adminPage.getByRole('row',{name:'Latest Voicebot traffic 0%'}).waitFor();
+ await adminPage.getByRole('row',{name:'Stable Voicebot traffic 100%'}).waitFor();
+ await adminPage.getByRole('row',{name:'Stable Guard agent count one'}).waitFor();
+ assert.equal(reviews,1);
  await adminPage.evaluate(()=>window.scrollTo(0,0));await adminPage.screenshot({path:'artifacts/premium-super-admin.png',fullPage:true});
  await adminContext.close();console.log('Super Admin UI: current MFA session, company policy and selected customer clearances PASS');
 }catch(e){console.error(await lastPage?.locator('body').innerText());await lastPage?.screenshot({path:'/tmp/ar3d-calling-failure.png',fullPage:true});throw e}finally{await browser.close();server.close();f.close()}
