@@ -1149,6 +1149,7 @@ async function voiceGatewayPanel(main){
    const d=await api('/v1/human/voice-gateway','POST',{action:'repair-review'});
    const reason={
     shared_voicebot_changed_stop:'The Shared Voicebot traffic or stable template check did not pass. Review both the Voicebot and Guard observations below.',
+    shared_voicebot_version_read_unverified_stop:'Exotel did not return a verifiable exact Voicebot version for one or both requests. An Assistant version in the unselected response is not proof of the paused candidate binding.',
     paused_candidate_origin_unconfirmed_stop:'The latest Voicebot is paused and binds the verified Guard. The saved error code does not link it to a Bot staging attempt.',
     recorded_guard_identity_changed:'Exotel did not return the recorded Guard assistant.',
     guard_version_unavailable:'Guard latest or stable version is missing.',
@@ -1176,6 +1177,7 @@ async function voiceGatewayPanel(main){
     stable_allocation_missing:'Stable version is absent from the allocation',
     traffic_outside_stable:'The allocation indicates traffic outside the stable version'
    }[b.trafficStatus];
+   const versionRead=x=>x?.selectedVersion|| (x?.hasRequestedVersionMap?'Requested version in map':'Not confirmed');
    const reads=[b.readError,b.versionReadErrors?.stable,b.versionReadErrors?.latest,
     g.readError,v.readError,g.latest?.readError,g.evidence?.stableAliasReadError].filter(Boolean);
    const phase={
@@ -1199,6 +1201,10 @@ async function voiceGatewayPanel(main){
      ['Paused Bot candidate exists',val(b.pausedCandidatePresent)],
      ['Latest Voicebot uses recorded Guard',val(b.latestUsesRecordedGuard)],
      ['Latest Voicebot Assistant version',b.latestAssistantVersion||'Unknown'],
+     ['Exact stable response selection',versionRead(b.versionResponses?.stable)],
+     ['Exact latest response selection',versionRead(b.versionResponses?.latest)],
+     ['Assistant version at response root for stable GET',b.versionResponses?.stable?.rootAssistantVersion||'Unknown'],
+     ['Assistant version at response root for latest GET',b.versionResponses?.latest?.rootAssistantVersion||'Unknown'],
      ['Paused candidate references verified Guard',val(b.pausedCandidateReferencesGuard)],
      ['Other Voicebot settings compared',b.comparedConfigFields?.join(', ')||'None returned in both versions'],
      ['Other Voicebot settings with differences',b.changedConfigFields?.join(', ')||'None observed'],
@@ -1267,9 +1273,9 @@ async function voiceGatewayPanel(main){
      ['Selected version agent count',d.guardVersionContract?.responseSelectedAgentCount||'Not confirmed'],
      ['Guard root safety instruction',flag(d.guardVersionContract?.rootInstructionMatchesGuard)],
      ['Guard agent safety instruction',flag(d.guardVersionContract?.agentInstructionMatchesGuard)],
-     ['Guard explicit version matches v2',flag(d.guardVersionContract?.responseVersionMatchesRequested)],
-     ['Guard latest version matches v2',flag(d.guardVersionContract?.responseLatestMatchesRequested)],
-     ['Guard stable version matches v2',flag(d.guardVersionContract?.responseStableMatchesRequested)],
+     ['Guard explicit version matches selected stable',flag(d.guardVersionContract?.responseVersionMatchesRequested)],
+     ['Guard latest version matches selected stable',flag(d.guardVersionContract?.responseLatestMatchesRequested)],
+     ['Guard stable version matches selected stable',flag(d.guardVersionContract?.responseStableMatchesRequested)],
      ['Gateway version recorded',d.gatewayVersionRecorded||'No'],
      ['Exotel read succeeded',flag(d.providerReadable)],
      ['Exotel latest version',d.latestVersion||'Unknown'],

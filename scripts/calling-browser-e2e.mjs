@@ -154,10 +154,11 @@ try{
   if(route.request().method()==='GET')return route.continue();
   assert.deepEqual(route.request().postDataJSON(),{action:'repair-review'});
   reviews++;
-  await route.fulfill({json:{outcome:'paused_candidate_verified_but_gateway_locked_stop',
+  await route.fulfill({json:{outcome:'shared_voicebot_version_read_unverified_stop',
    savedErrorCode:'bot_agent_fix_unknown',sharedVoicebot:{stableVersion:'v2',latestVersion:'v3',
     stableTrafficPercent:100,latestTrafficPercent:0,trafficStatus:'latest_omitted_from_full_stable_allocation',
-    stableTrafficPreserved:true,latestUsesRecordedGuard:true},
+    stableTrafficPreserved:true,latestUsesRecordedGuard:null,
+    versionResponses:{latest:{selectedVersion:null,hasRequestedVersionMap:false,rootAssistantVersion:'v2'}}},
    guard:{stableVersion:'v4',latestVersion:'v4',stable:{agentCount:'one',strictGuardVerified:true}}}});
  });
  await adminPage.getByRole('button',{name:'Refresh saved gateway status (read-only)',exact:true}).click();
@@ -167,6 +168,8 @@ try{
  await adminPage.getByRole('row',{name:'Latest Voicebot traffic 0%'}).waitFor();
  await adminPage.getByRole('row',{name:'Stable Voicebot traffic 100%'}).waitFor();
  await adminPage.getByRole('row',{name:'Stable Guard agent count one'}).waitFor();
+ await adminPage.getByRole('row',{name:'Latest Voicebot uses recorded Guard Not confirmed'}).waitFor();
+ await adminPage.getByRole('row',{name:'Assistant version at response root for latest GET v2'}).waitFor();
  assert.equal(reviews,1);
  await adminPage.evaluate(()=>window.scrollTo(0,0));await adminPage.screenshot({path:'artifacts/premium-super-admin.png',fullPage:true});
  await adminContext.close();console.log('Super Admin UI: current MFA session, company policy and selected customer clearances PASS');

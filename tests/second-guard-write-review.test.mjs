@@ -18,7 +18,7 @@ function seed(f,error){
 function provider({paused=false,unsafeTraffic=false,wrongCandidate=false,missingAgent=false,
  traffic,botUnavailable=false,guardUnavailable=false,wrongBotVersion=false,wrongTemplateVersion=false,
  wrongGuardVersion=false,nested=false,model='model-one',unsafeInstructions=false,unsafeTools=false,
- conflict=false,settingChanged=false}={}){
+ conflict=false,settingChanged=false,baseConfigForBothReads=false}={}){
  const gets=[],unexpected=[];
  const agent={id:'provider-assigned',instruction:unsafeInstructions?'PRIVATE_WRONG_PROMPT':prompt,
   tools:[],mcp_tools:unsafeTools?[{name:'private-tool'}]:[],llm_config:{model_id:model}};
@@ -32,6 +32,8 @@ function provider({paused=false,unsafeTraffic=false,wrongCandidate=false,missing
   gets.push(p+u.search);
   if(p.endsWith('/voicebots/'+bot)){
    if(botUnavailable)return new Response('PRIVATE_PROVIDER_ERROR',{status:502});
+   if(baseConfigForBothReads)return reply({id:bot,stable_version:'v2',latest_version:'v3',
+    traffic_allocation:{v2:100},assistant_config:{id:template,version:'v1'}});
    if(v==='v2')return reply({id:bot,version:'v2',tts_config:{enabled:true},
     assistant_config:{id:template,version:wrongTemplateVersion?'v2':'v1'}});
    if(v==='v3'){
@@ -185,6 +187,7 @@ test('exact nested version binds safely; wrong readback tag, pin, template versi
  assert.equal(verified.outcome,'paused_candidate_verified_but_gateway_locked_stop');
  assert.equal(verified.guard.stable.versionMapAgentCount,'one');
  const {d:versionUnverified}=await review({wrongBotVersion:true});
+ assert.equal(versionUnverified.outcome,'shared_voicebot_version_read_unverified_stop');
  assert.equal(versionUnverified.sharedVoicebot.versionReadErrors.latest,'provider_bot_version_unverified');
  assert.equal(versionUnverified.sharedVoicebot.pausedCandidateReferencesGuard,null);
  const {d:wrongPin}=await review({wrongGuardVersion:true});
@@ -215,4 +218,18 @@ test('paused candidate can be observed with a Guard phase lock without assuming 
  assert.equal(d.outcome,'paused_candidate_origin_unconfirmed_stop');
  assert.equal(d.sharedVoicebot.pausedCandidatePresent,true);
  assert.equal(d.sharedVoicebot.pausedCandidateReferencesGuard,true);
+});
+
+test('the latest metadata label does not select an untagged root binding returned for both Bot GETs',async()=>{
+ const {d}=await review({baseConfigForBothReads:true});
+ const b=d.sharedVoicebot;
+ assert.equal(d.outcome,'shared_voicebot_version_read_unverified_stop');
+ assert.equal(b.stableTrafficPreserved,true);
+ assert.equal(b.latestTrafficPercent,0);
+ assert.equal(b.pausedCandidatePresent,true);
+ assert.equal(b.latestUsesRecordedGuard,null);
+ assert.equal(b.pausedCandidateReferencesGuard,null);
+ assert.deepEqual(b.versionResponses.latest,{selectedVersion:null,hasRequestedVersionMap:false,rootAssistantVersion:'v1'});
+ assert.deepEqual(b.versionResponses.stable,b.versionResponses.latest);
+ assert.equal(d.guard.stable.strictGuardVerified,true);
 });
