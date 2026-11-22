@@ -269,21 +269,8 @@ export async function inspectCloudflare({ credentials, mode, apiFetch = fetch, t
     credentials.account + '/r2/buckets/ar3d-calling-recordings');
   if (bucketResult?.name !== 'ar3d-calling-recordings')
     throw Error('Main R2 bucket is missing or belongs to an unexpected resource.');
-  // Preflight rejects a mixed state. This stops accidental double-initialize.
-  if (mode === 'preflight' && modes.CONTROL_DB !== modes.CRM_DB &&
-      !(modes.CONTROL_DB === 'control_company_change_upgrade' && modes.CRM_DB === 'ready') &&
-       !(modes.CONTROL_DB === 'control_client_accounts_upgrade' && modes.CRM_DB === 'ready') &&
-      !(modes.CONTROL_DB === 'control_publication_upgrade' && modes.CRM_DB === 'ready') &&
-      !(modes.CONTROL_DB === 'control_profile_upgrade' && modes.CRM_DB === 'ready') &&
-      !(modes.CONTROL_DB === 'control_script_upgrade' && modes.CRM_DB === 'ready') &&
-      !(modes.CONTROL_DB === 'ready' && modes.CRM_DB === 'crm_dispatch_upgrade') &&
-      !(modes.CONTROL_DB === 'ready' && modes.CRM_DB === 'crm_additive_upgrade') &&
-      !(modes.CONTROL_DB === 'ready' && modes.CRM_DB === 'crm_voice_turn_upgrade') &&
-      !(modes.CONTROL_DB === 'ready' && modes.CRM_DB === 'crm_call_intent_upgrade') &&
-      !(modes.CONTROL_DB === 'control_additive_upgrade' && modes.CRM_DB === 'ready') &&
-      !(modes.CONTROL_DB === 'control_operator_test_upgrade' && modes.CRM_DB === 'ready') &&
-      !(modes.CONTROL_DB === 'control_operator_status_upgrade' && modes.CRM_DB === 'ready'))
-    throw Error('D1 databases have mixed initialized/empty states; manual reconciliation required.');
+  // Use the same allowlist for inspection and the deployment decision.
+  if (mode === 'preflight') verifiedSchemaState(modes);
   return { config, modes };
 }
 

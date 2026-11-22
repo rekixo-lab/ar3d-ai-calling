@@ -163,6 +163,18 @@ test('exact old CRM baseline is upgradeable without mistaking partial schemas as
 test('identity mismatch blocks touching any resource', async () => {
   await assert.rejects(inspectCloudflare({credentials:getCredentials(env),mode:'fresh',template,apiFetch:cloudflareMock({controlName:'tiyansh-production'})}),/mismatch/);
 });
+test('production preflight accepts the isolated scripted phone upgrade with ready CRM', async () => {
+  const controlTables=REQUIRED_TABLES.CONTROL_DB.filter(name=>name!=='scripted_phone_pilots');
+  const check=(crmTables,mode='preflight')=>inspectCloudflare({
+    credentials:getCredentials(env),mode,template,apiFetch:cloudflareMock({controlTables,crmTables})
+  });
+  const {modes}=await check(REQUIRED_TABLES.CRM_DB);
+  assert.deepEqual(modes,{CONTROL_DB:'control_scripted_pilot_upgrade',CRM_DB:'ready'});
+  assert.equal(verifiedSchemaState(modes),'control_scripted_pilot_upgrade');
+  await assert.rejects(check([]),/mixed or invalid/);
+  await assert.rejects(check(REQUIRED_TABLES.CRM_DB,'ready'),/scripted_phone_pilots/);
+});
+
 test('mixed empty/initialized state is not accepted without human inspection', async () => {
   await assert.rejects(inspectCloudflare({credentials:getCredentials(env),mode:'preflight',template,apiFetch:cloudflareMock({controlTables:REQUIRED_TABLES.CONTROL_DB})}),/mixed/);
 });
