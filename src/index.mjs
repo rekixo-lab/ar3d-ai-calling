@@ -1,8 +1,6 @@
 import {handleScriptedPhoneCallback} from './scripted-phone-pilot.mjs';
 import {handleHumanRequest} from './human-routes.mjs';
-import {handleVoiceGatewaySession} from './voice-gateway-session.mjs';
-import {handleExotelVoicebotWebhookRequest} from './exotel-voicebot-inbound.mjs';
-import {handleCallingCron} from './automatic-auth-maintenance.mjs';
+import {handleCallingCron} from './calling-schedule.mjs';
 import {
   checkSlug,checkName,checkStorageMode,normalizeIndianPhone,
   resolveCrmDb,newApiKey,sha256hex,parseJsonBody,SOURCES
@@ -171,10 +169,7 @@ export default {
     if(path==='/health'&&isGet(req))return json({service:'AR3D AI Calling',status:'foundation'});
     const scriptedPhone=await handleScriptedPhoneCallback(req,env);
     if(scriptedPhone)return scriptedPhone;
-    const gatewaySession=await handleVoiceGatewaySession(req,env);
-    if(gatewaySession)return gatewaySession;
-    const voicebotWebhook=await handleExotelVoicebotWebhookRequest(req,env);
-    if(voicebotWebhook)return voicebotWebhook;
+    if(path==='/v1/provider/exotel'||path.startsWith('/v1/provider/exotel/'))return fail('provider_route_retired',410);
     const humanResponse=await handleHumanRequest(req,env);
     if(humanResponse)return humanResponse;
     if(!env.CONTROL_DB)return fail('control DB missing',503);

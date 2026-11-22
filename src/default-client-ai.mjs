@@ -1,5 +1,5 @@
 // One-time, tenant-scoped AI draft defaults for real-estate clients.
-// No fabricated prices, projects or approvals. No Exotel requests or calls.
+// No fabricated prices, projects or approvals. Drafts require separate approval for calling.
 // Existing profile/script versions are never overwritten by this helper.
 import {buildMasterAIQuickSetup,MASTER_TEMPLATE_VERSION} from './ai-master-templates.mjs';
 import {compileScript} from './calling-script-core.mjs';

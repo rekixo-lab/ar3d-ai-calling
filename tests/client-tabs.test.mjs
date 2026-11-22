@@ -13,7 +13,7 @@ test('client workspace is divided into four practical tabs without dropping any 
   assert.match(js,/adminCompanyChangesPanel\(main\)/);
   assert.doesNotMatch(js,/await callingScriptEditor\(id,sections\.company\)/);
   assert.match(js,/await usageAndExport\(id,reports,d\.role\)/);
-  assert.match(js,/await voicebotReviewPanel\(id,reports,content\)/);
+  assert.doesNotMatch(js,/await voicebotReviewPanel\(id,reports,content\)/);
   assert.match(js,/state\.clientTab=key/);
   assert.ok(js.includes('client-reports'));
   assert.match(css,/\.client-content/);

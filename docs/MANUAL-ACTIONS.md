@@ -1,4 +1,4 @@
-**Active 48-hour execution:** See [48H-SPRINT.md](48H-SPRINT.md). The first step is GitHub production Environment secrets followed by the manual preflight. Do not initialize databases until both are confirmed fresh.
+[Production deployment](MAIN-DEPLOYMENT.md) · [Manual phone setup](scripted-phone-pilot.md)
 
 # AR3D AI Calling — operator-only remaining actions
 

@@ -1,4 +1,4 @@
--- Isolated verified-phone pilot. No campaign dispatch or customer schedules.
+-- Fixed questionnaire sessions for the verified pilot and approved campaign queue.
 CREATE TABLE scripted_phone_pilots (
  id TEXT PRIMARY KEY,
  tenant_id TEXT NOT NULL REFERENCES tenants(id),
@@ -8,13 +8,19 @@ CREATE TABLE scripted_phone_pilots (
  language TEXT NOT NULL CHECK(language IN ('hi','en')),
  destination TEXT NOT NULL,
  caller TEXT NOT NULL,
- rate_slot INTEGER NOT NULL UNIQUE,
+ rate_slot INTEGER UNIQUE,
  expires_at INTEGER NOT NULL,
  phase TEXT NOT NULL CHECK(phase IN ('requested','consent','question','transcribing','finishing',
-   'completed','declined','needs_review','ended','unknown','rejected')),
+   'suppressing','completed','declined','needs_review','ended','unknown','rejected')),
  provider_call_id TEXT UNIQUE,
  provider_request_id TEXT UNIQUE,
  turn INTEGER NOT NULL DEFAULT 0,
  survey_json TEXT NOT NULL,
- created_at TEXT NOT NULL
+ created_at TEXT NOT NULL,
+ provider_account_id TEXT NOT NULL,
+ job_id TEXT,
+ hangup_at INTEGER,
+ duration_seconds INTEGER,
+ UNIQUE(tenant_id,job_id),
+ CHECK((job_id IS NULL) = (rate_slot IS NOT NULL))
 );

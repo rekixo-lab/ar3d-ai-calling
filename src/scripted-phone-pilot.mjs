@@ -1,5 +1,6 @@
-// A single consented call to a configured internal number. Never runs from the campaign cron.
+// Shared phone questionnaire with a separately approved internal pilot and customer campaigns.
 import {resolveCrmDb,parseJsonBody} from './core.mjs';
+import {mutationOriginAllowed} from './human-auth.mjs';
 import {beginFixedVoicePreview,advanceFixedVoicePreview} from './fixed-voice-turns.mjs';
 import {normalizePropertySurvey,surveyToCrm} from './fixed-property-survey.mjs';
 import {ANSWER_MAX_BYTES,answerContentType,readBoundedBytes,supportsAnswerAudio,transcribeScriptedAnswer} from './scripted-speech.mjs';
@@ -19,23 +20,44 @@ const json=(result,status=200)=>Response.json(result,{status,headers});
 const error=(reason,status)=>json({error:reason},status);
 const xml=body=>new Response('<Response>'+body+'</Response>',{headers:{...headers,'Content-Type':'application/xml;charset=utf-8'}});
 const end=()=>xml('<Hangup/>');
-const promptKey=(language,prompt)=>'scripted-phone-pilot/'+language+'/'+prompt+'.mp3';
+const promptKey=(language,prompt,tenant)=> (tenant?'scripted-phone-campaigns/'+tenant:'scripted-phone-pilot')+'/'+language+'/'+prompt+'.mp3';
+export const SCRIPTED_CALLING_POLICY='ar3d-fixed-plivo-v1';
+export async function scriptedPromptsReady(env,language,tenant){
+ const files=await Promise.all(PROMPTS.map(name=>env.RECORDINGS.head(promptKey(language,name,tenant))));
+ return files.every(file=>file&&file.size>0&&file.size<=ANSWER_MAX_BYTES);
+}
 const iso=now=>new Date(now).toISOString();
 const normalizePhone=value=>String(value||'').replace(/^\+/,'');
 const escapeXml=value=>value.replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&apos;'})[c]);
 
-function configuration(env){
+function phoneConfiguration(env){
  const authId=env.PLIVO_AUTH_ID,token=env.PLIVO_AUTH_TOKEN;
- const caller=env.AR3D_PLIVO_CALLER_NUMBER,destination=env.AR3D_SCRIPTED_PILOT_VERIFIED_NUMBER;
- const origin=env.AR3D_SCRIPTED_PILOT_ORIGIN;
- const tenant=env.AR3D_SCRIPTED_PILOT_TENANT_ID,lead=env.AR3D_SCRIPTED_PILOT_LEAD_ID;
- if(env.AR3D_SCRIPTED_PILOT_ENABLED!=='enabled'||env.AR3D_PLIVO_RECORDING_AUTH!=='confirmed'||
+ const caller=env.AR3D_PLIVO_CALLER_NUMBER,origin=env.AR3D_SCRIPTED_PILOT_ORIGIN;
+ if(env.AR3D_PLIVO_RECORDING_AUTH!=='confirmed'||
     !/^[A-Za-z0-9]{8,64}$/.test(authId||'')||!/^[A-Za-z0-9]{16,128}$/.test(token||'')||
-    !/^\+91[1-9]\d{9}$/.test(caller||'')||!MOBILE.test(destination||'')||
-    !UUID.test(tenant||'')||!UUID.test(lead||'')||
+    !/^\+91[1-9]\d{9}$/.test(caller||'')||
     !/^https:\/\/[a-z0-9.-]+\.[a-z]{2,}$/i.test(origin||'')||
     !env.AI?.run||!env.RECORDINGS?.get||!env.RECORDINGS?.head)return null;
- return {authId,token,caller,destination,origin,tenant,lead,authorization:'Basic '+btoa(authId+':'+token)};
+ return {authId,token,caller,origin,authorization:'Basic '+btoa(authId+':'+token)};
+}
+
+function configuration(env){
+ const phone=phoneConfiguration(env),destination=env.AR3D_SCRIPTED_PILOT_VERIFIED_NUMBER;
+ const tenant=env.AR3D_SCRIPTED_PILOT_TENANT_ID,lead=env.AR3D_SCRIPTED_PILOT_LEAD_ID;
+ if(!phone||env.AR3D_SCRIPTED_PILOT_ENABLED!=='enabled'||!MOBILE.test(destination||'')||
+    !UUID.test(tenant||'')||!UUID.test(lead||''))return null;
+ return {...phone,destination,tenant,lead};
+}
+
+export async function approvedCampaignPhone(env){
+ if(env.AR3D_SCRIPTED_CAMPAIGNS_ENABLED!=='enabled')return null;
+ const config=configuration(env);
+ if(!config)return null;
+ const verified=await env.CONTROL_DB.prepare(`SELECT id FROM scripted_phone_pilots
+   WHERE job_id IS NULL AND phase='completed' AND hangup_at IS NOT NULL AND provider_account_id=?
+   AND caller=? AND destination=? AND tenant_id=? AND lead_id=? LIMIT 1`)
+  .bind(config.authId,config.caller,config.destination,config.tenant,config.lead).first();
+ return verified?phoneConfiguration(env):null;
 }
 
 async function currentMfa(db,user,now){
@@ -74,7 +96,7 @@ function responseFor(config,row){
 
 async function startPilot(req,env,user,config,now,fetcher){
  if(!config)return error('scripted_phone_pilot_not_configured',503);
- if(new URL(req.url).origin!==config.origin)return error('pilot_origin_mismatch',403);
+ if(!mutationOriginAllowed(req)||new URL(req.url).origin!==config.origin)return error('pilot_origin_mismatch',403);
  let data;
  try{data=parseJsonBody(new TextDecoder('utf-8',{fatal:true}).decode(await readBoundedBytes(req,1024)),1024)}
  catch{return error('invalid_pilot_request',400)}
@@ -87,28 +109,46 @@ async function startPilot(req,env,user,config,now,fetcher){
   AND NOT EXISTS(SELECT 1 FROM lead_opt_out_events o WHERE o.tenant_id=leads.tenant_id AND o.lead_id=leads.id)`)
   .bind(config.tenant,config.lead,config.destination).first();
  if(!lead)return error('verified_internal_lead_unavailable',409);
- const files=await Promise.all(PROMPTS.map(name=>env.RECORDINGS.head(promptKey(data.language,name))));
- if(files.some(file=>!file||file.size<1||file.size>ANSWER_MAX_BYTES))
+ if(!await scriptedPromptsReady(env,data.language))
   return error('pilot_prompt_recordings_incomplete',409);
  const id=crypto.randomUUID(),slot=Math.floor(now/900000),survey=beginFixedVoicePreview({language:data.language,now}).state;
  const reservation=await control.prepare(`INSERT INTO scripted_phone_pilots
-  (id,tenant_id,lead_id,lead_updated_at,actor_id,language,destination,caller,rate_slot,expires_at,phase,survey_json,created_at)
-  SELECT ?,?,?,?,?,?,?,?,?,?,'requested',?,? WHERE NOT EXISTS(
-   SELECT 1 FROM scripted_phone_pilots WHERE expires_at>? AND phase IN('requested','consent','question','transcribing','finishing','unknown'))
+  (id,tenant_id,lead_id,lead_updated_at,actor_id,language,destination,caller,rate_slot,expires_at,phase,survey_json,created_at,provider_account_id)
+  SELECT ?,?,?,?,?,?,?,?,?,?,'requested',?,?,? WHERE NOT EXISTS(
+   SELECT 1 FROM scripted_phone_pilots WHERE job_id IS NULL AND expires_at>? AND phase IN('requested','consent','question','transcribing','finishing','unknown'))
   ON CONFLICT(rate_slot) DO NOTHING`).bind(id,config.tenant,config.lead,lead.updated_at,user.id,
-  data.language,config.destination,config.caller,slot,now+ttl,JSON.stringify(survey),iso(now),now).run();
+  data.language,config.destination,config.caller,slot,now+ttl,JSON.stringify(survey),iso(now),config.authId,now).run();
  if(reservation.meta.changes!==1)return error('pilot_already_requested_or_rate_limited',409);
+ const outcome=await submitScriptedPhone(control,config,id,config.destination,duration,fetcher);
+ if(outcome==='rejected')return error('plivo_rejected_pilot',502);
+ if(outcome==='unknown')return error('pilot_outcome_unconfirmed_check_status',502);
+ return json({id,state:'submitted'},202);
+}
+
+export async function reserveCampaignQuestionnaire(control,config,job,now){
+ const id=crypto.randomUUID(),survey=beginFixedVoicePreview({language:job.language,now}).state;
+ const inserted=await control.prepare(`INSERT INTO scripted_phone_pilots
+   (id,tenant_id,lead_id,lead_updated_at,actor_id,language,destination,caller,expires_at,phase,survey_json,
+    created_at,provider_account_id,job_id)
+   VALUES (?,?,?,?,?,?,?,?,?,'requested',?,?,?,?) ON CONFLICT(tenant_id,job_id) DO NOTHING`)
+  .bind(id,job.tenant_id,job.lead_id,job.lead_updated_at,job.created_by,job.language,job.destination,config.caller,
+   now+ttl,JSON.stringify(survey),iso(now),config.authId,job.id).run();
+ if(inserted.meta.changes!==1)throw Error('scripted_session_already_exists');
+ return id;
+}
+
+export async function submitScriptedPhone(control,config,id,destination,maxSeconds,fetcher){
  try{
   const response=await fetcher('https://api.plivo.com/v1/Account/'+config.authId+'/Call/',{
    method:'POST',redirect:'error',signal:AbortSignal.timeout(8000),
    headers:{Authorization:config.authorization,'Content-Type':'application/json'},body:JSON.stringify({
-    from:config.caller,to:config.destination,answer_url:callback(config,id,'answer'),answer_method:'GET',
-    hangup_url:callback(config,id,'hangup'),hangup_method:'GET',time_limit:duration,hangup_on_ring:25
+    from:config.caller,to:destination,answer_url:callback(config,id,'answer'),answer_method:'GET',
+    hangup_url:callback(config,id,'hangup'),hangup_method:'GET',time_limit:maxSeconds,hangup_on_ring:25
    })
   });
   if([400,401,403,404,422,429].includes(response.status)){
    await control.prepare("UPDATE scripted_phone_pilots SET phase='rejected' WHERE id=? AND phase='requested'").bind(id).run();
-   return error('plivo_rejected_pilot',502);
+   return 'rejected';
   }
   if(!response.ok)throw Error('provider_outcome_unknown');
   const saved=JSON.parse(new TextDecoder().decode(await readBoundedBytes(response,8192)));
@@ -116,11 +156,11 @@ async function startPilot(req,env,user,config,now,fetcher){
   const updated=await control.prepare(`UPDATE scripted_phone_pilots SET provider_request_id=?
    WHERE id=? AND (provider_request_id IS NULL OR provider_request_id=?)`).bind(saved.request_uuid,id,saved.request_uuid).run();
   if(updated.meta.changes!==1)throw Error('provider_outcome_unknown');
-  return json({id,state:'submitted'},202);
+  return 'submitted';
  }catch{
   // No automatic redial, including when Plivo accepted the request but the HTTP response was lost.
   await control.prepare("UPDATE scripted_phone_pilots SET phase='unknown' WHERE id=? AND phase='requested'").bind(id).run();
-  return error('pilot_outcome_unconfirmed_check_status',502);
+  return 'unknown';
  }
 }
 
@@ -135,7 +175,7 @@ export async function handleScriptedPhoneAdmin(req,env,user,{now=Date.now(),fetc
   const recent=await env.CONTROL_DB.prepare(`SELECT id,
     CASE WHEN phase='requested' AND provider_request_id IS NOT NULL THEN 'submitted' ELSE phase END AS phase,
     language,created_at FROM scripted_phone_pilots
-    WHERE tenant_id=? AND lead_id=? ORDER BY created_at DESC LIMIT 5`).bind(config.tenant,config.lead).all();
+    WHERE tenant_id=? AND lead_id=? AND job_id IS NULL ORDER BY created_at DESC LIMIT 5`).bind(config.tenant,config.lead).all();
   return json({configured:true,destinationLast4:config.destination.slice(-4),recent:recent.results});
  }catch{return error('scripted_phone_pilot_unavailable',503)}
 }
@@ -188,6 +228,26 @@ async function saveVerifiedPilot(env,row,now){
  return results[0].meta.changes===1;
 }
 
+async function saveCampaignOptOut(env,row,now){
+ const db=await pilotCrm(env,row.tenant_id),at=iso(now);
+ if(!db)throw Error('scripted_crm_unavailable');
+ await db.batch([
+  db.prepare(`INSERT OR IGNORE INTO lead_opt_out_events(tenant_id,id,lead_id,source,actor,created_at)
+   SELECT tenant_id,?,id,'customer_request','scripted_phone',? FROM leads
+   WHERE tenant_id=? AND id=? AND mobile_e164=?`).bind(row.id,at,row.tenant_id,row.lead_id,row.destination),
+  db.prepare(`UPDATE leads SET consent_status='denied',dnd_status='blocked',updated_at=?
+   WHERE tenant_id=? AND id=? AND mobile_e164=? AND EXISTS(
+    SELECT 1 FROM lead_opt_out_events WHERE tenant_id=? AND id=? AND lead_id=?)`)
+   .bind(at,row.tenant_id,row.lead_id,row.destination,row.tenant_id,row.id,row.lead_id)
+ ]);
+}
+
+async function finishCampaignOptOut(env,row,now){
+ await saveCampaignOptOut(env,row,now);
+ await env.CONTROL_DB.prepare("UPDATE scripted_phone_pilots SET phase='declined' WHERE id=? AND phase='suppressing'").bind(row.id).run();
+ return end();
+}
+
 async function completePilot(env,row,now){
  const saved=await saveVerifiedPilot(env,row,now);
  const phase=saved?'completed':'needs_review';
@@ -209,7 +269,7 @@ async function recordingAnswer(config,env,row,params,fetcher){
 export async function handleScriptedPhoneCallback(req,env,{now=Date.now(),fetcher=fetch}={}){
  const url=new URL(req.url);
  if(!url.pathname.startsWith(HOOK+'/'))return null;
- const config=configuration(env);
+ const config=phoneConfiguration(env);
  if(req.method!=='GET'||!config||url.origin!==config.origin||url.href.length>8192)
   return error('pilot_callback_unavailable',404);
  const [id,step,arg,...rest]=url.pathname.slice(HOOK.length+1).split('/');
@@ -219,18 +279,21 @@ export async function handleScriptedPhoneCallback(req,env,{now=Date.now(),fetche
   if(step==='audio'){
    if(!arg?.endsWith('.mp3')||!PROMPTS.includes(arg.slice(0,-4))||url.search)return error('not_found',404);
    // Scoped to the random pilot ID; serves prerecorded questions only.
-   const row=await control.prepare('SELECT language FROM scripted_phone_pilots WHERE id=? AND expires_at>?')
-    .bind(id,now).first();
-   const audio=row?await env.RECORDINGS.get(promptKey(row.language,arg.slice(0,-4))):null;
+   const row=await control.prepare('SELECT language,tenant_id,job_id FROM scripted_phone_pilots WHERE id=? AND expires_at>? AND provider_account_id=?')
+    .bind(id,now,config.authId).first();
+   const audio=row?await env.RECORDINGS.get(promptKey(row.language,arg.slice(0,-4),row.job_id?row.tenant_id:null)):null;
    if(!audio||audio.size<1||audio.size>ANSWER_MAX_BYTES)return error('not_found',404);
    return new Response(audio.body,{headers:{...headers,'Content-Type':'audio/mpeg','Content-Length':String(audio.size)}});
   }
   if(!await verifiedPlivoGet(req,config,url))return error('invalid_provider_signature',403);
-  const params=url.searchParams,call=params.get('CallUUID'),requestId=params.get('RequestUUID');
+  const params=url.searchParams,call=params.get('CallUUID'),requestId=params.get('ALegRequestUUID')||params.get('RequestUUID');
   if(!ID.test(call||''))return error('invalid_call_reference',400);
   const row=await control.prepare('SELECT * FROM scripted_phone_pilots WHERE id=? AND expires_at>?').bind(id,now).first();
-  if(!row||row.tenant_id!==config.tenant||row.lead_id!==config.lead||
-     row.destination!==config.destination||row.caller!==config.caller)return end();
+  if(!row||row.provider_account_id!==config.authId||row.caller!==config.caller)return end();
+  const operator=configuration(env);
+  if(!row.job_id&&(!operator||row.tenant_id!==operator.tenant||row.lead_id!==operator.lead||
+     row.destination!==operator.destination))return end();
+  if(row.job_id&&step==='answer'&&env.AR3D_SCRIPTED_CAMPAIGNS_ENABLED!=='enabled')return end();
   if(step==='answer'&&!arg){
    if(!ID.test(requestId||'')||params.get('Direction')!=='outbound'||
       normalizePhone(params.get('To'))!==normalizePhone(row.destination)||
@@ -243,19 +306,29 @@ export async function handleScriptedPhoneCallback(req,env,{now=Date.now(),fetche
    return claim.meta.changes===1?responseFor(config,{...row,phase:'consent'}):end();
   }
   if(step==='hangup'&&!arg){
-   if(row.provider_call_id!==call&&(!row.provider_request_id||row.provider_request_id!==requestId))
-    return end();
-   await control.prepare(`UPDATE scripted_phone_pilots SET phase='ended' WHERE id=?
-    AND phase IN('requested','unknown','consent','question','transcribing')`).bind(id).run();
+   const matchedRequest=row.provider_request_id&&row.provider_request_id===requestId;
+   const matchesDestination=params.get('Direction')==='outbound'&&
+    normalizePhone(params.get('To'))===normalizePhone(row.destination)&&
+    normalizePhone(params.get('From'))===normalizePhone(row.caller);
+   if(row.provider_call_id?row.provider_call_id!==call:!matchedRequest&&!matchesDestination)return end();
+   const seconds=params.get('Duration');
+   const durationSeconds=/^\d{1,3}$/.test(seconds||'')?Number(seconds):null;
+   await control.prepare(`UPDATE scripted_phone_pilots SET hangup_at=COALESCE(hangup_at,?),
+    duration_seconds=COALESCE(duration_seconds,?),provider_call_id=COALESCE(provider_call_id,?),
+    phase=CASE WHEN phase IN('requested','unknown','consent','question') THEN 'ended' ELSE phase END
+    WHERE id=?`).bind(now,durationSeconds,call,id).run();
    return new Response(null,{status:204,headers});
   }
   if(row.provider_call_id!==call)return end();
+  if(row.phase==='suppressing'&&row.job_id)return await finishCampaignOptOut(env,row,now);
   if(terminal.has(row.phase))return responseFor(config,row);
   if(step==='consent'&&!arg){
    if(row.phase!=='consent')return row.phase==='question'&&row.turn===0?responseFor(config,row):end();
-   const phase=params.get('Digits')==='1'?'question':'declined';
+   const digits=params.get('Digits');
+   const phase=digits==='1'?'question':digits==='2'&&row.job_id?'suppressing':'declined';
    const changed=await control.prepare("UPDATE scripted_phone_pilots SET phase=? WHERE id=? AND phase='consent'").bind(phase,id).run();
-   return changed.meta.changes===1?responseFor(config,{...row,phase}):end();
+   if(changed.meta.changes!==1)return end();
+   return phase==='suppressing'?await finishCampaignOptOut(env,row,now):responseFor(config,{...row,phase});
   }
   if(step!=='turn'||!/^\d{1,2}$/.test(arg||''))return end();
   const turn=Number(arg);
@@ -274,6 +347,10 @@ export async function handleScriptedPhoneCallback(req,env,{now=Date.now(),fetche
    return responseFor(config,{...row,phase:'needs_review'});
   }
   const result=advanceFixedVoicePreview(JSON.parse(row.survey_json),{transcript:text||'repeat',now});
+  if(row.job_id&&result.state.status==='opted_out'){
+   await control.prepare("UPDATE scripted_phone_pilots SET phase='suppressing' WHERE id=? AND phase='transcribing'").bind(id).run();
+   return await finishCampaignOptOut(env,row,now);
+  }
   const phase={active:'question',completed:'finishing',opted_out:'declined',needs_review:'needs_review'}[result.state.status];
   const survey_json=JSON.stringify(result.state);
   const changed=await control.prepare("UPDATE scripted_phone_pilots SET phase=?,survey_json=?,turn=turn+1 WHERE id=? AND phase='transcribing' AND turn=?")

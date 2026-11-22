@@ -26,19 +26,12 @@ export async function smoke(base,fetchFn=fetch){
       return (await r.text())===expectedCss;
     }],
     ['/app/assets/app.js',200,'text/javascript',async r=>{
-      const js=await r.text();return js.includes('Calling & Exotel Setup')&&js.includes('Sign out');
+      const js=await r.text();return js.includes('Calling Setup')&&js.includes('/v1/human/scripted-phone-pilot')&&js.includes('Sign out');
     }],
     ['/v1/human/me',401,'application/json',async r=>(await r.json()).error==='sign in required'],
-    ['/v1/human/engineering/status',401,'application/json',async r=>(await r.json()).error==='sign in required'],
-    ['/v1/human/engineering/provider-pilot',401,'application/json',async r=>(await r.json()).error==='sign in required'],
-    ['/v1/human/engineering/media-protocol',401,'application/json',async r=>(await r.json()).error==='sign in required'],
-    ['/v1/human/engineering/provider-connectivity',401,'application/json',async r=>(await r.json()).error==='sign in required'],
-    ['/v1/human/engineering/exotel-trial-setup',401,'application/json',async r=>(await r.json()).error==='sign in required'],
-    ['/v1/human/engineering/own-sip-setup',401,'application/json',async r=>(await r.json()).error==='sign in required'],
-    ['/v1/human/engineering/voicebot-fixture',401,'application/json',async r=>(await r.json()).error==='sign in required'],
-    ['/v1/human/engineering/voicebot-qualification',401,'application/json',async r=>(await r.json()).error==='sign in required'],
+    ['/v1/human/scripted-phone-pilot',401,'application/json',async r=>(await r.json()).error==='sign in required'],
+    ['/v1/provider/exotel/voicebot',410,'application/json',async r=>(await r.json()).error==='provider_route_retired'],
     ['/v1/human/leads/33333333-3333-4333-8333-333333333333/qualification',401,'application/json',async r=>(await r.json()).error==='sign in required'],
-    ['/v1/human/voicebot-reviews',401,'application/json',async r=>(await r.json()).error==='sign in required'],
     ['/v1/human/call-intent-proposals',401,'application/json',async r=>(await r.json()).error==='sign in required'],
     ['/v1/human/voice-preview',401,'application/json',async r=>(await r.json()).error==='sign in required'],
   ];

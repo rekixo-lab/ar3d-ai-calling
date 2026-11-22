@@ -36,7 +36,7 @@ export const REQUIRED_COLUMNS = Object.freeze({
     shared_voice_gateway: Object.freeze(['id','bot_id','flow_id','template_assistant_id','template_version','guard_assistant_id','gateway_version','state','last_verified_at']),
     voice_call_routes: Object.freeze(['call_key','tenant_id','publication_id','job_id','operator_request_id','created_at','expires_at']),
     client_account_contacts: Object.freeze(['tenant_id','email','mobile_e164','created_by','created_at','updated_at']),
-    scripted_phone_pilots: Object.freeze(['id','tenant_id','lead_id','lead_updated_at','actor_id','language','destination','caller','rate_slot','expires_at','phase','provider_call_id','provider_request_id','turn','survey_json','created_at']),
+    scripted_phone_pilots: Object.freeze(['id','tenant_id','lead_id','lead_updated_at','actor_id','language','destination','caller','rate_slot','expires_at','phase','provider_call_id','provider_request_id','turn','survey_json','created_at','provider_account_id','job_id','hangup_at','duration_seconds']),
     company_change_requests: Object.freeze(['tenant_id','id','message','status','created_by','created_at','handled_by','handled_at','resolution_note']),
     calling_script_bindings: Object.freeze(['tenant_id','bot_id','assistant_id','source_version']),
     calling_script_versions: Object.freeze(['tenant_id','id','revision','config_json','prompt','provider_state','provider_version']),

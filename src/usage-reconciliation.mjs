@@ -14,7 +14,7 @@ export function reconcileProviderUsage(records,{quota=100,ratePaisePerMinute=nul
   for(const e of records){
     if(!e||typeof e!=='object'||Array.isArray(e)||
        Object.keys(e).some(k=>!['eventId','callSid','tenantId','status','durationSeconds','source'].includes(k))||
-       e.source!=='exotel_verified_readonly'||typeof e.eventId!=='string'||!ID.test(e.eventId)||
+       e.source!=='verified_carrier_readonly'||typeof e.eventId!=='string'||!ID.test(e.eventId)||
        typeof e.callSid!=='string'||!ID.test(e.callSid)||
        typeof e.tenantId!=='string'||!ID.test(e.tenantId)||
        !VALID.has(e.status)||!Number.isSafeInteger(e.durationSeconds)||
@@ -39,7 +39,7 @@ export function reconcileProviderUsage(records,{quota=100,ratePaisePerMinute=nul
   if(estimatedPaise!==null&&!Number.isSafeInteger(estimatedPaise))
     throw Error('provider usage estimate exceeded safe range');
   return Object.freeze({
-    source:'exotel_verified_readonly_preview',events:seen.size,
+    source:'verified_carrier_readonly_preview',events:seen.size,
     completedCalls:completed,otherOutcomes:failures,
     duplicatesIgnored:duplicates,connectedSeconds:seconds,
     hypotheticalRoundedMinutes:minutes,quotaPreviewOnly:{

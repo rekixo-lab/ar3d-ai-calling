@@ -117,7 +117,7 @@ export async function handleCallIntentProposals(req,env,user){
     return json({id,state:'blocked',executionAllowed:false,
       providerCallCreated:false,leadUpdated:false,consentGranted:false,
       customerCallsStarted:0,
-      notice:'Recorded a blocked call intent for human planning only. This cannot launch an Exotel call.'},201);
+      notice:'Recorded a blocked call intent for human planning only. Calling requires a separately approved campaign.'},201);
   }catch{
     return fail('call_intent_proposals_unavailable',503);
   }
