@@ -300,8 +300,73 @@ async function mfaPanel(main){
     section.append(start);
   }catch(err){asError(err)}
 }
+// Operator credit controls are optional; no client-facing setup friction.
+function creditWalletOperator(main){
+ const panel=node('details',{class:'card'},node('summary',{text:'Plivo balance & client credit budgets (operator)'}));
+ const area=div('stack'),provider=div(''),total=div(''),clientStatus=div('');
+ const company=node('select',{class:'field','aria-label':'Client credit company'});
+ const budget=input('plannedCreditInr','number');
+ budget.min='0';budget.max='1000000';budget.value='0';
+ const reason=input('creditReason','text','Reason for changing planned credit');
+ reason.maxLength=200;reason.value='AR3D provisional client credit package update';
+ const save=btn('Set planned credit',async()=>{
+  if(!company.value)return;
+  if(!confirm('Set the selected client planned credit to ₹'+budget.value+'? This does NOT transfer Plivo funds or activate calls.'))return;
+  save.disabled=true;
+  try{
+   const n=Number(budget.value);
+   if(!Number.isSafeInteger(n)||n<0||n>1000000)throw Error('Enter a whole INR amount');
+   const d=await api('/v1/human/credits/tenant','POST',{
+    tenantId:company.value,totalInr:n,expectedCurrentInr:current,reason:reason.value
+   });
+   notice('Client planned credit saved: ₹'+d.plannedInr+'. No Plivo funds transferred.');
+   await reload();
+  }catch(e){asError(e)}finally{save.disabled=false}
+ });
+ let current=0,opened=false;
+ const loadProvider=async()=>{
+  const d=await api('/v1/human/credits/provider');
+  provider.replaceChildren(node('p',{class:'note',text:d.available?
+   'Plivo API cash_credits: '+d.cashCredits+' (currency not independently verified). '+
+   (d.accountType==='developer'?'Trial account — not spendable client funding.':'Not yet a verified INR funding pool.'):
+   'Plivo balance unavailable until API credentials and carrier access are set.'}));
+ };
+ async function reload(){
+  if(!company.value)return;
+  const [d,sum]=await Promise.all([
+   api('/v1/human/credits/tenant?tenantId='+encodeURIComponent(company.value)),
+   api('/v1/human/credits/overview')
+  ]);
+  current=d.plannedInr;budget.value=String(current);
+  clientStatus.replaceChildren(node('p',{class:'note',
+   text:'This company: ₹'+current+' planned, ₹ balance not spendable. No billing or calling activated.'}));
+  total.replaceChildren(node('p',{class:'muted',
+   text:'Total planned across '+sum.clientsWithPlan+' clients: ₹'+sum.plannedTotalInr+
+    '. Not deducted from Plivo cash_credits.'}));
+ }
+ async function open(){
+  if(opened)return;
+  opened=true;
+  const d=await api('/v1/human/tenants?limit=100');
+  company.replaceChildren(node('option',{value:'',text:'Select a client company'}),
+   ...d.tenants.map(t=>node('option',{value:t.id,text:t.display_name+' — '+t.status})));
+  await Promise.all([loadProvider(),api('/v1/human/credits/overview').then(x=>
+   total.replaceChildren(node('p',{class:'note',text:'Total planned: ₹'+x.plannedTotalInr+
+    ' across '+x.clientsWithPlan+' clients (not yet spendable).'}))]);
+ }
+ company.addEventListener('change',()=>reload().catch(asError));
+ area.append(node('p',{class:'muted',
+  text:'These are planning limits only. No money moves to a Plivo subaccount; calling remains disabled until approved funding, minutes reconciliation and telecom checks.'}),
+  btn('Refresh Plivo API balance',()=>loadProvider().catch(asError),true),provider,total,
+  div('formrow',lab('Client company',company),lab('Total planned credit (₹)',budget)),
+  lab('Audit reason',reason),save,clientStatus);
+ panel.append(area);main.append(panel);
+ panel.addEventListener('toggle',()=>{if(panel.open)open().catch(err=>{opened=false;asError(err)})});
+ document.addEventListener('client-created',()=>{opened=false;if(panel.open)open().catch(asError)});
+}
+
 async function superAdmin(main){
- const panel=div('card client-directory',title('Client directory'));panel.id='clients-panel';main.append(panel);
+ const panel=div('card client-directory',title('Client directory'));panel.id='clients-panel';main.append(panel);creditWalletOperator(main);
  const list=div(''),directorySearch=input('clientDirectorySearch','search','Search company name, slug or email');
  const prev=btn('← Previous companies',async()=>{pageOffset=Math.max(0,pageOffset-100);await refresh();await refreshAccess();populateMemberCompanies()},true);
  const next=btn('Next companies →',async()=>{pageOffset+=100;await refresh();await refreshAccess();populateMemberCompanies()},true);
@@ -343,12 +408,14 @@ async function superAdmin(main){
  const name=input('company','text','Builder company name');
  const email=input('contactEmail','email','client@builder.com');
  const mobile=input('mobile','tel','10-digit Indian mobile');
+ const initialCredit=input('initialCreditInr','number');initialCredit.min='0';initialCredit.max='1000000';initialCredit.value='0';
  existing=node('select',{class:'field'},[node('option',{value:'',text:'New company or automatically match by name'}),
   ...tenantRowsAll.filter(t=>t.status==='trial'||t.status==='active').map(t=>node('option',{value:t.id,text:t.display_name}))]);
  existing.addEventListener('change',()=>{const t=tenantRowsAll.find(t=>t.id===existing.value);if(t)name.value=t.display_name});
  const advanced=node('details',{},[node('summary',{text:'Link to an existing company instead'}),lab('Existing company',existing)]);
  const f=node('form',{class:'stack'},[
   div('formrow',lab('Company name',name),lab('Client email',email),lab('Client mobile',mobile)),
+  lab('Initial planned credit (₹) — no Plivo funds moved',initialCredit),
   advanced,
   node('button',{class:'btn',type:'submit',text:'Create client invitation'})
  ]);
@@ -361,11 +428,13 @@ async function superAdmin(main){
   if(!confirm(action+' and generate a private invitation for '+email.value+'? No email or password will be sent automatically.'))return;
   const submit=f.querySelector('button[type=submit]');submit.disabled=true;
   try{
-   const body={displayName:name.value,email:email.value,mobile:mobile.value};
+   const body={displayName:name.value,email:email.value,mobile:mobile.value,
+    initialCreditInr:Number(initialCredit.value||0)};
    if(existing.value)body.tenantId=existing.value;
    const d=await api('/v1/human/client-accounts','POST',body);
    inviteResult.replaceChildren(div('banner',
     node('strong',{text:d.existingTenant?'Existing company linked':'New company created'}),
+    node('p',{text:'Client planned credit: ₹'+d.plannedCreditInr+' (not live Plivo balance or calling allowance).'}),
     node('p',{text:'Invitation is not sent automatically. Copy this private one-time link and share it only with the intended client. The client chooses their own password.'}),
     node('input',{class:'field',value:d.inviteUrl,readonly:'readonly','aria-label':'Private client invitation link'}),
     btn('Copy private link',async()=>{try{await navigator.clipboard.writeText(d.inviteUrl);notice('Private link copied.')}catch{notice('Select and copy the invitation link above.',true)}},true),
@@ -644,6 +713,19 @@ async function renderClient(id,content){
  if(!content.isConnected||content.renderVersion!==version)return;
  if(roleLabel)roleLabel.textContent=d.role==='client_admin'?'Client Admin':'Client viewer';
  const overview=clientDashboardOverview(d,()=>renderClient(id,content));
+ // Client-visible credit is explicitly provisional until carrier CDR billing.
+ if(d.role==='client_admin'){
+  const metric=div('card metric',node('span',{class:'muted',text:'Planned calling credit'}),
+   node('strong',{text:'Loading…'}),
+   node('p',{class:'muted',text:'Not yet spendable; activation pending.'}));
+  overview.querySelector('.client-metrics')?.append(metric);
+  api('/v1/human/credits/tenant?tenantId='+encodeURIComponent(id)).then(w=>{
+   if(content.renderVersion!==version)return;
+   metric.querySelector('strong').textContent='₹'+String(w.plannedInr);
+  }).catch(()=>{
+   if(content.renderVersion===version)metric.querySelector('strong').textContent='Not configured';
+  });
+ }
  const sections=Object.fromEntries(['customers','ai-test','calling','results','company'].map(key=>[
   key,node('section',{class:'workspace-section',id:key,hidden:true})
  ]));
