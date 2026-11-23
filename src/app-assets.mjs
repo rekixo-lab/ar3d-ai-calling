@@ -1420,8 +1420,9 @@ async function crmWorkflow(tenantId,content,role,refreshContent=content){
   ].map(([value,text])=>node('option',{value,text})));
   let offset=0;
   const searchBtn=btn('Search',()=>{offset=0;refresh().catch(asError)},true);
+  const hotLeadsBtn=btn('Interested leads',()=>{filter.value='interested';offset=0;refresh().catch(asError)},true);
   const tableArea=div(''),details=div(''),visitArea=div('');
-  workflow.append(div('formrow',lab('Search leads',search),lab('Interest status',filter),lab('Customer type',segmentFilter),searchBtn),tableArea,details);
+  workflow.append(div('formrow',lab('Search leads',search),lab('Interest status',filter),lab('Customer type',segmentFilter),searchBtn,hotLeadsBtn),tableArea,details);
   const schedule=node('details',{class:'card'},[node('summary',{text:'Site visits'}),visitArea]);
   content.append(schedule);
   async function visitList(){
@@ -1440,14 +1441,38 @@ async function crmWorkflow(tenantId,content,role,refreshContent=content){
           const allowed=v?.status==='requested'?['confirmed','cancelled']:['completed','cancelled'];
           statusSelect.replaceChildren(...allowed.map(s=>node('option',{value:s,text:s})));
         }
-        selected.addEventListener('change',statusOptions);statusOptions();
+        const newVisitTime=input('newVisitTime','datetime-local');
+        function currentVisitTime(){
+          const v=pending.find(x=>x.id===selected.value);
+          if(!v)return;
+          const time=new Date(v.scheduledAt);
+          newVisitTime.value=new Date(time.getTime()-time.getTimezoneOffset()*60000).toISOString().slice(0,16);
+        }
+        selected.addEventListener('change',()=>{statusOptions();currentVisitTime()});statusOptions();currentVisitTime();
         const form=node('form',{class:'formrow'},[lab('Visit',selected),lab('Status update',statusSelect),
           node('button',{class:'btn secondary',type:'submit',text:'Save visit status'})]);
         form.addEventListener('submit',async e=>{e.preventDefault();try{
           await api('/v1/human/visits/'+selected.value,'PATCH',{tenantId,status:statusSelect.value});
           notice('Visit status saved; no notifications were sent.');await visitList();
         }catch(err){asError(err)}});
-        visitArea.append(form);
+        const rescheduleForm=node('form',{class:'formrow'},[
+          lab('New visit date/time',newVisitTime),
+          node('button',{class:'btn secondary',type:'submit',text:'Reschedule visit'})
+        ]);
+        rescheduleForm.addEventListener('submit',async e=>{
+          e.preventDefault();
+          try{
+            const v=pending.find(x=>x.id===selected.value);
+            if(!v||!newVisitTime.value)throw Error('Select a visit and a new date/time');
+            await api('/v1/human/visits/'+v.id,'PATCH',{
+              tenantId,action:'reschedule',expectedScheduledAt:v.scheduledAt,
+              scheduledAt:new Date(newVisitTime.value).toISOString()
+            });
+            notice('Visit date updated in CRM. Inform the customer separately.');await visitList();
+          }catch(err){asError(err)}
+        });
+        visitArea.append(form,rescheduleForm,
+         node('p',{class:'muted',text:'Rescheduling updates CRM only. Automatic SMS/WhatsApp reminders are not connected yet.'}));
       }
     }
   }
