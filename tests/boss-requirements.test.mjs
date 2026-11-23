@@ -51,9 +51,9 @@ test('Boss spreadsheet supports both categories, size, visit date and safe uncla
 });
 test('CSV segment, plot size and invalid calendar day are rejected strictly',()=>{
   for(const value of ['approved to call','verified','telemarketing'])assert.throws(()=>
-    parseLeadCsv('Mobile,Customer Type\n9876543210,'+value),/invalid customer type/);
-  assert.throws(()=>parseLeadCsv('Mobile,Visit Date\n9876543210,2026-02-30'),/invalid visit preference date/);
-  assert.throws(()=>parseLeadCsv('Mobile,Plot Size\n9876543210,'+'x'.repeat(121)),/invalid plot size/);
+    parseLeadCsv('Name,Mobile,Customer Type\nExample buyer,9876543210,'+value),/invalid customer type/);
+  assert.throws(()=>parseLeadCsv('Name,Mobile,Visit Date\nExample buyer,9876543210,2026-02-30'),/invalid visit preference date/);
+  assert.throws(()=>parseLeadCsv('Name,Mobile,Plot Size\nExample buyer,9876543210,'+'x'.repeat(121)),/invalid plot size/);
 });
 test('import uses CRM-only tenant scope; never grants consent or creates a call',async()=>{
   const f=fake();
