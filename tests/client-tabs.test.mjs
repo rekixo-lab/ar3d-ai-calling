@@ -3,9 +3,9 @@ import assert from 'node:assert/strict';
 import vm from 'node:vm';
 import {js,css} from '../src/app-assets.mjs';
 
-test('client workspace shows the four primary views through one navigation',()=>{
+test('client workspace shows five primary views including independent AI Testing',()=>{
   assert.doesNotThrow(()=>new vm.Script(js));
-  for(const name of ['Customers / Excel','Calling','Company details','Results / CRM'])assert.ok(js.includes(name));
+  for(const name of ['Customers / Excel','AI Testing','Calling','Company details','Results / CRM'])assert.ok(js.includes(name));
   assert.match(js,/section\.hidden=name!==key/);
   assert.match(js,/aria-current/);
   assert.match(js,/campaignResultsPanel\(id,section\)/);
@@ -24,4 +24,14 @@ test('client overview shows only the selected tenant CRM counts and current role
   assert.match(js,/content\.replaceChildren\(node\('p',\{class:'muted',text:'Loading workspace…'\}\)\)/);
   assert.match(css,/\.client-summary/);
   assert.match(css,/\.client-metrics/);
+});
+
+test('standalone AI Testing UI cannot call, dial or persist practice answers',()=>{
+  assert.match(js,/function aiTestingPanel\(content\)/);
+  assert.match(js,/'ai-test':section=>aiTestingPanel\(section\)/);
+  const code=js.slice(js.indexOf('function aiTestingPanel('),js.indexOf('function manualCustomerPanel('));
+  assert.match(code,/action:'start'/);
+  assert.match(code,/action:'turn'/);
+  assert.match(code,/No.*CRM update/);
+  assert.doesNotMatch(code,/\/v1\/human\/leads|\/v1\/human\/calling\/runs|Save Reviewed Answers to CRM','POST'/);
 });
