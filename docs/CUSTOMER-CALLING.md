@@ -14,6 +14,7 @@ Complete the [verified-number pilot](scripted-phone-pilot.md) before enabling cu
 - Client Admin → **Customers / Excel → Customer list → Interested leads** now selects the existing Interest status filter immediately (read-only shortcut). Existing user-specific CRM access remains unchanged.
 - Client Admin → **Customers / Excel → Site visits** can now reschedule a visit that is `requested` or `confirmed`. The chosen future date/time is saved to the client's own CRM, leaving the visit status unchanged, with an audit entry and stale-update conflict protection. Completed/cancelled visits cannot be rescheduled.
 - **No automatic notifications are sent.** Rescheduling does not make Plivo calls or SMS/WhatsApp messages; the staff must inform the customer manually until a separately approved provider integration and opt-in reminder workflow exist.
+- **Sales team assignment:** Client Admin can open a customer in **Customers / Excel → Customer list** and choose **Assign customer to sales staff**. Only currently active members of that company are available, and every change is audited. Assigning a customer does not give them permission to call, message or bypass consent/DND. If staff options are missing, ask AR3D Super Admin to invite members to that company first. Requires isolated Calling CRM migration `0020_lead_staff_assignments.sql`.
 
 ## Next Actions and easy reports (pre-KYC)
 
