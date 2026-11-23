@@ -1019,12 +1019,26 @@ function launchReadinessPanel(main){
    if(!card.isConnected)return;
    status.textContent=data.canClaimProductionReady?
     'Production go-live verified.':'Not yet production-ready. Plivo KYC alone is not the remaining step.';
-   const engineering=table(['Engineering gate','Readiness'],data.engineering.map(x=>[x.label,x.ready?'Verified':'Not implemented / signed off']));
+   const engineering=table(['Required engineering / privacy gate','Readiness'],
+    data.engineering.filter(x=>x.id!=='open_conversation').map(x=>
+     [x.label,x.ready?'Verified':'Not implemented / signed off']));
+   const packs=Array.isArray(data.audioPacks)?data.audioPacks:[];
+   const audio=table(['Private R2 internal test voice pack','Object metadata check'],
+    packs.map(p=>[
+     (p.language==='hi'?'Hindi':'English')+' — internal pilot',
+     String(p.requiredReady)+'/'+String(p.requiredTotal)+' required MP3 ready; repeat.mp3: '+
+      String(p.optionalRepeat)+'; '+(p.ready?'All required objects ready':'Incomplete or unverified')+
+      (p.missing?.length?'; missing: '+p.missing.join(', '):'')+
+      (p.invalid?.length?'; invalid size: '+p.invalid.join(', '):'')+
+      (p.unavailable?.length?'; metadata unavailable: '+p.unavailable.join(', '):'')
+    ]));
    const external=table(['Provider / operator gate','Verification'],data.external.map(x=>[x.label,x.verified?'Verified':'Independent verification required']));
    const setup=table(['Plivo and Worker configuration','Configuration only'],data.environment.map(x=>[x.label,x.configured?'Present':'Missing / disabled']));
    details.replaceChildren(
-    node('p',{class:'muted',text:'Fixed-question Plivo script: implemented. Real-time conversational AI: not implemented. Presence of an API key does not prove KYC or a permitted live route.'}),
-    title('Engineering still required','h3'),engineering,
+    node('p',{class:'muted',text:'Agreed v1: fixed-question Smart Voice Q&A, not an open-ended streaming AI. Live two-way interruption is optional later. No API key or R2 file proves Plivo KYC or a permitted call route.'}),
+    title('Internal pilot audio (R2, read-only)','h3'),audio,
+    node('p',{class:'muted',text:'Checks private R2 object presence and size, not pronunciation, sound quality or phone readiness. Customer campaign voice packs use separate tenant folders.'}),
+    title('Engineering and operator sign-off still required','h3'),engineering,
     node('details',{class:'card'},[
      node('summary',{text:'Provider approvals and internal pilot'}),
      external,
