@@ -1,0 +1,75 @@
+// Operator-only dry-run inventory of a single lead's deletion dependencies.
+// NEVER removes customer data, revokes consent, clears DND or places a call.
+// A complete, policy-approved retention/deletion workflow is still required.
+import {resolveCrmDb} from './core.mjs';
+
+const path=/^\/v1\/human\/leads\/([a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})\/deletion-readiness$/i;
+const uuid=/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
+const headers={'Cache-Control':'no-store','X-Content-Type-Options':'nosniff','Referrer-Policy':'no-referrer'};
+const json=(body,status=200)=>Response.json(body,{status,headers});
+const fail=(error,status)=>json({error},status);
+const sources=[
+ ['calls','calls'],
+ ['callingJobs','calling_jobs'],
+ ['campaignCandidates','call_campaign_candidates'],
+ ['siteVisits','site_visits'],
+ ['consentReferences','lead_consent_evidence'],
+ ['optOutEvents','lead_opt_out_events']
+];
+
+export async function handleDeletionReadiness(req,env,user){
+ const url=new URL(req.url),match=url.pathname.match(path);
+ if(!match)return null;
+ if(req.method!=='GET')return fail('method not allowed',405);
+ if([...url.searchParams.keys()].some(key=>key!=='tenantId')||
+    url.searchParams.getAll('tenantId').length!==1||
+    !uuid.test(url.searchParams.get('tenantId')||''))
+  return fail('valid tenantId required',400);
+ if(user?.globalRole!=='super_admin'||!uuid.test(user.id||'')&&typeof user.id!=='string')
+  return fail('forbidden',403);
+ if(!/^[a-f0-9]{64}$/i.test(user.token_hash||''))return fail('current MFA Super Admin required',403);
+ try{
+  const control=env.CONTROL_DB,tid=url.searchParams.get('tenantId'),now=Date.now();
+  const mfa=await control.prepare(
+   'SELECT 1 AS verified FROM human_mfa_settings m JOIN human_sessions s ON s.user_id=m.user_id '+
+   'WHERE m.user_id=? AND s.token_hash=? AND m.enabled_at IS NOT NULL '+
+   'AND s.created_at>=m.enabled_at AND s.revoked_at IS NULL AND s.expires_at>? LIMIT 1')
+   .bind(user.id,user.token_hash,now).first();
+  if(!mfa)return fail('current MFA Super Admin required',403);
+  const tenant=await control.prepare(
+   'SELECT id AS tenant_id,storage_mode,dedicated_binding FROM tenants WHERE id=? LIMIT 1')
+   .bind(tid).first();
+  if(!tenant)return fail('tenant not found',404);
+  const db=resolveCrmDb(env,tenant),leadId=match[1];
+  const lead=await db.prepare(
+   'SELECT id,consent_status,dnd_status FROM leads WHERE tenant_id=? AND id=?')
+   .bind(tid,leadId).first();
+  if(!lead)return fail('lead not found',404);
+  const counts=await Promise.all(sources.map(async([,table])=>{
+   const row=await db.prepare('SELECT COUNT(*) AS n FROM '+table+
+    ' WHERE tenant_id=? AND lead_id=?').bind(tid,leadId).first();
+   return Number(row?.n||0);
+  }));
+  const dependentRecords=Object.fromEntries(sources.map(([name],i)=>[name,counts[i]]));
+  return json({
+   tenantId:tid,leadId,
+   mode:'read_only_deletion_dry_run',executionAllowed:false,
+   piiDeleted:false,providerRecordingsDeleted:false,
+   contactSuppressionPreserved:dependentRecords.optOutEvents>0||
+    lead.consent_status==='denied'||lead.dnd_status==='blocked',
+   dependentRecords,
+   checksRequired:[
+    'approved_retention_and_legal_hold_policy',
+    'verified_production_backup_and_isolated_restore',
+    'recording_and_export_inventory',
+    'preserve_do_not_call_suppression_after_erasure',
+    'cancel_or_reconcile_in_flight_calling',
+    'tenant_scoped_authenticated_delete_approval'
+   ],
+   notice:'No records were deleted. This is a dependency inventory, not a complete privacy erasure or authorization to dial.'
+  });
+ }catch(e){
+  console.error('AR3D private deletion dry-run unavailable',e);
+  return fail('read-only deletion check unavailable',503);
+ }
+}
