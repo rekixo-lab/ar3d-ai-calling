@@ -114,17 +114,12 @@ function cloudflareMock({ controlTables=[],crmTables=[],controlName='ar3d-callin
         else if(sql.includes('human_mfa_settings')) rows=['user_id','recovery_generation_id','enabled_at'].map(name=>({name}));
         else if(sql.includes('human_mfa_recovery_codes')) rows=['user_id','code_hash','used_at'].map(name=>({name}));
         else if(sql.includes('provider_event_inbox')) rows=['tenant_id','provider','event_id','status'].map(name=>({name}));
-        else if(sql.includes('exotel_voicebot_event_receipts')) rows=['receipt_key','account_fingerprint','session_fingerprint','call_fingerprint','conversation_fingerprint','event_fingerprint','payload_digest','event_kind','turn_status','possible_opt_out','status','received_at','expires_at'].map(name=>({name}));
-        else if(sql.includes('exotel_operator_test_calls')) rows=['id','actor_user_id','rate_slot','provider_call_sid','state','error_code','created_at','updated_at'].map(name=>({name}));
-        else if(sql.includes('exotel_operator_status_checks')) rows=['id','call_request_id','actor_user_id','check_slot','state','provider_status','duration_seconds','error_code','created_at','finished_at'].map(name=>({name}));
         else if(sql.includes('human_ip_login_limits')) rows=['ip_hash','attempt_count','blocked_until'].map(name=>({name}));
         else if(sql.includes('lead_opt_out_events')) rows=['tenant_id','lead_id','source','created_at'].map(name=>({name}));
         else if(sql.includes('lead_consent_evidence')) rows=['tenant_id','lead_id','review_status','submitted_by'].map(name=>({name}));
         else if(sql.includes('call_campaign_drafts')) rows=['tenant_id','status','language_mode'].map(name=>({name}));
         else if(sql.includes('call_campaign_candidates')) rows=['tenant_id','campaign_id','lead_id'].map(name=>({name}));
-        else if(sql.includes('voicebot_qualification_reviews')) rows=['tenant_id','lead_id','provider','status','survey_json','source_verified','mapping_verified','possible_opt_out'].map(name=>({name}));
         else if(sql.includes('scripted_call_results')) rows=REQUIRED_COLUMNS.CRM_DB.scripted_call_results.map(name=>({name}));
-        else if(sql.includes('voicebot_verified_turns')) rows=REQUIRED_COLUMNS.CRM_DB.voicebot_verified_turns.map(name=>({name}));
         else if(sql.includes('call_intent_proposals')) rows=['tenant_id','id','campaign_id','lead_id','purpose','state','created_by','created_at'].map(name=>({name}));
         else if(sql.includes('company_profile_versions')) rows=REQUIRED_COLUMNS.CONTROL_DB.company_profile_versions.map(name=>({name}));
         else if(sql.includes('client_account_contacts')) rows=REQUIRED_COLUMNS.CONTROL_DB.client_account_contacts.map(name=>({name}));
@@ -146,20 +141,6 @@ function cloudflareMock({ controlTables=[],crmTables=[],controlName='ar3d-callin
 test('preflight accepts new empty resources with correct Cloudflare identities', async () => {
   const r = await inspectCloudflare({credentials:getCredentials(env),mode:'preflight',template,apiFetch:cloudflareMock()});
   assert.deepEqual(r.modes,{CONTROL_DB:'fresh',CRM_DB:'fresh'});
-});
-test('exact old CRM baseline is upgradeable without mistaking partial schemas as safe',async()=>{
-  const old=REQUIRED_TABLES.CRM_DB.filter(t=>t!=='voicebot_qualification_reviews');
-  assert.equal(checkTables(old,'CRM_DB','preflight'),'crm_additive_upgrade');
-  assert.throws(()=>checkTables(old,'CRM_DB','ready'),/missing tables/);
-  assert.throws(()=>checkTables(old.filter(t=>t!=='leads'),'CRM_DB','preflight'),/partial schema/);
-  assert.equal(verifiedSchemaState({CONTROL_DB:'ready',CRM_DB:'crm_additive_upgrade'}),'crm_additive_upgrade');
-  const result=await inspectCloudflare({credentials:getCredentials(env),mode:'preflight',template,
-    apiFetch:cloudflareMock({controlTables:REQUIRED_TABLES.CONTROL_DB,crmTables:old,
-      triggers:mockTriggers.filter(t=>!t.name.startsWith('trg_voicebot_review_'))})});
-  assert.deepEqual(result.modes,{CONTROL_DB:'ready',CRM_DB:'crm_additive_upgrade'});
-  await assert.rejects(inspectCloudflare({credentials:getCredentials(env),mode:'preflight',template,
-    apiFetch:cloudflareMock({controlTables:REQUIRED_TABLES.CONTROL_DB,crmTables:old,
-      triggers:mockTriggers.filter(t=>t.name!=='trg_no_call_launch')})}),/safety trigger/);
 });
 test('identity mismatch blocks touching any resource', async () => {
   await assert.rejects(inspectCloudflare({credentials:getCredentials(env),mode:'fresh',template,apiFetch:cloudflareMock({controlName:'tiyansh-production'})}),/mismatch/);
@@ -206,7 +187,7 @@ test('ready schema refuses absent CRM safety triggers even when all tables exist
 test('ready schema checks post-migration safety columns, not just original tables', async () => {
   assert.throws(()=>checkColumns(['tenant_id','status'],'CRM_DB','call_campaign_drafts'),/missing columns/);
   assert.throws(()=>checkColumns(['user_id'],'CONTROL_DB','human_mfa_recovery_codes'),/missing columns/);
-  assert.throws(()=>checkColumns(['tenant_id','status'],'CRM_DB','voicebot_qualification_reviews'),/missing columns/);
+   assert.throws(()=>checkColumns(['tenant_id','status'],'CRM_DB','call_intent_proposals'),/missing columns/);
 });
 
 test('ready deployment blocks missing tenant suspension state tracking', () => {
@@ -226,76 +207,13 @@ test('unattended operations allow only both new-empty or both verified-ready sch
   assert.throws(()=>verifiedSchemaState({CONTROL_DB:'unsafe',CRM_DB:'unsafe'}),/mixed or invalid/);
 });
 
-test('preflight allows ONLY the isolated Control D1 Exotel receipts additive upgrade',async()=>{
-  const old=REQUIRED_TABLES.CONTROL_DB.filter(t=>t!=='exotel_voicebot_event_receipts');
-  assert.equal(checkTables(old,'CONTROL_DB','preflight'),'control_additive_upgrade');
-  assert.throws(()=>checkTables(old,'CONTROL_DB','ready'),/missing tables/);
-  assert.throws(()=>checkTables(old.filter(t=>t!=='provider_event_inbox'),'CONTROL_DB','preflight'),/partial schema/);
-  assert.equal(verifiedSchemaState({
-    CONTROL_DB:'control_additive_upgrade',CRM_DB:'ready'
-  }),'control_additive_upgrade');
-  const result=await inspectCloudflare({
-    credentials:getCredentials(env),mode:'preflight',template,
-    apiFetch:cloudflareMock({
-      controlTables:old,crmTables:REQUIRED_TABLES.CRM_DB
-    })
-  });
-  assert.deepEqual(result.modes,{
-    CONTROL_DB:'control_additive_upgrade',CRM_DB:'ready'
-  });
-  await assert.rejects(inspectCloudflare({
-    credentials:getCredentials(env),mode:'preflight',template,
-    apiFetch:cloudflareMock({
-      controlTables:old,crmTables:REQUIRED_TABLES.CRM_DB.filter(t=>t!=='voicebot_qualification_reviews')
-    })
-  }),/mixed/);
-  assert.throws(()=>checkColumns(['receipt_key'],'CONTROL_DB','exotel_voicebot_event_receipts'),/missing columns/);
+test('historical carrier-only tables are ignored by the required active schema',()=>{
+ const expanded=[...REQUIRED_TABLES.CONTROL_DB,'retired_carrier_receipts'];
+ assert.equal(checkTables(expanded,'CONTROL_DB','preflight'),'ready');
+ assert.equal(checkTables(expanded,'CONTROL_DB','ready'),'ready');
+ assert.throws(()=>checkTables(REQUIRED_TABLES.CONTROL_DB.filter(t=>t!=='human_sessions'),
+  'CONTROL_DB','preflight'),/partial schema/);
 });
-
-test('isolated Control D1 operator self-test additive migration allows only exactly one absent table',async()=>{
-  const old=REQUIRED_TABLES.CONTROL_DB.filter(t=>t!=='exotel_operator_test_calls');
-  assert.equal(checkTables(old,'CONTROL_DB','preflight'),'control_operator_test_upgrade');
-  assert.throws(()=>checkTables(old,'CONTROL_DB','ready'),/missing tables/);
-  assert.throws(()=>checkTables(old.filter(t=>t!=='human_sessions'),'CONTROL_DB','preflight'),/partial schema/);
-  assert.equal(verifiedSchemaState({
-    CONTROL_DB:'control_operator_test_upgrade',CRM_DB:'ready'
-  }),'control_operator_test_upgrade');
-  const result=await inspectCloudflare({
-    credentials:getCredentials(env),mode:'preflight',template,
-    apiFetch:cloudflareMock({controlTables:old,crmTables:REQUIRED_TABLES.CRM_DB})
-  });
-  assert.deepEqual(result.modes,{
-    CONTROL_DB:'control_operator_test_upgrade',CRM_DB:'ready'
-  });
-  assert.throws(()=>checkColumns(['id','state'],'CONTROL_DB','exotel_operator_test_calls'),
-    /missing columns/);
-  assert.throws(()=>verifiedSchemaState({
-    CONTROL_DB:'control_operator_test_upgrade',CRM_DB:'crm_additive_upgrade'
-  }),/mixed or invalid/);
-});
-
-test('isolated Control D1 status check evidence has exactly one reviewed additive upgrade',async()=>{
-  const old=REQUIRED_TABLES.CONTROL_DB.filter(t=>t!=='exotel_operator_status_checks');
-  assert.equal(checkTables(old,'CONTROL_DB','preflight'),'control_operator_status_upgrade');
-  assert.throws(()=>checkTables(old,'CONTROL_DB','ready'),/missing tables/);
-  assert.throws(()=>checkTables(old.filter(t=>t!=='human_sessions'),'CONTROL_DB','preflight'),/partial schema/);
-  assert.equal(verifiedSchemaState({
-    CONTROL_DB:'control_operator_status_upgrade',CRM_DB:'ready'
-  }),'control_operator_status_upgrade');
-  const result=await inspectCloudflare({
-    credentials:getCredentials(env),mode:'preflight',template,
-    apiFetch:cloudflareMock({controlTables:old,crmTables:REQUIRED_TABLES.CRM_DB})
-  });
-  assert.deepEqual(result.modes,{
-    CONTROL_DB:'control_operator_status_upgrade',CRM_DB:'ready'
-  });
-  assert.throws(()=>checkColumns(['id','state'],'CONTROL_DB','exotel_operator_status_checks'),
-    /missing columns/);
-  assert.throws(()=>verifiedSchemaState({
-    CONTROL_DB:'control_operator_status_upgrade',CRM_DB:'crm_additive_upgrade'
-  }),/mixed or invalid/);
-});
-
 test('Calling CRM v10 upgrade permits exactly one missing blocked-proposal table',async()=>{
   const old=REQUIRED_TABLES.CRM_DB.filter(x=>x!=='call_intent_proposals');
   assert.equal(checkTables(old,'CRM_DB','preflight'),'crm_call_intent_upgrade');
@@ -319,7 +237,7 @@ test('Calling CRM v10 upgrade permits exactly one missing blocked-proposal table
   assert.throws(()=>checkColumns(['tenant_id','id'],'CRM_DB','call_intent_proposals'),
     /missing columns/);
   assert.throws(()=>verifiedSchemaState({
-    CONTROL_DB:'control_operator_status_upgrade',CRM_DB:'crm_call_intent_upgrade'
+    CONTROL_DB:'unknown_upgrade',CRM_DB:'crm_call_intent_upgrade'
   }),/mixed or invalid/);
 });
 test('campaign dispatch upgrade requires exactly four missing tables on the complete v10 baseline',async()=>{
