@@ -10,6 +10,7 @@ const headers={'Cache-Control':'no-store','X-Content-Type-Options':'nosniff','Re
 const json=(data,status=200)=>Response.json(data,{status,headers});
 const fail=(error,status=400)=>json({error},status);
 const positiveMoney=v=>Number.isSafeInteger(v)&&v>=0&&v<=1000000;
+const allowedPack=v=>[0,100,200,300,400,500].includes(v);
 const toPaise=v=>v*100;
 async function currentMfa(env,user){
  if(user?.globalRole!=='super_admin'||!/^[a-f0-9]{64}$/i.test(user.token_hash||''))return false;
@@ -118,7 +119,7 @@ export async function handleCreditWalletRequest(req,env,user,{fetcher=fetch}={})
   const d=await boundedBody(req);
   if(!d||typeof d!=='object'||Array.isArray(d)||
      Object.keys(d).some(k=>!['tenantId','totalInr','expectedCurrentInr','reason'].includes(k))||
-     !uuid.test(d.tenantId||'')||!positiveMoney(d.totalInr)||
+     !uuid.test(d.tenantId||'')||!allowedPack(d.totalInr)||
      !positiveMoney(d.expectedCurrentInr)||typeof d.reason!=='string'||
      d.reason.trim().length<10||d.reason.trim().length>200||
      /[\u0000-\u001f]/u.test(d.reason))return fail('invalid credit plan',400);

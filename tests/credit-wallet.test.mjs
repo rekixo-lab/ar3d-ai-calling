@@ -40,10 +40,10 @@ test('current-MFA admin sets provisional INR credit; client sees only own balanc
   assert.equal(d.clientsWithPlan,1);
   assert.equal(d.verifiedProviderFunding,false);
   r=await route(f,'tenant',admin,'POST',{
-   tenantId:tid,totalInr:1000,expectedCurrentInr:500,
+   tenantId:tid,totalInr:300,expectedCurrentInr:500,
    reason:'Increase provisional package allocation'});
   assert.equal(r.status,200);
-  assert.equal(f.c.db.prepare('SELECT planned_paise AS n FROM tenant_credit_budgets WHERE tenant_id=?').get(tid).n,100000);
+  assert.equal(f.c.db.prepare('SELECT planned_paise AS n FROM tenant_credit_budgets WHERE tenant_id=?').get(tid).n,30000);
   assert.equal(f.c.db.prepare('SELECT COUNT(*) AS n FROM tenant_credit_audit').get().n,2);
  }finally{f.close()}
 });
@@ -58,6 +58,8 @@ test('credit grants require current MFA, cannot double-use stale budget, refuse 
   assert.equal((await route(f,'tenant',admin,'POST',b)).status,200);
   assert.equal((await route(f,'tenant',admin,'POST',b)).status,409);
   assert.equal((await route(f,'tenant',admin,'POST',{...b,totalInr:-10,expectedCurrentInr:500})).status,400);
+  assert.equal((await route(f,'tenant',admin,'POST',{...b,totalInr:1000,expectedCurrentInr:500})).status,400);
+  assert.equal((await route(f,'tenant',admin,'POST',{...b,totalInr:150,expectedCurrentInr:500})).status,400);
   assert.equal((await route(f,'tenant',admin,'POST',{...b,totalInr:1.5,expectedCurrentInr:500})).status,400);
   assert.equal((await route(f,'tenant',admin,'POST',{...b,reason:'short',expectedCurrentInr:500})).status,400);
   assert.equal((await route(f,'tenant',admin,'POST',{...b,extra:'force'})).status,400);

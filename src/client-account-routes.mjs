@@ -34,8 +34,8 @@ export async function handleClientAccountRequest(req,env,user){
     if(Object.keys(d).some(k=>!['displayName','email','mobile','tenantId','initialCreditInr'].includes(k)))return fail('unexpected account field');
     const displayName=checkName(d.displayName),email=validEmail(d.email),mobile=normalizeIndianPhone(d.mobile);
     const initialCreditInr=d.initialCreditInr??0;
-    if(!Number.isSafeInteger(initialCreditInr)||initialCreditInr<0||initialCreditInr>1000000)
-      return fail('invalid planned credit amount');
+    if(![0,100,200,300,400,500].includes(initialCreditInr))
+      return fail('choose 0, 100, 200, 300, 400 or 500 planned credits');
     // An initial budget is a provisional internal plan, never Plivo funds.
     // Do not allow a stale or non-MFA session to create credits.
     if(initialCreditInr>0){

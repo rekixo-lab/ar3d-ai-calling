@@ -112,13 +112,15 @@ test('stale MFA cannot grant new client credits or create partial invitations',a
  const f=fixture();
  try{
   const r=await post(f,{displayName:'Unapproved Builder',email:'other@example.test',
-   mobile:'9000000024',initialCreditInr:1000});
+   mobile:'9000000024',initialCreditInr:500});
   assert.equal(r.status,403);
   assert.equal(f.c.db.prepare("SELECT COUNT(*) AS n FROM tenants WHERE slug='unapproved-builder'").get().n,0);
   assert.equal(f.c.db.prepare('SELECT COUNT(*) AS n FROM tenant_credit_budgets').get().n,0);
   const bad=await post(f,{displayName:'No Budget Builder',email:'other2@example.test',
    mobile:'9000000025',initialCreditInr:-100});
   assert.equal(bad.status,400);
+  assert.equal((await post(f,{displayName:'Unlisted Pack',email:'unlisted@example.test',mobile:'9000000028',initialCreditInr:150})).status,400);
+  assert.equal((await post(f,{displayName:'Oversize Pack',email:'oversize@example.test',mobile:'9000000029',initialCreditInr:1000})).status,400);
  }finally{f.close()}
 });
 
