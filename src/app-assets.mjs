@@ -303,7 +303,7 @@ async function mfaPanel(main){
 // Operator credit controls are optional; no client-facing setup friction.
 function creditWalletOperator(main){
  const panel=node('details',{class:'card'},node('summary',{text:'Plivo balance & client credit budgets (operator)'}));
- const area=div('stack'),provider=div(''),total=div(''),clientStatus=div('');
+ const area=div('stack'),provider=div(''),connection=div(''),total=div(''),clientStatus=div('');
  const company=node('select',{class:'field','aria-label':'Client credit company'});
  const packages=[0,100,200,300,400,500];
  const budget=node('select',{class:'field','aria-label':'Planned client credit package'},
@@ -331,6 +331,21 @@ function creditWalletOperator(main){
    'Plivo API cash_credits: '+d.cashCredits+' (currency not independently verified). '+
    (d.accountType==='developer'?'Trial account — not spendable client funding.':'Not yet a verified INR funding pool.'):
    'Plivo balance unavailable until API credentials and carrier access are set.'}));
+ };
+ const loadConnection=async()=>{
+  const d=await api('/v1/human/credits/provider-check');
+  const result=d.credentialsVerified?'Plivo API authenticated':'Plivo API connection not verified';
+  const count=d.numberListAvailable?
+   ' · rented numbers listed: '+d.listedNumberCount+
+   (d.totalNumberCount!==null?' of '+d.totalNumberCount:''):' · number list not available';
+  const caller=d.configuredCallerPresent===true?' · configured caller found in provider list':
+   d.configuredCallerPresent===false?' · configured caller not in provider list':' · caller ownership not verified';
+  connection.replaceChildren(
+   node('p',{class:'note',role:'status',text:result+count+caller+'. KYC and outbound route still require provider approval.'}),
+   ...(Array.isArray(d.listedNumbers)?d.listedNumbers.map(n=>
+    node('p',{class:'muted',text:n.maskedNumber+(n.inIndia?' · India':'')+(n.voiceEnabled?' · Voice enabled':' · Voice not verified')})):[]
+   )
+  );
  };
  async function reload(){
   if(!company.value)return;
@@ -361,7 +376,8 @@ function creditWalletOperator(main){
  company.addEventListener('change',()=>reload().catch(asError));
  area.append(node('p',{class:'muted',
   text:'These are planning limits only. No money moves to a Plivo subaccount; calling remains disabled until approved funding, minutes reconciliation and telecom checks.'}),
-  btn('Refresh Plivo API balance',()=>loadProvider().catch(asError),true),provider,total,
+  btn('Refresh Plivo API balance',()=>loadProvider().catch(asError),true),provider,
+  btn('Check Plivo API & rented numbers',()=>loadConnection().catch(asError),true),connection,total,
   div('formrow',lab('Client company',company),lab('Total planned credit (₹)',budget)),
   lab('Audit reason',reason),save,clientStatus);
  panel.append(area);main.append(panel);
