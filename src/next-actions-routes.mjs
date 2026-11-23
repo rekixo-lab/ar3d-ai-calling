@@ -4,7 +4,6 @@ import {requireMembership} from './human-auth.mjs';
 import {resolveCrmDb} from './core.mjs';
 
 const PATH='/v1/human/next-actions';
-const UUID=/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}-[a-f0-9]{12}$/i;
 // Use the same precise, canonical tenant-ID format as the other human routes.
 const TENANT=/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
 const HEADERS={'Cache-Control':'no-store','X-Content-Type-Options':'nosniff','Referrer-Policy':'no-referrer'};
