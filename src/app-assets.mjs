@@ -303,7 +303,7 @@ async function mfaPanel(main){
 // Operator credit controls are optional; no client-facing setup friction.
 function creditWalletOperator(main){
  const panel=node('details',{class:'card'},node('summary',{text:'Plivo balance & client credit budgets (operator)'}));
- const area=div('stack'),provider=div(''),connection=div(''),total=div(''),clientStatus=div('');
+ const area=div('stack'),provider=div(''),connection=div(''),usage=div(''),total=div(''),clientStatus=div('');
  const company=node('select',{class:'field','aria-label':'Client credit company'});
  const packages=[0,100,200,300,400,500];
  const budget=node('select',{class:'field','aria-label':'Planned client credit package'},
@@ -347,6 +347,17 @@ function creditWalletOperator(main){
    )
   );
  };
+ const loadUsage=async()=>{
+  const d=await api('/v1/human/credits/usage-summary');
+  const result=d.available?
+   'Plivo India outbound voice · '+d.fromDate+' to '+d.toDateExclusive+
+   ' (exclusive) · '+d.listedCalls+' calls · '+d.listedBilledSeconds+
+   ' billed seconds · '+d.listedAmount+' '+d.currency+
+   (d.hasMorePages?' · Partial rows; more provider pages available':'')+
+   '. This is the provider account total, not client wallet deductions.':
+   'Plivo usage not available. Check credentials and UsageSummary API permission.';
+  usage.replaceChildren(node('p',{class:'note',role:'status',text:result}));
+ };
  async function reload(){
   if(!company.value)return;
   const [d,sum]=await Promise.all([
@@ -377,7 +388,8 @@ function creditWalletOperator(main){
  area.append(node('p',{class:'muted',
   text:'These are planning limits only. No money moves to a Plivo subaccount; calling remains disabled until approved funding, minutes reconciliation and telecom checks.'}),
   btn('Refresh Plivo API balance',()=>loadProvider().catch(asError),true),provider,
-  btn('Check Plivo API & rented numbers',()=>loadConnection().catch(asError),true),connection,total,
+  btn('Check Plivo API & rented numbers',()=>loadConnection().catch(asError),true),connection,
+  btn('View last 7 days Plivo voice usage',()=>loadUsage().catch(asError),true),usage,total,
   div('formrow',lab('Client company',company),lab('Total planned credit (₹)',budget)),
   lab('Audit reason',reason),save,clientStatus);
  panel.append(area);main.append(panel);
