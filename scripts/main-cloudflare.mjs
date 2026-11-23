@@ -88,6 +88,13 @@ export function makeMainConfig(template, credentials) {
     domainRoutes[0]?.pattern === 'aicalling.ar3dstudio.in' &&
     domainRoutes[0]?.custom_domain === true &&
     Object.keys(domainRoutes[0]).length === 2;
+  // The approved Bengaluru 080 landline is the sole configured AR3D outbound
+  // caller. This non-secret identifier NEVER permits promotional calling,
+  // initiates a call, or changes any independently gated campaign flags.
+  // A wrong or additional template var fails before a remote write.
+  const onlyApprovedCaller = template?.vars &&
+    Object.keys(template.vars).length === 1 &&
+    template.vars.AR3D_PLIVO_CALLER_NUMBER === '+918065491333';
   // Only auth cleanup and the bounded, operator-approved campaign scheduler may run.
   // Reject arbitrary schedules or queue/event consumers targeting other services.
   const onlyAuthCron = template?.triggers &&
@@ -96,7 +103,7 @@ export function makeMainConfig(template, credentials) {
     template.triggers.crons.length === 1 &&
     template.triggers.crons[0] === '* * * * *';
   if (template?.name !== 'ar3d-ai-calling' || template.main !== './src/index.mjs' ||
-      template.route || !onlyCallingDomain || !onlyAuthCron || template.services ||
+      template.route || !onlyCallingDomain || !onlyAuthCron || !onlyApprovedCaller || template.services ||
       !Array.isArray(template.d1_databases) || template.d1_databases.length !== 2 ||
       !Array.isArray(template.r2_buckets) || template.r2_buckets.length !== 1) {
     throw Error('Unsafe Worker template: wrong project, routes, resources or entry point.');
