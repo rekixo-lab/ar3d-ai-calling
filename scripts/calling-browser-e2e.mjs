@@ -87,6 +87,57 @@ try{
  assert.deepEqual(errors,[]);await context.close();
  console.log('Calling UI '+viewport.width+': CSV-only campaign, disabled calling guard, saved answers in Results / CRM PASS');
  }
+ // Multi-company Client Dashboard regression: a viewer in Demo is an admin only
+ // of Secondary Builder. No previous tenant's data or controls may survive a switch.
+ const otherTenant='77777777-7777-4777-8777-777777777777';
+ const otherLead='88888888-8888-4888-8888-888888888888';
+ f.c.db.prepare(`INSERT INTO tenants(id,slug,display_name,plan_code,storage_mode,status,created_at,updated_at)
+  VALUES(?,'secondary-builder','Secondary Builder','starter','shared','active',?,?)`).run(otherTenant,'2020-01-01T00:00:00Z','2020-01-01T00:00:00Z');
+ f.c.db.prepare("INSERT INTO tenant_memberships(tenant_id,user_id,role,created_at) VALUES(?,'viewer','client_admin',?)")
+  .run(otherTenant,new Date().toISOString());
+ f.r.db.prepare(`INSERT INTO leads(tenant_id,id,name,mobile_e164,source_type,created_at,updated_at)
+  VALUES(?,?,'Secondary-only buyer','+919000000080','excel',?,?)`)
+  .run(otherTenant,otherLead,new Date().toISOString(),new Date().toISOString());
+ const multiContext=await browser.newContext({viewport:{width:390,height:844}});
+ const multiToken=await newSession(f.env.CONTROL_DB,'viewer');
+ await multiContext.addCookies([{name:COOKIE,value:multiToken,url:origin}]);
+ const multiPage=await multiContext.newPage(),multiErrors=[];
+ lastPage=multiPage;multiPage.setDefaultTimeout(10000);
+ multiPage.on('pageerror',e=>multiErrors.push(e.message));
+ await multiPage.goto(origin+'/app');
+ await multiPage.locator('.workspace-role').getByText('Client viewer',{exact:true}).waitFor();
+ const overview=multiPage.locator('.client-summary');
+ await overview.getByText('Demo',{exact:true}).waitFor();
+ assert.equal(await multiPage.locator('input[type=file]').count(),0);
+ assert.equal(await multiPage.getByText('Secondary-only buyer',{exact:true}).count(),0);
+ await multiPage.locator('.company-switch select').selectOption(otherTenant);
+ await multiPage.locator('.workspace-role').getByText('Client Admin',{exact:true}).waitFor();
+ await overview.getByText('Secondary Builder',{exact:true}).waitFor();
+ await multiPage.getByText('Secondary-only buyer',{exact:true}).waitFor();
+ assert.equal(await multiPage.getByText('Fictional buyer',{exact:true}).count(),0);
+ assert.equal(await multiPage.locator('input[type=file]').count(),1);
+ assert.equal(await overview.getByText('1',{exact:true}).count(),1);
+ // Confirm the previously broken manual add-customer form really persists
+ // only to the selected tenant, with consent and DND still unknown.
+ await multiPage.getByText('Add one customer manually',{exact:true}).click();
+ await multiPage.locator('input[name=customerName]').fill('Secondary manual buyer');
+ await multiPage.locator('input[name=customerMobile]').fill('9000000079');
+ await multiPage.getByRole('button',{name:'Add customer',exact:true}).click();
+ await multiPage.getByText('Secondary manual buyer',{exact:true}).waitFor();
+ assert.equal(f.r.db.prepare('SELECT COUNT(*) AS n FROM leads WHERE tenant_id=?').get(otherTenant).n,2);
+ assert.equal(f.r.db.prepare("SELECT consent_status,dnd_status FROM leads WHERE tenant_id=? AND name='Secondary manual buyer'").get(otherTenant).consent_status,'unknown');
+ assert.equal(await overview.getByText('2',{exact:true}).count(),1);
+ await multiPage.screenshot({path:'artifacts/client-tenant-switch-mobile.png',fullPage:true});
+ await multiPage.locator('.company-switch select').selectOption(tid);
+ await multiPage.locator('.workspace-role').getByText('Client viewer',{exact:true}).waitFor();
+ await overview.getByText('Demo',{exact:true}).waitFor();
+ await multiPage.getByText('Fictional buyer',{exact:true}).waitFor();
+ assert.equal(await multiPage.getByText('Secondary-only buyer',{exact:true}).count(),0);
+ assert.equal(await multiPage.locator('input[type=file]').count(),0);
+ assert.ok(await multiPage.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
+ assert.deepEqual(multiErrors,[]);
+ await multiContext.close();
+ console.log('Client Dashboard: multi-company role switch, separate CRM records, viewer restrictions and mobile layout PASS');
  const adminContext=await browser.newContext({viewport:{width:1440,height:1000}});
  const adminToken=await newSession(f.env.CONTROL_DB,'admin');await adminContext.addCookies([{name:COOKIE,value:adminToken,url:origin}]);
  const adminPage=await adminContext.newPage();lastPage=adminPage;adminPage.setDefaultTimeout(10000);

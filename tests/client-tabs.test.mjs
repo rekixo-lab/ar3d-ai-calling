@@ -14,3 +14,14 @@ test('client workspace shows the four primary views through one navigation',()=>
   assert.doesNotMatch(js,/Advanced campaign planning and project links|Publish AI agent for calls/);
   assert.match(css,/\.client-content/);
 });
+
+test('client overview shows only the selected tenant CRM counts and current role',()=>{
+  assert.match(js,/function clientDashboardOverview\(data,onRefresh\)/);
+  assert.match(js,/clientDashboardOverview\(d,\(\)=>renderClient\(id,content\)\)/);
+  assert.match(js,/if\(roleLabel\)roleLabel\.textContent=d\.role==='client_admin'/);
+  assert.match(js,/Client Admin · Can manage customers/);
+  assert.match(js,/Viewer · Read-only/);
+  assert.match(js,/content\.replaceChildren\(node\('p',\{class:'muted',text:'Loading workspace…'\}\)\)/);
+  assert.match(css,/\.client-summary/);
+  assert.match(css,/\.client-metrics/);
+});

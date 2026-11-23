@@ -538,7 +538,8 @@ async function clientCompanySummary(tenantId,content,role,companyName=''){
 async function clientPanel(main,openView){
  const tenants=state.me.tenants;
  const panel=div('client-workspace'),content=div('client-content');
- const choice=node('select',{class:'field'},tenants.map(t=>node('option',{value:t.id,text:t.name})));
+ const choice=node('select',{class:'field'},tenants.map(t=>
+  node('option',{value:t.id,text:t.name+' · '+(t.role==='client_admin'?'Admin':'Viewer')})));
  if(tenants.length>1){
   panel.append(div('company-switch',lab('Company',choice)));
   choice.addEventListener('change',()=>renderClient(choice.value,content));
@@ -548,10 +549,33 @@ async function clientPanel(main,openView){
  await renderClient(choice.value,content);
 }
 
+// Verified tenant overview: only the selected company's server-authorized counts.
+function clientDashboardOverview(data,onRefresh){
+ const owner=data.role==='client_admin',metrics=data.metrics||{};
+ const count=key=>String(Number.isSafeInteger(metrics[key])&&metrics[key]>=0?metrics[key]:0);
+ const summary=div('card client-summary',
+  div('row between',
+   div('',title('Company overview'),node('strong',{class:'client-company-name',text:data.tenant.name})),
+   div('row',node('span',{class:'badge '+(owner?'positive':'pending'),
+     text:owner?'Client Admin · Can manage customers':'Viewer · Read-only'}),
+    btn('Refresh overview',onRefresh,true))),
+  div('cards client-metrics',
+   ...[['Customers',count('leads'),'users'],
+       ['Call records',count('calls'),'phone'],
+       ['Visit requests',count('siteVisits'),'calendar']].map(([label,value,symbol])=>
+      div('card metric',div('metric-symbol',icon(symbol)),
+       node('span',{class:'muted',text:label}),node('strong',{text:value})))),
+  node('p',{class:'muted',text:'These figures are this company’s CRM records, not verified Plivo call minutes or charges.'}));
+ summary.setAttribute('aria-label','Selected company overview');
+ return summary;
+}
 async function renderClient(id,content){
  const version=(content.renderVersion||0)+1;
  content.renderVersion=version;
  state.clientSetTab=null;
+ const roleLabel=root.querySelector('.workspace-role');
+ if(roleLabel)roleLabel.textContent='Client workspace';
+ // Clear the previous company's visible data before requesting this company.
  content.replaceChildren(node('p',{class:'muted',text:'Loading workspace…'}));
  let d;
  try{d=await api('/v1/human/overview?tenantId='+encodeURIComponent(id))}
@@ -562,6 +586,8 @@ async function renderClient(id,content){
   return;
  }
  if(!content.isConnected||content.renderVersion!==version)return;
+ if(roleLabel)roleLabel.textContent=d.role==='client_admin'?'Client Admin':'Client viewer';
+ const overview=clientDashboardOverview(d,()=>renderClient(id,content));
  const sections=Object.fromEntries(['customers','calling','results','company'].map(key=>[
   key,node('section',{class:'workspace-section',id:key,hidden:true})
  ]));
@@ -586,7 +612,7 @@ async function renderClient(id,content){
   },
   company:section=>clientCompanySummary(id,section,d.role,d.tenant.name)
  };
- content.replaceChildren(...Object.values(sections));
+ content.replaceChildren(overview,...Object.values(sections));
  function selectSection(key){
   if(!Object.hasOwn(sections,key))return;
   for(const [name,section] of Object.entries(sections))section.hidden=name!==key;
