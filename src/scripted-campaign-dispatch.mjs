@@ -2,6 +2,29 @@ import {resolveCrmDb} from './core.mjs';
 import {SCRIPTED_CALLING_POLICY,approvedCampaignPhone,reserveCampaignQuestionnaire,scriptedPromptsReady,submitScriptedPhone} from './scripted-phone-pilot.mjs';
 
 export const CAMPAIGN_CRON='* * * * *';
+// Bounds total D1/R2 lookups in a single Worker invocation. The existing
+// maximum of two attempted tenant dispatches per minute is NOT increased.
+// Cloudflare Free D1 has a 50-query/invocation limit; a small candidate window
+// leaves room for the safety checks and atomic reservations below.
+export const CAMPAIGN_SCAN_LIMIT=16;
+export const CAMPAIGN_WORK_LIMIT=2;
+
+// Stateless rotating pages. Every active tenant is scanned, including those
+// after the first 100, without loading all tenant rows into the Worker.
+// Each pass covers the entire directory; the start within each page rotates
+// by WORK_LIMIT after a full pass so heavily queued early tenants cannot
+// permanently starve their neighbors. No schema migration or stored cursor.
+export function campaignScanOffset(now,count){
+ if(!Number.isSafeInteger(now)||now<0||!Number.isSafeInteger(count)||count<0)
+  throw Error('invalid scheduler time or active tenant count');
+ if(count===0)return 0;
+ const pages=Math.ceil(count/CAMPAIGN_SCAN_LIMIT);
+ const minute=Math.floor(now/60000);
+ const page=minute%pages;
+ const pass=Math.floor(minute/pages);
+ return (page*CAMPAIGN_SCAN_LIMIT+
+  (pass*CAMPAIGN_WORK_LIMIT)%CAMPAIGN_SCAN_LIMIT)%count;
+}
 export async function scriptedCampaignConfiguration(env){
  const ready=Boolean(await approvedCampaignPhone(env));
  return {ready,missing:ready?[]:['Plivo setup, a completed internal pilot and campaign authorization']};
@@ -98,24 +121,48 @@ export async function tickScriptedTenant(env,db,tid,config,{apiFetch=fetch,now=D
  }
 }
 
-export async function runScriptedCampaignCron(env,{now=Date.now(),apiFetch=fetch}={}){
+export async function runScriptedCampaignCron(env,{
+ now=Date.now(),apiFetch=fetch,tickTenant=tickScriptedTenant
+}={}){
  if(env.AR3D_SCRIPTED_CAMPAIGNS_ENABLED!=='enabled')return {processed:0};
+ // Bad schedule inputs fail closed before making any provider or CRM request.
+ if(!Number.isSafeInteger(now)||now<0)throw Error('invalid Calling cron time');
  const config=await approvedCampaignPhone(env);
  if(!config)return {processed:0};
- const rows=(await env.CONTROL_DB.prepare("SELECT id,storage_mode,dedicated_binding FROM tenants WHERE status='active' ORDER BY id LIMIT 100").all()).results;
- const offset=rows.length?Math.floor(now/60000)%rows.length:0;
- let processed=0;
- for(const tenant of [...rows.slice(offset),...rows.slice(0,offset)]){
+ const count=await env.CONTROL_DB.prepare(
+  "SELECT COUNT(*) AS total FROM tenants WHERE status='active'"
+ ).first();
+ const total=Number(count?.total);
+ if(!Number.isSafeInteger(total)||total<0)
+  throw Error('invalid active tenant directory count');
+ if(total===0)return {processed:0,scanned:0,activeTenants:0};
+ const offset=campaignScanOffset(now,total);
+ const batchSize=Math.min(total,CAMPAIGN_SCAN_LIMIT);
+ const sql="SELECT id,storage_mode,dedicated_binding FROM tenants WHERE status='active' ORDER BY id LIMIT ? OFFSET ?";
+ const first=(await env.CONTROL_DB.prepare(sql).bind(batchSize,offset).all()).results;
+ if(!Array.isArray(first)||first.length>batchSize)
+  throw Error('invalid scheduler tenant page');
+ const remaining=batchSize-first.length;
+ const wrap=remaining?(await env.CONTROL_DB.prepare(sql).bind(remaining,0).all()).results:[];
+ if(!Array.isArray(wrap)||wrap.length>remaining)
+  throw Error('invalid scheduler wrap page');
+ const rows=[...first,...wrap],seen=new Set();
+ let processed=0,scanned=0;
+ for(const tenant of rows){
+  if(!tenant||typeof tenant.id!=='string'||seen.has(tenant.id))continue;
+  seen.add(tenant.id);scanned++;
   try{
    const db=resolveCrmDb(env,tenant);
    const work=await db.prepare(`SELECT id FROM calling_runs WHERE tenant_id=? AND state='running'
     UNION ALL SELECT id FROM calling_jobs WHERE tenant_id=? AND state IN('reserved','submitted','unknown') LIMIT 1`)
     .bind(tenant.id,tenant.id).first();
    if(!work)continue;
-   await tickScriptedTenant(env,db,tenant.id,config,{now,apiFetch});
+   await tickTenant(env,db,tenant.id,config,{now,apiFetch});
+   processed++;
   }catch{console.error('AR3D scripted campaign processing unavailable')}
-  processed++;
-  if(processed>=2)break;
+  if(processed>=CAMPAIGN_WORK_LIMIT)break;
  }
- return {processed};
+ // Aggregate counters only: no customer names, tenant IDs, provider tokens or
+ // CRM answers in scheduled logs.
+ return {processed,scanned,activeTenants:total};
 }
