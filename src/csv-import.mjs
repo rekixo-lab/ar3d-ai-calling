@@ -84,6 +84,7 @@ export function parseLeadCsv(csv){
     if(found.length>1)throw Error('Duplicate CSV header for '+field);
     positions[field]=found[0]??-1;
   }
+  if(positions.name<0)throw Error('Missing Name column');
   if(positions.mobile<0)throw Error('Missing Mobile Number column');
   const seen=new Set();const parsed=[];
   for(let i=0;i<rows.length;i++){
@@ -99,6 +100,10 @@ export function parseLeadCsv(csv){
     const visitDatePreference=parseVisitDate(get('visitDate'),line);
     if(plotSize.length>120||/[\u0000-\u001f]/u.test(plotSize))
       throw Error('CSV row '+line+': invalid plot size');
+    if(!name||/[\u0000-\u001f\u007f]/u.test(name))
+      throw Error('CSV row '+line+': customer name is required and must be printable');
+    if(/[\u0000-\u001f\u007f]/u.test(location))
+      throw Error('CSV row '+line+': invalid location');
     if(name.length>120||location.length>160||requirement.length>1000)
       throw Error('CSV row '+line+': text field too long');
     let min,max;
