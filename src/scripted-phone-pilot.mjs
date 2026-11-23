@@ -28,6 +28,37 @@ export async function scriptedPromptsReady(env,language,tenant){
  const files=await Promise.all(PROMPTS.map(name=>env.RECORDINGS.head(promptKey(language,name,tenant))));
  return files.every(file=>file&&file.size>0&&file.size<=ANSWER_MAX_BYTES);
 }
+
+// Metadata-only, bounded audio audit for the current-MFA Super Admin readiness
+// page. Never opens audio bytes, changes R2, queries Plivo or authorizes dialing.
+export async function inspectScriptedPromptPack(env,language='hi'){
+ if(!['hi','en'].includes(language))throw Error('invalid audio pack language');
+ const names=[...PROMPTS,'repeat'],bucket=env?.RECORDINGS;
+ if(typeof bucket?.head!=='function')
+  return Object.freeze({language,scope:'internal_pilot',requiredTotal:PROMPTS.length,
+   requiredReady:0,missing:[],invalid:[],unavailable:[...PROMPTS],
+   optionalRepeat:'unavailable',ready:false});
+ const checked=await Promise.allSettled(names.map(name=>
+  bucket.head(promptKey(language,name,null))));
+ const state=result=>{
+  if(result.status!=='fulfilled')return 'unavailable';
+  if(!result.value)return 'missing';
+  const size=result.value.size;
+  return Number.isSafeInteger(size)&&size>0&&size<=ANSWER_MAX_BYTES?'present':'invalid';
+ };
+ const required=checked.slice(0,PROMPTS.length),missing=[],invalid=[],unavailable=[];
+ required.forEach((result,i)=>{
+  const status=state(result);
+  if(status==='missing')missing.push(PROMPTS[i]+'.mp3');
+  else if(status==='invalid')invalid.push(PROMPTS[i]+'.mp3');
+  else if(status==='unavailable')unavailable.push(PROMPTS[i]+'.mp3');
+ });
+ const requiredReady=PROMPTS.length-missing.length-invalid.length-unavailable.length;
+ return Object.freeze({language,scope:'internal_pilot',requiredTotal:PROMPTS.length,
+  requiredReady,missing,invalid,unavailable,
+  optionalRepeat:state(checked[PROMPTS.length]),ready:requiredReady===PROMPTS.length});
+}
+
 const iso=now=>new Date(now).toISOString();
 const normalizePhone=value=>String(value||'').replace(/^\+/,'');
 const escapeXml=value=>value.replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&apos;'})[c]);
