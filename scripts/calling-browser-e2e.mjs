@@ -117,6 +117,16 @@ try{
  assert.equal(await multiPage.getByText('Fictional buyer',{exact:true}).count(),0);
  assert.equal(await multiPage.locator('input[type=file]').count(),1);
  assert.equal(await overview.getByText('1',{exact:true}).count(),1);
+ // Confirm the previously broken manual add-customer form really persists
+ // only to the selected tenant, with consent and DND still unknown.
+ await multiPage.getByText('Add one customer manually',{exact:true}).click();
+ await multiPage.locator('input[name=customerName]').fill('Secondary manual buyer');
+ await multiPage.locator('input[name=customerMobile]').fill('9000000079');
+ await multiPage.getByRole('button',{name:'Add customer',exact:true}).click();
+ await multiPage.getByText('Secondary manual buyer',{exact:true}).waitFor();
+ assert.equal(f.r.db.prepare('SELECT COUNT(*) AS n FROM leads WHERE tenant_id=?').get(otherTenant).n,2);
+ assert.equal(f.r.db.prepare("SELECT consent_status,dnd_status FROM leads WHERE tenant_id=? AND name='Secondary manual buyer'").get(otherTenant).consent_status,'unknown');
+ assert.equal(await overview.getByText('2',{exact:true}).count(),1);
  await multiPage.screenshot({path:'artifacts/client-tenant-switch-mobile.png',fullPage:true});
  await multiPage.locator('.company-switch select').selectOption(tid);
  await multiPage.locator('.workspace-role').getByText('Client viewer',{exact:true}).waitFor();
