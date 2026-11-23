@@ -169,7 +169,8 @@ export default {
     if(path==='/health'&&isGet(req))return json({service:'AR3D AI Calling',status:'foundation'});
     const scriptedPhone=await handleScriptedPhoneCallback(req,env);
     if(scriptedPhone)return scriptedPhone;
-    if(path==='/v1/provider/exotel'||path.startsWith('/v1/provider/exotel/'))return fail('provider_route_retired',410);
+    // Old provider webhooks have no active adapter; reject unknown routes without touching provider APIs.
+    if(path.startsWith('/v1/provider/'))return fail('not found',404);
     const humanResponse=await handleHumanRequest(req,env);
     if(humanResponse)return humanResponse;
     if(!env.CONTROL_DB)return fail('control DB missing',503);
