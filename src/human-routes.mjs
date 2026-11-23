@@ -9,6 +9,7 @@ import {handleCallingScripts} from './calling-script-routes.mjs';
 import {handleCrmRequest} from './crm-routes.mjs';
 import {handlePropertyQualificationRequest} from './property-qualification-routes.mjs';
 import {handleFixedVoicePreviewRequest} from './fixed-voice-preview-routes.mjs';
+import {handleAiTestCrmRequest} from './ai-test-crm-routes.mjs';
 import {handleTenantLifecycleRequest} from './tenant-lifecycle-routes.mjs';
 import {initialClientAI} from './default-client-ai.mjs';
 import {handleDataPortabilityRequest} from './data-portability-routes.mjs';
@@ -293,6 +294,8 @@ export async function handleHumanRequest(req,env){
     if(dataResponse)return dataResponse;
     const voicePreviewResponse=await handleFixedVoicePreviewRequest(req,env,user);
     if(voicePreviewResponse)return voicePreviewResponse;
+    const aiTestCrmResponse=await handleAiTestCrmRequest(req,env,user);
+    if(aiTestCrmResponse)return aiTestCrmResponse;
     const qualificationResponse=await handlePropertyQualificationRequest(req,env,user);
     if(qualificationResponse)return qualificationResponse;
     const crmResponse=await handleCrmRequest(req,env,user);
