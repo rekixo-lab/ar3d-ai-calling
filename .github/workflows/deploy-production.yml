@@ -176,13 +176,20 @@ jobs:
       - name: Recheck complete safety triggers, columns and identities before deploy
         if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.operation == 'deploy')
         run: node scripts/main-cloudflare.mjs ready
+      # Do not publish over a Worker whose login/MFA bindings are absent.
+      # One narrowly guarded recovery can restore the exact previously green
+      # Worker version, then stop instead of silently deploying fresh code.
+      - name: Verify isolated auth secrets and recover last verified version if necessary
+        id: auth
+        if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.operation == 'deploy')
+        run: node scripts/guarded-worker-recovery.mjs
       - name: Deploy only the new AR3D AI Calling Worker
         id: publish
-        if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.operation == 'deploy')
+        if: (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.operation == 'deploy')) && steps.auth.outputs.recovered != 'true'
         shell: bash
         run: |
           set -euo pipefail
-          npx --yes wrangler@4 deploy --config wrangler.jsonc 2>&1 | tee /tmp/ar3d-calling-wrangler-deploy.log
+          npx --yes wrangler@4 deploy --keep-vars --config wrangler.jsonc 2>&1 | tee /tmp/ar3d-calling-wrangler-deploy.log
           # Wrangler's published workers.dev URL is non-secret; never construct
           # a URL from Cloudflare credentials or accept unrelated Worker names.
           URL="$(grep -Eo 'https://ar3d-ai-calling\.[a-z0-9-]+\.workers\.dev/?' /tmp/ar3d-calling-wrangler-deploy.log | head -n 1 || true)"
@@ -192,8 +199,15 @@ jobs:
             echo "worker_url=$URL" >> "$GITHUB_OUTPUT"
           fi
       - name: Inspect isolated Worker secret binding names (never values)
-        if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.operation == 'deploy')
-        run: node scripts/inspect-main-secrets.mjs
+        if: (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.operation == 'deploy')) && steps.auth.outputs.recovered != 'true'
+        run: |
+          set -euo pipefail
+          for attempt in 1 2 3 4 5 6; do
+            if node scripts/inspect-main-secrets.mjs; then exit 0; fi
+            if [ "$attempt" -lt 6 ]; then sleep 5; fi
+          done
+          echo "::error::Authentication secrets unverified after deploy; manual rollback required"
+          exit 1
       - name: Read-only smoke test on deployed isolated Worker
         if: steps.publish.outputs.worker_url != ''
         shell: bash
@@ -216,3 +230,9 @@ jobs:
             sleep 5
           done
           echo "::error::Custom Calling domain smoke failed"; exit 1
+
+      - name: Mark rollback-only recovery as not a new release
+        if: steps.auth.outputs.recovered == 'true'
+        run: |
+          echo "::error::Previous verified Worker was restored; the new main release has NOT been deployed."
+          exit 1
