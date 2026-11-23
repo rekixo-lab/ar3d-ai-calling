@@ -27,6 +27,12 @@ Client Admin → **Results / CRM → Campaign results & customer answers** may s
 
 It shows the provider-reported amount and billed seconds, with **currency unverified for the India account**. No INR conversion, budget deduction, automatic charge, client money transfer or call attempt occurs. Unanswered or uncertain submissions do not get automatic redials. Provider authorization, actual CDR settlement and final credit balance accounting remain blocked until KYC/currency and commercial approval are verified.
 
+## Plivo seven-day Indian voice usage (read-only)
+
+In Super Admin → **Plivo balance & client credit budgets (operator)**, use **View last 7 days Plivo voice usage**. Its server-only Account API call uses Plivo `GET /v1/Account/{auth_id}/UsageSummary/` with `granularity=day`, `product=voice`, `direction=outbound`, `country=IN`, a bounded 7-day **UTC date** window, and up to 100 rows. The API's `meta.currency` is explicitly shown after verifying the account ID. The report displays only aggregate call count, seconds and provider charge. Partial paged results are marked as incomplete.
+
+**This is a parent-account report, not a per-client wallet ledger**. It must not be used to subtract credits, calculate tenant invoices, call a trial balance spendable, or release another campaign. Pricing, provider CDR invoice reconciliation, reseller/telecom approval and all customer permission gates still apply. This optional check sends **no calls or messages**.
+
 ## Before real client billing or calls
 
 - Confirm the India business account, real currency, balance definition, trial restrictions, legal sales/reseller agreements, and 140 promotional series pricing with Plivo.

@@ -170,3 +170,76 @@ test('Plivo setup check fails safely on API rejection or partial rented-number i
   assert.equal((await route(f,'provider-check',admin,'POST',{x:1})).status,400);
  }finally{f.close()}
 });
+
+test('Plivo UsageSummary shows verified report currency without client-wallet debit',async()=>{
+ const f=fixture();
+ try{
+  f.env.PLIVO_AUTH_ID='TESTACCOUNT123';
+  f.env.PLIVO_AUTH_TOKEN='SYNTHETICAUTHTOKEN123';
+  freshMfa(f);
+  assert.equal((await route(f,'usage-summary',client)).status,403);
+  const before=f.c.db.prepare('SELECT total_changes() AS n').get().n;
+  const r=await route(f,'usage-summary',admin,'GET',undefined,{fetcher:async(url,options)=>{
+   assert.match(url,/^https:\/\/api\.plivo\.com\/v1\/Account\/TESTACCOUNT123\/UsageSummary\/\?/);
+   const query=new URL(url).searchParams;
+   assert.equal(query.get('granularity'),'day');
+   assert.equal(query.get('product'),'voice');
+   assert.equal(query.get('direction'),'outbound');
+   assert.equal(query.get('country'),'IN');
+   assert.equal(query.get('page_size'),'100');
+   assert.equal(options.method,'GET');
+   assert.match(options.headers.Authorization,/^Basic /);
+   return Response.json({
+    meta:{auth_id:'TESTACCOUNT123',currency:'INR',total_spend:14.555,from_date:'2026-11-17'},
+    usage:[{product:'voice',country:'IN',direction:'outbound',
+     duration_seconds:105,total_units:2,total_amount:14.555}]
+   });
+  }});
+  assert.equal(r.status,200,await r.clone().text());
+  const d=await r.json();
+  assert.equal(d.available,true);
+  assert.equal(d.currency,'INR');
+  assert.equal(d.listedCalls,2);
+  assert.equal(d.listedBilledSeconds,105);
+  assert.equal(d.listedAmount,'14.555000');
+  assert.equal(d.providerWindowTotalSpend,'14.555000');
+  assert.equal(d.clientWalletDebited,false);
+  assert.equal(d.clientFundingVerified,false);
+  assert.equal(d.listedRowsComplete,true);
+  assert.equal(f.c.db.prepare('SELECT total_changes() AS n').get().n,before);
+  assert.ok(!JSON.stringify(d).includes('TESTACCOUNT123'));
+  assert.ok(!JSON.stringify(d).includes('SYNTHETICAUTHTOKEN123'));
+ }finally{f.close()}
+});
+
+test('UsageSummary does not expose untrusted charge or misleading partial usage',async()=>{
+ const f=fixture();
+ try{
+  f.env.PLIVO_AUTH_ID='TESTACCOUNT123';
+  f.env.PLIVO_AUTH_TOKEN='SYNTHETICAUTHTOKEN123';
+  freshMfa(f);
+  const call=async(data)=>await(await route(f,'usage-summary',admin,'GET',undefined,{
+   fetcher:async()=>Response.json(data)
+  })).json();
+  const good={meta:{auth_id:'TESTACCOUNT123',currency:'USD',
+   next_page_token:'next',total_spend:3},
+   usage:[{product:'voice',country:'IN',direction:'outbound',
+    duration_seconds:60,total_units:1,total_amount:3}]};
+  const partial=await call(good);
+  assert.equal(partial.available,true);
+  assert.equal(partial.hasMorePages,true);
+  assert.equal(partial.listedRowsComplete,false);
+  assert.equal(partial.currency,'USD');
+  assert.equal(partial.clientWalletDebited,false);
+  assert.equal((await call({...good,meta:{...good.meta,auth_id:'OTHER'}})).available,false);
+  assert.equal((await call({...good,meta:{...good.meta,currency:'Rupees'}})).available,false);
+  assert.equal((await call({...good,usage:[{...good.usage[0],total_amount:-1}]})).available,false);
+  assert.equal((await call({...good,usage:[{...good.usage[0],country:'US'}]})).available,false);
+  const unavailable=await route(f,'usage-summary',admin,'GET',undefined,{
+   fetcher:async()=>new Response('rate limit',{status:429})
+  });
+  assert.equal((await unavailable.json()).available,false);
+  assert.equal((await route(f,'usage-summary?forceDebit=true')).status,400);
+  assert.equal((await route(f,'usage-summary',admin,'POST',{anything:true})).status,400);
+ }finally{f.close()}
+});
