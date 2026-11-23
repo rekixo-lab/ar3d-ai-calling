@@ -64,6 +64,38 @@ try{
  await page.getByRole('button',{name:'Submit test answer',exact:true}).click();
  await page.getByText(/Stop-calling request detected/).waitFor();
  assert.ok(await page.getByRole('button',{name:'Submit test answer',exact:true}).isDisabled());
+ // Task 5: explicitly choose a synthetic CRM customer and enable auto-save.
+ // The standalone preview above must still have written zero rows.
+ const autoId=viewport.width===1440?
+  'eeeeeeee-1111-4111-8111-111111111111':'eeeeeeee-2222-4222-8222-222222222222';
+ const autoName='AI Auto Test '+viewport.width,atAuto=new Date().toISOString();
+ f.r.db.prepare(`INSERT INTO leads(tenant_id,id,name,mobile_e164,source_type,requirements_json,created_at,updated_at)
+  VALUES(?,?,?,?,'excel',?,?,?)`)
+  .run(tid,autoId,autoName,viewport.width===1440?'+919000000087':'+919000000088',
+   JSON.stringify({raw:'Do not overwrite Excel notes'}),atAuto,atAuto);
+ await page.getByLabel('Search CRM customer').fill(autoName);
+ await page.getByRole('button',{name:'Find CRM customer'}).click();
+ await page.getByLabel('Select CRM customer').selectOption(autoId);
+ await page.getByLabel('Auto-save AI test answers to selected customer CRM').check();
+ await page.getByRole('button',{name:'Start AI test',exact:true}).click();
+ const visitDay=new Date(Date.now()+10*86400000+330*60000).toISOString().slice(0,10);
+ const autoAnswers=aiLang==='hi'?
+  ['फ्लैट','रायपुर','शंकर नगर','3BHK','35 लाख','हाँ',visitDay]:
+  ['flat','Raipur','Shankar Nagar','3BHK','35 lakh','yes',visitDay];
+ for(let i=0;i<autoAnswers.length;i++)await step(autoAnswers[i],i);
+ await page.getByRole('status').getByText(/Auto-saved to/).waitFor();
+ const saved=f.r.db.prepare('SELECT * FROM leads WHERE tenant_id=? AND id=?').get(tid,autoId);
+ assert.equal(saved.budget_max_inr,3500000);
+ assert.equal(saved.plot_size_preference,'3BHK');
+ assert.equal(saved.consent_status,'unknown');
+ assert.equal(saved.dnd_status,'unknown');
+ assert.equal(JSON.parse(saved.requirements_json).raw,'Do not overwrite Excel notes');
+ assert.equal(JSON.parse(saved.requirements_json).propertySurvey.simulated,true);
+ assert.equal(f.r.db.prepare('SELECT COUNT(*) AS n FROM crm_audit_events WHERE tenant_id=? AND target_id=? AND action=?')
+  .get(tid,autoId,'lead.ai_test_auto_saved').n,1);
+ assert.equal(f.r.db.prepare('SELECT COUNT(*) AS n FROM calls').get().n,aiCallsBefore);
+ assert.equal(f.r.db.prepare('SELECT COUNT(*) AS n FROM site_visits').get().n,0);
+ await page.screenshot({path:'artifacts/ai-auto-crm-'+viewport.width+'.png',fullPage:true});
  await page.getByRole('link',{name:'Calling',exact:true}).click();
  await page.getByRole('heading',{name:'Campaign controls',exact:true}).waitFor();
  await page.getByRole('link',{name:'Company details',exact:true}).click();
