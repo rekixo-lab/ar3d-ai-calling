@@ -352,7 +352,7 @@ function creditWalletOperator(main){
    ...d.tenants.map(t=>node('option',{value:t.id,text:t.display_name+' — '+t.status})));
   await Promise.all([loadProvider(),api('/v1/human/credits/overview').then(x=>
    total.replaceChildren(node('p',{class:'note',text:'Total planned: ₹'+x.plannedTotalInr+
-    ' across '+x.clientsWithPlan+' clients (not yet spendable).'}))]);
+    ' across '+x.clientsWithPlan+' clients (not yet spendable).'})))]);
  }
  company.addEventListener('change',()=>reload().catch(asError));
  area.append(node('p',{class:'muted',
