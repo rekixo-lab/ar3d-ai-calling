@@ -26,12 +26,14 @@ test('client overview shows only the selected tenant CRM counts and current role
   assert.match(css,/\.client-metrics/);
 });
 
-test('standalone AI Testing UI cannot call, dial or persist practice answers',()=>{
-  assert.match(js,/function aiTestingPanel\(content\)/);
-  assert.match(js,/'ai-test':section=>aiTestingPanel\(section\)/);
+test('AI Testing UI defaults to preview only; explicit auto-save is scoped to selected CRM customer',()=>{
+  assert.match(js,/function aiTestingPanel\(content,tenantId,role\)/);
+  assert.match(js,/'ai-test':section=>aiTestingPanel\(section,id,d.role\)/);
   const code=js.slice(js.indexOf('function aiTestingPanel('),js.indexOf('function manualCustomerPanel('));
   assert.match(code,/action:'start'/);
   assert.match(code,/action:'turn'/);
-  assert.match(code,/no CRM update/i);
-  assert.doesNotMatch(code,/\/v1\/human\/leads|\/v1\/human\/calling\/runs|Save Reviewed Answers to CRM','POST'/);
+  assert.match(code,/By default results are not saved/i);
+  assert.match(code,/\/v1\/human\/ai-test-crm/);
+  assert.match(code,/canSave&&autoSave.checked/);
+  assert.doesNotMatch(code,/\/v1\/human\/calls\/start|\/v1\/human\/calling\/runs/);
 });
