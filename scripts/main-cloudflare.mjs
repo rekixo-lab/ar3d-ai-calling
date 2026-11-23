@@ -19,7 +19,7 @@ export const REQUIRED_TABLES = Object.freeze({
   ]),
   CRM_DB: Object.freeze([
     'leads','agents','calls','site_visits','crm_audit_events',
-    'lead_notes','conversation_simulations','lead_opt_out_events','lead_consent_evidence','call_campaign_drafts','call_campaign_candidates','call_intent_proposals','calling_policies','calling_clearances','calling_runs','calling_jobs','scripted_call_results','lead_staff_assignments',
+    'lead_notes','conversation_simulations','lead_opt_out_events','lead_consent_evidence','call_campaign_drafts','call_campaign_candidates','call_intent_proposals','calling_policies','calling_clearances','calling_runs','calling_jobs','scripted_call_results','lead_staff_assignments','verified_provider_call_costs',
   ]),
 });
 export const REQUIRED_COLUMNS = Object.freeze({
@@ -59,6 +59,7 @@ export const REQUIRED_COLUMNS = Object.freeze({
     calling_jobs: Object.freeze(['tenant_id','id','run_id','lead_id','state','provider_call_sid','reserved_at']),
     call_intent_proposals: Object.freeze(['tenant_id','id','campaign_id','lead_id','purpose','state','created_by','created_at']),
     lead_staff_assignments: Object.freeze(['tenant_id','lead_id','user_id','assigned_by','assigned_at']),
+    verified_provider_call_costs: Object.freeze(['tenant_id','job_id','provider_call_uuid','reported_amount','billed_seconds','call_seconds','currency_status','verified_by','verified_at']),
   }),
 });
 const accountPattern = /^[a-f0-9]{32}$/i;
@@ -158,6 +159,9 @@ export function checkTables(tables, binding, mode) {
   // Any missing unrelated table still fails closed rather than deploying.
   if(mode==='preflight'&&binding==='CONTROL_DB'&&missing.length===2&&
      ['tenant_credit_budgets','tenant_credit_audit'].every(t=>missing.includes(t)))return 'control_credit_upgrade';
+  if(mode==='preflight'&&binding==='CRM_DB'&&missing.length===2&&
+     ['lead_staff_assignments','verified_provider_call_costs'].every(t=>missing.includes(t)))return 'crm_staff_cdr_upgrade';
+  if(mode==='preflight'&&binding==='CRM_DB'&&missing.length===1&&missing[0]==='verified_provider_call_costs')return 'crm_cdr_upgrade';
   if(mode==='preflight'&&binding==='CRM_DB'&&missing.length===1&&missing[0]==='lead_staff_assignments')return 'crm_staff_upgrade';
   if(mode==='preflight'&&binding==='CONTROL_DB'&&missing.length===1&&missing[0]==='scripted_phone_pilots')return 'control_scripted_pilot_upgrade';
   if(mode==='preflight'&&binding==='CONTROL_DB'&&missing.length===1&&missing[0]==='company_change_requests')return 'control_company_change_upgrade';
@@ -223,7 +227,7 @@ export async function inspectCloudflare({ credentials, mode, apiFetch = fetch, t
     if (['control_client_accounts_upgrade','control_publication_upgrade','control_profile_upgrade',
          'control_script_upgrade','crm_dispatch_upgrade','ready','crm_call_intent_upgrade',
          'crm_scripted_results_upgrade','control_company_change_upgrade',
-         'control_scripted_pilot_upgrade','control_credit_upgrade','crm_staff_upgrade'].includes(state)) {
+         'control_scripted_pilot_upgrade','control_credit_upgrade','crm_staff_upgrade','crm_cdr_upgrade','crm_staff_cdr_upgrade'].includes(state)) {
       if (binding === 'CRM_DB') {
         const triggers = await query(id, "SELECT name,sql FROM sqlite_master WHERE type='trigger' AND name LIKE 'trg_%'");
         checkSafetyTriggers(triggers,{allowCallIntentUpgrade:state === 'crm_call_intent_upgrade'});
@@ -231,7 +235,8 @@ export async function inspectCloudflare({ credentials, mode, apiFetch = fetch, t
       for (const table of Object.keys(REQUIRED_COLUMNS[binding])) {
         if(state==='control_client_accounts_upgrade'&&table==='client_account_contacts')continue;
         if(state==='control_credit_upgrade'&&['tenant_credit_budgets','tenant_credit_audit'].includes(table))continue;
-        if(state==='crm_staff_upgrade'&&table==='lead_staff_assignments')continue;
+        if(['crm_staff_upgrade','crm_staff_cdr_upgrade'].includes(state)&&table==='lead_staff_assignments')continue;
+        if(['crm_cdr_upgrade','crm_staff_cdr_upgrade'].includes(state)&&table==='verified_provider_call_costs')continue;
         if(state==='control_company_change_upgrade'&&table==='company_change_requests')continue;
         if(state==='control_scripted_pilot_upgrade'&&table==='scripted_phone_pilots')continue;
         if(state==='control_publication_upgrade'&&['calling_agent_publications','shared_voice_gateway','voice_call_routes'].includes(table))continue;
@@ -259,6 +264,10 @@ export async function inspectCloudflare({ credentials, mode, apiFetch = fetch, t
 // A single clean state is mandatory for unattended deployment. Mixed/partial
 // schemas are NEVER safe to automatically initialize or deploy.
 export function verifiedSchemaState(modes) {
+  if(modes?.CONTROL_DB==='control_credit_upgrade'&&modes?.CRM_DB==='crm_staff_cdr_upgrade')return 'credit_staff_cdr_upgrade';
+  if(modes?.CONTROL_DB==='control_credit_upgrade'&&modes?.CRM_DB==='crm_cdr_upgrade')return 'credit_cdr_upgrade';
+  if(modes?.CONTROL_DB==='ready'&&modes?.CRM_DB==='crm_staff_cdr_upgrade')return 'crm_staff_cdr_upgrade';
+  if(modes?.CONTROL_DB==='ready'&&modes?.CRM_DB==='crm_cdr_upgrade')return 'crm_cdr_upgrade';
   if(modes?.CONTROL_DB==='control_credit_upgrade'&&modes?.CRM_DB==='crm_staff_upgrade')return 'credit_staff_upgrade';
   if(modes?.CONTROL_DB==='control_credit_upgrade'&&modes?.CRM_DB==='ready')return 'control_credit_upgrade';
   if(modes?.CONTROL_DB==='ready'&&modes?.CRM_DB==='crm_staff_upgrade')return 'crm_staff_upgrade';

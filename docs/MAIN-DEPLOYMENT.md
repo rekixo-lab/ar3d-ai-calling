@@ -170,6 +170,12 @@ The manual `workflow_dispatch` preflight/initialize/deploy options remain as a r
 
 GitHub `main` pushes now recognize only the reviewed, additive Calling `migrations/control/0020_client_credit_planning.sql` (two empty new wallet planning tables) and `migrations/crm/0020_lead_staff_assignments.sql` (one new per-tenant staff assignment table). The deployment workflow never touches live leads or changes CRM consent/DND triggers. Its preflight confirms the **exact Calling D1 resource names/IDs**, the existing columns and safety triggers and R2 bucket. It then runs only missing migrations, rechecks both schemas as fully ready and publishes only `ar3d-ai-calling` on its existing hostname. Wrong IDs, mismatched/missing unrelated tables or unsafe triggers fail closed. Do not run `initialize` on populated databases. There is no auto-dialing or provider credential activation from a migration; KYC remains pending.
 
+## Idempotent provider CDR cost observation migration
+
+The guarded Calling-only deploy now recognizes `verified_provider_call_costs` as one exact additive new CRM table, including a combined preflight state when the earlier Staff Assignment table is also absent. It requires the correct isolated Calling D1 IDs, all existing CRM safety triggers and columns, and the correct private R2 bucket. On an authorized `main` push it runs `migrations/crm/0021_verified_provider_call_costs.sql` only when this table is missing, then checks the complete schema again before publishing the Calling Worker.
+
+The new table is an **immutable raw provider observation**, not a client credit deduction or bill. Production migration/deployment outcome must be verified in Cloudflare/GitHub Actions. No other AR3D databases or routes may be modified.
+
 ## Bootstrap 401: exact-token mismatch troubleshooting (non-secret)
 
 The live `POST /v1/human/bootstrap` returns HTTP 401 when the presented Bearer token is absent, differs from the Worker-only `ADMIN_BOOTSTRAP_TOKEN`, or the binding is absent/too short. Token values are intentionally inaccessible from the Cloudflare dashboard. The bootstrap helper now strips accidental surrounding paste whitespace, reports entered token character count **only**, and never logs the token/password. The Worker normalizes accidental surrounding whitespace before checking a constant-time hash comparison. Normal login and API tokens are unrelated.

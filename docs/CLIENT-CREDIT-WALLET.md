@@ -33,6 +33,14 @@ In Super Admin → **Plivo balance & client credit budgets (operator)**, use **V
 
 **This is a parent-account report, not a per-client wallet ledger**. It must not be used to subtract credits, calculate tenant invoices, call a trial balance spendable, or release another campaign. Pricing, provider CDR invoice reconciliation, reseller/telecom approval and all customer permission gates still apply. This optional check sends **no calls or messages**.
 
+## Verified CDR observation ledger — billing safety groundwork
+
+A **current-MFA Super Admin** may use `POST /v1/human/plivo-cost-reconcile` with the exact tenant and terminal Calling job UUID to verify the recorded Plivo call identity against the provider's Calls API and store its reported amount/billed seconds in isolated Calling CRM `verified_provider_call_costs`. Every observation is **unique per tenant/job and provider call ID**, auditable, and immutable: repeating the same verified amount does not double-count or write a second audit entry, and a changed provider amount returns **409 manual review** rather than replacing an earlier record. Unknown, in-flight, mismatched, cross-account and forged provider responses are rejected.
+
+**Currency status is always `unverified`.** This table is *not* a wallet charge, not an invoice, not a spendable balance and not proof of permission to dial. Client credits are **never** deducted by this endpoint. After carrier currency, fundable non-trial balance, per-tenant attribution and refund/tax policies are approved, build an independent integer-unit debit and reservation ledger with corresponding D1 atomic spend gates before activating paid usage.
+
+This changes only the **isolated Calling CRM D1**, requiring additive `migrations/crm/0021_verified_provider_call_costs.sql` via guarded deployment. Do not apply it to other AR3D projects.
+
 ## Before real client billing or calls
 
 - Confirm the India business account, real currency, balance definition, trial restrictions, legal sales/reseller agreements, and 140 promotional series pricing with Plivo.

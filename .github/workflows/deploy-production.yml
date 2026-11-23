@@ -101,11 +101,14 @@ jobs:
       # no modifications to existing customer/lead data. The preflight verifies
       # the D1 names, all other tables and CRM safety triggers before allowing.
       - name: Create isolated Calling Control provisional credit tables
-        if: github.event_name == 'push' && (steps.schema.outputs.schema_state == 'control_credit_upgrade' || steps.schema.outputs.schema_state == 'credit_staff_upgrade')
+        if: github.event_name == 'push' && contains(fromJSON('["control_credit_upgrade","credit_staff_upgrade","credit_cdr_upgrade","credit_staff_cdr_upgrade"]'), steps.schema.outputs.schema_state)
         run: npx --yes wrangler@4 d1 execute ar3d-calling-control --remote --yes --config wrangler.jsonc --file migrations/control/0020_client_credit_planning.sql
       - name: Create isolated Calling CRM staff assignment table
-        if: github.event_name == 'push' && (steps.schema.outputs.schema_state == 'crm_staff_upgrade' || steps.schema.outputs.schema_state == 'credit_staff_upgrade')
+        if: github.event_name == 'push' && contains(fromJSON('["crm_staff_upgrade","credit_staff_upgrade","crm_staff_cdr_upgrade","credit_staff_cdr_upgrade"]'), steps.schema.outputs.schema_state)
         run: npx --yes wrangler@4 d1 execute ar3d-calling-shared-crm --remote --yes --config wrangler.jsonc --file migrations/crm/0020_lead_staff_assignments.sql
+      - name: Create isolated Calling CRM verified CDR observation ledger
+        if: github.event_name == 'push' && contains(fromJSON('["crm_cdr_upgrade","crm_staff_cdr_upgrade","credit_cdr_upgrade","credit_staff_cdr_upgrade"]'), steps.schema.outputs.schema_state)
+        run: npx --yes wrangler@4 d1 execute ar3d-calling-shared-crm --remote --yes --config wrangler.jsonc --file migrations/crm/0021_verified_provider_call_costs.sql
       # Never auto-migrate partial or mixed schemas. Re-check the EMPTY state
       # immediately before writing, even if the previous read said fresh.
       - name: Confirm both isolated D1 schemas are still empty
@@ -143,6 +146,7 @@ jobs:
           npx --yes wrangler@4 d1 execute ar3d-calling-shared-crm --remote --yes --config wrangler.jsonc --file migrations/crm/0011_scripted_campaign_dispatch.sql
           npx --yes wrangler@4 d1 execute ar3d-calling-shared-crm --remote --yes --config wrangler.jsonc --file migrations/crm/0013_scripted_call_results.sql
           npx --yes wrangler@4 d1 execute ar3d-calling-shared-crm --remote --yes --config wrangler.jsonc --file migrations/crm/0020_lead_staff_assignments.sql
+          npx --yes wrangler@4 d1 execute ar3d-calling-shared-crm --remote --yes --config wrangler.jsonc --file migrations/crm/0021_verified_provider_call_costs.sql
       - name: Verify post-initialization schema before proceeding
         if: (github.event_name == 'push' && steps.schema.outputs.schema_state == 'fresh') || (github.event_name == 'workflow_dispatch' && inputs.operation == 'initialize')
         run: node scripts/main-cloudflare.mjs ready
