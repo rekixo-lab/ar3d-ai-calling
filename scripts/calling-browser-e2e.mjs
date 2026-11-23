@@ -130,7 +130,7 @@ try{
  await picker.locator('option[value="'+draft.id+'"]').waitFor({state:'attached'});
  assert.equal(await picker.inputValue(),draft.id);
  assert.ok(await page.getByRole('button',{name:'Start calling',exact:true}).isDisabled());
- await page.getByText(/Calling disabled/).waitFor();
+ await page.getByText(/AI calling is being prepared by AR3D/).waitFor();
  const selected=f.r.db.prepare(`SELECT l.id,l.name FROM call_campaign_candidates c JOIN leads l
    ON l.tenant_id=c.tenant_id AND l.id=c.lead_id WHERE c.tenant_id=? AND c.campaign_id=?`).all(tid,draft.id);
  assert.deepEqual(selected.map(x=>x.name),['Uploaded buyer']);
