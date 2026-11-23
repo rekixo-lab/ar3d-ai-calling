@@ -75,28 +75,33 @@ export async function handleClientAccessRequest(req,env,user){
       .bind(tid,id).first();
     if(!target)return fail('active member not found; refresh',409);
     const result=await db.batch([
+      // Audit only an actually active membership in the same transaction as revocation.
+      db.prepare(`INSERT INTO tenant_audit_events(id,tenant_id,actor,action,target_id,detail_json,created_at)
+        SELECT ?,?,?,'client.member_disabled',?,?,?
+        FROM tenant_memberships WHERE tenant_id=? AND user_id=? AND status='active'`)
+        .bind(crypto.randomUUID(),tid,user.id,id,detail,at,tid,id),
       db.prepare("UPDATE tenant_memberships SET status='disabled' WHERE tenant_id=? AND user_id=? AND status='active'").bind(tid,id),
       // Prevent an already-issued invitation from instantly undoing this revocation.
       db.prepare('UPDATE human_invitations SET expires_at=0 WHERE tenant_id=? AND email=? AND redeemed_at IS NULL AND expires_at>?')
-        .bind(tid,target.email,Date.now()),
-      db.prepare(`INSERT INTO tenant_audit_events(id,tenant_id,actor,action,target_id,detail_json,created_at)
-        VALUES(?,?,?,'client.member_disabled',?,?,?)`)
-        .bind(crypto.randomUUID(),tid,user.id,id,detail,at)
+        .bind(tid,target.email,Date.now())
     ]);
-    if(Number(result[0]?.meta?.changes)!==1)return fail('member changed; refresh',409);
+    if(Number(result[0]?.meta?.changes)!==1||Number(result[1]?.meta?.changes)!==1)
+      return fail('member changed; refresh',409);
     return json({ok:true,status:'disabled',notice:'Company access removed for this member; other clients are unchanged.'});
   }
   const invitationId=Number(revoke[2]);
   if(!Number.isSafeInteger(invitationId))return fail('invalid invitation',400);
+  const stamp=Date.now();
   const result=await db.batch([
+    db.prepare(`INSERT INTO tenant_audit_events(id,tenant_id,actor,action,target_id,detail_json,created_at)
+      SELECT ?,?,?,'client.invitation_revoked',?,?,?
+      FROM human_invitations WHERE rowid=? AND tenant_id=? AND redeemed_at IS NULL AND expires_at>?`)
+      .bind(crypto.randomUUID(),tid,user.id,String(invitationId),detail,at,invitationId,tid,stamp),
     db.prepare(`UPDATE human_invitations SET expires_at=0
       WHERE rowid=? AND tenant_id=? AND redeemed_at IS NULL AND expires_at>?`)
-      .bind(invitationId,tid,Date.now()),
-    db.prepare(`INSERT INTO tenant_audit_events(id,tenant_id,actor,action,target_id,detail_json,created_at)
-      SELECT ?,? ,?,'client.invitation_revoked',token_hash,?,?
-      FROM human_invitations WHERE rowid=? AND tenant_id=? AND expires_at=0 AND redeemed_at IS NULL`)
-      .bind(crypto.randomUUID(),tid,user.id,detail,at,invitationId,tid)
+      .bind(invitationId,tid,stamp)
   ]);
-  if(Number(result[0]?.meta?.changes)!==1)return fail('pending invitation not found; refresh',409);
+  if(Number(result[0]?.meta?.changes)!==1||Number(result[1]?.meta?.changes)!==1)
+    return fail('pending invitation not found; refresh',409);
   return json({ok:true,status:'revoked',notice:'Invitation revoked; the private link can no longer activate access.'});
 }
