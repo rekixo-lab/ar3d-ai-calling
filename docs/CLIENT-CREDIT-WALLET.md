@@ -1,11 +1,11 @@
 # Client Credit Wallet — pre-KYC planning (not live billing)
 
-**Status:** Provisional internal INR credit allocations only. This does **not** top up a Plivo subaccount, move money, establish billing, verify Plivo trial credits as saleable, or allow calls without the pre-existing provider/consent/DND gates.
+**Status:** Provisional internal INR credit allocations only. Pack choices: ₹0 (no-credit trial), ₹100, ₹200, ₹300, ₹400, ₹500. One provisional AR3D credit is defined here as ₹1 of an internal planning budget, **not** Plivo funds or free minutes. This does **not** top up a Plivo subaccount, move money, establish billing, verify Plivo trial credits as saleable, or allow calls without the pre-existing provider/consent/DND gates.
 
 ## User workflow
 
-- **Super Admin → Clients → Create / invite a new client:** choose an initial **planned** rupee amount such as ₹500 or ₹1,000. A **current Super Admin MFA session** is required for a positive initial allocation. The company, invitation, budget and budget audit are written in one Control D1 transaction.
-- **Super Admin → Plivo balance & client credit budgets:** expand operator-only controls. The **Refresh Plivo API balance** action retrieves the Account API's `cash_credits` and account type, using only Worker server-side credentials. It never exposes tokens in API responses or the browser. Select one existing company and set its **total planned INR credit** with an audited reason; the update is optimistic and detects stale amounts. This is setting an amount, not adding an accidental repeat top-up.
+- **Super Admin → Clients → Create / invite a new client:** choose a **planned** pack of 100, 200, 300, 400 or 500 credits (or 0 for a no-credit trial). A **current Super Admin MFA session** is required for a positive initial allocation. The company, invitation, budget and budget audit are written in one Control D1 transaction.
+- **Super Admin → Plivo balance & client credit budgets:** expand operator-only controls. The **Refresh Plivo API balance** action retrieves the Account API's `cash_credits` and account type, using only Worker server-side credentials. It never exposes tokens in API responses or the browser. Select one existing company and set its **total planned INR credit** to one of the same pack amounts with an audited reason; the update is optimistic and detects stale amounts. This is setting an amount, not adding an accidental repeat top-up. Previously configured legacy amounts (for example ₹1,000) remain readable but can only be changed to the new pack choices.
 - **Client Dashboard → Company overview:** a provisional ₹ amount is shown **for that client's own account only**. This explicitly says **not spendable**. No API secrets, global Plivo balance or other tenants' figures are visible to clients.
 - **No balance data?** The provider preview explicitly says unavailable. It does not manufacture ₹1,000 from the screenshot or assume a USD API balance is INR.
 
