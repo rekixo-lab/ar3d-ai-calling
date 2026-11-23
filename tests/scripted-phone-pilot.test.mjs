@@ -227,3 +227,54 @@ test('CSV campaign → approved dial → seven signed answers → client CRM res
   }finally{f.close()}
  }
 });
+
+test('Scripted phone repeats the location prompt after hearing trouble instead of saving it',async()=>{
+ const f=fixture();
+ try{
+  const spoken=['प्लॉट','आपकी आवाज नहीं आ रही','रायपुर','अमलीडीह','1200 वर्ग फुट','45 लाख','बाद में'];
+  const env={...f.env,PLIVO_AUTH_ID:'syntheticAuth',PLIVO_AUTH_TOKEN:token,
+   AR3D_SCRIPTED_PILOT_ENABLED:'enabled',AR3D_PLIVO_RECORDING_AUTH:'confirmed',
+   AR3D_SCRIPTED_PILOT_ORIGIN:origin,AR3D_PLIVO_CALLER_NUMBER:'+918000000000',
+   AR3D_SCRIPTED_PILOT_VERIFIED_NUMBER:internalNumber,AR3D_SCRIPTED_PILOT_TENANT_ID:tid,
+   AR3D_SCRIPTED_PILOT_LEAD_ID:lead,
+   RECORDINGS:{head:async()=>({size:4}),get:async()=>({size:4,body:new Uint8Array(4)})},
+   AI:{async run(){return {text:spoken.shift()}}}
+  };
+  let providerCalls=0,hook;
+  const fetcher=async(url,options)=>{
+   if(url.startsWith('https://api.plivo.com/')){
+    providerCalls++;
+    hook=JSON.parse(options.body).answer_url.replace(/\/answer$/,'');
+    return Response.json({request_uuid:requestId},{status:202});
+   }
+   return new Response('RIFF',{headers:{'Content-Type':'audio/wav'}});
+  };
+  const started=await handleScriptedPhoneAdmin(new Request(origin+'/v1/human/scripted-phone-pilot',{
+   method:'POST',headers:{Origin:origin},
+   body:JSON.stringify({language:'hi',confirm:'CALL_ONE_VERIFIED_INTERNAL_NUMBER'})
+  }),env,admin,{now,fetcher});
+  assert.equal(started.status,202);
+  assert.equal(providerCalls,1);
+  const callback=(step,params={})=>handleScriptedPhoneCallback(
+   signed(hook+'/'+step,{CallUUID:callId,...params}),env,{now,fetcher});
+  await callback('answer',{ALegRequestUUID:requestId,From:'918000000000',
+   To:'919000000001',Direction:'outbound'});
+  await callback('consent',{Digits:'1'});
+  assert.match(await (await callback('turn/0',{RecordingID:'record-id-00'})).text(),/location\.mp3/);
+  const bad=await callback('turn/1',{RecordingID:'record-id-01'});
+  assert.equal(bad.status,200);
+  assert.match(await bad.text(),/location\.mp3/);
+  assert.equal(f.r.db.prepare("SELECT COUNT(*) AS n FROM crm_audit_events WHERE action='lead.scripted_phone_pilot_saved'").get().n,0);
+  for(let i=2;i<=6;i++){
+   const res=await callback('turn/'+i,{RecordingID:'record-id-0'+i});
+   assert.equal(res.status,200);
+   assert.match(await res.text(),i===6?/closing\.mp3/:/<Record/);
+  }
+  assert.equal(spoken.length,0);
+  const row=f.r.db.prepare('SELECT preferred_location,budget_max_inr FROM leads WHERE tenant_id=? AND id=?').get(tid,lead);
+  assert.equal(row.preferred_location,'रायपुर');
+  assert.equal(row.budget_max_inr,4500000);
+  assert.equal(f.r.db.prepare("SELECT COUNT(*) AS n FROM crm_audit_events WHERE action='lead.scripted_phone_pilot_saved'").get().n,1);
+  assert.equal(providerCalls,1);
+ }finally{f.close()}
+});
