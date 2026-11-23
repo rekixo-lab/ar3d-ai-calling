@@ -17,7 +17,7 @@ export function validateSmokeBase(raw){
   return url.origin;
 }
 
-export async function smoke(base,fetchFn=fetch){
+export async function smoke(base,fetchFn=fetch,{checkPlivoAnswer=true}={}){
   const origin=validateSmokeBase(base);
   const checks=[
     ['/health',200,'application/json',async r=>{
@@ -64,8 +64,9 @@ export async function smoke(base,fetchFn=fetch){
   // Its exact URL is deliberately an immediate Hangup with no D1/provider
   // reads or writes. A synthetic POST validates the deployed Cloudflare
   // route and XML before an operator connects the Production Application.
-  const path='/v1/provider/plivo/inbound-unavailable';
-  try{
+  if(checkPlivoAnswer){
+   const path='/v1/provider/plivo/inbound-unavailable';
+   try{
     const response=await fetchFn(new URL(path,origin),{
       method:'POST',redirect:'error',cache:'no-store',
       headers:{'Content-Type':'application/x-www-form-urlencoded'},
@@ -80,6 +81,7 @@ export async function smoke(base,fetchFn=fetch){
   }catch{
     console.log(path,'POST FAIL (network or unexpected response)');
     ok=false;
+   }
   }
   return ok;
 }
