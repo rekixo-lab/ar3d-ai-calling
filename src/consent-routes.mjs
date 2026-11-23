@@ -9,6 +9,7 @@ const json=(data,status=200)=>Response.json(data,{status,headers});
 const fail=(error,status=400)=>json({error},status);
 const sources=['website_form','signed_form','in_person','other'];
 const purposes=['property_information','site_visit'];
+const reviewQueuePath='/v1/human/consent-review-queue';
 const paths=/^\/v1\/human\/leads\/([a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})\/(consent-evidence|call-readiness)$/i;
 
 async function boundedPayload(req){
@@ -43,10 +44,57 @@ function validateIntake(body){
   if(Date.parse(capturedAt)>Date.now()+60000)throw Error('evidence timestamp cannot be in the future');
   return {source:body.source,purpose:body.purpose,reference:body.reference.trim(),capturedAt};
 }
+
+// Tenant-admin-only pre-KYC evidence queue. No mutation, DND lookup, lead
+// permission update or dial. A submitted reference is NOT verified consent.
+async function pendingEvidenceQueue(req,env,user,url){
+ if(req.method!=='GET')return fail('method not allowed',405);
+ const allowed=new Set(['tenantId','purpose','limit','offset']);
+ if([...url.searchParams.keys()].some(key=>!allowed.has(key)||
+    url.searchParams.getAll(key).length!==1))
+  return fail('invalid review queue query',400);
+ const tenantId=url.searchParams.get('tenantId');
+ const member=await requireMembership(env.CONTROL_DB,user,tenantId,true);
+ if(!member)return fail('forbidden',403);
+ const purpose=url.searchParams.get('purpose')||'all';
+ const rawLimit=url.searchParams.get('limit')||'25';
+ const rawOffset=url.searchParams.get('offset')||'0';
+ if(!['all',...purposes].includes(purpose)||!/^\d{1,3}$/.test(rawLimit)||
+    !/^\d{1,5}$/.test(rawOffset))return fail('invalid review queue pagination or purpose',400);
+ const limit=Number(rawLimit),offset=Number(rawOffset);
+ if(limit<1||limit>100||offset>10000)
+  return fail('invalid review queue pagination or purpose',400);
+ const db=resolveCrmDb(env,member),tid=member.tenant_id;
+ const filter="e.tenant_id=? AND e.review_status='pending' AND (?='all' OR e.purpose=?)";
+ const join=' FROM lead_consent_evidence e JOIN leads l ON l.tenant_id=e.tenant_id AND l.id=e.lead_id WHERE ';
+ const [records,total]=await Promise.all([
+  db.prepare('SELECT e.id,e.lead_id AS leadId,e.source,e.purpose,e.reference,'+
+    'e.captured_at AS capturedAt,e.received_at AS receivedAt,'+
+    'l.name AS leadName,l.consent_status AS consentStatus,'+
+    'l.dnd_status AS dndStatus,l.customer_segment AS customerSegment,'+
+    'EXISTS(SELECT 1 FROM lead_opt_out_events o WHERE o.tenant_id=e.tenant_id AND o.lead_id=e.lead_id) AS optedOut'+
+    join+filter+' ORDER BY e.received_at DESC,e.id DESC LIMIT ? OFFSET ?')
+   .bind(tid,purpose,purpose,limit,offset).all(),
+  db.prepare('SELECT COUNT(*) AS total'+join+filter).bind(tid,purpose,purpose).first()
+ ]);
+ return json({tenantId:tid,purpose,limit,offset,total:Number(total?.total||0),
+  items:records.results.map(row=>({...row,optedOut:!!row.optedOut,
+   verificationStatus:'not_verified',executionAllowed:false})),
+  verificationPerformed:false,executionAllowed:false,
+  notice:'Pending evidence is only an unverified customer-supplied reference. This review queue cannot grant consent, clear DND or authorize dialing.'});
+}
+
 export async function handleConsentRequest(req,env,user){
   const url=new URL(req.url),match=url.pathname.match(paths);
-  if(!match)return null;
+  if(!match&&url.pathname!==reviewQueuePath)return null;
   if(!env.CONTROL_DB)return fail('control database unavailable',503);
+  if(url.pathname===reviewQueuePath){
+   try{return await pendingEvidenceQueue(req,env,user,url)}
+   catch(e){
+    console.error('AR3D consent-review queue unavailable',e);
+    return fail('service unavailable',503);
+   }
+  }
   const leadId=match[1],route=match[2],method=req.method;
   try{
     let data=null;
