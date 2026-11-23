@@ -357,7 +357,7 @@ async function superAdmin(main){
     node('input',{class:'field',value:location.origin+'/app',readonly:'readonly','aria-label':'Permanent client sign-in link'})
    ));
    notice('Invitation prepared; client account activates after invitation acceptance.');
-   f.reset();await refresh();await refreshAccess();document.dispatchEvent(new CustomEvent('client-created',{detail:d.id}));
+   f.reset();await refresh();await refreshAccess();populateMemberCompanies();document.dispatchEvent(new CustomEvent('client-created',{detail:d.id}));
   }catch(err){asError(err)}
   finally{submit.disabled=false}
  });
@@ -388,9 +388,59 @@ actionForm.addEventListener('submit',async e=>{e.preventDefault();try{
   if(!confirm((verb==='suspend'?'Suspend':'Resume')+' access for '+t.display_name+'?'))return;
   const result=await api('/v1/human/tenants/'+t.id+'/'+verb,'POST',{reason:reason.value});
   notice('Client access updated: '+result.status+'.');
-  reason.value='';await refresh();await refreshAccess();
+  reason.value='';await refresh();await refreshAccess();populateMemberCompanies();
 }catch(err){asError(err)}});
 await inviteSection(management);
+// Super Admin can review and revoke individual access without suspending a whole builder.
+const membersPanel=node('details',{class:'card'},node('summary',{text:'Members & unused invitation links'}));
+management.append(membersPanel);
+const memberCompany=node('select',{class:'field'});
+const revokeReason=input('revokeReason','text','Required audit reason (at least 10 characters)');
+revokeReason.maxLength=240;
+const memberResults=div('');
+const memberControls=div('stack',lab('Company',memberCompany),
+  lab('Reason for disabling or revoking access',revokeReason),
+  btn('Refresh members and invitations',async()=>{try{await loadMembers()}catch(err){asError(err)}},true),
+  memberResults);
+membersPanel.append(memberControls);
+function populateMemberCompanies(){
+ const previous=memberCompany.value;
+ memberCompany.replaceChildren(node('option',{value:'',text:'Select a company'}),
+  ...tenantRows.map(t=>node('option',{value:t.id,text:t.display_name+' — '+t.status})));
+ if(tenantRows.some(t=>t.id===previous))memberCompany.value=previous;
+}
+populateMemberCompanies();
+memberCompany.addEventListener('change',()=>{loadMembers().catch(asError)});
+async function revokeAccess(path,description){
+ if(revokeReason.value.trim().length<10)throw Error('Enter an audit reason of at least 10 characters');
+ if(!confirm(description+'? This change is recorded in the audit log.'))return;
+ await api(path,'POST',{reason:revokeReason.value.trim()});
+ revokeReason.value='';
+ notice('Access updated. Existing company data and other client accounts are unchanged.');
+ await refresh();await refreshAccess();populateMemberCompanies();await loadMembers();
+}
+async function loadMembers(){
+ const tenantId=memberCompany.value;
+ memberResults.replaceChildren();
+ if(!tenantId)return;
+ const data=await api('/v1/human/tenants/'+tenantId+'/access');
+ const members=data.members.map(m=>[m.email,m.role,m.status,m.status==='active'?
+   btn('Disable member',async()=>{try{
+    await revokeAccess('/v1/human/tenants/'+tenantId+'/members/'+encodeURIComponent(m.id)+'/disable',
+      'Disable '+m.email+' for '+data.client.name);
+   }catch(err){asError(err)}},true):'—']);
+ const invites=data.pendingInvitations.map(i=>[i.email,i.role,new Date(i.expiresAt).toLocaleString(),
+   btn('Revoke link',async()=>{try{
+    await revokeAccess('/v1/human/tenants/'+tenantId+'/invitations/'+i.id+'/revoke',
+      'Revoke pending invitation for '+i.email);
+   }catch(err){asError(err)}},true)]);
+ memberResults.append(title('Member accounts','h3'),
+   node('p',{class:'muted',text:'Disabled members immediately lose access to this company. Re-invite them to restore access. Other company memberships are unaffected.'}),
+   table(['Email','Role','Status','Action'],members),
+   title('Pending invitations','h3'),
+   node('p',{class:'muted',text:'Only unused, unexpired links are shown. Private invitation tokens are never listed.'}),
+   table(['Email','Role','Expires','Action'],invites));
+}
 }
 async function inviteSection(main){const previous=document.getElementById('invite-card');if(previous)previous.remove();const card=div('card invite-card');card.id='invite-card';card.append(title('Invite an existing client user','h3'),node('p',{class:'muted',text:'Create a new invitation for an existing company.'}));const select=node('select',{class:'field'},[node('option',{value:'',text:'Choose company'})]);const tenants=await api('/v1/human/tenants');tenants.tenants.forEach(t=>select.append(node('option',{value:t.id,text:t.display_name})));const email=input('email','email','client@builder.com');const role=node('select',{class:'field'},['client_admin','viewer'].map(x=>node('option',{value:x,text:x})));const f=node('form',{class:'formrow'},[lab('Company',select),lab('Client email',email),lab('Role',role),node('button',{type:'submit',class:'btn',text:'Create invitation'})]);f.addEventListener('submit',async e=>{e.preventDefault();try{const d=await api('/v1/human/invitations','POST',{tenantId:select.value,email:email.value,role:role.value});const share=node('input',{class:'field',value:d.inviteUrl,readonly:'readonly',style:'width:100%'});card.append(div('banner',node('p',{text:'Share this one-time link securely:'}),share));notice('Invitation generated for '+email.value)}catch(err){asError(err)}});card.append(f);main.append(card)}
 async function adminCompanyChangesPanel(main){
