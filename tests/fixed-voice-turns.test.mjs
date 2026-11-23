@@ -153,3 +153,26 @@ test('Browser client offers sequential voice demo with opt-in microphone and sta
   const r=await worker.fetch(new Request(origin+'/app'),{});
   assert.match(r.headers.get('Permissions-Policy'),/microphone=\(self\)/);
 });
+
+test('Hindi refusal is not incorrectly classified as later; conflicting yes/no requires repeat',()=>{
+  const beforeInterest=()=>{
+    let state=beginFixedVoicePreview({language:'hi',now:stamp}).state;
+    for(const answer of ['फ्लैट','रायपुर','शंकर नगर','2BHK','35 लाख'])
+      state=turn(state,answer).state;
+    return state;
+  };
+  const no=turn(beforeInterest(),'अभी नहीं चाहिए');
+  assert.equal(no.action,'completed');
+  assert.equal(no.state.answers.interest,'not_interested');
+  assert.equal(no.state.answers.visitDate,null);
+  const later=turn(beforeInterest(),'अभी नहीं, कुछ दिन बाद');
+  assert.equal(later.action,'completed');
+  assert.equal(later.state.answers.interest,'later');
+  for(const text of ['हाँ, नहीं चाहिए','yes, not interested']){
+    const ambiguous=turn(beforeInterest(),text);
+    assert.equal(ambiguous.action,'repeat');
+    assert.equal(ambiguous.state.index,5);
+    assert.equal(ambiguous.state.answers.interest,undefined);
+    assert.match(ambiguous.warning,/conflicting/);
+  }
+});

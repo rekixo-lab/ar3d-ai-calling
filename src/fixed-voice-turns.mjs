@@ -79,10 +79,17 @@ function parseBudget(str){
   return rupees;
 }
 function parseInterest(str){
-  if(/(?:later|follow.?up|next month|not now|बाद में|अभी नहीं|फिर कभी|कुछ दिन)/iu.test(str))return 'later';
-  if(/(?:not interested|no interest|नहीं चाहिए|रुचि नहीं|इंटरेस्ट नहीं|नहीं देखना|नहीं लेना)/iu.test(str))
+  const reject=/(?:not interested|no interest|don't want|do not want|no thanks|नहीं चाहिए|रुचि नहीं|इंटरेस्ट नहीं|नहीं देखना|नहीं लेना)/iu.test(str);
+  const agree=/(?:\b(?:yes|yeah|sure)\b|हाँ|हां|जी हाँ|जरूर|ज़रूर|देखना है)/iu.test(str);
+  // An explicit refusal outweighs vague "not now" / "अभी नहीं".
+  // But conflicting yes/no responses must NEVER be silently saved as interested.
+  if(reject){
+    if(agree)throw Error('conflicting interest answer; repeat or review');
     return 'not_interested';
-  if(/(?:yes|yeah|interested|sure|हाँ|हां|जी हाँ|देखना है|चाहिए|जरूर|ज़रूर)/iu.test(str))
+  }
+  if(/(?:later|follow.?up|next month|not now|बाद में|अभी नहीं|फिर कभी|कुछ दिन)/iu.test(str))
+    return 'later';
+  if(agree||/(?:interested|चाहिए)/iu.test(str))
     return 'interested';
   throw Error('unclear interest; repeat or review');
 }
