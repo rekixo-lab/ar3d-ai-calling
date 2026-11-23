@@ -31,6 +31,39 @@ try{
  const context=await browser.newContext({viewport});await context.addCookies([{name:COOKIE,value:token,url:origin}]);
  const page=await context.newPage(),errors=[];lastPage=page;page.setDefaultTimeout(10000);page.on('pageerror',e=>errors.push(e.message));
  await page.goto(origin+'/app');
+ // AI Testing uses an authenticated browser preview, never live phone or CRM.
+ const aiLeadCount=f.r.db.prepare('SELECT COUNT(*) AS n FROM leads').get().n;
+ const aiCallsBefore=f.r.db.prepare('SELECT COUNT(*) AS n FROM calls').get().n;
+ await page.getByRole('link',{name:'AI Testing',exact:true}).click();
+ await page.getByRole('heading',{name:'7-question AI test (no calls)',exact:true}).waitFor();
+ const aiLang=viewport.width===1440?'en':'hi';
+ await page.getByLabel('AI test language',{exact:true}).selectOption(aiLang);
+ await page.getByRole('button',{name:'Start AI test',exact:true}).click();
+ const aiAnswer=page.getByLabel('AI test answer',{exact:true});
+ const step=async(answer,index)=>{
+  await page.getByText('Question '+(index+1)+' of 7 —',{exact:false}).waitFor();
+  await aiAnswer.fill(answer);
+  await page.getByRole('button',{name:'Submit test answer',exact:true}).click();
+ };
+ await step('invalid property response',0);
+ await page.getByText(/Please clarify: unclear property type/).waitFor();
+ const sample=aiLang==='hi'?
+  ['फ्लैट','रायपुर','शंकर नगर','3BHK','35 लाख','हाँ','2027-01-12']:
+  ['flat','Raipur','Shankar Nagar','3BHK','35 lakh','yes','2027-01-12'];
+ for(let i=0;i<sample.length;i++)await step(sample[i],i);
+ await page.getByText('AI test completed — review the recognized answers below.').waitFor();
+ await page.getByRole('heading',{name:'Test result',exact:true}).waitFor();
+ await page.getByRole('row',{name:/Budget \(INR\) 3500000/}).waitFor();
+ await page.getByRole('row',{name:/Visit date 2027-01-12/}).waitFor();
+ await page.screenshot({path:'artifacts/ai-testing-'+viewport.width+'.png',fullPage:true});
+ assert.ok(await page.getByRole('button',{name:'Submit test answer',exact:true}).isDisabled());
+ assert.equal(f.r.db.prepare('SELECT COUNT(*) AS n FROM leads').get().n,aiLeadCount);
+ assert.equal(f.r.db.prepare('SELECT COUNT(*) AS n FROM calls').get().n,aiCallsBefore);
+ await page.getByRole('button',{name:'Start AI test',exact:true}).click();
+ await aiAnswer.fill(aiLang==='hi'?'कॉल मत करना':'do not call');
+ await page.getByRole('button',{name:'Submit test answer',exact:true}).click();
+ await page.getByText(/Stop-calling request detected/).waitFor();
+ assert.ok(await page.getByRole('button',{name:'Submit test answer',exact:true}).isDisabled());
  await page.getByRole('link',{name:'Calling',exact:true}).click();
  await page.getByRole('heading',{name:'Campaign controls',exact:true}).waitFor();
  await page.getByRole('link',{name:'Company details',exact:true}).click();
