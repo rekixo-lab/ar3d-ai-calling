@@ -42,7 +42,7 @@ test('public smoke checks health, login UI, sidebar fix and 401 without writes o
     ['/app/assets/app.js',[200,'text/javascript','Calling Setup /v1/human/scripted-phone-pilot Sign out']],
     ['/v1/human/me',[401,'application/json',JSON.stringify({error:'sign in required'})]],
     ['/v1/human/scripted-phone-pilot',[401,'application/json',JSON.stringify({error:'sign in required'})]],
-    ['/v1/provider/exotel/voicebot',[410,'application/json',JSON.stringify({error:'provider_route_retired'})]],
+    ['/v1/provider/unknown-transport',[404,'application/json',JSON.stringify({error:'not found'})]],
     ['/v1/human/leads/33333333-3333-4333-8333-333333333333/qualification',[401,'application/json',JSON.stringify({error:'sign in required'})]],
     ['/v1/human/call-intent-proposals',[401,'application/json',JSON.stringify({error:'sign in required'})]],
     ['/v1/human/voice-preview',[401,'application/json',JSON.stringify({error:'sign in required'})]],
