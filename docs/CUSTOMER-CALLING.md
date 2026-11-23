@@ -15,6 +15,13 @@ Complete the [verified-number pilot](scripted-phone-pilot.md) before enabling cu
 - Client Admin → **Customers / Excel → Site visits** can now reschedule a visit that is `requested` or `confirmed`. The chosen future date/time is saved to the client's own CRM, leaving the visit status unchanged, with an audit entry and stale-update conflict protection. Completed/cancelled visits cannot be rescheduled.
 - **No automatic notifications are sent.** Rescheduling does not make Plivo calls or SMS/WhatsApp messages; the staff must inform the customer manually until a separately approved provider integration and opt-in reminder workflow exist.
 
+## Next Actions and easy reports (pre-KYC)
+
+- Client **Company overview → View follow-ups and next actions** opens the **Results** page, showing due follow-ups and upcoming site visits from the client's own CRM.
+- **Next Actions** is a read-only task reminder in the dashboard. It highlights staff follow-up dates, visit requests/confirmations, and Do Not Call entries without sending any WhatsApp/SMS or retrying a telephone call.
+- **Operations report** now shows interested leads, follow-up leads and already-due follow-ups, alongside campaign/visit counters. These are CRM statuses, not Plivo-verified answers, billed minutes or revenue.
+- Future automatic callback and carrier-integrated reminders must require provider-approved routing and independently verified recipient preference and DND status.
+
 ## Queue and results
 
 The Worker dispatches on a one-minute schedule within 09:00–20:00 India time. Customers without current clearance stay queued while approved customers proceed. Explicit suppression blocks a customer. It reserves one call at a time per company and enforces the daily cap including failed attempts. Pause or disable company calling to suspend further reservations. A call already being submitted can finish. An uncertain request locks that company's queue until operations confirms its outcome from Plivo and the application audit. The client pauses the campaign, then a current MFA Super Admin verifies the ended attempt in Plivo. After 30 minutes from submission, enter the provider evidence reference and use **Close verified attempt**. The client can then resume the remaining jobs. The closed attempt cannot be dialed again by resuming the same run.
