@@ -92,7 +92,7 @@ try{
  const otherTenant='77777777-7777-4777-8777-777777777777';
  const otherLead='88888888-8888-4888-8888-888888888888';
  f.c.db.prepare(`INSERT INTO tenants(id,slug,display_name,plan_code,storage_mode,status,created_at,updated_at)
-  VALUES(?,'secondary-builder','Secondary Builder','starter','shared','active',?,?)`).run(otherTenant,new Date().toISOString(),new Date().toISOString());
+  VALUES(?,'secondary-builder','Secondary Builder','starter','shared','active',?,?)`).run(otherTenant,'2020-01-01T00:00:00Z','2020-01-01T00:00:00Z');
  f.c.db.prepare("INSERT INTO tenant_memberships(tenant_id,user_id,role,created_at) VALUES(?,'viewer','client_admin',?)")
   .run(otherTenant,new Date().toISOString());
  f.r.db.prepare(`INSERT INTO leads(tenant_id,id,name,mobile_e164,source_type,created_at,updated_at)
