@@ -62,7 +62,7 @@ A client may own multiple projects and memberships in multiple AI Calling tenant
 
 ## Calling safety/eligibility
 
-A spreadsheet of unknown numbers does NOT confer consent. On import, consent/DND status is `unknown`. The backend has a strictly gated Plivo internal pilot and reviewed scripted-campaign path, **not** authorization for general real-world automated calling. Provider-side permissions, applicable registration, real opt-in/DND verification, allowed calling hours, suppression lists, AI identity disclosure, recording notices, retention policy, opt-out workflow and audit still require operator sign-off. Exotel agent-only setup must not be retried after an uncertain provider write without read-only reconciliation. Do not enable unknown-lead auto-dial through a personal SIM.
+A spreadsheet of unknown numbers does NOT confer consent. On import, consent/DND status is `unknown`. The backend has a strictly gated Plivo internal pilot and reviewed scripted-campaign path, **not** authorization for general real-world automated calling. Provider-side permissions, applicable registration, real opt-in/DND verification, allowed calling hours, suppression lists, AI identity disclosure, recording notices, retention policy, opt-out workflow and audit still require operator sign-off. The discontinued carrier setup must never be retried without read-only reconciliation and operator review. Do not enable unknown-lead auto-dial through a personal SIM.
 
 ## Security concerns before production
 
