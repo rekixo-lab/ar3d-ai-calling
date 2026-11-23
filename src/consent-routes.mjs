@@ -54,8 +54,29 @@ async function pendingEvidenceQueue(req,env,user,url){
     url.searchParams.getAll(key).length!==1))
   return fail('invalid review queue query',400);
  const tenantId=url.searchParams.get('tenantId');
- const member=await requireMembership(env.CONTROL_DB,user,tenantId,true);
- if(!member)return fail('forbidden',403);
+ // Allow the central operator to inspect pending references only with a fresh
+ // MFA Super Admin session. Ordinary clients need their own admin membership.
+ let member;
+ if(user?.globalRole==='super_admin'){
+  if(!/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/i.test(tenantId||'')||
+     !/^[a-f0-9]{64}$/i.test(user.token_hash||''))return fail('forbidden',403);
+  const now=Date.now();
+  const fresh=await env.CONTROL_DB.prepare(
+   'SELECT 1 AS verified FROM human_mfa_settings m JOIN human_sessions s '+
+   'ON s.user_id=m.user_id WHERE m.user_id=? AND s.token_hash=? '+
+   'AND m.enabled_at IS NOT NULL AND s.created_at>=m.enabled_at '+
+   'AND s.revoked_at IS NULL AND s.expires_at>? LIMIT 1')
+   .bind(user.id,user.token_hash,now).first();
+  if(!fresh)return fail('current Super Admin MFA session required',403);
+  const tenant=await env.CONTROL_DB.prepare(
+   "SELECT id AS tenant_id,storage_mode,dedicated_binding FROM tenants "+
+   "WHERE id=? AND status IN('trial','active') LIMIT 1").bind(tenantId).first();
+  if(!tenant)return fail('forbidden',403);
+  member=tenant;
+ }else{
+  member=await requireMembership(env.CONTROL_DB,user,tenantId,true);
+  if(!member)return fail('forbidden',403);
+ }
  const purpose=url.searchParams.get('purpose')||'all';
  const rawLimit=url.searchParams.get('limit')||'25';
  const rawOffset=url.searchParams.get('offset')||'0';
