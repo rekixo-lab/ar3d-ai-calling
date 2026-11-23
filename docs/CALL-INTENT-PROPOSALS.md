@@ -2,9 +2,9 @@
 
 This milestone creates **durable blocked proposals only**, tying an existing
 Client Admin draft campaign to its existing tenant-owned lead. It is not an
-Exotel call ledger, not a telecom permission record, and cannot initiate calls.
+Plivo call ledger, not a telecom permission record, and cannot initiate calls.
 It is intentionally separated from the existing successful *operator's own*
-Exotel self-test; the latter never maps to a customer lead.
+separately gated Plivo self-test; the latter never maps to an unapproved customer lead.
 
 ## Workflow
 
@@ -57,12 +57,12 @@ there are any dedicated tenants: do not assume cross-DB deployment.
 
 ## What remains before real customer production
 
-- Exotel-approved commercial entitlement, correct Indian numbering/traffic
-  classification, compliant KYC and authorized ExoPhone.
+- Plivo-approved commercial entitlement, correct Indian numbering/traffic
+  classification, compliant KYC and authorized caller number.
 - Independently verified recipient consent, current DND and suppression,
   lawful purpose and local time windows (no inference from past enquiry).
 - A **separate authorized-call registry** with live consent evidence,
-  registered tenant/lead/number, Exotel account/leg/flow/caller ID,
+  registered tenant/lead/number, Plivo account/request/call/caller ID,
   provider-read-only Call Details confirmation and bounded dispatch.
   A blocked proposal must NEVER be promoted directly.
 - Independently authenticated vendor webhook source, replay-resistant
