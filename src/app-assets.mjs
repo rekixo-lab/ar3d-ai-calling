@@ -302,19 +302,34 @@ async function mfaPanel(main){
 }
 async function superAdmin(main){
  const panel=div('card client-directory',title('Client directory'));panel.id='clients-panel';main.append(panel);
- const list=div('');panel.append(list);
- let existing=null,tenantRowsAll=[];
+ const list=div(''),directorySearch=input('clientDirectorySearch','search','Search company name, slug or email');
+ const prev=btn('← Previous companies',async()=>{pageOffset=Math.max(0,pageOffset-100);await refresh();await refreshAccess();populateMemberCompanies()},true);
+ const next=btn('Next companies →',async()=>{pageOffset+=100;await refresh();await refreshAccess();populateMemberCompanies()},true);
+ const searchButton=btn('Search clients',async()=>{pageOffset=0;await refresh();await refreshAccess();populateMemberCompanies()},true);
+ const pagination=div('formrow',prev,next);
+ directorySearch.maxLength=80;
+ directorySearch.setAttribute('aria-label','Search all clients');
+ directorySearch.addEventListener('keydown',e=>{
+  if(e.key==='Enter'){e.preventDefault();pageOffset=0;refresh().then(refreshAccess).then(populateMemberCompanies).catch(asError)}
+ });
+ panel.append(div('formrow',lab('Find any company',directorySearch),searchButton),list,pagination);
+ let existing=null,tenantRowsAll=[],pageOffset=0;
  async function refresh(){
   try{
-   const d=await api('/v1/human/tenants');tenantRowsAll=d.tenants;
+   const query=new URLSearchParams({limit:'100',offset:String(pageOffset),q:directorySearch.value.trim()});
+   const d=await api('/v1/human/tenants?'+query);tenantRowsAll=d.tenants;
+   const total=Number.isSafeInteger(d.total)?d.total:d.tenants.length;
+   const matched=Number.isSafeInteger(d.matched)?d.matched:d.tenants.length;
+   prev.disabled=pageOffset===0;next.disabled=pageOffset+d.tenants.length>=matched;
    list.replaceChildren(
     div('cards',...[
-      ['Total clients',d.tenants.length,'users'],
-      ['Active clients',d.tenants.filter(t=>t.status==='active').length,'phone'],
-      ['Team members',d.tenants.reduce((n,t)=>n+Number(t.member_count||0),0),'shield']
+      ['Total clients',total,'users'],
+      ['Active clients',Number.isSafeInteger(d.active)?d.active:d.tenants.filter(t=>t.status==='active').length,'phone'],
+      ['Team members',Number.isSafeInteger(d.members)?d.members:d.tenants.reduce((n,t)=>n+Number(t.member_count||0),0),'shield']
     ].map(([label,value,symbol])=>div('card metric',div('metric-symbol',icon(symbol)),node('span',{class:'muted',text:label}),node('strong',{text:String(value)})))),
+    node('p',{class:'muted',text:'Showing '+d.tenants.length+' of '+matched+
+      ' matching companies · page '+(Math.floor(pageOffset/100)+1)}),
     table(['Company','Contact email','Mobile','Status','Members'],d.tenants.map(t=>[t.display_name,t.contact_email||'—',t.contact_mobile||'—',t.status,t.member_count]))
-
    );
    if(existing){
     const old=existing.value;
@@ -342,7 +357,7 @@ async function superAdmin(main){
   e.preventDefault();
   const matched=tenantRowsAll.find(t=>t.id===existing.value)||
    tenantRowsAll.find(t=>t.display_name.toLowerCase()===name.value.trim().toLowerCase());
-  const action=matched?'Link to existing '+matched.display_name:'Create a new company';
+  const action=matched?'Link to existing '+matched.display_name:'Create or link company';
   if(!confirm(action+' and generate a private invitation for '+email.value+'? No email or password will be sent automatically.'))return;
   const submit=f.querySelector('button[type=submit]');submit.disabled=true;
   try{
@@ -374,7 +389,8 @@ const actionForm=node('form',{class:'stack'},[lab('Company',accessSelect),lab('R
 accessCard.append(actionForm);
 let tenantRows=[];
 async function refreshAccess(){
-  const result=await api('/v1/human/tenants');
+  const q=new URLSearchParams({q:directorySearch.value.trim(),limit:'100',offset:String(pageOffset)});
+  const result=await api('/v1/human/tenants?'+q);
   tenantRows=result.tenants.filter(t=>['trial','active','suspended'].includes(t.status));
   const oldValue=accessSelect.value;
   accessSelect.replaceChildren(...tenantRows.map(t=>node('option',{value:t.id,text:t.display_name+' — '+t.status})));
@@ -443,12 +459,48 @@ async function loadMembers(){
    table(['Email','Role','Expires','Action'],invites));
 }
 }
-async function inviteSection(main){const previous=document.getElementById('invite-card');if(previous)previous.remove();const card=div('card invite-card');card.id='invite-card';card.append(title('Invite an existing client user','h3'),node('p',{class:'muted',text:'Create a new invitation for an existing company.'}));const select=node('select',{class:'field'},[node('option',{value:'',text:'Choose company'})]);const tenants=await api('/v1/human/tenants');tenants.tenants.forEach(t=>select.append(node('option',{value:t.id,text:t.display_name})));const email=input('email','email','client@builder.com');const role=node('select',{class:'field'},['client_admin','viewer'].map(x=>node('option',{value:x,text:x})));const f=node('form',{class:'formrow'},[lab('Company',select),lab('Client email',email),lab('Role',role),node('button',{type:'submit',class:'btn',text:'Create invitation'})]);f.addEventListener('submit',async e=>{e.preventDefault();try{const d=await api('/v1/human/invitations','POST',{tenantId:select.value,email:email.value,role:role.value});const share=node('input',{class:'field',value:d.inviteUrl,readonly:'readonly',style:'width:100%'});card.append(div('banner',node('p',{text:'Share this one-time link securely:'}),share));notice('Invitation generated for '+email.value)}catch(err){asError(err)}});card.append(f);main.append(card)}
+async function inviteSection(main){
+ const previous=document.getElementById('invite-card');if(previous)previous.remove();
+ const card=div('card invite-card');card.id='invite-card';
+ card.append(title('Invite an existing client user','h3'),
+  node('p',{class:'muted',text:'Create a private invitation for a company. Search across all companies.'}));
+ const select=node('select',{class:'field','aria-label':'Company to invite'}),
+  search=input('inviteCompanySearch','search','Find any company by name or email');
+ search.maxLength=80;
+ async function find(){
+  const q=new URLSearchParams({q:search.value.trim(),limit:'100'});
+  const result=await api('/v1/human/tenants?'+q);
+  const old=select.value;
+  select.replaceChildren(node('option',{value:'',text:'Choose company'}),
+   ...result.tenants.map(t=>node('option',{value:t.id,text:t.display_name})));
+  if(result.tenants.some(t=>t.id===old))select.value=old;
+ }
+ const email=input('email','email','client@builder.com');
+ const role=node('select',{class:'field'},['client_admin','viewer'].map(x=>node('option',{value:x,text:x})));
+ const f=node('form',{class:'formrow'},[lab('Company',select),lab('Client email',email),lab('Role',role),
+  node('button',{type:'submit',class:'btn',text:'Create invitation'})]);
+ f.addEventListener('submit',async e=>{
+  e.preventDefault();
+  if(!select.value){asError(Error('Choose a company before inviting'));return}
+  try{
+   const d=await api('/v1/human/invitations','POST',{tenantId:select.value,email:email.value,role:role.value});
+   const share=node('input',{class:'field',value:d.inviteUrl,readonly:'readonly',style:'width:100%'});
+   card.append(div('banner',node('p',{text:'Share this one-time link securely:'}),share));
+   notice('Invitation generated for '+email.value);
+  }catch(err){asError(err)}
+ });
+ const findBtn=btn('Find company',()=>find().catch(asError),true);
+ search.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();find().catch(asError)}});
+ card.append(div('formrow',lab('Search client directory',search),findBtn),f);
+ main.append(card);await find().catch(asError);
+}
 async function adminCompanyChangesPanel(main){
  const card=div('card client-directory',title('Client Change Requests','h3'),
   node('p',{class:'note',text:'Clients request corrections here. Update the company profile before marking a change request handled.'}));
  card.id='company-change-inbox';main.append(card);
  const company=node('select',{class:'field','aria-label':'Review client company'}),items=div('stack');
+ const search=input('changeRequestCompanySearch','search','Search all companies');
+ search.maxLength=80;
  const refreshList=async()=>{
   items.replaceChildren();
   if(!company.value)return;
@@ -482,15 +534,18 @@ async function adminCompanyChangesPanel(main){
  };
  const refreshCompanies=async()=>{
   const old=company.value;
-  const d=await api('/v1/human/tenants');
+  const d=await api('/v1/human/tenants?'+new URLSearchParams({q:search.value.trim(),limit:'100'}));
   company.replaceChildren(...d.tenants.filter(t=>['trial','active'].includes(t.status))
    .map(t=>node('option',{value:t.id,text:t.display_name})));
   if([...company.options].some(x=>x.value===old))company.value=old;
   await refreshList();
  };
  company.addEventListener('change',()=>refreshList().catch(asError));
- card.append(div('formrow',lab('Client',company),
-  btn('Refresh client requests',()=>refreshCompanies().catch(asError),true)),items);
+ const find=btn('Find companies',()=>refreshCompanies().catch(asError),true);
+ search.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();refreshCompanies().catch(asError)}});
+ card.append(div('formrow',lab('Find company',search),find),
+  div('formrow',lab('Client',company),
+   btn('Refresh client requests',()=>refreshCompanies().catch(asError),true)),items);
  await refreshCompanies();
 }
 async function clientCompanySummary(tenantId,content,role,companyName=''){
@@ -950,7 +1005,16 @@ async function customerCallingPanel(tenantId,content,role,openView){
 async function callingAdminPanel(main){
  const card=div('card calling-settings',title('Client calling approval')),area=div('approval-grid');card.id='calling-setup';main.append(card);
  const company=node('select',{class:'field','aria-label':'Calling setup company'});
- try{const d=await api('/v1/human/tenants');company.append(...d.tenants.map(t=>node('option',{value:t.id,text:t.display_name+' — '+t.status})))}catch(e){asError(e);return}
+ const companySearch=input('callingSetupCompanySearch','search','Search company name or email');
+ companySearch.maxLength=80;
+ async function findCompany(){
+  const prev=company.value;
+  const query=new URLSearchParams({limit:'100',q:companySearch.value.trim()});
+  const d=await api('/v1/human/tenants?'+query);
+  company.replaceChildren(...d.tenants.map(t=>node('option',{value:t.id,text:t.display_name+' — '+t.status})));
+  if(d.tenants.some(t=>t.id===prev))company.value=prev;
+ }
+ try{await findCompany()}catch(e){asError(e);return}
  const approval=input('approval','text','Approved phone provider and calling purpose reference');
  const days=input('days','number');days.value='7';days.min='1';days.max='30';
  const limit=input('dailyLimit','number');limit.value='10';limit.min='1';limit.max='100';
@@ -1009,25 +1073,41 @@ async function callingAdminPanel(main){
  }
  company.addEventListener('change',()=>{draft.value='';clearanceOffset=0;approval.value='';enabled.checked=false;consent.value='';dnd.value='';refresh().catch(asError)});
  draft.addEventListener('change',()=>{clearanceOffset=0;refresh().catch(asError)});
- card.append(lab('Client company',company),btn('Load calling setup',()=>refresh().catch(asError),true),area);
+ const find=btn('Find company',async()=>{try{await findCompany();await refresh()}catch(e){asError(e)}},true);
+ companySearch.addEventListener('keydown',e=>{
+  if(e.key==='Enter'){e.preventDefault();findCompany().then(refresh).catch(asError)}
+ });
+ card.append(div('formrow',lab('Search all clients',companySearch),find),
+  lab('Client company',company),btn('Load calling setup',()=>refresh().catch(asError),true),area);
  area.append(policyForm,clearanceForm,recovery,status);await refresh();
 }
 
 async function companyAdminPanel(main){
  const card=div('card',title('Company profile'));
  const company=node('select',{class:'field','aria-label':'Company profile'});
+ const search=input('profileCompanySearch','search','Find any company by name or email');
+ search.maxLength=80;
  const area=div('stack');
- card.append(div('formrow',lab('Choose company',company)),area);main.append(card);
- const result=await api('/v1/human/tenants');
- company.replaceChildren(...result.tenants.filter(t=>['active','trial'].includes(t.status))
-  .map(t=>node('option',{value:t.id,text:t.display_name})));
+ async function findCompany(){
+  const prev=company.value;
+  const result=await api('/v1/human/tenants?'+new URLSearchParams({limit:'100',q:search.value.trim()}));
+  company.replaceChildren(...result.tenants.filter(t=>['active','trial'].includes(t.status))
+   .map(t=>node('option',{value:t.id,text:t.display_name})));
+  if(result.tenants.some(t=>t.id===prev))company.value=prev;
+  load();
+ }
+ const button=btn('Find company',()=>findCompany().catch(asError),true);
+ search.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();findCompany().catch(asError)}});
+ card.append(div('formrow',lab('Search all companies',search),button),
+  div('formrow',lab('Choose company',company)),area);main.append(card);
  function load(){
   if(!company.value){area.replaceChildren(node('p',{class:'muted',text:'Create a client before editing a company profile.'}));return}
   const profile=div('stack');
   area.replaceChildren(profile);
   companyProfileEditor(company.value,profile,true,company.selectedOptions[0]?.textContent||'').catch(asError);
  }
- company.addEventListener('change',load);load();
+ company.addEventListener('change',load);
+ await findCompany();
 }
 async function companyProfileEditor(tenantId,content,admin=false,companyLabel=''){
  const card=div(admin?'stack':'card',title('Company Knowledge','h3'));content.append(card);

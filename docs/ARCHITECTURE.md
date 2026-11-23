@@ -1,4 +1,4 @@
-# AR3D AI Calling — Architecture v0.1
+# AR3D AI Calling — Architecture and isolated product boundaries
 
 ## Source review
 
@@ -40,7 +40,7 @@ AR3D Engine (3D project knowledge) ───────┘                     
 - `agent_id`: AI agent within one tenant. The default can serve multiple permitted projects; future agents can be project-specific.
 - `phone_number_id`: separately assigned telecom calling identity; do not claim this is automatically available.
 
-A client may own multiple projects. No client-owned API may select `tenant_id` from request query, URL, JSON body or unverified HTTP header. It is derived from authentication only.
+A client may own multiple projects and memberships in multiple AI Calling tenants. The browser may **request** a tenant by `tenantId` when switching companies, but that value never grants authority: every CRM read/write is limited to a currently active tenant membership checked server-side, then SQL scopes by the verified tenant ID. Provider callbacks use a separate signed provider/job identity check.
 
 ## Storage tiers
 
@@ -49,7 +49,7 @@ A client may own multiple projects. No client-owned API may select `tenant_id` f
 - Growth: keep configurable; it can begin in shared mode. Plan migration must be transactional, verified and reversible (not built yet).
 - Each tenant's quota, plan, billing and provider usage to be metered separately in future versions.
 
-## Main modules to add next
+## Product roadmap (partially implemented in the isolated Worker)
 
 1. Human-authenticated Super Admin + client admin: project/tenant linked SSO, membership and per-user RBAC; the current backend keys must never be embedded in browser code.
 2. Excel import with source/consent provenance, normalization, duplicate reports and preview.
@@ -62,11 +62,11 @@ A client may own multiple projects. No client-owned API may select `tenant_id` f
 
 ## Calling safety/eligibility
 
-A spreadsheet of unknown numbers does NOT confer consent. On import, consent/DND status is `unknown`. The backend has no real call-launch route in this starter. Before enabling promotional calling, implement provider-side permissions, applicable registration, verified consent/DND checks, allowed calling hours, suppression lists, accurate AI identity disclosure, recording notices, data-retention policy, opt-out workflow and audit. Do not enable unknown-lead auto-dial through a personal SIM.
+A spreadsheet of unknown numbers does NOT confer consent. On import, consent/DND status is `unknown`. The backend has a strictly gated Plivo internal pilot and reviewed scripted-campaign path, **not** authorization for general real-world automated calling. Provider-side permissions, applicable registration, real opt-in/DND verification, allowed calling hours, suppression lists, AI identity disclosure, recording notices, retention policy, opt-out workflow and audit still require operator sign-off. Exotel agent-only setup must not be retried after an uncertain provider write without read-only reconciliation. Do not enable unknown-lead auto-dial through a personal SIM.
 
 ## Security concerns before production
 
-- API keys in this starter are server-to-server ONLY. No browser/client login or RBAC is built.
+- Machine API keys are server-to-server only and never belong in browser code. Browser login, tenant memberships, role checks, MFA and scoped Client Dashboard are implemented; their presence does not certify a completed security or compliance rollout.
 - Rate limiting, key rotation UI, audit middleware, billing, consent verification, DND provider check, PII encryption strategy, retention/deletion, private recordings with signed access, backup and recovery, observability and incident handling are required before production.
 - D1 does not supply application-level tenant row isolation automatically. Every query must scope `tenant_id` and every foreign key must be composite where applicable; include negative cross-tenant regression tests.
 - Do not mix AR3D Platform, Engine and AI Calling production databases.

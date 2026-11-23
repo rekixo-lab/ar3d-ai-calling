@@ -80,15 +80,33 @@ async function save(env,user,context,result,access){
  });
  const crm=surveyToCrm(survey);
  const original=await db.prepare(
-  'SELECT updated_at AS updatedAt, requirements_json AS requirements FROM leads WHERE tenant_id=? AND id=?'
+  'SELECT updated_at AS updatedAt, requirements_json AS requirements, budget_min_inr AS budgetMinInr, interest_status AS interestStatus, consent_status AS consentStatus, dnd_status AS dndStatus FROM leads WHERE tenant_id=? AND id=?'
  ).bind(tid,context.leadId).first();
  if(!original)return fail('customer not found',404);
  if(original.updatedAt!==context.expectedUpdatedAt)
   return fail('Customer changed during this test. Answers were not saved. Refresh and restart.',409);
+ // Simulation may update an ordinary lead, but must never downgrade a completed
+ // sale or rewrite suppressed customer preferences.
+ if(original.interestStatus==='converted')
+  return fail('Converted customer records cannot be changed by a simulated AI test.',409);
+ if(original.consentStatus==='denied'||original.dndStatus==='blocked')
+  return fail('Suppressed customer requires manual CRM review; test answers were not saved.',409);
  let prior;
  try{prior=JSON.parse(original.requirements||'{}')}catch{return fail('Customer notes need manual review; no changes saved.',409)}
  if(!prior||typeof prior!=='object'||Array.isArray(prior))
   return fail('Customer notes need manual review; no changes saved.',409);
+ // A browser-typed demo is not verified customer testimony. Do not replace
+ // an earlier staff-reviewed or provider-verified property survey, or an
+ // actual recorded scripted call qualification.
+ if((prior.propertySurvey&&
+    (typeof prior.propertySurvey!=='object'||
+     prior.propertySurvey.simulated!==true||
+     prior.propertySurvey.channel!=='auto_ai_test_browser'))||
+    prior.scriptedCallPilot)
+  return fail('Verified customer qualification exists. Review and update manually; simulation was not saved.',409);
+ if(original.budgetMinInr!==null&&original.budgetMinInr!==undefined&&
+    crm.budgetMaxInr!==null&&Number(original.budgetMinInr)>crm.budgetMaxInr)
+  return fail('Test budget conflicts with the customer minimum. Review manually; no changes saved.',409);
  const at=new Date(Math.max(Date.now(),Date.parse(original.updatedAt)+1)).toISOString();
  const next={...prior,propertySurvey:{
   ...survey,channel:'auto_ai_test_browser',simulated:true,
@@ -101,9 +119,11 @@ async function save(env,user,context,result,access){
  // the compare-and-set UPDATE return zero, without adding any audit event.
  const rows=await db.batch([
   db.prepare(`UPDATE leads SET preferred_location=?,plot_size_preference=?,
-     budget_min_inr=NULL,budget_max_inr=?,interest_status=?,visit_date_preference=?,
+     budget_max_inr=?,interest_status=?,visit_date_preference=?,
      requirements_json=?,updated_at=?
-     WHERE tenant_id=? AND id=? AND updated_at=?`).bind(
+     WHERE tenant_id=? AND id=? AND updated_at=?
+       AND interest_status!='converted' AND consent_status!='denied' AND dnd_status!='blocked'
+       AND NOT EXISTS(SELECT 1 FROM lead_opt_out_events o WHERE o.tenant_id=leads.tenant_id AND o.lead_id=leads.id)`).bind(
     crm.preferredLocation,crm.plotSizePreference,crm.budgetMaxInr,
     crm.interestStatus,crm.visitDatePreference,serial,at,
     tid,context.leadId,context.expectedUpdatedAt),
