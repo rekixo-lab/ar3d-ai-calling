@@ -41,7 +41,7 @@ function seedOther(f){
 test('opt-in Hindi seven-turn test auto-saves one selected CRM lead and preserves audit/consent/Excel notes',async()=>{
  const f=fixture();
  try{
-  f.r.db.prepare("UPDATE leads SET requirements_json=?,consent_status='denied',dnd_status='blocked' WHERE tenant_id=? AND id=?")
+  f.r.db.prepare("UPDATE leads SET requirements_json=?,budget_min_inr=2000000 WHERE tenant_id=? AND id=?")
    .run(JSON.stringify({raw:'Excel source must survive'}),tid,lead);
   const token=await newSession(f.env.CONTROL_DB,'client');
   const before=f.r.db.prepare('SELECT name,mobile_e164 AS mobile,consent_status AS consent,dnd_status AS dnd FROM leads WHERE tenant_id=? AND id=?').get(tid,lead);
@@ -62,6 +62,7 @@ test('opt-in Hindi seven-turn test auto-saves one selected CRM lead and preserve
   assert.equal(stored.preferred_location,'रायपुर');
   assert.equal(stored.plot_size_preference,'3BHK');
   assert.equal(stored.budget_max_inr,3500000);
+  assert.equal(stored.budget_min_inr,2000000,'typed test must not erase a verified minimum budget');
   assert.equal(stored.interest_status,'interested');
   assert.equal(stored.visit_date_preference,answers.at(-1));
   assert.deepEqual({
@@ -163,5 +164,60 @@ test('stop-calling and unclear-answer previews cannot mutate CRM or consent',asy
   assert.equal(f.r.db.prepare('SELECT COUNT(*) AS n FROM crm_audit_events').get().n,0);
   assert.equal(f.r.db.prepare('SELECT COUNT(*) AS n FROM calls').get().n,0);
   assert.equal(f.r.db.prepare('SELECT COUNT(*) AS n FROM lead_opt_out_events').get().n,0);
+ }finally{f.close()}
+});
+
+const fixedAnswers=()=>['फ्लैट','रायपुर','शंकर नगर','3BHK','35 लाख','हाँ',dateForTest()];
+test('simulated AI test cannot overwrite converted sales, real call surveys, or suppressed contacts',async()=>{
+ const cases=[
+  {label:'converted sale',change:"UPDATE leads SET interest_status='converted' WHERE tenant_id=? AND id=?",
+   binds:[]},
+  {label:'verified survey',change:"UPDATE leads SET requirements_json=? WHERE tenant_id=? AND id=?",
+   binds:[JSON.stringify({raw:'staff reviewed',propertySurvey:{simulated:false,channel:'manual_review'}})]},
+  {label:'actual phone call qualification',change:"UPDATE leads SET requirements_json=? WHERE tenant_id=? AND id=?",
+   binds:[JSON.stringify({scriptedCallPilot:{id:'verified-phone-session',answers:{location:'Verified city'}}})]},
+  {label:'consent denied',change:"UPDATE leads SET consent_status='denied',dnd_status='blocked' WHERE tenant_id=? AND id=?",
+   binds:[]},
+  {label:'minimum budget conflicts with simulation',change:"UPDATE leads SET budget_min_inr=5000000 WHERE tenant_id=? AND id=?",
+   binds:[]}
+ ];
+ for(const testCase of cases){
+  const f=fixture();
+  try{
+   f.r.db.prepare(testCase.change).run(...testCase.binds,tid,lead);
+   const existing=f.r.db.prepare("SELECT * FROM leads WHERE tenant_id=? AND id=?").get(tid,lead);
+   const token=await newSession(f.env.CONTROL_DB,'client');
+   let current=await (await begin(f,token)).json();
+   for(const answer of fixedAnswers().slice(0,-1)){
+    const response=await advance(f,token,current,answer);
+    assert.equal(response.status,200,testCase.label);
+    current=await response.json();
+   }
+   const blocked=await advance(f,token,current,fixedAnswers().at(-1));
+   assert.equal(blocked.status,409,testCase.label+': '+await blocked.clone().text());
+   const saved=f.r.db.prepare("SELECT * FROM leads WHERE tenant_id=? AND id=?").get(tid,lead);
+   for(const column of ['preferred_location','plot_size_preference','budget_min_inr',
+     'budget_max_inr','interest_status','requirements_json','consent_status','dnd_status','updated_at'])
+    assert.equal(saved[column],existing[column],testCase.label+' changed '+column);
+   assert.equal(f.r.db.prepare("SELECT COUNT(*) AS n FROM crm_audit_events WHERE action='lead.ai_test_auto_saved'").get().n,0);
+   assert.equal(f.r.db.prepare('SELECT COUNT(*) AS n FROM calls').get().n,0);
+  }finally{f.close()}
+ }
+});
+test('a real opt-out event cannot be overwritten even if contact flags remain unknown',async()=>{
+ const f=fixture();
+ try{
+  f.r.db.prepare(`INSERT INTO lead_opt_out_events(tenant_id,id,lead_id,source,actor,created_at)
+    VALUES(?,?,?,'customer_request','test',?)`)
+   .run(tid,crypto.randomUUID(),lead,at);
+  const token=await newSession(f.env.CONTROL_DB,'client');
+  let current=await (await begin(f,token)).json();
+  for(const answer of fixedAnswers().slice(0,-1)){
+   const res=await advance(f,token,current,answer);
+   assert.equal(res.status,200);current=await res.json();
+  }
+  const final=await advance(f,token,current,fixedAnswers().at(-1));
+  assert.equal(final.status,409);
+  assert.equal(f.r.db.prepare("SELECT COUNT(*) AS n FROM crm_audit_events WHERE action='lead.ai_test_auto_saved'").get().n,0);
  }finally{f.close()}
 });
