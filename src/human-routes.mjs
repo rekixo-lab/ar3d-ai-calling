@@ -22,6 +22,7 @@ import {handleCampaignRequest} from './campaign-routes.mjs';
 import {handleCallIntentProposals} from './call-intent-proposals.mjs';
 import {handleProjectLinkRequest} from './project-link-routes.mjs';
 import {handleConsentRequest} from './consent-routes.mjs';
+import {handleDeletionReadiness} from './privacy-deletion-readiness.mjs';
 import {reserveLoginAttempt} from './login-guard.mjs';
 import {challengeAfterPassword,finishMfaLogin,handleMfaSettings} from './mfa.mjs';
 import {handleConversationRequest} from './conversation-routes.mjs';
@@ -312,6 +313,8 @@ export async function handleHumanRequest(req,env){
     if(calling)return calling;
     const consentResponse=await handleConsentRequest(req,env,user);
     if(consentResponse)return consentResponse;
+    const privacyPreview=await handleDeletionReadiness(req,env,user);
+    if(privacyPreview)return privacyPreview;
     const projectResponse=await handleProjectLinkRequest(req,env,user);
     if(projectResponse)return projectResponse;
     const callIntentResponse=await handleCallIntentProposals(req,env,user);
