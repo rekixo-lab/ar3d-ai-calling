@@ -176,6 +176,12 @@ The guarded Calling-only deploy now recognizes `verified_provider_call_costs` as
 
 The new table is an **immutable raw provider observation**, not a client credit deduction or bill. Production migration/deployment outcome must be verified in Cloudflare/GitHub Actions. No other AR3D databases or routes may be modified.
 
+## Selected production Plivo phone number — November 2026
+
+The operator selected **+91 80 6549 1333** (E.164: `+918065491333`) for the single `AR3D_Production` Plivo Voice Application. Plivo Console screenshot shows the number as **local/Bengaluru, KYC Approved, linked to Application**. The guarded Calling-only Wrangler template now sets `AR3D_PLIVO_CALLER_NUMBER=+918065491333` as a **non-secret binding**. All previously configured voice API credentials stay server-only. The template validation rejects any other calling number and any additional vars that might accidentally turn customer campaigns on. The change does not verify a successful remote deployment or place calls.
+
+**Current approved-scope boundary:** Indian 080/022 local business numbers are Plivo's service/transactional route, **not** an alternative to a 140 promotional number. The owner decided not to pursue 140 provisioning now; therefore **new-lead real-estate advertising/promotional mass campaigns are out of scope for this caller**. Do not enable `AR3D_SCRIPTED_CAMPAIGNS_ENABLED` or bypass recipient consent/suppression checks for that purpose. Permitted support/service usage still needs its proper purpose/eligibility and carrier verification. Plivo India KYC approval for a local number does not itself approve all traffic categories or calling on behalf of other builders. <https://docs.plivo.com/docs/numbers/rent-india-numbers>
+
 ## Single Production Plivo Voice Application (outbound-only AR3D)
 
 Create one Plivo **Application**, named `AR3D_Production`, not a Plivo AI Agent and not a SIP Trunk. Plivo requires an Application Answer URL. Set:
