@@ -4,7 +4,7 @@ import {fixture,tid,admin,client,at} from './helpers/calling-fixture.mjs';
 import {handleClientAccessRequest} from '../src/client-access-routes.mjs';
 import {requireMembership} from '../src/human-auth.mjs';
 
-const base='https://calling.example.test/v1/human/tenants/'+tid;
+const base='/v1/human/tenants/'+tid;
 const request=(path,reason='Access review: company owner confirmed the offboarding')=>
   new Request('https://calling.example.test'+path,{
     method:'POST',headers:{origin:'https://calling.example.test','content-type':'application/json'},
