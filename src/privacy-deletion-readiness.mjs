@@ -25,7 +25,7 @@ export async function handleDeletionReadiness(req,env,user){
     url.searchParams.getAll('tenantId').length!==1||
     !uuid.test(url.searchParams.get('tenantId')||''))
   return fail('valid tenantId required',400);
- if(user?.globalRole!=='super_admin'||!uuid.test(user.id||'')&&typeof user.id!=='string')
+ if(user?.globalRole!=='super_admin')
   return fail('forbidden',403);
  if(!/^[a-f0-9]{64}$/i.test(user.token_hash||''))return fail('current MFA Super Admin required',403);
  try{
