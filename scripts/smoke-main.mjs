@@ -1,5 +1,7 @@
-// Strictly read-only public smoke tests for the standalone AR3D Calling Worker.
-// No authenticated session, customer data, secret, POST or live telecom requests.
+// Strictly non-telecom public smoke tests for the standalone AR3D Calling Worker.
+// No authenticated session, customer data, secrets, or live provider calls.
+// One safe POST checks the fixed <Hangup/> Plivo Application Answer URL;
+// it cannot create a call or modify CRM and is restricted to the exact host.
 import { fileURLToPath } from 'node:url';
 import {css as expectedCss} from '../src/app-assets.mjs';
 
@@ -57,6 +59,27 @@ export async function smoke(base,fetchFn=fetch){
       console.log(path,'FAIL (network or unexpected response)');
       ok=false;
     }
+  }
+  // A production Plivo Application needs a *fixed* inbound Answer URL.
+  // Its exact URL is deliberately an immediate Hangup with no D1/provider
+  // reads or writes. A synthetic POST validates the deployed Cloudflare
+  // route and XML before an operator connects the Production Application.
+  const path='/v1/provider/plivo/inbound-unavailable';
+  try{
+    const response=await fetchFn(new URL(path,origin),{
+      method:'POST',redirect:'error',cache:'no-store',
+      headers:{'Content-Type':'application/x-www-form-urlencoded'},
+      body:''
+    });
+    const type=(response.headers.get('content-type')||'').split(';')[0].trim().toLowerCase();
+    const xml=await response.text();
+    const valid=response.status===200&&type==='application/xml'&&
+      xml==='<?xml version="1.0" encoding="UTF-8"?><Response><Hangup/></Response>';
+    console.log(path,'POST HTTP '+response.status,valid?'PASS':'FAIL');
+    if(!valid)ok=false;
+  }catch{
+    console.log(path,'POST FAIL (network or unexpected response)');
+    ok=false;
   }
   return ok;
 }
