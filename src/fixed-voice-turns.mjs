@@ -9,8 +9,8 @@ const STOP=/(?:stop calling|don't call|do not call|remove my number|unsubscribe|
 // Explicit repair requests override ordinary field parsing. In particular, speech
 // about a bad audio connection is NOT a city, neighborhood or plot preference.
 const AGAIN=/^(?:(?:please|कृपया|जरा|ज़रा|माफ कीजिए|माफ़ कीजिए)\s+)?(?:repeat(?: please| that| question)?|again|say again|pardon|come again|can you repeat|could you repeat|what did you say|दोबारा(?: बोलिए| बताइए| पूछिए)?|दुबारा(?: बोलिए| बताइए| पूछिए)?|फिर से(?: बोलिए| बताइए| पूछिए)?|एक बार और|एक बार फिर|क्या पूछा|फिर बोलो)[।.?!\s]*$/iu;
-const NOT_HEARD=/(?:सुनाई\s+नहीं|सुन\s+नहीं\s+पा|समझ\s+नहीं\s+आ|(?:आवाज|आवाज़).{0,24}(?:नहीं\s+आ|कट\s+रही|साफ\s+नहीं)|\b(?:cannot|can't|couldn't|didn't|did not)\s+(?:hear|understand)\b|\b(?:voice|audio)\s+(?:is\s+)?(?:breaking|cutting)\b|\bwhat\s+did\s+you\s+say\b|क्या\s+(?:बोला|कहा))/iu;
-const NON_ANSWER=/^(?:yes|yeah|no|ok(?:ay)?|hello|hi|hmm+|uh+|हाँ|हां|जी|जी हाँ|जी नहीं|नहीं|ठीक|ठीक है|अच्छा|ओके|हेलो|नमस्ते|पता नहीं|मालूम नहीं)[।.!?\s]*$/iu;
+const NOT_HEARD=/(?:सुनाई\s+नहीं|सुन\s+नहीं\s+पा|समझ\s+नहीं\s+आ|(?:आवाज|आवाज़).{0,24}(?:नहीं\s+आ|कट\s+रही|साफ\s+नहीं)|\b(?:cannot|can't|couldn't|could not|didn't|did not)\s+(?:hear|understand)\b|\b(?:voice|audio)\s+(?:is\s+)?(?:breaking|cutting)\b|\bwhat\s+did\s+you\s+say\b|क्या\s+(?:बोला|कहा))/iu;
+const NON_ANSWER=/^(?:yes|yeah|no|ok(?:ay)?|hello|hi|hmm+|uh+|हाँ|हां|जी|जी हाँ|जी नहीं|नहीं|ठीक|ठीक है|अच्छा|ओके|हेलो|नमस्ते|पता नहीं|मालूम नहीं|pata nahi|not sure|i don't know|i do not know)[।.!?\s]*$/iu;
 const MAX_TURNS=25;
 const MAX_ATTEMPTS=3;
 const MAX_TEXT=220;
