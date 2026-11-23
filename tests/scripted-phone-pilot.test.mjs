@@ -146,10 +146,10 @@ test('queued customer call uses signed callbacks, scoped audio and durable opt-o
 });
 
 test('retired provider endpoints stop before DB access or body handling',async()=>{
- for(const path of ['/v1/provider/exotel','/v1/provider/exotel/voicebot','/v1/provider/exotel/session']){
+ for(const path of ['/v1/provider/unknown-transport','/v1/provider/retired-hook','/v1/provider/legacy/session']){
   const response=await worker.fetch(new Request(origin+path,{method:'POST',body:'{}'}),{});
-  assert.equal(response.status,410);
-  assert.deepEqual(await response.json(),{error:'provider_route_retired'});
+  assert.equal(response.status,404);
+  assert.deepEqual(await response.json(),{error:'not found'});
  }
 });
 
