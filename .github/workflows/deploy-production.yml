@@ -67,43 +67,12 @@ jobs:
           else
             echo "::error::Unsupported operation"; exit 1
           fi
-      # Additive-only migration on previously verified Calling Control D1.
-      # Metadata-only webhook receipts. Never alters the existing provider_inbox,
-      # user/tenant tables or CRM call/consent denial triggers.
-      - name: Upgrade only the isolated Calling Control D1 Exotel webhook receipts
-        if: github.event_name == 'push' && steps.schema.outputs.schema_state == 'control_additive_upgrade'
-        run: |
-          npx --yes wrangler@4 d1 execute ar3d-calling-control --remote --yes --config wrangler.jsonc --file migrations/control/0008_exotel_voicebot_receipts.sql
-          npx --yes wrangler@4 d1 execute ar3d-calling-control --remote --yes --config wrangler.jsonc --file migrations/control/0009_operator_self_test_calls.sql
-          npx --yes wrangler@4 d1 execute ar3d-calling-control --remote --yes --config wrangler.jsonc --file migrations/control/0010_exotel_operator_status_checks.sql
-      # Add exactly one operator self-test audit table in isolated Calling Control D1.
-      # No CRM writes, customer call enabling, Exotel dispatch or other projects.
-      - name: Upgrade isolated Calling Control D1 operator test audit
-        if: github.event_name == 'push' && steps.schema.outputs.schema_state == 'control_operator_test_upgrade'
-        run: |
-          npx --yes wrangler@4 d1 execute ar3d-calling-control --remote --yes --config wrangler.jsonc --file migrations/control/0009_operator_self_test_calls.sql
-      # Only the registered operator's existing Exotel Call Details read-only audit.
-      # One new Control D1 table. NO dial automation, CRM/tenant/campaign writes.
-      - name: Upgrade isolated Calling Control D1 verified operator status history
-        if: github.event_name == 'push' && steps.schema.outputs.schema_state == 'control_operator_status_upgrade'
-        run: |
-          npx --yes wrangler@4 d1 execute ar3d-calling-control --remote --yes --config wrangler.jsonc --file migrations/control/0010_exotel_operator_status_checks.sql
-      # Additive-only migration on previously verified Calling CRM schema.
-      # No Platform/Engine resources; no lead/call/consent changes or trigger drops.
-      - name: Upgrade only the isolated Calling CRM Voicebot review schema
-        if: github.event_name == 'push' && steps.schema.outputs.schema_state == 'crm_additive_upgrade'
-        run: |
-          npx --yes wrangler@4 d1 execute ar3d-calling-shared-crm --remote --yes --config wrangler.jsonc --file migrations/crm/0009_voicebot_review_queue.sql
-          npx --yes wrangler@4 d1 execute ar3d-calling-shared-crm --remote --yes --config wrangler.jsonc --file migrations/crm/0010_call_intent_proposals.sql
       # Isolated Calling CRM v10: immutable blocked intent proposal records.
       # Never touches leads, dial triggers, provider credentials or other apps.
       - name: Upgrade isolated Calling CRM blocked intent proposals only
         if: github.event_name == 'push' && steps.schema.outputs.schema_state == 'crm_call_intent_upgrade'
         run: |
           npx --yes wrangler@4 d1 execute ar3d-calling-shared-crm --remote --yes --config wrangler.jsonc --file migrations/crm/0010_call_intent_proposals.sql
-      - name: Add registered Exotel answer queue to isolated Calling CRM
-        if: github.event_name == 'push' && steps.schema.outputs.schema_state == 'crm_voice_turn_upgrade'
-        run: npx --yes wrangler@4 d1 execute ar3d-calling-shared-crm --remote --yes --config wrangler.jsonc --file migrations/crm/0012_verified_voicebot_turns.sql
       - name: Add scripted call results to the isolated Calling CRM
         if: github.event_name == 'push' && steps.schema.outputs.schema_state == 'crm_scripted_results_upgrade'
         run: npx --yes wrangler@4 d1 execute ar3d-calling-shared-crm --remote --yes --config wrangler.jsonc --file migrations/crm/0013_scripted_call_results.sql
@@ -127,7 +96,7 @@ jobs:
         run: npx --yes wrangler@4 d1 execute ar3d-calling-control --remote --yes --config wrangler.jsonc --file migrations/control/0011_calling_scripts.sql
       - name: Add isolated Calling campaign queue (dispatch remains opt-in)
         if: github.event_name == 'push' && steps.schema.outputs.schema_state == 'crm_dispatch_upgrade'
-        run: npx --yes wrangler@4 d1 execute ar3d-calling-shared-crm --remote --yes --config wrangler.jsonc --file migrations/crm/0011_exotel_campaign_dispatch.sql
+        run: npx --yes wrangler@4 d1 execute ar3d-calling-shared-crm --remote --yes --config wrangler.jsonc --file migrations/crm/0011_scripted_campaign_dispatch.sql
       # Never auto-migrate partial or mixed schemas. Re-check the EMPTY state
       # immediately before writing, even if the previous read said fresh.
       - name: Confirm both isolated D1 schemas are still empty
@@ -143,9 +112,6 @@ jobs:
           npx --yes wrangler@4 d1 execute ar3d-calling-control --remote --yes --config wrangler.jsonc --file migrations/control/0005_mfa_recovery.sql
           npx --yes wrangler@4 d1 execute ar3d-calling-control --remote --yes --config wrangler.jsonc --file migrations/control/0006_tenant_lifecycle.sql
           npx --yes wrangler@4 d1 execute ar3d-calling-control --remote --yes --config wrangler.jsonc --file migrations/control/0007_provider_inbox.sql
-          npx --yes wrangler@4 d1 execute ar3d-calling-control --remote --yes --config wrangler.jsonc --file migrations/control/0008_exotel_voicebot_receipts.sql
-          npx --yes wrangler@4 d1 execute ar3d-calling-control --remote --yes --config wrangler.jsonc --file migrations/control/0009_operator_self_test_calls.sql
-          npx --yes wrangler@4 d1 execute ar3d-calling-control --remote --yes --config wrangler.jsonc --file migrations/control/0010_exotel_operator_status_checks.sql
           npx --yes wrangler@4 d1 execute ar3d-calling-control --remote --yes --config wrangler.jsonc --file migrations/control/0011_calling_scripts.sql
           npx --yes wrangler@4 d1 execute ar3d-calling-control --remote --yes --config wrangler.jsonc --file migrations/control/0012_company_profiles.sql
           npx --yes wrangler@4 d1 execute ar3d-calling-control --remote --yes --config wrangler.jsonc --file migrations/control/0013_agent_publications.sql
@@ -163,10 +129,8 @@ jobs:
           npx --yes wrangler@4 d1 execute ar3d-calling-shared-crm --remote --yes --config wrangler.jsonc --file migrations/crm/0006_campaign_drafts.sql
           npx --yes wrangler@4 d1 execute ar3d-calling-shared-crm --remote --yes --config wrangler.jsonc --file migrations/crm/0007_agent_safety.sql
           npx --yes wrangler@4 d1 execute ar3d-calling-shared-crm --remote --yes --config wrangler.jsonc --file migrations/crm/0008_customer_qualification.sql
-          npx --yes wrangler@4 d1 execute ar3d-calling-shared-crm --remote --yes --config wrangler.jsonc --file migrations/crm/0009_voicebot_review_queue.sql
           npx --yes wrangler@4 d1 execute ar3d-calling-shared-crm --remote --yes --config wrangler.jsonc --file migrations/crm/0010_call_intent_proposals.sql
-          npx --yes wrangler@4 d1 execute ar3d-calling-shared-crm --remote --yes --config wrangler.jsonc --file migrations/crm/0011_exotel_campaign_dispatch.sql
-          npx --yes wrangler@4 d1 execute ar3d-calling-shared-crm --remote --yes --config wrangler.jsonc --file migrations/crm/0012_verified_voicebot_turns.sql
+          npx --yes wrangler@4 d1 execute ar3d-calling-shared-crm --remote --yes --config wrangler.jsonc --file migrations/crm/0011_scripted_campaign_dispatch.sql
           npx --yes wrangler@4 d1 execute ar3d-calling-shared-crm --remote --yes --config wrangler.jsonc --file migrations/crm/0013_scripted_call_results.sql
       - name: Verify post-initialization schema before proceeding
         if: (github.event_name == 'push' && steps.schema.outputs.schema_state == 'fresh') || (github.event_name == 'workflow_dispatch' && inputs.operation == 'initialize')
