@@ -170,6 +170,7 @@ function dashboard(){
   ['security','Security','shield','Manage two-factor authentication and recovery codes.']
  ]:[
   ['customers','Customers / Excel','users','Import customers and prepare a calling campaign.'],
+  ['ai-test','AI Testing','spark','Practice the seven fixed questions without a phone call or CRM update.'],
   ['calling','Calling','phone','Review your campaign and start or pause approved calls.'],
   ['results','Results / CRM','grid','See call outcomes and answers saved to your CRM.'],
   ['company','Company details','file','Review your company information and request changes.']
@@ -588,7 +589,7 @@ async function renderClient(id,content){
  if(!content.isConnected||content.renderVersion!==version)return;
  if(roleLabel)roleLabel.textContent=d.role==='client_admin'?'Client Admin':'Client viewer';
  const overview=clientDashboardOverview(d,()=>renderClient(id,content));
- const sections=Object.fromEntries(['customers','calling','results','company'].map(key=>[
+ const sections=Object.fromEntries(['customers','ai-test','calling','results','company'].map(key=>[
   key,node('section',{class:'workspace-section',id:key,hidden:true})
  ]));
  const loaded=new Set();
@@ -597,6 +598,7 @@ async function renderClient(id,content){
    if(d.role==='client_admin')section.append(manualCustomerPanel(id,content));
    await crmWorkflow(id,section,d.role,content);
   },
+  'ai-test':section=>aiTestingPanel(section),
   calling:section=>customerCallingPanel(id,section,d.role,content.openView),
   results:async section=>{
    campaignResultsPanel(id,section);
@@ -627,6 +629,88 @@ async function renderClient(id,content){
  }
  state.clientSetTab=selectSection;
  content.openView(state.clientTab||'customers');
+}
+
+// Safe independent testing: never needs a lead or phones; no saving to D1.
+// Voice transcription remains optional only inside a specific customer's reviewed form.
+function aiTestingPanel(content){
+ const box=div('card ai-testing',title('7-question AI test (no calls)'),
+  node('p',{class:'note',text:'Practice with fictional information. This is a deterministic Hindi/English answer parser, not a live phone conversation. Answers stay in this page until you leave it; no CRM update, recording or calling approval is made.'}));
+ const language=node('select',{class:'field','aria-label':'AI test language'},
+  [['hi','हिंदी'],['en','English']].map(([value,label])=>node('option',{value,text:label})));
+ const status=node('p',{class:'banner',role:'status',text:'Choose a language and start the test.'});
+ const question=node('p',{class:'ai-test-question',text:'No question started.'});
+ const answer=input('aiTestAnswer','text','Enter a fictional answer');
+ answer.required=false;answer.maxLength=220;answer.disabled=true;
+ answer.setAttribute('aria-label','AI test answer');
+ const preview=div('stack');preview.hidden=true;
+ const start=btn('Start AI test',async()=>{
+  start.disabled=true;
+  try{
+   const result=await api('/v1/human/voice-preview','POST',{action:'start',language:language.value});
+   render(result);
+  }catch(err){asError(err)}finally{start.disabled=false}
+ });
+ const next=btn('Submit test answer',async()=>{
+  if(!session||session.status!=='active')return;
+  next.disabled=true;
+  try{
+   const result=await api('/v1/human/voice-preview','POST',{
+    action:'turn',state:session,transcript:answer.value,confidence:1
+   });
+   render(result);
+  }catch(err){asError(err)}
+  finally{next.disabled=!session||session.status!=='active'}
+ });
+ next.disabled=true;
+ const speak=btn('Speak current question',()=>{
+  if(!session||session.status!=='active')return;
+  if(!('speechSynthesis' in window)||!('SpeechSynthesisUtterance' in window))
+    return notice('Question audio is unavailable in this browser.',true);
+  window.speechSynthesis.cancel();
+  const msg=new SpeechSynthesisUtterance(promptText);
+  msg.lang=session.language==='hi'?'hi-IN':'en-IN';
+  window.speechSynthesis.speak(msg);
+ },true);
+ speak.disabled=true;
+ let session=null,promptText='';
+ function render(result){
+  session=result.state;promptText=result.prompt||'';
+  const active=session.status==='active';
+  answer.disabled=!active;next.disabled=!active;speak.disabled=!active;
+  if(active){
+   question.textContent='Question '+(session.index+1)+' of 7 — '+promptText;
+   status.textContent=result.action==='repeat'?
+    'Please clarify: '+(result.warning||'Answer not recognized'):
+    'Demo only · Question '+(session.index+1)+' of 7';
+   if(result.action!=='repeat')answer.value='';
+   if(result.action!=='repeat')answer.focus();
+   preview.hidden=true;
+   return;
+  }
+  question.textContent=session.status==='completed'?'AI test completed — review the recognized answers below.':
+   session.status==='opted_out'?'Stop-calling request detected. In a real CRM, staff must verify and record the opt-out.':
+    'Response unclear after three attempts. Human review required.';
+  status.textContent=session.status==='completed'?
+    'Completed: no phone calls, CRM saves or site visits.':
+    'Stopped safely: no CRM record, opt-out or consent was modified.';
+  if(session.status==='completed'){
+   const a=session.answers;
+   preview.replaceChildren(title('Test result','h3'),
+     table(['Question','Interpreted answer'],[
+      ['Property type',a.propertyType],['Location',a.location],['Area',a.area],
+      ['Size',a.size],['Budget (INR)',a.budgetInr??'—'],
+      ['Interest',a.interest],['Visit date',a.visitDate||'Not requested']
+     ]),node('p',{class:'muted',text:'These results are for practice only. To save real customer answers, open Customers / Excel → Details → 7 Fixed Questions and explicitly review and save.'}));
+   preview.hidden=false;
+  }else preview.hidden=true;
+ }
+ answer.addEventListener('keydown',event=>{
+  if(event.key==='Enter'&&!next.disabled){event.preventDefault();next.click()}
+ });
+ box.append(div('formrow',lab('Question language',language),start),
+  status,question,lab('Test answer',answer),div('formrow',next,speak),preview);
+ content.append(box);
 }
 
 function manualCustomerPanel(tenantId,content){
