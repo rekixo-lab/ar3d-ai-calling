@@ -17,7 +17,7 @@ Do the following only when at your own secure computer. This checklist is not pr
 
 - Choose and contract with an India-compliant calling provider, obtain the authorized caller number(s), and complete required KYC, DLT/telecom registration and permitted traffic categories with the provider.
 - Arrange independently verifiable opt-in proof, DND/suppression lookup, call-time windows, disclosure, recording notifications and deletion/retention rules. The current software **does not verify these**.
-- Choose and fund Hindi/English STT, TTS and LLM/realtime services. Keep keys in Cloudflare Worker secrets, not browser code. Agree on usage pricing, privacy processing and region.
+- **Agreed fixed-question v1:** Cloudflare Workers AI speech-to-text and the existing approved prerecorded Hindi/English R2 prompts are the intended initial speech stack. No general-purpose LLM or realtime TTS provider is mandatory. Verify usage limits, processing/region and costs. Streaming TTS/LLM is an **optional future upgrade**; never claim calling minutes or speech processing are guaranteed free.
 - Choose payment processor, subscriptions, rates, tax/invoice policy, usage quotas and refunds. Billing and automatic minute charging are not implemented.
 - Approve explicit, permission-scoped read-only AR3D Platform/Engine project APIs and integration credentials. A pending link is not verified project data.
 - Verify backups, data-retention deletion workflows, provider callback signatures, duplicate event handling, live audio latency and telecom compliance before any actual call can be enabled.
@@ -25,7 +25,7 @@ Do the following only when at your own secure computer. This checklist is not pr
 
 ## Pending engineering modules
 
-Real provider webhook adapter and signature verification; call initiation and phone-number inventory; realtime media transport; production STT/TTS/LLM prompts and human fallback; provider DND sync; consent verification; calls/transcripts/recordings handling and retention; usage metering, customer billing and payment processing; per-plan limits; AR3D knowledge verification; secure data deletion and full disaster recovery. All of these require additional implementation and/or provider access.
+The Plivo-only **scripted** pilot/campaign already includes a signed webhook adapter, bounded call initiation, recorded prompt playback, short-answer STT and opt-out flow. It remains **unverified in a real authorized internal phone call**. Still pending for real customers: India carrier KYC/approved caller and traffic type, external live DND verification and consent evidence review, consent/recording notices, reliable private data deletion/backup/restore and operational sign-off. Paid SaaS requires separately verified provider usage and subscription/invoicing. Realtime media, general STT/TTS/LLM conversation and knowledge/RAG are optional future product work, not prerequisites for agreed fixed-question v1. Do not activate phone calling by dropping safety triggers.
 
 The build may be deployed to a main Worker for synthetic tests; it is **not production-ready for live calls or customer PII**.
 
