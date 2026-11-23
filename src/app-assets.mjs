@@ -303,14 +303,14 @@ async function mfaPanel(main){
 async function superAdmin(main){
  const panel=div('card client-directory',title('Client directory'));panel.id='clients-panel';main.append(panel);
  const list=div(''),directorySearch=input('clientDirectorySearch','search','Search company name, slug or email');
- const prev=btn('← Previous companies',async()=>{pageOffset=Math.max(0,pageOffset-100);await refresh()},true);
- const next=btn('Next companies →',async()=>{pageOffset+=100;await refresh()},true);
- const searchButton=btn('Search clients',async()=>{pageOffset=0;await refresh()},true);
+ const prev=btn('← Previous companies',async()=>{pageOffset=Math.max(0,pageOffset-100);await refresh();await refreshAccess();populateMemberCompanies()},true);
+ const next=btn('Next companies →',async()=>{pageOffset+=100;await refresh();await refreshAccess();populateMemberCompanies()},true);
+ const searchButton=btn('Search clients',async()=>{pageOffset=0;await refresh();await refreshAccess();populateMemberCompanies()},true);
  const pagination=div('formrow',prev,next);
  directorySearch.maxLength=80;
  directorySearch.setAttribute('aria-label','Search all clients');
  directorySearch.addEventListener('keydown',e=>{
-  if(e.key==='Enter'){e.preventDefault();pageOffset=0;refresh().catch(asError)}
+  if(e.key==='Enter'){e.preventDefault();pageOffset=0;refresh().then(refreshAccess).then(populateMemberCompanies).catch(asError)}
  });
  panel.append(div('formrow',lab('Find any company',directorySearch),searchButton),list,pagination);
  let existing=null,tenantRowsAll=[],pageOffset=0;
@@ -357,7 +357,7 @@ async function superAdmin(main){
   e.preventDefault();
   const matched=tenantRowsAll.find(t=>t.id===existing.value)||
    tenantRowsAll.find(t=>t.display_name.toLowerCase()===name.value.trim().toLowerCase());
-  const action=matched?'Link to existing '+matched.display_name:'Create a new company';
+  const action=matched?'Link to existing '+matched.display_name:'Create or link company';
   if(!confirm(action+' and generate a private invitation for '+email.value+'? No email or password will be sent automatically.'))return;
   const submit=f.querySelector('button[type=submit]');submit.disabled=true;
   try{
@@ -389,7 +389,8 @@ const actionForm=node('form',{class:'stack'},[lab('Company',accessSelect),lab('R
 accessCard.append(actionForm);
 let tenantRows=[];
 async function refreshAccess(){
-  const result=await api('/v1/human/tenants');
+  const q=new URLSearchParams({q:directorySearch.value.trim(),limit:'100',offset:String(pageOffset)});
+  const result=await api('/v1/human/tenants?'+q);
   tenantRows=result.tenants.filter(t=>['trial','active','suspended'].includes(t.status));
   const oldValue=accessSelect.value;
   accessSelect.replaceChildren(...tenantRows.map(t=>node('option',{value:t.id,text:t.display_name+' — '+t.status})));
