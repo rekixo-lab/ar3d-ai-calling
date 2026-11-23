@@ -10,6 +10,9 @@ const STOP=/(?:stop calling|don't call|do not call|remove my number|unsubscribe|
 // about a bad audio connection is NOT a city, neighborhood or plot preference.
 const AGAIN=/^(?:(?:please|कृपया|जरा|ज़रा|माफ कीजिए|माफ़ कीजिए)\s+)?(?:repeat(?: please| that| question)?|again|say again|pardon|come again|can you repeat|could you repeat|what did you say|दोबारा(?: बोलिए| बताइए| पूछिए)?|दुबारा(?: बोलिए| बताइए| पूछिए)?|फिर से(?: बोलिए| बताइए| पूछिए)?|एक बार और|एक बार फिर|क्या पूछा|फिर बोलो)[।.?!\s]*$/iu;
 const NOT_HEARD=/(?:सुनाई\s+नहीं|सुन\s+नहीं\s+पा|समझ\s+नहीं\s+आ|(?:आवाज|आवाज़).{0,24}(?:नहीं\s+आ|कट\s+रही|साफ\s+नहीं)|\b(?:cannot|can't|couldn't|could not|didn't|did not)\s+(?:hear|understand)\b|\b(?:voice|audio)\s+(?:is\s+)?(?:breaking|cutting)\b|\bwhat\s+did\s+you\s+say\b|क्या\s+(?:बोला|कहा))/iu;
+// A correction or a question about what the agent said is not a geographic
+// answer. This also applies at all later survey steps; never guess intent.
+const MISUNDERSTOOD=/(?:गलत.{0,28}(?:समझ|सुन|बोल|कह|पूछ)|(?:समझ|सुना|सुन).{0,28}गलत|क्या\s+(?:बोल|कह|पूछ)\s+रहे|(?:कौन\s*सा|क्या)\s+सवाल\s+था|(?:you\s+(?:misheard|misunderstood)\s+me|you\s+(?:got|heard|understood)\s+(?:it|me|that)\s+wrong|that(?:'s| is)\s+not\s+what\s+i\s+said|what\s+(?:are|were)\s+you\s+(?:saying|asking)|please\s+ask\s+(?:the\s+question\s+)?again)|(?:dobara|dubara|phir\s+se)\s+(?:bolo|boliye|pucho|poochho|batao|bataiye)|(?:sunai\s+nahi|awaz\s+nahi\s+aa))/iu;
 const NON_ANSWER=/^(?:yes|yeah|no|ok(?:ay)?|hello|hi|hmm+|uh+|हाँ|हां|जी|जी हाँ|जी नहीं|नहीं|ठीक|ठीक है|अच्छा|ओके|हेलो|नमस्ते|पता नहीं|मालूम नहीं|pata nahi|not sure|i don't know|i do not know)[।.!?\s]*$/iu;
 const MAX_TURNS=25;
 const MAX_ATTEMPTS=3;
@@ -35,7 +38,7 @@ function cleaned(input){
 }
 function smallText(str,field){
   const value=str.replace(/^[।.!?\s]+|[।.!?\s]+$/g,'').trim();
-  if(NON_ANSWER.test(value)||NOT_HEARD.test(value))
+  if(NON_ANSWER.test(value)||NOT_HEARD.test(value)||MISUNDERSTOOD.test(value))
     throw Error('not a location or area answer; repeat or review');
   if(value.length<2||value.length>120)throw Error('unclear '+field+'; repeat or review');
   return value;
@@ -93,6 +96,10 @@ function parseInterest(str){
     if(agree)throw Error('conflicting interest answer; repeat or review');
     return 'not_interested';
   }
+  // A bare "no / नहीं" with "yes / हाँ" is contradictory, not consent
+  // or interest. Do not silently mark an interested customer.
+  if(agree&&/(?:\b(?:no|nope|nah)\b|नहीं)/iu.test(str))
+    throw Error('conflicting interest answer; repeat or review');
   if(/(?:later|follow.?up|next month|not now|बाद में|अभी नहीं|फिर कभी|कुछ दिन)/iu.test(str))
     return 'later';
   if(agree||/(?:interested|चाहिए)/iu.test(str))
@@ -180,7 +187,7 @@ export function advanceFixedVoicePreview(current,{transcript,confidence=1,now=Da
   }
   let parsed;
   try{
-    if(AGAIN.test(input)||NOT_HEARD.test(input)||confidence<0.70)
+    if(AGAIN.test(input)||NOT_HEARD.test(input)||MISUNDERSTOOD.test(input)||confidence<0.70)
       throw Error('recognition unclear; repeat question');
     const field=FIELDS[state.index];
     if(field==='propertyType')parsed=parseProperty(input);
