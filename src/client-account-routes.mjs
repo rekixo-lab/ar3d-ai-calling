@@ -31,8 +31,22 @@ export async function handleClientAccountRequest(req,env,user){
   if(req.method!=='POST')return fail('method not allowed',405);
   try{
     const d=await readBody(req);
-    if(Object.keys(d).some(k=>!['displayName','email','mobile','tenantId'].includes(k)))return fail('unexpected account field');
+    if(Object.keys(d).some(k=>!['displayName','email','mobile','tenantId','initialCreditInr'].includes(k)))return fail('unexpected account field');
     const displayName=checkName(d.displayName),email=validEmail(d.email),mobile=normalizeIndianPhone(d.mobile);
+    const initialCreditInr=d.initialCreditInr??0;
+    if(!Number.isSafeInteger(initialCreditInr)||initialCreditInr<0||initialCreditInr>1000000)
+      return fail('invalid planned credit amount');
+    // An initial budget is a provisional internal plan, never Plivo funds.
+    // Do not allow a stale or non-MFA session to create credits.
+    if(initialCreditInr>0){
+      if(!/^[a-f0-9]{64}$/i.test(user.token_hash||''))return fail('current MFA required to set credits',403);
+      const session=await env.CONTROL_DB.prepare(
+       'SELECT 1 AS valid FROM human_mfa_settings m JOIN human_sessions s ON s.user_id=m.user_id '+
+       'WHERE m.user_id=? AND s.token_hash=? AND m.enabled_at IS NOT NULL '+
+       'AND s.created_at>=m.enabled_at AND s.revoked_at IS NULL AND s.expires_at>? LIMIT 1')
+       .bind(user.id,user.token_hash,Date.now()).first();
+      if(!session)return fail('current MFA required to set credits',403);
+    }
     if(!/^\+91[6-9][0-9]{9}$/.test(mobile))return fail('Indian mobile number required');
     if(d.tenantId!==undefined&&(!/^[a-f0-9-]{36}$/i.test(d.tenantId)||typeof d.tenantId!=='string'))
       return fail('invalid existing client');
@@ -75,6 +89,17 @@ export async function handleClientAccountRequest(req,env,user){
     actions.push(db.prepare(`INSERT INTO client_account_contacts(tenant_id,email,mobile_e164,created_by,created_at,updated_at)
       VALUES(?,?,?,?,?,?)`)
       .bind(tenant.id,email,mobile,user.id,at,at));
+    if(initialCreditInr>0){
+      actions.push(db.prepare(
+       'INSERT INTO tenant_credit_budgets(tenant_id,planned_paise,updated_by,updated_at) '+
+       'VALUES(?,?,?,?)')
+       .bind(tenant.id,initialCreditInr*100,user.id,at));
+      actions.push(db.prepare(
+       'INSERT INTO tenant_credit_audit(id,tenant_id,actor,previous_paise,new_paise,reason,created_at) '+
+       'VALUES(?,?,?,?,?,?,?)')
+       .bind(crypto.randomUUID(),tenant.id,user.id,0,initialCreditInr*100,
+        'Initial provisional client credit; no carrier funds or calls activated',at));
+    }
     actions.push(db.prepare('INSERT INTO human_invitations(token_hash,tenant_id,email,role,expires_at,created_by,created_at) VALUES(?,?,?,\'client_admin\',?,?,?)')
       .bind(digest,tenant.id,email,expiry,user.id,at));
     actions.push(db.prepare('INSERT INTO tenant_audit_events(id,tenant_id,actor,action,target_id,detail_json,created_at) VALUES(?,?,?,\'client.account_invited\',?,?,?)')
@@ -83,6 +108,7 @@ export async function handleClientAccountRequest(req,env,user){
     if(out.some(x=>Number(x.meta?.changes)!==1))return fail('account was not changed; review existing access',409);
     return json({ok:true,id:tenant.id,slug:tenant.slug,displayName:tenant.display_name,email,
       existingTenant:!tenant.isNew,aiDraftReady:Boolean(tenant.isNew),aiPublished:false,
+      plannedCreditInr:initialCreditInr,creditStatus:'provisional_only',
       access:'invitation_pending',
       inviteUrl:new URL(req.url).origin+'/app#invite='+token,
       expiresAt:new Date(expiry).toISOString(),
