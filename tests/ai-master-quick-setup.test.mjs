@@ -11,7 +11,7 @@ const make=(body,user=admin,origin='https://app.example.invalid')=>new Request(
  'https://app.example.invalid/v1/human/calling-scripts/quick-setup',
  {method:'POST',headers:{Origin:origin,'Content-Type':'application/json'},body:JSON.stringify({tenantId:tid,...body})});
 const call=(f,body,user=admin,origin)=>handleCallingScripts(make(body,user,origin),f.env,user,{now,
- fetcher:async()=>{throw Error('NO Exotel calls permitted by quick setup')}});
+ fetcher:async()=>{throw Error('NO provider calls permitted by quick setup')}});
 const preview=async(f,d=details)=>call(f,{mode:'preview',details:d});
 
 test('Master AI templates are validated, versioned and never invent unprovided price or location',()=>{
