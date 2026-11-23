@@ -135,7 +135,7 @@ test('Read-only pack check distinguishes complete, missing, invalid and R2-outag
  assert.equal(seen.length,12);
  assert.ok(seen.every(key=>key.startsWith('scripted-phone-pilot/hi/')));
  assert.ok(!JSON.stringify(hi).includes('private infrastructure details'));
- assert.throws(()=>inspectScriptedPromptPack(env,'fr'),/invalid audio pack language/);
+ await assert.rejects(inspectScriptedPromptPack(env,'fr'),/invalid audio pack language/);
  const en=await inspectScriptedPromptPack(env,'en');
  assert.equal(en.requiredReady,11);
  assert.equal(en.optionalRepeat,'present');
