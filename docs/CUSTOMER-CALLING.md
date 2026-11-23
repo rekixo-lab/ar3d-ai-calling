@@ -20,6 +20,7 @@ Complete the [verified-number pilot](scripted-phone-pilot.md) before enabling cu
 
 - Client **Company overview → View follow-ups and next actions** opens the **Results** page, showing due follow-ups and upcoming site visits from the client's own CRM.
 - **Next Actions** is a read-only task reminder in the dashboard. It highlights staff follow-up dates, visit requests/confirmations, and Do Not Call entries without sending any WhatsApp/SMS or retrying a telephone call.
+- **Reminder draft (Hindi/English):** For a confirmed future site visit, choose WhatsApp or SMS draft and click **Prepare reminder**, then copy the text. This requires a company admin session, cannot draft for Do Not Call/denied/blocked customers or stale/unconfirmed visits, and never invokes Plivo or changes CRM. The draft is **not an approved WhatsApp template** and no delivery/opt-in verification is implied. Human staff must check genuine opt-in and the provider-approved route/template before sending; automatic SMS/WhatsApp remains disabled.
 - **Operations report** now shows interested leads, follow-up leads and already-due follow-ups, alongside campaign/visit counters. These are CRM statuses, not Plivo-verified answers, billed minutes or revenue.
 - Future automatic callback and carrier-integrated reminders must require provider-approved routing and independently verified recipient preference and DND status.
 
