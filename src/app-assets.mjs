@@ -598,7 +598,7 @@ async function renderClient(id,content){
    if(d.role==='client_admin')section.append(manualCustomerPanel(id,content));
    await crmWorkflow(id,section,d.role,content);
   },
-  'ai-test':section=>aiTestingPanel(section),
+  'ai-test':section=>aiTestingPanel(section,id,d.role),
   calling:section=>customerCallingPanel(id,section,d.role,content.openView),
   results:async section=>{
    campaignResultsPanel(id,section);
@@ -631,11 +631,11 @@ async function renderClient(id,content){
  content.openView(state.clientTab||'customers');
 }
 
-// Safe independent testing: never needs a lead or phones; no saving to D1.
-// Voice transcription remains optional only inside a specific customer's reviewed form.
-function aiTestingPanel(content){
+// Browser-only AI preview, with optional explicit auto-save to one CRM customer.
+// No calls, telecom records, or consent/DND changes in either mode.
+function aiTestingPanel(content,tenantId,role){
  const box=div('card ai-testing',title('7-question AI test (no calls)'),
-  node('p',{class:'note',text:'Practice with fictional information. This is a deterministic Hindi/English answer parser, not a live phone conversation. Answers stay in this page until you leave it; no CRM update, recording or calling approval is made.'}));
+  node('p',{class:'note',text:'Practice with fictional answers. This is not a live phone call. By default results are not saved. A Client Admin may explicitly enable auto-save for one selected CRM customer; nothing changes consent, DND or call records.'}));
  const language=node('select',{class:'field','aria-label':'AI test language'},
   [['hi','हिंदी'],['en','English']].map(([value,label])=>node('option',{value,text:label})));
  const status=node('p',{class:'banner',role:'status',text:'Choose a language and start the test.'});
@@ -643,11 +643,53 @@ function aiTestingPanel(content){
  const answer=input('aiTestAnswer','text','Enter a fictional answer');
  answer.required=false;answer.maxLength=220;answer.disabled=true;
  answer.setAttribute('aria-label','AI test answer');
+ const canSave=role==='client_admin';
+ const search=input('aiTestCustomerSearch','search','Search customer by name or mobile');
+ search.required=false;search.maxLength=80;
+ search.setAttribute('aria-label','Search CRM customer');
+ const customer=node('select',{class:'field','aria-label':'Select CRM customer'},
+  node('option',{value:'',text:'Select a customer to enable auto-save'}));
+ const autoSave=node('input',{type:'checkbox'});
+ autoSave.checked=false;
+ autoSave.setAttribute('aria-label','Auto-save AI test answers to selected customer CRM');
+ const customerNote=node('p',{class:'muted',text:'No customer selected. AI test answers stay in preview.'});
+ const lookup=btn('Find CRM customer',async()=>{
+  lookup.disabled=true;
+  try{
+   const args=new URLSearchParams({tenantId,q:search.value.trim(),limit:'50'});
+   const data=await api('/v1/human/leads?'+args);
+   customer.replaceChildren(node('option',{value:'',text:'Select a customer to enable auto-save'}),
+    ...data.leads.map(lead=>node('option',{value:lead.id,
+     text:lead.name+' · mobile ending '+String(lead.mobile||'').slice(-4)})));
+   autoSave.checked=false;
+   customerNote.textContent=data.leads.length+' matching customers shown. Choose one, then explicitly enable auto-save.';
+  }catch(err){asError(err)}finally{lookup.disabled=false}
+ },true);
+ if(canSave){
+  customer.addEventListener('change',()=>{autoSave.checked=false;
+   customerNote.textContent=customer.value?'Enable auto-save only if these fictional answers should update this customer.':'No customer selected. AI test answers stay in preview.'});
+  box.append(div('stack',
+   title('Optional CRM auto-save','h3'),
+   node('p',{class:'muted',text:'Only the selected customer will be updated after the final answer. Existing notes are retained. No visit is booked; no calls are placed.'}),
+   div('formrow',lab('Search customer',search),lookup),
+   lab('Customer for this test',customer),
+   lab('Automatically save completed test answers to this CRM customer',autoSave),
+   customerNote));
+ }else box.append(node('p',{class:'note',text:'Viewer access: practice only. CRM auto-save requires a Client Admin account.'}));
+ let linked=false,secureContext=null,secureProof=null,selectedName='';
  const preview=div('stack');preview.hidden=true;
  const start=btn('Start AI test',async()=>{
   start.disabled=true;
   try{
-   const result=await api('/v1/human/voice-preview','POST',{action:'start',language:language.value});
+   const wantSave=canSave&&autoSave.checked;
+   if(wantSave&&!customer.value)throw Error('Select a CRM customer before enabling auto-save');
+   const result=wantSave?
+    await api('/v1/human/ai-test-crm','POST',{
+     action:'start',tenantId,leadId:customer.value,language:language.value
+    }):
+    await api('/v1/human/voice-preview','POST',{action:'start',language:language.value});
+   linked=wantSave;secureContext=result.context||null;secureProof=result.proof||null;
+   selectedName=wantSave?result.selectedCustomer:'';
    render(result);
   }catch(err){asError(err)}finally{start.disabled=false}
  });
@@ -655,9 +697,10 @@ function aiTestingPanel(content){
   if(!session||session.status!=='active')return;
   next.disabled=true;
   try{
-   const result=await api('/v1/human/voice-preview','POST',{
-    action:'turn',state:session,transcript:answer.value,confidence:1
-   });
+   const payload={action:'turn',state:session,transcript:answer.value,confidence:1};
+   if(linked){payload.context=secureContext;payload.proof=secureProof}
+   const result=await api(linked?'/v1/human/ai-test-crm':'/v1/human/voice-preview','POST',payload);
+   if(linked){secureContext=result.context||secureContext;secureProof=result.proof||null}
    render(result);
   }catch(err){asError(err)}
   finally{next.disabled=!session||session.status!=='active'}
@@ -678,6 +721,8 @@ function aiTestingPanel(content){
   session=result.state;promptText=result.prompt||'';
   const active=session.status==='active';
   answer.disabled=!active;next.disabled=!active;speak.disabled=!active;
+  language.disabled=active;
+  if(canSave){search.disabled=active;customer.disabled=active;autoSave.disabled=active;lookup.disabled=active}
   if(active){
    question.textContent='Question '+(session.index+1)+' of 7 — '+promptText;
    status.textContent=result.action==='repeat'?
@@ -692,7 +737,9 @@ function aiTestingPanel(content){
    session.status==='opted_out'?'Stop-calling request detected. In a real CRM, staff must verify and record the opt-out.':
     'Response unclear after three attempts. Human review required.';
   status.textContent=session.status==='completed'?
-    'Completed: no phone calls, CRM saves or site visits.':
+    (result.savedToCrm?
+     'Auto-saved to '+selectedName+' in this company CRM. No calls, consent or site visits changed.':
+     'Completed: preview only. No CRM saves, calls or site visits.'):
     'Stopped safely: no CRM record, opt-out or consent was modified.';
   if(session.status==='completed'){
    const a=session.answers;
@@ -701,7 +748,9 @@ function aiTestingPanel(content){
       ['Property type',a.propertyType],['Location',a.location],['Area',a.area],
       ['Size',a.size],['Budget (INR)',a.budgetInr??'—'],
       ['Interest',a.interest],['Visit date',a.visitDate||'Not requested']
-     ]),node('p',{class:'muted',text:'These results are for practice only. To save real customer answers, open Customers / Excel → Details → 7 Fixed Questions and explicitly review and save.'}));
+     ]),node('p',{class:'muted',text:result.savedToCrm?
+       'Auto-save completed for '+selectedName+'. This is simulated qualification, not a verified customer phone call or a confirmed visit.':
+       'Preview only. To save these answers, use a new test with explicit CRM auto-save or open Customers / Excel → Details → 7 Fixed Questions.'}));
    preview.hidden=false;
   }else preview.hidden=true;
  }
