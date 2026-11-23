@@ -15,6 +15,12 @@ Official Plivo [Account API](https://www.plivo.com/docs/account/api/account) doc
 
 **Fundability is intentionally NOT implemented yet.** Multiple provisional allocations may sum to more than the Plivo account's actual funds, but they cannot be spent, and the UI always explains this. Production must refuse to activate a funded wallet until the provider confirms available nontrial funds, currency/exchange rules, merchant/reseller compliance, India numbers and carrier-approved traffic. Implement a separate, reconciled backing reserve before marking anything spendable.
 
+## On-demand per-call Plivo charge check (read-only)
+
+Client Admin → **Results / CRM → Campaign results & customer answers** may select **Check charge** for an ended call. The Worker reads only the corresponding tenant's completed/failed `calling_jobs` and, when it has a provider-confirmed call UUID, queries the official Plivo Calls API `GET /v1/Account/{auth_id}/Call/{call_uuid}/` with Worker-only credentials. It rejects mismatched origin/destination, account, UUID, direction and malformed amounts; never returns customer phone numbers, provider secrets or call recordings to the browser.
+
+It shows the provider-reported amount and billed seconds, with **currency unverified for the India account**. No INR conversion, budget deduction, automatic charge, client money transfer or call attempt occurs. Unanswered or uncertain submissions do not get automatic redials. Provider authorization, actual CDR settlement and final credit balance accounting remain blocked until KYC/currency and commercial approval are verified.
+
 ## Before real client billing or calls
 
 - Confirm the India business account, real currency, balance definition, trial restrictions, legal sales/reseller agreements, and 140 promotional series pricing with Plivo.
