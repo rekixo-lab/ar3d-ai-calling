@@ -73,7 +73,7 @@ test('Plivo balance is only Super Admin MFA, account type/currency are never inf
  const f=fixture();
  try{
   f.env.PLIVO_AUTH_ID='TESTACCOUNT123';
-  f.env.PLIVO_AUTH_TOKEN='SYNTHETIC_AUTH_TOKEN_123';
+  f.env.PLIVO_AUTH_TOKEN='SYNTHETICAUTHTOKEN123';
   assert.equal((await route(f,'provider',client)).status,403);
   freshMfa(f);
   let seen=0;
@@ -90,7 +90,7 @@ test('Plivo balance is only Super Admin MFA, account type/currency are never inf
   assert.equal(d.cashCreditsCurrency,'unverified_for_India_account');
   assert.equal(d.verifiedInr,false);assert.equal(seen,1);
   assert.ok(!JSON.stringify(d).includes('TESTACCOUNT123'));
-  assert.ok(!JSON.stringify(d).includes('SYNTHETIC_AUTH_TOKEN_123'));
+  assert.ok(!JSON.stringify(d).includes('SYNTHETICAUTHTOKEN123'));
   const outage=await route(f,'provider',admin,'GET',undefined,{fetcher:async()=>{throw Error('synthetic provider secret')}})
   assert.equal((await outage.json()).available,false);
   const noKeys=await route({...f,env:{...f.env,PLIVO_AUTH_TOKEN:undefined}},'provider',admin);
