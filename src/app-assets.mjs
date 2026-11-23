@@ -305,8 +305,9 @@ function creditWalletOperator(main){
  const panel=node('details',{class:'card'},node('summary',{text:'Plivo balance & client credit budgets (operator)'}));
  const area=div('stack'),provider=div(''),total=div(''),clientStatus=div('');
  const company=node('select',{class:'field','aria-label':'Client credit company'});
- const budget=input('plannedCreditInr','number');
- budget.min='0';budget.max='1000000';budget.value='0';
+ const packages=[0,100,200,300,400,500];
+ const budget=node('select',{class:'field','aria-label':'Planned client credit package'},
+  packages.map(n=>node('option',{value:String(n),text:n?String(n)+' credits · ₹'+n+' planned':'No credits · ₹0'})));
  const reason=input('creditReason','text','Reason for changing planned credit');
  reason.maxLength=200;reason.value='AR3D provisional client credit package update';
  const save=btn('Set planned credit',async()=>{
@@ -315,7 +316,7 @@ function creditWalletOperator(main){
   save.disabled=true;
   try{
    const n=Number(budget.value);
-   if(!Number.isSafeInteger(n)||n<0||n>1000000)throw Error('Enter a whole INR amount');
+   if(!packages.includes(n))throw Error('Choose 100, 200, 300, 400 or 500 planned credits');
    const d=await api('/v1/human/credits/tenant','POST',{
     tenantId:company.value,totalInr:n,expectedCurrentInr:current,reason:reason.value
    });
@@ -337,7 +338,10 @@ function creditWalletOperator(main){
    api('/v1/human/credits/tenant?tenantId='+encodeURIComponent(company.value)),
    api('/v1/human/credits/overview')
   ]);
-  current=d.plannedInr;budget.value=String(current);
+  current=d.plannedInr;
+  // Preserve any previously configured legacy plan in the read-only display.
+  if(!packages.includes(current))budget.append(node('option',{value:String(current),text:'Existing legacy plan · ₹'+current}));
+  budget.value=String(current);
   clientStatus.replaceChildren(node('p',{class:'note',
    text:'This company: ₹'+current+' planned, ₹ balance not spendable. No billing or calling activated.'}));
   total.replaceChildren(node('p',{class:'muted',
@@ -408,14 +412,16 @@ async function superAdmin(main){
  const name=input('company','text','Builder company name');
  const email=input('contactEmail','email','client@builder.com');
  const mobile=input('mobile','tel','10-digit Indian mobile');
- const initialCredit=input('initialCreditInr','number');initialCredit.min='0';initialCredit.max='1000000';initialCredit.value='0';
+ const initialCredit=node('select',{class:'field','aria-label':'Starting client credit package'},
+   [0,100,200,300,400,500].map(n=>node('option',{value:String(n),text:n?String(n)+' credits (₹'+n+' planned)':'No credits (₹0)'})));
+ initialCredit.value='100';
  existing=node('select',{class:'field'},[node('option',{value:'',text:'New company or automatically match by name'}),
   ...tenantRowsAll.filter(t=>t.status==='trial'||t.status==='active').map(t=>node('option',{value:t.id,text:t.display_name}))]);
  existing.addEventListener('change',()=>{const t=tenantRowsAll.find(t=>t.id===existing.value);if(t)name.value=t.display_name});
  const advanced=node('details',{},[node('summary',{text:'Link to an existing company instead'}),lab('Existing company',existing)]);
  const f=node('form',{class:'stack'},[
   div('formrow',lab('Company name',name),lab('Client email',email),lab('Client mobile',mobile)),
-  lab('Initial planned credit (₹) — no Plivo funds moved',initialCredit),
+  lab('Starting credits — choose 100 to 500 (planned only)',initialCredit),
   advanced,
   node('button',{class:'btn',type:'submit',text:'Create client invitation'})
  ]);
