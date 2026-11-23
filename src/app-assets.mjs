@@ -601,6 +601,7 @@ async function renderClient(id,content){
   'ai-test':section=>aiTestingPanel(section,id,d.role),
   calling:section=>customerCallingPanel(id,section,d.role,content.openView),
   results:async section=>{
+   operationsReportPanel(id,section);
    campaignResultsPanel(id,section);
    if(d.role==='client_admin'){
     const reports=node('details',{class:'card'},node('summary',{text:'Export and audit history'}));
@@ -775,6 +776,54 @@ function manualCustomerPanel(tenantId,content){
   }catch(e){asError(e)}finally{submit.disabled=false}
  });
  details.append(form);return details;
+}
+
+// Read-only operational reporting for the selected company only.
+// Counts exclude customer PII and cannot trigger any provider/CRM mutation.
+function operationsReportPanel(tenantId,content){
+ const card=div('card',title('Operations & Security Report'),
+  node('p',{class:'muted',text:'Read-only company summary. Failed and unknown calls must be reviewed manually; this page cannot retry a call.'}));
+ const view=div('stack'),refresh=btn('Refresh operations report',()=>load().catch(asError),true);
+ card.append(refresh,view);
+ content.append(card);
+ async function load(){
+  refresh.disabled=true;
+  try{
+   const data=await api('/v1/human/operations/report?tenantId='+encodeURIComponent(tenantId));
+   if(!card.isConnected)return;
+   const jobs=data.jobs;
+   const lines=[
+    ['CRM customers',data.customers.total],
+    ['Blocked / denied customers',data.customers.blockedOrDenied],
+    ['Campaigns running',data.campaigns.running],
+    ['Queued call jobs',jobs.queued],
+    ['Provider in-flight jobs',jobs.reserved+jobs.submitted],
+    ['Unknown provider outcomes',jobs.unknown],
+    ['Failed jobs',jobs.failed],
+    ['Completed jobs',jobs.completed],
+    ['Visit requests',data.visits.requested],
+    ['CRM audit events · last 7 days',data.recentActivity.auditEvents],
+    ['AI test auto-saves · last 7 days',data.recentActivity.simulatedCrmAutoSaves]
+   ];
+   view.replaceChildren(
+    node('p',{class:'muted',text:'Updated '+new Date(data.asOf).toLocaleString()+
+      ' · last 7 days for activity counts · not billable provider usage'}),
+    table(['Measure','Count'],lines.map(([name,count])=>[name,String(count)])),
+    node('p',{class:data.providerReview.needsManualReconciliation?'banner err':'note',
+     role:'status',text:data.providerReview.notice}),
+    node('p',{class:'muted',text:'No automatic redial, consent changes or billing actions. Any uncertain provider response stays locked until manually reconciled.'})
+   );
+  }catch(error){
+   if(card.isConnected)view.replaceChildren(node('p',{class:'banner err',role:'alert',
+    text:'Operational report unavailable. No calling or CRM action was performed.'}));
+   throw error;
+  }finally{refresh.disabled=false}
+ }
+ load().catch(asError);
+ content.addEventListener('workspace-tab-shown',()=>{
+  if(!card.isConnected)return;
+  load().catch(asError);
+ });
 }
 
 function campaignResultsPanel(tenantId,content){

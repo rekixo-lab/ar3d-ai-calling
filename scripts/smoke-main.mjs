@@ -34,6 +34,12 @@ export async function smoke(base,fetchFn=fetch){
     ['/v1/human/leads/33333333-3333-4333-8333-333333333333/qualification',401,'application/json',async r=>(await r.json()).error==='sign in required'],
     ['/v1/human/call-intent-proposals',401,'application/json',async r=>(await r.json()).error==='sign in required'],
     ['/v1/human/voice-preview',401,'application/json',async r=>(await r.json()).error==='sign in required'],
+    // Public read-only monitoring ensures sensitive reports, exports and
+    // customer-linked test actions never leak without a human login.
+    ['/v1/human/operations/report',401,'application/json',async r=>(await r.json()).error==='sign in required'],
+    ['/v1/human/exports/leads',401,'application/json',async r=>(await r.json()).error==='sign in required'],
+    ['/v1/human/audit',401,'application/json',async r=>(await r.json()).error==='sign in required'],
+    ['/v1/human/ai-test-crm',401,'application/json',async r=>(await r.json()).error==='sign in required'],
   ];
   let ok=true;
   for(const [path,status,contentType,check] of checks){

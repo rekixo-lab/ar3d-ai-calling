@@ -140,6 +140,9 @@ try{
  f.r.db.prepare("INSERT INTO scripted_call_results VALUES(?,?,?,?,1,?)").run(tid,job,crypto.randomUUID(),
   JSON.stringify({propertyType:'flat',location:'Raipur',area:'Shankar Nagar',size:'3BHK',budgetInr:3500000,interest:'interested',visitDate:'2027-01-12'}),at);
  await page.getByRole('link',{name:'Results / CRM',exact:true}).click();
+ await page.getByRole('heading',{name:'Operations & Security Report'}).waitFor();
+ await page.getByRole('row',{name:/Unknown provider outcomes 0/}).waitFor();
+ await page.getByRole('button',{name:'Refresh operations report'}).click();
  await page.getByRole('heading',{name:'Campaign results & customer answers'}).waitFor();
  await page.getByRole('button',{name:'Refresh customer answers'}).waitFor();
  await page.getByRole('combobox',{name:'Filter results by campaign'}).selectOption(draft.id);

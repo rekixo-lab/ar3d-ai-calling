@@ -13,6 +13,7 @@ import {handleAiTestCrmRequest} from './ai-test-crm-routes.mjs';
 import {handleTenantLifecycleRequest} from './tenant-lifecycle-routes.mjs';
 import {initialClientAI} from './default-client-ai.mjs';
 import {handleDataPortabilityRequest} from './data-portability-routes.mjs';
+import {handleOperationsReportRequest} from './operations-report-routes.mjs';
 import {handleAgentSettingsRequest} from './agent-settings-routes.mjs';
 import {handleAuditRequest} from './audit-routes.mjs';
 import {handleVisitStatusRequest} from './visit-status-routes.mjs';
@@ -292,6 +293,8 @@ export async function handleHumanRequest(req,env){
     if(auditResponse)return auditResponse;
     const dataResponse=await handleDataPortabilityRequest(req,env,user);
     if(dataResponse)return dataResponse;
+    const operationsReportResponse=await handleOperationsReportRequest(req,env,user);
+    if(operationsReportResponse)return operationsReportResponse;
     const voicePreviewResponse=await handleFixedVoicePreviewRequest(req,env,user);
     if(voicePreviewResponse)return voicePreviewResponse;
     const aiTestCrmResponse=await handleAiTestCrmRequest(req,env,user);

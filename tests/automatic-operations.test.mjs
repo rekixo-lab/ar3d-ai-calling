@@ -69,7 +69,11 @@ test('Periodic monitor is secretless, GET-only and checks the exact Calling orig
   for(const path of ['/v1/human/me','/v1/human/scripted-phone-pilot',
     '/v1/human/leads/33333333-3333-4333-8333-333333333333/qualification',
     '/v1/human/call-intent-proposals',
-    '/v1/human/voice-preview'])
+    '/v1/human/voice-preview',
+    '/v1/human/operations/report',
+    '/v1/human/exports/leads',
+    '/v1/human/audit',
+    '/v1/human/ai-test-crm'])
     content[path]=[401,'application/json',JSON.stringify({error:'sign in required'})];
   const seen=[];
   const result=await monitor({fetchFn:async(url,opts)=>{
@@ -101,4 +105,31 @@ test('one minute cron slot dispatches safely and preserves six-hour cleanup',asy
  const due=await handleCallingCron({cron:'* * * * *',scheduledTime:Date.parse('2026-11-20T06:00:00Z')},f.env);
  assert.equal(due.processed,0);assert.equal(due.maintenance.tablesChecked,4);
  assert.equal(f.calls.length,4);
+});
+
+test('hourly bounded auth cleanup improves 1000+ client hygiene without touching CRM or provider',async()=>{
+ const f=dbFixture({changes:100});
+ const hour=Date.parse('2026-11-20T07:00:00Z'); // not a six-hour boundary
+ const result=await handleCallingCron({cron:'* * * * *',scheduledTime:hour},f.env);
+ assert.equal(result.processed,0);
+ assert.equal(result.maintenance.tablesChecked,4);
+ assert.equal(result.maintenance.rowsDeleted,400);
+ assert.equal(f.calls.length,4);
+ assert.ok(f.calls.every(x=>x.params.at(-1)===100));
+ assert.ok(f.calls.every(x=>x.sql.startsWith('DELETE FROM human_')));
+ const notHour=await handleCallingCron({cron:'* * * * *',scheduledTime:hour+60000},f.env);
+ assert.equal(notHour.processed,0);
+ assert.equal(notHour.maintenance,undefined);
+ assert.equal(f.calls.length,4);
+ for(const invalid of [-1,NaN,Infinity,1.5])
+  await assert.rejects(handleCallingCron({cron:'* * * * *',scheduledTime:invalid},f.env),
+   /invalid Calling Worker schedule time/);
+ assert.equal(f.calls.length,4);
+});
+test('hourly cleanup refuses an unexpected expired-row count and cannot continue with a false success',async()=>{
+ const f=dbFixture({changes:101});
+ await assert.rejects(handleCallingCron({
+  cron:'* * * * *',scheduledTime:Date.parse('2026-11-20T07:00:00Z')
+ },f.env),/unconfirmed expired session cleanup/);
+ assert.ok(f.calls.every(x=>!/(INSERT INTO calls|UPDATE leads|DELETE FROM leads|recording)/i.test(x.sql)));
 });
