@@ -12,7 +12,7 @@ function get(params='',method='GET'){
 function seed(f,id,purpose,at){
  f.r.db.prepare("INSERT INTO lead_consent_evidence "+
   "(tenant_id,id,lead_id,source,purpose,reference,captured_at,received_at,submitted_by) "+
-  "VALUES(?,?,?,'website_form',?,?,?,?,?,'client')")
+  "VALUES(?,?,?,'website_form',?,?,?,?,'client')")
  .run(tid,id,lead,purpose,'internal-reference-'+id.slice(-3),at,at);
 }
 
