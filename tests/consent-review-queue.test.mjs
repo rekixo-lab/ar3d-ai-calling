@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {fixture,tid,lead,client} from './helpers/calling-fixture.mjs';
+import {fixture,tid,lead,client,admin} from './helpers/calling-fixture.mjs';
 import {handleConsentRequest} from '../src/consent-routes.mjs';
 
 const base='https://app.example.invalid/v1/human/consent-review-queue';
@@ -104,5 +104,22 @@ test('Blocked lead appears with DND status, never becomes callable',async()=>{
   assert.equal(entry.executionAllowed,false);
   assert.equal(f.r.db.prepare('SELECT consent_status,dnd_status FROM leads WHERE tenant_id=? AND id=?')
    .get(tid,lead).consent_status,'denied');
+ }finally{f.close()}
+});
+
+test('Central operator can view the pending queue only with a current MFA Super Admin session',async()=>{
+ const f=fixture();
+ try{
+  seed(f,'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee','site_visit','2026-11-20T00:00:00Z');
+  const now=Date.now(),date=new Date(now).toISOString();
+  f.c.db.prepare("UPDATE human_sessions SET created_at=?,expires_at=? WHERE user_id='admin'")
+   .run(date,now+3600000);
+  const readable=await handleConsentRequest(get('tenantId='+tid),f.env,admin);
+  assert.equal(readable.status,200,await readable.clone().text());
+  assert.equal((await readable.json()).total,1);
+  const badSession={...admin,token_hash:'c'.repeat(64)};
+  assert.equal((await handleConsentRequest(get('tenantId='+tid),f.env,badSession)).status,403);
+  f.c.db.prepare("UPDATE human_mfa_settings SET enabled_at=NULL WHERE user_id='admin'").run();
+  assert.equal((await handleConsentRequest(get('tenantId='+tid),f.env,admin)).status,403);
  }finally{f.close()}
 });
