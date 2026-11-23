@@ -696,7 +696,8 @@ function clientDashboardOverview(data,onRefresh){
        ['Visit requests',count('siteVisits'),'calendar']].map(([label,value,symbol])=>
       div('card metric',div('metric-symbol',icon(symbol)),
        node('span',{class:'muted',text:label}),node('strong',{text:value})))),
-  node('p',{class:'muted',text:'These figures are this company’s CRM records, not verified Plivo call minutes or charges.'}));
+  node('p',{class:'muted',text:'These figures are this company’s CRM records, not verified Plivo call minutes or charges.'}),
+  btn('View follow-ups and next actions',()=>{state.clientTab='results';state.clientSetTab?.('results')},true));
  summary.setAttribute('aria-label','Selected company overview');
  return summary;
 }
@@ -744,6 +745,7 @@ async function renderClient(id,content){
   'ai-test':section=>aiTestingPanel(section,id,d.role),
   calling:section=>customerCallingPanel(id,section,d.role,content.openView),
   results:async section=>{
+   nextActionsPanel(id,section);
    operationsReportPanel(id,section);
    campaignResultsPanel(id,section);
    if(d.role==='client_admin'){
@@ -923,6 +925,54 @@ function manualCustomerPanel(tenantId,content){
 
 // Read-only operational reporting for the selected company only.
 // Counts exclude customer PII and cannot trigger any provider/CRM mutation.
+// Read-only in-app follow-up/reminder preview; no external message or phone call.
+function nextActionsPanel(tenantId,content){
+ const card=div('card',title('Next Actions · Follow-ups & Visits','h3'),
+  node('p',{class:'muted',text:'Your upcoming follow-ups and site visits in one place. No call or WhatsApp message is sent automatically.'}));
+ card.id='client-next-actions';
+ const days=node('select',{class:'field','aria-label':'Next actions time window'},[
+  ['1','Next 24 hours'],['7','Next 7 days'],['14','Next 14 days'],['30','Next 30 days']
+ ].map(([value,text])=>node('option',{value,text})));
+ days.value='7';
+ const area=div('stack');
+ const refresh=btn('Refresh next actions',()=>load().catch(asError),true);
+ card.append(div('formrow',lab('Show tasks',days),refresh),area);
+ content.append(card);
+ let inflight=false;
+ async function load(){
+  if(inflight||!card.isConnected)return;
+  inflight=true;refresh.disabled=true;
+  try{
+   const query=new URLSearchParams({tenantId,days:days.value});
+   const result=await api('/v1/human/next-actions?'+query);
+   if(!card.isConnected)return;
+   const next=(date)=>new Date(date).toLocaleString('en-IN',{dateStyle:'medium',timeStyle:'short'});
+   const followups=result.followups.map(f=>[f.customer,next(f.dueAt),
+     f.status==='do_not_call'?'Do Not Call':'Staff follow-up',f.interestStatus]);
+   const visits=result.visits.map(v=>[v.customer,next(v.scheduledAt),
+    v.status==='confirmed'?'Confirmed':'Needs confirmation']);
+   area.replaceChildren(
+    div('row between',title('Follow-ups · '+String(followups.length),'h3'),
+     node('span',{class:'muted',text:result.hasMoreFollowups?'First 20 shown':'All due within window'})),
+    followups.length?table(['Customer','Due','Action','Interest'],followups):
+     node('p',{class:'muted',text:'No follow-ups due in this window.'}),
+    div('row between',title('Site visits · '+String(visits.length),'h3'),
+     node('span',{class:'muted',text:result.hasMoreVisits?'First 20 shown':'Upcoming visits'})),
+    visits.length?table(['Customer','Visit time','Status'],visits):
+     node('p',{class:'muted',text:'No site visits in this window.'}),
+    node('p',{class:'note',text:'Review contact permission before calling or messaging. Automatic callbacks and external reminders are not active.'})
+   );
+  }catch(err){
+   if(card.isConnected)area.replaceChildren(node('p',{class:'banner err',role:'alert',
+    text:'Next actions unavailable. No messages or calls were sent.'}));
+   throw err;
+  }finally{inflight=false;refresh.disabled=false}
+ }
+ days.addEventListener('change',()=>load().catch(asError));
+ content.addEventListener('workspace-tab-shown',()=>load().catch(asError));
+ if(!content.hidden)load().catch(asError);
+}
+
 function operationsReportPanel(tenantId,content){
  const card=div('card',title('Operations & Security Report'),
   node('p',{class:'muted',text:'Read-only company summary. Failed and unknown calls must be reviewed manually; this page cannot retry a call.'}));
