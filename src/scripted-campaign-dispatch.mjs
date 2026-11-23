@@ -157,8 +157,10 @@ export async function runScriptedCampaignCron(env,{
     UNION ALL SELECT id FROM calling_jobs WHERE tenant_id=? AND state IN('reserved','submitted','unknown') LIMIT 1`)
     .bind(tenant.id,tenant.id).first();
    if(!work)continue;
-   await tickTenant(env,db,tenant.id,config,{now,apiFetch});
+   // Count the attempt BEFORE the potentially failing network operation.
+   // A provider timeout must not cause an unbounded number of new attempts.
    processed++;
+   await tickTenant(env,db,tenant.id,config,{now,apiFetch});
   }catch{console.error('AR3D scripted campaign processing unavailable')}
   if(processed>=CAMPAIGN_WORK_LIMIT)break;
  }
