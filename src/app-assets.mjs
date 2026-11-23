@@ -1127,7 +1127,53 @@ async function callingAdminPanel(main){
    }
   }catch(e){if(generation===requestGeneration)status.append(node('p',{class:'err',text:e.message+' — use a current Super Admin MFA login.'}))}
  }
- company.addEventListener('change',()=>{draft.value='';clearanceOffset=0;approval.value='';enabled.checked=false;consent.value='';dnd.value='';refresh().catch(asError)});
+ // Optional central-operator evidence queue. It is collapsed and never
+ // shown in the client's one-click campaign workflow. This view cannot approve
+ // evidence, clear DND or start calls.
+ const queuePanel=node('details',{class:'card'},
+  node('summary',{text:'Pending customer consent references (operator only)'}));
+ const queueContent=div('stack',
+  node('p',{class:'muted',text:'For AR3D review only. These references are not verified permissions; customer calling remains blocked until external approvals.'}));
+ const queueData=div('stack'),queueControls=div('formrow');
+ let queueOffset=0,queueRequest=0;
+ const prevQueue=btn('Previous',()=>{queueOffset=Math.max(0,queueOffset-25);loadQueue().catch(asError)},true);
+ const nextQueue=btn('Next',()=>{queueOffset+=25;loadQueue().catch(asError)},true);
+ const refreshQueue=btn('Refresh pending references',()=>loadQueue().catch(asError),true);
+ prevQueue.disabled=true;nextQueue.disabled=true;
+ queueControls.append(prevQueue,nextQueue);
+ queueContent.append(refreshQueue,queueData,queueControls);
+ queuePanel.append(queueContent);main.append(queuePanel);
+ async function loadQueue(){
+  if(!queuePanel.open)return;
+  const generation=++queueRequest,tenantId=company.value;
+  queueData.replaceChildren();
+  if(!tenantId)return;
+  refreshQueue.disabled=true;
+  try{
+   const params=new URLSearchParams({tenantId,offset:String(queueOffset),limit:'25'});
+   const data=await api('/v1/human/consent-review-queue?'+params);
+   if(generation!==queueRequest||tenantId!==company.value)return;
+   queueData.append(node('p',{class:'note',
+    text:String(data.total)+' reference(s) pending review — 0 approved by this screen.'}));
+   if(data.items.length)queueData.append(
+    table(['Customer','Purpose','Reference','Captured','Lead status'],
+     data.items.map(row=>[row.leadName||row.leadId.slice(0,8),row.purpose,
+      row.reference,row.capturedAt,
+      row.optedOut?'Do Not Call':row.consentStatus+' / '+row.dndStatus])));
+   prevQueue.disabled=queueOffset===0;
+   nextQueue.disabled=queueOffset+data.items.length>=data.total;
+  }catch(err){
+   if(generation===queueRequest)queueData.append(node('p',{class:'err',
+    text:'Pending references unavailable. Current Super Admin MFA is required.'}));
+   throw err;
+  }finally{if(generation===queueRequest)refreshQueue.disabled=false}
+ }
+ queuePanel.addEventListener('toggle',()=>{if(queuePanel.open)loadQueue().catch(asError)});
+ company.addEventListener('change',()=>{
+  queueOffset=0;
+  if(queuePanel.open)loadQueue().catch(asError);
+  draft.value='';clearanceOffset=0;approval.value='';enabled.checked=false;consent.value='';dnd.value='';refresh().catch(asError);
+ });
  draft.addEventListener('change',()=>{clearanceOffset=0;refresh().catch(asError)});
  const find=btn('Find company',async()=>{try{await findCompany();await refresh()}catch(e){asError(e)}},true);
  companySearch.addEventListener('keydown',e=>{
