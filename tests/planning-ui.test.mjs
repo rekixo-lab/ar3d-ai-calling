@@ -34,7 +34,7 @@ test('public production smoke accepts only calling hosts and rejects external ta
   ]) assert.throws(()=>validateSmokeBase(url));
 });
 
-test('public smoke checks health, login UI, sidebar fix and 401 without writes or credentials',async()=>{
+test('deployment smoke checks UI, auth barrier and safe Plivo Hangup POST',async()=>{
   const responses=new Map([
     ['/health',[200,'application/json',JSON.stringify({service:'AR3D AI Calling',status:'foundation'})]],
     ['/app',[200,'text/html','<title>AR3D AI Calling</title>']],
@@ -50,7 +50,8 @@ test('public smoke checks health, login UI, sidebar fix and 401 without writes o
     ['/v1/human/launch-readiness',[401,'application/json',JSON.stringify({error:'sign in required'})]],
     ['/v1/human/exports/leads',[401,'application/json',JSON.stringify({error:'sign in required'})]],
     ['/v1/human/audit',[401,'application/json',JSON.stringify({error:'sign in required'})]],
-    ['/v1/human/ai-test-crm',[401,'application/json',JSON.stringify({error:'sign in required'})]]
+    ['/v1/human/ai-test-crm',[401,'application/json',JSON.stringify({error:'sign in required'})]],
+    ['/v1/provider/plivo/inbound-unavailable',[200,'application/xml','<?xml version="1.0" encoding="UTF-8"?><Response><Hangup/></Response>']]
   ]);
   const seen=[];
   const fetchFn=async (url,opts)=>{
@@ -60,7 +61,7 @@ test('public smoke checks health, login UI, sidebar fix and 401 without writes o
   };
   assert.equal(await smoke('https://aicalling.ar3dstudio.in',fetchFn),true);
   assert.deepEqual(seen.map(x=>x[0]),[...responses.keys()]);
-  assert.ok(seen.every(([path,opts])=>opts.method==='GET'&&opts.redirect==='error'&&opts.cache==='no-store'));
+  assert.ok(seen.every(([path,opts])=>opts.method===(path==='/v1/provider/plivo/inbound-unavailable'?'POST':'GET')&&opts.redirect==='error'&&opts.cache==='no-store'));
 });
 
 test('public smoke fails closed on an unsafe redirect, broken content or wrong response',async()=>{
