@@ -60,6 +60,24 @@ test('XLSX stored and compressed first visible worksheet parses rich strings and
     assert.equal(rows[0].budgetMaxInr,2500000);
   }
 });
+
+test('XLSX accepts 100 customer rows and rejects 101 before importing',async()=>{
+ const extra=Array.from({length:100},(_,i)=>{
+  const n=i+3,phone=String(9000000000+i);
+  return '<row r="'+n+'"><c r="A'+n+'" t="inlineStr"><is><t>Buyer '+n+'</t></is></c>'+
+   '<c r="B'+n+'"><v>'+phone+'</v></c></row>';
+ });
+ const forRows=count=>sheet.replace('</sheetData>',extra.slice(0,count-1).join('')+'</sheetData>');
+ assert.equal((await parseLeadXlsx(workbookZip(forRows(100)))).length,100);
+ await assert.rejects(parseLeadXlsx(workbookZip(forRows(101))),/invalid or excessive worksheet rows|maximum 100/);
+ const e=env(),oversize=Buffer.from(workbookZip(forRows(101))).toString('base64');
+ for(const action of ['preview','commit']){
+  const r=await worker.fetch(request({tenantId,format:'xlsx',xlsxBase64:oversize},action),e.env);
+  assert.equal(r.status,400);
+ }
+ assert.ok(!e.log.some(x=>x.sql.includes('INSERT INTO leads')));
+});
+
 test('XLSX valid base64 entry preserves import output',async()=>{
   const rows=await parseLeadXlsxBase64(payload.xlsxBase64);
   assert.equal(rows[0].name,'Rita Shah');
