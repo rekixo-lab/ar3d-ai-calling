@@ -23,6 +23,7 @@ import {handleCallIntentProposals} from './call-intent-proposals.mjs';
 import {handleProjectLinkRequest} from './project-link-routes.mjs';
 import {handleConsentRequest} from './consent-routes.mjs';
 import {handleDeletionReadiness} from './privacy-deletion-readiness.mjs';
+import {handleCreditWalletRequest} from './credit-wallet-routes.mjs';
 import {reserveLoginAttempt} from './login-guard.mjs';
 import {challengeAfterPassword,finishMfaLogin,handleMfaSettings} from './mfa.mjs';
 import {handleConversationRequest} from './conversation-routes.mjs';
@@ -297,6 +298,8 @@ export async function handleHumanRequest(req,env){
       return await handleMfaSettings(req,env,user,method==='POST'?await payload(req):null);
     const readiness=await handleLaunchReadiness(req,env,user);
     if(readiness)return readiness;
+    const credits=await handleCreditWalletRequest(req,env,user);
+    if(credits)return credits;
     const scriptedPhone=await handleScriptedPhoneAdmin(req,env,user);
     if(scriptedPhone)return scriptedPhone;
     const accounts=await handleClientAccountRequest(req,env,user);
