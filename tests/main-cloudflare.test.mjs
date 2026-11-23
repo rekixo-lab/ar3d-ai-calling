@@ -4,6 +4,33 @@ import {
   REQUIRED_COLUMNS, REQUIRED_TABLES, REQUIRED_SAFETY_TRIGGERS, getCredentials, makeMainConfig, checkTables, checkColumns, checkSafetyTriggers, inspectCloudflare, verifiedSchemaState,
 } from '../scripts/main-cloudflare.mjs';
 
+test('new CDR cost observation is additive only and guarded by exact Calling CRM state',async()=>{
+ const missing=['verified_provider_call_costs'];
+ const old=REQUIRED_TABLES.CRM_DB.filter(x=>!missing.includes(x));
+ const prior=REQUIRED_TABLES.CRM_DB.filter(x=>!['lead_staff_assignments',...missing].includes(x));
+ const controls=REQUIRED_TABLES.CONTROL_DB.filter(x=>!['tenant_credit_budgets','tenant_credit_audit'].includes(x));
+ assert.equal(checkTables(old,'CRM_DB','preflight'),'crm_cdr_upgrade');
+ assert.equal(checkTables(prior,'CRM_DB','preflight'),'crm_staff_cdr_upgrade');
+ assert.equal(verifiedSchemaState({CONTROL_DB:'ready',CRM_DB:'crm_cdr_upgrade'}),'crm_cdr_upgrade');
+ assert.equal(verifiedSchemaState({CONTROL_DB:'ready',CRM_DB:'crm_staff_cdr_upgrade'}),'crm_staff_cdr_upgrade');
+ assert.equal(verifiedSchemaState({CONTROL_DB:'control_credit_upgrade',CRM_DB:'crm_cdr_upgrade'}),'credit_cdr_upgrade');
+ assert.equal(verifiedSchemaState({CONTROL_DB:'control_credit_upgrade',CRM_DB:'crm_staff_cdr_upgrade'}),'credit_staff_cdr_upgrade');
+ assert.throws(()=>checkTables(old,'CRM_DB','ready'),/missing tables/);
+ assert.throws(()=>checkTables(prior.filter(x=>x!=='leads'),'CRM_DB','preflight'),/partial schema/);
+ assert.throws(()=>checkTables(controls.filter(x=>x!=='human_sessions'),'CONTROL_DB','preflight'),/partial schema/);
+ const inspection=await inspectCloudflare({
+  credentials:getCredentials(env),mode:'preflight',template,
+  apiFetch:cloudflareMock({controlTables:REQUIRED_TABLES.CONTROL_DB,crmTables:prior})
+ });
+ assert.equal(inspection.modes.CRM_DB,'crm_staff_cdr_upgrade');
+ assert.equal(inspection.modes.CONTROL_DB,'ready');
+ await assert.rejects(inspectCloudflare({
+  credentials:getCredentials(env),mode:'ready',template,
+  apiFetch:cloudflareMock({controlTables:REQUIRED_TABLES.CONTROL_DB,crmTables:prior})
+ }),/missing tables/);
+ assert.throws(()=>checkColumns(['tenant_id','job_id'],'CRM_DB','verified_provider_call_costs'),/missing columns/);
+});
+
 test('isolated credit wallet + staff CRM additions have exact fail-closed main deploy states',async()=>{
  const missingControl=['tenant_credit_budgets','tenant_credit_audit'];
  const oldControl=REQUIRED_TABLES.CONTROL_DB.filter(name=>!missingControl.includes(name));
@@ -144,6 +171,7 @@ function cloudflareMock({ controlTables=[],crmTables=[],controlName='ar3d-callin
         else if(sql.includes('tenant_credit_budgets')) rows=REQUIRED_COLUMNS.CONTROL_DB.tenant_credit_budgets.map(name=>({name}));
         else if(sql.includes('tenant_credit_audit')) rows=REQUIRED_COLUMNS.CONTROL_DB.tenant_credit_audit.map(name=>({name}));
         else if(sql.includes('lead_staff_assignments')) rows=REQUIRED_COLUMNS.CRM_DB.lead_staff_assignments.map(name=>({name}));
+        else if(sql.includes('verified_provider_call_costs')) rows=REQUIRED_COLUMNS.CRM_DB.verified_provider_call_costs.map(name=>({name}));
         else if(sql.includes('call_intent_proposals')) rows=['tenant_id','id','campaign_id','lead_id','purpose','state','created_by','created_at'].map(name=>({name}));
         else if(sql.includes('company_profile_versions')) rows=REQUIRED_COLUMNS.CONTROL_DB.company_profile_versions.map(name=>({name}));
         else if(sql.includes('client_account_contacts')) rows=REQUIRED_COLUMNS.CONTROL_DB.client_account_contacts.map(name=>({name}));
