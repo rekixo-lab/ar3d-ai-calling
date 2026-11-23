@@ -950,9 +950,37 @@ function nextActionsPanel(tenantId,content){
   ['1','Next 24 hours'],['7','Next 7 days'],['14','Next 14 days'],['30','Next 30 days']
  ].map(([value,text])=>node('option',{value,text})));
  days.value='7';
- const area=div('stack');
+ const area=div('stack'),reminderDraft=div('stack');
+ const reminderChannel=node('select',{class:'field','aria-label':'Reminder channel'},
+   [['whatsapp','WhatsApp draft'],['sms','SMS draft']].map(([value,text])=>
+    node('option',{value,text})));
+ const reminderLanguage=node('select',{class:'field','aria-label':'Reminder language'},
+   [['hi','Hindi'],['en','English']].map(([value,text])=>node('option',{value,text})));
+ const previewReminder=visit=>btn('Prepare reminder',async()=>{
+  try{
+   const query=new URLSearchParams({
+    tenantId,visitId:visit.visitId,channel:reminderChannel.value,language:reminderLanguage.value
+   });
+   const d=await api('/v1/human/visit-reminder-preview?'+query);
+   if(!card.isConnected)return;
+   reminderDraft.replaceChildren(
+    node('p',{class:'note',text:'Draft only — not sent. Check customer permission and approved template before using.'}),
+    node('pre',{class:'note',text:d.message}),
+    btn('Copy draft',async()=>{
+     try{await navigator.clipboard.writeText(d.message);notice('Reminder text copied. Nothing was sent.')}
+     catch{notice('Select and copy the text above manually.',true)}
+    },true)
+   );
+  }catch(err){
+   reminderDraft.replaceChildren(node('p',{class:'banner err',
+    text:'Reminder cannot be prepared. Check visit status and Do Not Call.'}));
+   asError(err);
+  }
+ },true);
  const refresh=btn('Refresh next actions',()=>load().catch(asError),true);
- card.append(div('formrow',lab('Show tasks',days),refresh),area);
+ card.append(div('formrow',lab('Show tasks',days),refresh),
+  div('formrow',lab('Reminder language',reminderLanguage),lab('Channel',reminderChannel)),
+  area,reminderDraft);
  content.append(card);
  let inflight=false;
  async function load(){
@@ -966,7 +994,8 @@ function nextActionsPanel(tenantId,content){
    const followups=result.followups.map(f=>[f.customer,next(f.dueAt),
      f.status==='do_not_call'?'Do Not Call':'Staff follow-up',f.interestStatus]);
    const visits=result.visits.map(v=>[v.customer,next(v.scheduledAt),
-    v.status==='confirmed'?'Confirmed':'Needs confirmation']);
+    v.status==='confirmed'?'Confirmed':'Needs confirmation',
+    v.status==='confirmed'?previewReminder(v):'Confirm visit first']);
    area.replaceChildren(
     div('row between',title('Follow-ups · '+String(followups.length),'h3'),
      node('span',{class:'muted',text:result.hasMoreFollowups?'First 20 shown':'All due within window'})),
@@ -974,7 +1003,7 @@ function nextActionsPanel(tenantId,content){
      node('p',{class:'muted',text:'No follow-ups due in this window.'}),
     div('row between',title('Site visits · '+String(visits.length),'h3'),
      node('span',{class:'muted',text:result.hasMoreVisits?'First 20 shown':'Upcoming visits'})),
-    visits.length?table(['Customer','Visit time','Status'],visits):
+    visits.length?table(['Customer','Visit time','Status','Reminder'],visits):
      node('p',{class:'muted',text:'No site visits in this window.'}),
     node('p',{class:'note',text:'Review contact permission before calling or messaging. Automatic callbacks and external reminders are not active.'})
    );
