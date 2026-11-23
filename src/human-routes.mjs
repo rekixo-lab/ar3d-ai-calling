@@ -142,18 +142,48 @@ async function logout(req,env){
   if(/^[a-f0-9]{64}$/.test(token))await env.CONTROL_DB.prepare('UPDATE human_sessions SET revoked_at=? WHERE token_hash=?').bind(now(),await sha256hex(token)).run();
   return response({ok:true},200,{'Set-Cookie':cookieFor('',0)});
 }
-async function listTenants(env){
-  const db=env.CONTROL_DB;
-  const rows=await db.prepare(`SELECT t.id,t.slug,t.display_name,t.plan_code,t.storage_mode,t.status,
-    c.email AS contact_email,c.mobile_e164 AS contact_mobile,
-    (SELECT COUNT(*) FROM tenant_memberships m WHERE m.tenant_id=t.id AND m.status='active') AS member_count
-    FROM tenants t LEFT JOIN client_account_contacts c ON c.tenant_id=t.id ORDER BY t.created_at DESC LIMIT 100`).all();
+async function listTenants(env,req){
+  const db=env.CONTROL_DB,url=new URL(req.url);
+  // Admin directory must search and page ALL clients, not silently truncate
+  // to the newest 100. Keep each query/response bounded for 1000+ companies.
+  if([...url.searchParams.keys()].some(k=>!['q','limit','offset'].includes(k))||
+      url.searchParams.getAll('q').length>1||
+      url.searchParams.getAll('limit').length>1||
+      url.searchParams.getAll('offset').length>1)
+    return fail('invalid directory query');
+  const q=(url.searchParams.get('q')||'').trim();
+  const limitRaw=url.searchParams.get('limit')||'100',offsetRaw=url.searchParams.get('offset')||'0';
+  if(typeof q!=='string'||q.length>80||/[\u0000-\u001f\u007f]/u.test(q)||
+     !/^\d{1,3}$/.test(limitRaw)||!/^\d{1,7}$/.test(offsetRaw)||
+     Number(limitRaw)<1||Number(limitRaw)>100||Number(offsetRaw)>1000000)
+    return fail('invalid directory pagination');
+  const limit=Number(limitRaw),offset=Number(offsetRaw);
+  const where=` WHERE (?='' OR instr(lower(t.display_name),lower(?))>0
+    OR instr(lower(t.slug),lower(?))>0 OR instr(lower(COALESCE(c.email,'')),lower(?))>0)`;
+  const query=[q,q,q,q];
+  const [rows,count]=await Promise.all([
+    db.prepare(`SELECT t.id,t.slug,t.display_name,t.plan_code,t.storage_mode,t.status,
+      c.email AS contact_email,c.mobile_e164 AS contact_mobile,
+      (SELECT COUNT(*) FROM tenant_memberships m WHERE m.tenant_id=t.id AND m.status='active') AS member_count
+      FROM tenants t LEFT JOIN client_account_contacts c ON c.tenant_id=t.id
+      ${where} ORDER BY t.created_at DESC,t.id DESC LIMIT ? OFFSET ?`)
+      .bind(...query,limit,offset).all(),
+    db.prepare(`SELECT
+      (SELECT COUNT(*) FROM tenants) AS total,
+      (SELECT COUNT(*) FROM tenants WHERE status='active') AS active,
+      (SELECT COUNT(*) FROM tenant_memberships WHERE status='active') AS members,
+      (SELECT COUNT(*) FROM tenants t LEFT JOIN client_account_contacts c ON c.tenant_id=t.id ${where}) AS matched`)
+      .bind(...query).first()
+  ]);
+  const meta={total:Number(count?.total||0),active:Number(count?.active||0),
+    members:Number(count?.members||0),matched:Number(count?.matched||0),offset,limit};
   try{
     const enriched=await enrichAdminTenantsWithUsage(env,rows.results);
-    return response({tenants:enriched,reportingUnavailable:!env.CRM_DB});
-  }catch(e){
-    console.error('Calling Super Admin reporting unavailable',e);
-    return response({tenants:rows.results.map(t=>({...t,usage:null,usageAvailable:false})),reportingUnavailable:true});
+    return response({tenants:enriched,...meta,reportingUnavailable:!env.CRM_DB});
+  }catch{
+    console.error('Calling Super Admin reporting unavailable');
+    return response({tenants:rows.results.map(t=>({...t,usage:null,usageAvailable:false})),
+      ...meta,reportingUnavailable:true});
   }
 }
 async function createTenant(req,db,user){
@@ -310,7 +340,7 @@ export async function handleHumanRequest(req,env){
     if(lifecycle)return lifecycle;
     if(path==='/v1/human/tenants'){
       if(user.globalRole!=='super_admin')return fail('forbidden',403);
-      if(method==='GET')return await listTenants(env);
+      if(method==='GET')return await listTenants(env,req);
       if(method==='POST')return await createTenant(req,env.CONTROL_DB,user);
     }
     if(path==='/v1/human/invitations'&&method==='POST')return await invite(req,env.CONTROL_DB,user);
