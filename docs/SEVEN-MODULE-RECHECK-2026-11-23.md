@@ -33,7 +33,7 @@ No provider writes, production calls, consent grants, DND resets or customer dat
 
 ## Explicitly not proven / operator blockers
 
-1. **Exotel agent-only setup is in an uncertain provider-write state** per previous workspace evidence. Do **not** retry Prepare/Connect/Verify or a test call without independent read-only provider/support reconciliation.
+1. **The discontinued carrier adapter is not used by the current Plivo implementation.** Historical external-provider records must not be retried, reconnected or deleted without separate verified operator reconciliation.
 2. Plivo customer calling requires carrier permissions, a separately verified internal pilot, DND/opt-in evidence, registered caller identity and recorded consent. The synthetic webhook tests do **not** establish live carrier acceptance.
 3. Browser AI Testing is typed input with optional browser speech. This does **not** certify human real-time STT/TTS/LLM latency or full-duplex calls.
 4. The bounded rotating scheduler does **not** provide 1,000 simultaneous calls or guarantee carrier quotas, Worker resources or per-client SLA. Real load/soak testing is still required.
