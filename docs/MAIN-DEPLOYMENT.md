@@ -166,6 +166,10 @@ After the initial four **GitHub production Environment Secrets** are configured,
 The manual `workflow_dispatch` preflight/initialize/deploy options remain as a recovery fallback but normal code updates need no Run Workflow button. Runtime Worker secrets for login/MFA and first Super Admin bootstrap are **not** automatically generated; an authorized operator must configure them once. Telecom onboarding, signed vendor callbacks, real consent/DND and billing are also external setup tasks, not solved by CI/CD.
 
 
+## Guarded credit/staff schema upgrade for existing Calling D1
+
+GitHub `main` pushes now recognize only the reviewed, additive Calling `migrations/control/0020_client_credit_planning.sql` (two empty new wallet planning tables) and `migrations/crm/0020_lead_staff_assignments.sql` (one new per-tenant staff assignment table). The deployment workflow never touches live leads or changes CRM consent/DND triggers. Its preflight confirms the **exact Calling D1 resource names/IDs**, the existing columns and safety triggers and R2 bucket. It then runs only missing migrations, rechecks both schemas as fully ready and publishes only `ar3d-ai-calling` on its existing hostname. Wrong IDs, mismatched/missing unrelated tables or unsafe triggers fail closed. Do not run `initialize` on populated databases. There is no auto-dialing or provider credential activation from a migration; KYC remains pending.
+
 ## Bootstrap 401: exact-token mismatch troubleshooting (non-secret)
 
 The live `POST /v1/human/bootstrap` returns HTTP 401 when the presented Bearer token is absent, differs from the Worker-only `ADMIN_BOOTSTRAP_TOKEN`, or the binding is absent/too short. Token values are intentionally inaccessible from the Cloudflare dashboard. The bootstrap helper now strips accidental surrounding paste whitespace, reports entered token character count **only**, and never logs the token/password. The Worker normalizes accidental surrounding whitespace before checking a constant-time hash comparison. Normal login and API tokens are unrelated.

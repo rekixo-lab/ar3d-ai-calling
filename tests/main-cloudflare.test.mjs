@@ -4,6 +4,27 @@ import {
   REQUIRED_COLUMNS, REQUIRED_TABLES, REQUIRED_SAFETY_TRIGGERS, getCredentials, makeMainConfig, checkTables, checkColumns, checkSafetyTriggers, inspectCloudflare, verifiedSchemaState,
 } from '../scripts/main-cloudflare.mjs';
 
+test('isolated credit wallet + staff CRM additions have exact fail-closed main deploy states',async()=>{
+ const missingControl=['tenant_credit_budgets','tenant_credit_audit'];
+ const oldControl=REQUIRED_TABLES.CONTROL_DB.filter(name=>!missingControl.includes(name));
+ const oldCrm=REQUIRED_TABLES.CRM_DB.filter(name=>name!=='lead_staff_assignments');
+ assert.equal(checkTables(oldControl,'CONTROL_DB','preflight'),'control_credit_upgrade');
+ assert.equal(checkTables(oldCrm,'CRM_DB','preflight'),'crm_staff_upgrade');
+ assert.equal(verifiedSchemaState({CONTROL_DB:'control_credit_upgrade',CRM_DB:'crm_staff_upgrade'}),'credit_staff_upgrade');
+ assert.equal(verifiedSchemaState({CONTROL_DB:'control_credit_upgrade',CRM_DB:'ready'}),'control_credit_upgrade');
+ assert.equal(verifiedSchemaState({CONTROL_DB:'ready',CRM_DB:'crm_staff_upgrade'}),'crm_staff_upgrade');
+ assert.throws(()=>checkTables(oldControl,'CONTROL_DB','ready'),/missing tables/);
+ assert.throws(()=>checkTables(oldCrm,'CRM_DB','ready'),/missing tables/);
+ assert.throws(()=>checkTables(oldControl.filter(x=>x!=='human_sessions'),'CONTROL_DB','preflight'),/partial schema/);
+ assert.throws(()=>checkTables(oldCrm.filter(x=>x!=='leads'),'CRM_DB','preflight'),/partial schema/);
+ const state=await inspectCloudflare({credentials:getCredentials(env),mode:'preflight',template,
+  apiFetch:cloudflareMock({controlTables:oldControl,crmTables:oldCrm})});
+ assert.equal(state.modes.CONTROL_DB,'control_credit_upgrade');
+ assert.equal(state.modes.CRM_DB,'crm_staff_upgrade');
+ await assert.rejects(inspectCloudflare({credentials:getCredentials(env),mode:'ready',template,
+  apiFetch:cloudflareMock({controlTables:oldControl,crmTables:oldCrm})}),/missing tables/);
+});
+
 test('Calling Control company change queue is a single additive isolated migration',async()=>{
  const old=REQUIRED_TABLES.CONTROL_DB.filter(x=>x!=='company_change_requests');
  assert.equal(checkTables(old,'CONTROL_DB','preflight'),'control_company_change_upgrade');
@@ -120,6 +141,9 @@ function cloudflareMock({ controlTables=[],crmTables=[],controlName='ar3d-callin
         else if(sql.includes('call_campaign_drafts')) rows=['tenant_id','status','language_mode'].map(name=>({name}));
         else if(sql.includes('call_campaign_candidates')) rows=['tenant_id','campaign_id','lead_id'].map(name=>({name}));
         else if(sql.includes('scripted_call_results')) rows=REQUIRED_COLUMNS.CRM_DB.scripted_call_results.map(name=>({name}));
+        else if(sql.includes('tenant_credit_budgets')) rows=REQUIRED_COLUMNS.CONTROL_DB.tenant_credit_budgets.map(name=>({name}));
+        else if(sql.includes('tenant_credit_audit')) rows=REQUIRED_COLUMNS.CONTROL_DB.tenant_credit_audit.map(name=>({name}));
+        else if(sql.includes('lead_staff_assignments')) rows=REQUIRED_COLUMNS.CRM_DB.lead_staff_assignments.map(name=>({name}));
         else if(sql.includes('call_intent_proposals')) rows=['tenant_id','id','campaign_id','lead_id','purpose','state','created_by','created_at'].map(name=>({name}));
         else if(sql.includes('company_profile_versions')) rows=REQUIRED_COLUMNS.CONTROL_DB.company_profile_versions.map(name=>({name}));
         else if(sql.includes('client_account_contacts')) rows=REQUIRED_COLUMNS.CONTROL_DB.client_account_contacts.map(name=>({name}));
