@@ -28,6 +28,7 @@ import {handleConsentRequest} from './consent-routes.mjs';
 import {handleDeletionReadiness} from './privacy-deletion-readiness.mjs';
 import {handleCreditWalletRequest} from './credit-wallet-routes.mjs';
 import {handlePlivoCdrRequest} from './plivo-cdr-routes.mjs';
+import {handlePlivoCostReconcile} from './plivo-cost-reconcile-routes.mjs';
 import {reserveLoginAttempt} from './login-guard.mjs';
 import {challengeAfterPassword,finishMfaLogin,handleMfaSettings} from './mfa.mjs';
 import {handleConversationRequest} from './conversation-routes.mjs';
@@ -320,6 +321,8 @@ export async function handleHumanRequest(req,env){
     if(calling)return calling;
     const verifiedCdr=await handlePlivoCdrRequest(req,env,user);
     if(verifiedCdr)return verifiedCdr;
+    const observedCost=await handlePlivoCostReconcile(req,env,user);
+    if(observedCost)return observedCost;
     const consentResponse=await handleConsentRequest(req,env,user);
     if(consentResponse)return consentResponse;
     const privacyPreview=await handleDeletionReadiness(req,env,user);
