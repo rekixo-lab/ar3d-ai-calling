@@ -69,7 +69,13 @@ h2 > .icon, h3 > .icon { color: #3963a6; }
 .page-description, .muted { color: var(--muted); font-size: 14px; }
 .workspace-section, .client-content { min-width: 0; }
 .company-context { margin: -6px 0 16px; color: #405575; font-weight: 650; }
-.company-switch { width: min(100%, 320px); margin-bottom: 16px; }
+.company-switch { width: min(100%, 360px); margin-bottom: 16px; }
+.client-summary { border-top: 3px solid #3975d4; }
+.client-summary .row { min-width: 0; }
+.client-company-name { display: block; color: #284268; font-size: 16px; overflow-wrap: anywhere; }
+.client-metrics { margin-top: 17px; margin-bottom: 11px; }
+.client-metrics .metric { min-width: 0; }
+.client-summary > .muted { font-size: 12px; }
 .card {
   background: #fff; border: 1px solid var(--line); border-radius: 13px;
   padding: clamp(16px, 2.6vw, 27px); margin: 0 0 16px;
@@ -173,6 +179,11 @@ pre { white-space: pre-wrap; overflow-wrap: anywhere; }
   .approval-grid { grid-template-columns: minmax(0, 1fr); }
 }
 @media(max-width: 650px) {
+  .client-metrics { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 7px; }
+  .client-metrics .metric { padding: 12px 9px; }
+  .client-metrics .metric .metric-symbol { display: none; }
+  .client-metrics .metric strong { font-size: 23px; }
+  .client-metrics .metric .muted { font-size: 11px; }
   .layout { display: block; }
   .sidebar { position: relative; height: auto; overflow: visible; gap: 12px; padding: 13px 14px; }
   .workspace-nav { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 5px; }
