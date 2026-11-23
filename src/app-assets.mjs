@@ -1005,7 +1005,16 @@ async function customerCallingPanel(tenantId,content,role,openView){
 async function callingAdminPanel(main){
  const card=div('card calling-settings',title('Client calling approval')),area=div('approval-grid');card.id='calling-setup';main.append(card);
  const company=node('select',{class:'field','aria-label':'Calling setup company'});
- try{const d=await api('/v1/human/tenants');company.append(...d.tenants.map(t=>node('option',{value:t.id,text:t.display_name+' — '+t.status})))}catch(e){asError(e);return}
+ const companySearch=input('callingSetupCompanySearch','search','Search company name or email');
+ companySearch.maxLength=80;
+ async function findCompany(){
+  const prev=company.value;
+  const query=new URLSearchParams({limit:'100',q:companySearch.value.trim()});
+  const d=await api('/v1/human/tenants?'+query);
+  company.replaceChildren(...d.tenants.map(t=>node('option',{value:t.id,text:t.display_name+' — '+t.status})));
+  if(d.tenants.some(t=>t.id===prev))company.value=prev;
+ }
+ try{await findCompany()}catch(e){asError(e);return}
  const approval=input('approval','text','Approved phone provider and calling purpose reference');
  const days=input('days','number');days.value='7';days.min='1';days.max='30';
  const limit=input('dailyLimit','number');limit.value='10';limit.min='1';limit.max='100';
@@ -1064,7 +1073,12 @@ async function callingAdminPanel(main){
  }
  company.addEventListener('change',()=>{draft.value='';clearanceOffset=0;approval.value='';enabled.checked=false;consent.value='';dnd.value='';refresh().catch(asError)});
  draft.addEventListener('change',()=>{clearanceOffset=0;refresh().catch(asError)});
- card.append(lab('Client company',company),btn('Load calling setup',()=>refresh().catch(asError),true),area);
+ const find=btn('Find company',async()=>{try{await findCompany();await refresh()}catch(e){asError(e)}},true);
+ companySearch.addEventListener('keydown',e=>{
+  if(e.key==='Enter'){e.preventDefault();findCompany().then(refresh).catch(asError)}
+ });
+ card.append(div('formrow',lab('Search all clients',companySearch),find),
+  lab('Client company',company),btn('Load calling setup',()=>refresh().catch(asError),true),area);
  area.append(policyForm,clearanceForm,recovery,status);await refresh();
 }
 
