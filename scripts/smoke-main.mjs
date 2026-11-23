@@ -37,6 +37,7 @@ export async function smoke(base,fetchFn=fetch){
     // Public read-only monitoring ensures sensitive reports, exports and
     // customer-linked test actions never leak without a human login.
     ['/v1/human/operations/report',401,'application/json',async r=>(await r.json()).error==='sign in required'],
+    ['/v1/human/launch-readiness',401,'application/json',async r=>(await r.json()).error==='sign in required'],
     ['/v1/human/exports/leads',401,'application/json',async r=>(await r.json()).error==='sign in required'],
     ['/v1/human/audit',401,'application/json',async r=>(await r.json()).error==='sign in required'],
     ['/v1/human/ai-test-crm',401,'application/json',async r=>(await r.json()).error==='sign in required'],
