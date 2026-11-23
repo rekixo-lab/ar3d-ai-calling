@@ -3,7 +3,7 @@
 import {normalizeIndianPhone} from './core.mjs';
 
 export const MAX_CSV_BYTES=160000;
-export const MAX_CSV_ROWS=200;
+export const MAX_CSV_ROWS=100;
 const HEADERS=Object.freeze({
   name:['name','customer name','client name','full name','customer'],
   mobile:['mobile','mobile number','phone','phone number','contact','contact number','number','whatsapp number'],
@@ -43,13 +43,13 @@ function csvCells(text){
       if(!closed)cell+=ch;
     }
     if(cell.length>3000)throw Error('CSV cell too long');
-    if(rows.length>MAX_CSV_ROWS+1)throw Error('Too many CSV rows (maximum 200)');
+    if(rows.length>MAX_CSV_ROWS+1)throw Error('Too many CSV rows (maximum 100)');
   }
   if(quoted)throw Error('Malformed CSV: unclosed quote');
   row.push(cell.trim());
   if(row.some(v=>v!==''))rows.push(row);
   if(rows.length<2)throw Error('CSV must have a header and at least one customer');
-  if(rows.length>MAX_CSV_ROWS+1)throw Error('Too many CSV rows (maximum 200)');
+  if(rows.length>MAX_CSV_ROWS+1)throw Error('Too many CSV rows (maximum 100)');
   if(rows[0].length>24)throw Error('Too many columns');
   return rows;
 }

@@ -1271,7 +1271,7 @@ async function crmWorkflow(tenantId,content,role,refreshContent=content){
   const workflow=div('card',title('Customer list'));workflow.id='customer-workflow';
   if(editable){
     const upload=div('card import-card',title('Upload customer file'),
-      node('p',{class:'muted',text:'CSV or Excel (.xlsx) · up to 200 rows · Name and Mobile columns'}));
+      node('p',{class:'muted',text:'CSV or Excel (.xlsx) · up to 100 customers per file · Name and Mobile columns'}));
     content.prepend(upload);
     const template=btn('Download customer Excel template (CSV)',()=>{const href=URL.createObjectURL(new Blob(['Name,Mobile\r\n'],{type:'text/csv;charset=utf-8'}));const a=node('a',{href,download:'ar3d-customer-template.csv'});document.body.append(a);a.click();a.remove();URL.revokeObjectURL(href)},true);upload.append(template);
     const picker=node('input',{class:'field',type:'file',accept:'.csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}),previewBox=div(''),csvBox=div('formrow',lab('Excel .xlsx or CSV file',picker));
