@@ -103,7 +103,7 @@ test('disabled/suspended company membership loses API data access even with an e
   assert.deepEqual((await me.json()).tenants.map(t=>t.id),[otherTenant]);
   assert.equal((await get(f,token,'/v1/human/overview?tenantId='+tid)).status,403);
   assert.equal((await get(f,token,'/v1/human/overview?tenantId='+otherTenant)).status,200);
-  f.c.db.prepare("UPDATE tenants SET status='suspended' WHERE id=?").run(otherTenant);
+  f.c.db.prepare("UPDATE tenants SET suspended_from_status=status,status='suspended' WHERE id=?").run(otherTenant);
   assert.deepEqual((await (await get(f,token,'/v1/human/me')).json()).tenants,[]);
   assert.equal((await get(f,token,'/v1/human/overview?tenantId='+otherTenant)).status,403);
  }finally{f.close()}
