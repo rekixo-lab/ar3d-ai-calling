@@ -25,6 +25,8 @@ function seed(f){
   f.r.db.prepare(`INSERT INTO leads(tenant_id,id,name,mobile_e164,source_type,created_at,updated_at)
     VALUES(?,?,?,?,'excel',?,?)`).run(tid,id,name,mobile,at,at);
  }
+ f.r.db.prepare("UPDATE leads SET interest_status='interested' WHERE tenant_id=? AND id=?").run(tid,lead2);
+ f.r.db.prepare("UPDATE leads SET interest_status='followup',followup_at=? WHERE tenant_id=? AND id=?").run(new Date(Date.now()-60000).toISOString(),tid,lead3);
  f.r.db.prepare(`INSERT INTO calling_runs(tenant_id,id,campaign_id,state,created_by,created_at,updated_at)
   VALUES(?,?,?,'running','client',?,?)`).run(tid,run,cid,at,at);
  const writeJob=f.r.db.prepare(`INSERT INTO calling_jobs(tenant_id,id,run_id,lead_id,state,created_at,updated_at)
@@ -58,6 +60,10 @@ test('operations report exposes only tenant aggregates, flags unknown provider o
   const data=await res.json();
   assert.equal(data.tenantId,tid);
   assert.deepEqual(data.customers,{total:3,blockedOrDenied:1});
+  assert.equal(data.leadPipeline.interested,1);
+  assert.equal(data.leadPipeline.followup,1);
+  assert.equal(data.leadPipeline.dueFollowups,1);
+  assert.equal(data.leadPipeline.not_interested,0);
   assert.equal(data.campaigns.running,1);
   assert.equal(data.visits.requested,1);
   assert.equal(data.jobs.unknown,1);
