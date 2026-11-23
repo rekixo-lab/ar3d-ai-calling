@@ -71,6 +71,7 @@ test('Periodic monitor is secretless, GET-only and checks the exact Calling orig
     '/v1/human/call-intent-proposals',
     '/v1/human/voice-preview',
     '/v1/human/operations/report',
+    '/v1/human/launch-readiness',
     '/v1/human/exports/leads',
     '/v1/human/audit',
     '/v1/human/ai-test-crm'])

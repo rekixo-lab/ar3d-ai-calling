@@ -14,6 +14,7 @@ import {handleTenantLifecycleRequest} from './tenant-lifecycle-routes.mjs';
 import {initialClientAI} from './default-client-ai.mjs';
 import {handleDataPortabilityRequest} from './data-portability-routes.mjs';
 import {handleOperationsReportRequest} from './operations-report-routes.mjs';
+import {handleLaunchReadiness} from './launch-readiness-routes.mjs';
 import {handleAgentSettingsRequest} from './agent-settings-routes.mjs';
 import {handleAuditRequest} from './audit-routes.mjs';
 import {handleVisitStatusRequest} from './visit-status-routes.mjs';
@@ -293,6 +294,8 @@ export async function handleHumanRequest(req,env){
     if(!user)return fail('sign in required',401);
     if(path==='/v1/human/mfa'||path==='/v1/human/mfa/setup'||path==='/v1/human/mfa/enable'||path==='/v1/human/mfa/recovery/regenerate')
       return await handleMfaSettings(req,env,user,method==='POST'?await payload(req):null);
+    const readiness=await handleLaunchReadiness(req,env,user);
+    if(readiness)return readiness;
     const scriptedPhone=await handleScriptedPhoneAdmin(req,env,user);
     if(scriptedPhone)return scriptedPhone;
     const accounts=await handleClientAccountRequest(req,env,user);

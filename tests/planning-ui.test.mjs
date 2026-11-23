@@ -47,6 +47,7 @@ test('public smoke checks health, login UI, sidebar fix and 401 without writes o
     ['/v1/human/call-intent-proposals',[401,'application/json',JSON.stringify({error:'sign in required'})]],
     ['/v1/human/voice-preview',[401,'application/json',JSON.stringify({error:'sign in required'})]],
     ['/v1/human/operations/report',[401,'application/json',JSON.stringify({error:'sign in required'})]],
+    ['/v1/human/launch-readiness',[401,'application/json',JSON.stringify({error:'sign in required'})]],
     ['/v1/human/exports/leads',[401,'application/json',JSON.stringify({error:'sign in required'})]],
     ['/v1/human/audit',[401,'application/json',JSON.stringify({error:'sign in required'})]],
     ['/v1/human/ai-test-crm',[401,'application/json',JSON.stringify({error:'sign in required'})]]
