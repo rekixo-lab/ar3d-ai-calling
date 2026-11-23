@@ -32,6 +32,6 @@ test('standalone AI Testing UI cannot call, dial or persist practice answers',()
   const code=js.slice(js.indexOf('function aiTestingPanel('),js.indexOf('function manualCustomerPanel('));
   assert.match(code,/action:'start'/);
   assert.match(code,/action:'turn'/);
-  assert.match(code,/No.*CRM update/);
+  assert.match(code,/no CRM update/i);
   assert.doesNotMatch(code,/\/v1\/human\/leads|\/v1\/human\/calling\/runs|Save Reviewed Answers to CRM','POST'/);
 });
