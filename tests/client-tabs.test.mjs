@@ -8,7 +8,7 @@ test('client workspace shows five primary views including independent AI Testing
   for(const name of ['Customers / Excel','AI Testing','Calling','Company details','Results / CRM'])assert.ok(js.includes(name));
   assert.match(js,/section\.hidden=name!==key/);
   assert.match(js,/aria-current/);
-  assert.match(js,/campaignResultsPanel\(id,section\)/);
+  assert.match(js,/campaignResultsPanel\(id,section,d\.role\)/);
   assert.match(js,/Import & prepare campaign/);
   assert.match(js,/client-reports/);
   assert.doesNotMatch(js,/Advanced campaign planning and project links|Publish AI agent for calls/);
