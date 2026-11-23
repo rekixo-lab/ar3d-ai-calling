@@ -1085,18 +1085,29 @@ async function callingAdminPanel(main){
 async function companyAdminPanel(main){
  const card=div('card',title('Company profile'));
  const company=node('select',{class:'field','aria-label':'Company profile'});
+ const search=input('profileCompanySearch','search','Find any company by name or email');
+ search.maxLength=80;
  const area=div('stack');
- card.append(div('formrow',lab('Choose company',company)),area);main.append(card);
- const result=await api('/v1/human/tenants');
- company.replaceChildren(...result.tenants.filter(t=>['active','trial'].includes(t.status))
-  .map(t=>node('option',{value:t.id,text:t.display_name})));
+ async function findCompany(){
+  const prev=company.value;
+  const result=await api('/v1/human/tenants?'+new URLSearchParams({limit:'100',q:search.value.trim()}));
+  company.replaceChildren(...result.tenants.filter(t=>['active','trial'].includes(t.status))
+   .map(t=>node('option',{value:t.id,text:t.display_name})));
+  if(result.tenants.some(t=>t.id===prev))company.value=prev;
+  load();
+ }
+ const button=btn('Find company',()=>findCompany().catch(asError),true);
+ search.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();findCompany().catch(asError)}});
+ card.append(div('formrow',lab('Search all companies',search),button),
+  div('formrow',lab('Choose company',company)),area);main.append(card);
  function load(){
   if(!company.value){area.replaceChildren(node('p',{class:'muted',text:'Create a client before editing a company profile.'}));return}
   const profile=div('stack');
   area.replaceChildren(profile);
   companyProfileEditor(company.value,profile,true,company.selectedOptions[0]?.textContent||'').catch(asError);
  }
- company.addEventListener('change',load);load();
+ company.addEventListener('change',load);
+ await findCompany();
 }
 async function companyProfileEditor(tenantId,content,admin=false,companyLabel=''){
  const card=div(admin?'stack':'card',title('Company Knowledge','h3'));content.append(card);
