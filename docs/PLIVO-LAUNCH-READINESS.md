@@ -11,17 +11,21 @@ The owner has selected a **fixed-question Smart Voice Q&A**, not a general, real
 Open **/app → Super Admin → Calling Setup → Plivo Go-Live Readiness**. The **Refresh go-live checks** button reads `GET /v1/human/launch-readiness`.
 
 - Restricted to a **current MFA-enrolled Super Admin session**. Returns no account IDs, Auth Tokens, caller numbers, phone numbers, tenant IDs, lead IDs, secret values or keys.
-- Makes **no Plivo or billing API call**, no CRM writes, no DND/consent changes and no phone call; cannot change approval state.
-- Lists configuration *presence only*. `configured: true` does **not** mean the provider accepted the key, granted a traffic category, rented a number or approved a business.
+- Makes **no Plivo or billing API call**, no CRM writes, no DND/consent changes and no phone call; cannot change approval state. It only makes bounded private **R2 HEAD metadata reads** for the internal pilot Hindi and English voice packs.
+- Lists configuration *presence only* and, separately, the **11 required MP3 object checks per language** plus optional `repeat.mp3` status. A file marked `present` means R2 reports a valid nonzero size within 512 KiB. It **does not** verify pronunciation, content, playability, provider acceptance, traffic category or business approval.
 - If a human admin is not logged in or did not enroll in MFA, the route rejects with 401/403. A consumer UI or public status page cannot access the report.
 
 ## Work that can be engineered without the final Plivo credentials
 
-1. **Real-time conversational agent:** implement authenticated Plivo bidirectional audio streaming, bounded streaming sessions, India Hindi/English STT, customer-specific RAG grounded in approved company/project knowledge, LLM turn logic, speech synthesis, interruption/human handoff, verified callback identity, and guard against stale/out-of-order sessions. The current browser test does not supply this. The scripted phone flow uses prerecorded R2 MP3 prompts + Workers AI transcription for short answers, which is a different, restricted feature.
+1. **Optional future conversational upgrade — not a v1 blocker:** Plivo bidirectional streaming, RAG/LLM dialog, streaming TTS, barge-in and human-handoff may be added later. The **agreed v1** is already based on a bounded fixed-question flow with reviewed R2 MP3 prompts and Workers AI transcription of short answers; it must still pass a verified real-device internal test before customer use.
 2. **Security / privacy:** implement retention and deletion policy for call audio and PII, recovery procedures, operator audit, rate limits and backups with an actually verified restoration drill. Independent vulnerability assessment and MFA rollout also require real-world sign-off.
 3. **Consent and DND evidence:** code enforces per-lead clearance and opt-outs, but an independent live DND lookup/verification and lawful evidence workflow are still to be integrated and accepted. Never infer permission from imported Excel/CSV.
 4. **Product operations:** verified carrier usage events, payment subscriptions and invoicing if charging users, durable retry reconciliation and truthful quotas. Synthetic preview of minutes or charges is not billing.
 5. **Provider-independent verification:** full browser E2E, cross-tenant isolation, security scans, load/soak, callback replay, no-dial failure tests; must be signed off for production before onboarding real customers.
+
+## Verify Hindi audio now, without KYC
+
+After reviewing PR #125 and deploying only to the isolated Calling Worker, open **Super Admin → Calling Setup → Plivo Go-Live Readiness → Refresh go-live checks**. Its internal-pilot audio section checks `scripted-phone-pilot/hi/` and `scripted-phone-pilot/en/` in the private `ar3d-calling-recordings` R2 binding. For each language, expect **11/11** required objects and an optional `repeat.mp3` marked present if supplied. Missing, oversize and temporarily inaccessible objects are reported separately. The user-supplied Hindi upload screenshots show these names but do **not** substitute for live R2 metadata verification or a listened-to pilot. Customer campaigns do **not** reuse pilot files: their reviewed clips must be uploaded per tenant under `scripted-phone-campaigns/<tenant-uuid>/hi/` or `/en/` when customer activation is eventually approved.
 
 ## After Plivo business KYC / India route approval
 
