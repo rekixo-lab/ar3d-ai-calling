@@ -1002,7 +1002,49 @@ async function customerCallingPanel(tenantId,content,role,openView){
  render();await refresh();
 }
 
+// Go-live truth is separate from the successful deployment of a CRM/phone
+// prototype. This view never sends credentials and cannot activate calling.
+function launchReadinessPanel(main){
+ const card=div('card',title('Plivo Go-Live Readiness')),
+  status=node('p',{class:'note',role:'status',
+   text:'Checking the Plivo setup and independent production requirements…'}),
+  details=div('stack'),refreshButton=btn('Refresh go-live checks',()=>refresh().catch(asError),true);
+ card.append(node('p',{class:'muted',text:'Read-only. Does not contact Plivo, place any call, authorize customers or change configuration.'}),
+  status,refreshButton,details);
+ main.append(card);
+ async function refresh(){
+  refreshButton.disabled=true;
+  try{
+   const data=await api('/v1/human/launch-readiness');
+   if(!card.isConnected)return;
+   status.textContent=data.canClaimProductionReady?
+    'Production go-live verified.':'Not yet production-ready. Plivo KYC alone is not the remaining step.';
+   const engineering=table(['Engineering gate','Readiness'],data.engineering.map(x=>[x.label,x.ready?'Verified':'Not implemented / signed off']));
+   const external=table(['Provider / operator gate','Verification'],data.external.map(x=>[x.label,x.verified?'Verified':'Independent verification required']));
+   const setup=table(['Plivo and Worker configuration','Configuration only'],data.environment.map(x=>[x.label,x.configured?'Present':'Missing / disabled']));
+   details.replaceChildren(
+    node('p',{class:'muted',text:'Fixed-question Plivo script: implemented. Real-time conversational AI: not implemented. Presence of an API key does not prove KYC or a permitted live route.'}),
+    title('Engineering still required','h3'),engineering,
+    node('details',{class:'card'},[
+     node('summary',{text:'Provider approvals and internal pilot'}),
+     external,
+     node('p',{class:'muted',text:'Only the provider/operator can verify Indian KYC, traffic category, consent, caller ID and completed pilot.'})
+    ]),
+    node('details',{class:'card'},[
+     node('summary',{text:'Configured environment (names only, no credential values)'}),
+     setup
+    ])
+   );
+  }catch(error){
+   if(card.isConnected)status.textContent='Readiness unavailable. No calling action occurred. A current MFA Super Admin session is required.';
+   throw error;
+  }finally{refreshButton.disabled=false}
+ }
+ refresh().catch(()=>{});
+}
+
 async function callingAdminPanel(main){
+ launchReadinessPanel(main);
  const card=div('card calling-settings',title('Client calling approval')),area=div('approval-grid');card.id='calling-setup';main.append(card);
  const company=node('select',{class:'field','aria-label':'Calling setup company'});
  const companySearch=input('callingSetupCompanySearch','search','Search company name or email');
