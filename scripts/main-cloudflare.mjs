@@ -15,11 +15,11 @@ export const REQUIRED_TABLES = Object.freeze({
   CONTROL_DB: Object.freeze([
     'tenants','tenant_keys','project_links','tenant_numbers','tenant_audit_events',
     'human_users','tenant_memberships','human_sessions','human_invitations',
-    'human_login_limits','human_bootstrap_claim','human_ip_login_limits','human_mfa_settings','human_mfa_challenges','human_mfa_recovery_codes','provider_event_inbox','calling_script_bindings','calling_script_versions','company_profile_versions','calling_agent_publications','shared_voice_gateway','voice_call_routes','client_account_contacts','company_change_requests','scripted_phone_pilots',
+    'human_login_limits','human_bootstrap_claim','human_ip_login_limits','human_mfa_settings','human_mfa_challenges','human_mfa_recovery_codes','provider_event_inbox','calling_script_bindings','calling_script_versions','company_profile_versions','calling_agent_publications','shared_voice_gateway','voice_call_routes','client_account_contacts','company_change_requests','scripted_phone_pilots','tenant_credit_budgets','tenant_credit_audit',
   ]),
   CRM_DB: Object.freeze([
     'leads','agents','calls','site_visits','crm_audit_events',
-    'lead_notes','conversation_simulations','lead_opt_out_events','lead_consent_evidence','call_campaign_drafts','call_campaign_candidates','call_intent_proposals','calling_policies','calling_clearances','calling_runs','calling_jobs','scripted_call_results',
+    'lead_notes','conversation_simulations','lead_opt_out_events','lead_consent_evidence','call_campaign_drafts','call_campaign_candidates','call_intent_proposals','calling_policies','calling_clearances','calling_runs','calling_jobs','scripted_call_results','lead_staff_assignments',
   ]),
 });
 export const REQUIRED_COLUMNS = Object.freeze({
@@ -37,6 +37,8 @@ export const REQUIRED_COLUMNS = Object.freeze({
     client_account_contacts: Object.freeze(['tenant_id','email','mobile_e164','created_by','created_at','updated_at']),
     scripted_phone_pilots: Object.freeze(['id','tenant_id','lead_id','lead_updated_at','actor_id','language','destination','caller','rate_slot','expires_at','phase','provider_call_id','provider_request_id','turn','survey_json','created_at','provider_account_id','job_id','hangup_at','duration_seconds']),
     company_change_requests: Object.freeze(['tenant_id','id','message','status','created_by','created_at','handled_by','handled_at','resolution_note']),
+    tenant_credit_budgets: Object.freeze(['tenant_id','planned_paise','updated_by','updated_at']),
+    tenant_credit_audit: Object.freeze(['id','tenant_id','actor','previous_paise','new_paise','reason','created_at']),
     calling_script_bindings: Object.freeze(['tenant_id','bot_id','assistant_id','source_version']),
     calling_script_versions: Object.freeze(['tenant_id','id','revision','config_json','prompt','provider_state','provider_version']),
     human_ip_login_limits: Object.freeze(['ip_hash','attempt_count','blocked_until']),
@@ -56,6 +58,7 @@ export const REQUIRED_COLUMNS = Object.freeze({
     scripted_call_results: Object.freeze(['tenant_id','job_id','session_id','answers_json','saved_to_lead','captured_at']),
     calling_jobs: Object.freeze(['tenant_id','id','run_id','lead_id','state','provider_call_sid','reserved_at']),
     call_intent_proposals: Object.freeze(['tenant_id','id','campaign_id','lead_id','purpose','state','created_by','created_at']),
+    lead_staff_assignments: Object.freeze(['tenant_id','lead_id','user_id','assigned_by','assigned_at']),
   }),
 });
 const accountPattern = /^[a-f0-9]{32}$/i;
@@ -151,6 +154,11 @@ export function checkTables(tables, binding, mode) {
     return 'fresh';
   }
   const missing = expected.filter(name => !present.has(name));
+  // Exact additive credit/staff tables are safe for the isolated Calling D1.
+  // Any missing unrelated table still fails closed rather than deploying.
+  if(mode==='preflight'&&binding==='CONTROL_DB'&&missing.length===2&&
+     ['tenant_credit_budgets','tenant_credit_audit'].every(t=>missing.includes(t)))return 'control_credit_upgrade';
+  if(mode==='preflight'&&binding==='CRM_DB'&&missing.length===1&&missing[0]==='lead_staff_assignments')return 'crm_staff_upgrade';
   if(mode==='preflight'&&binding==='CONTROL_DB'&&missing.length===1&&missing[0]==='scripted_phone_pilots')return 'control_scripted_pilot_upgrade';
   if(mode==='preflight'&&binding==='CONTROL_DB'&&missing.length===1&&missing[0]==='company_change_requests')return 'control_company_change_upgrade';
   if(mode==='preflight'&&binding==='CONTROL_DB'&&missing.length===1&&missing[0]==='client_account_contacts')return 'control_client_accounts_upgrade';
@@ -215,13 +223,15 @@ export async function inspectCloudflare({ credentials, mode, apiFetch = fetch, t
     if (['control_client_accounts_upgrade','control_publication_upgrade','control_profile_upgrade',
          'control_script_upgrade','crm_dispatch_upgrade','ready','crm_call_intent_upgrade',
          'crm_scripted_results_upgrade','control_company_change_upgrade',
-         'control_scripted_pilot_upgrade'].includes(state)) {
+         'control_scripted_pilot_upgrade','control_credit_upgrade','crm_staff_upgrade'].includes(state)) {
       if (binding === 'CRM_DB') {
         const triggers = await query(id, "SELECT name,sql FROM sqlite_master WHERE type='trigger' AND name LIKE 'trg_%'");
         checkSafetyTriggers(triggers,{allowCallIntentUpgrade:state === 'crm_call_intent_upgrade'});
       }
       for (const table of Object.keys(REQUIRED_COLUMNS[binding])) {
         if(state==='control_client_accounts_upgrade'&&table==='client_account_contacts')continue;
+        if(state==='control_credit_upgrade'&&['tenant_credit_budgets','tenant_credit_audit'].includes(table))continue;
+        if(state==='crm_staff_upgrade'&&table==='lead_staff_assignments')continue;
         if(state==='control_company_change_upgrade'&&table==='company_change_requests')continue;
         if(state==='control_scripted_pilot_upgrade'&&table==='scripted_phone_pilots')continue;
         if(state==='control_publication_upgrade'&&['calling_agent_publications','shared_voice_gateway','voice_call_routes'].includes(table))continue;
@@ -249,6 +259,9 @@ export async function inspectCloudflare({ credentials, mode, apiFetch = fetch, t
 // A single clean state is mandatory for unattended deployment. Mixed/partial
 // schemas are NEVER safe to automatically initialize or deploy.
 export function verifiedSchemaState(modes) {
+  if(modes?.CONTROL_DB==='control_credit_upgrade'&&modes?.CRM_DB==='crm_staff_upgrade')return 'credit_staff_upgrade';
+  if(modes?.CONTROL_DB==='control_credit_upgrade'&&modes?.CRM_DB==='ready')return 'control_credit_upgrade';
+  if(modes?.CONTROL_DB==='ready'&&modes?.CRM_DB==='crm_staff_upgrade')return 'crm_staff_upgrade';
   if(modes?.CONTROL_DB==='control_scripted_pilot_upgrade'&&modes?.CRM_DB==='ready')return 'control_scripted_pilot_upgrade';
   if(modes?.CONTROL_DB==='control_company_change_upgrade'&&modes?.CRM_DB==='ready')return 'control_company_change_upgrade';
   if(modes?.CONTROL_DB==='control_client_accounts_upgrade'&&modes?.CRM_DB==='ready')return 'control_client_accounts_upgrade';
