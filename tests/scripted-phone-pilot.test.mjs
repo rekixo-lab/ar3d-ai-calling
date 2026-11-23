@@ -320,3 +320,55 @@ test('Optional retry audio is not required for a complete campaign prompt set',a
  assert.ok(requested.every(key=>key.startsWith(
   'scripted-phone-campaigns/88888888-8888-4888-8888-888888888888/hi/')));
 });
+
+test('Silence from speech recognition ends in review, never saves invented CRM values or redials',async()=>{
+ const f=fixture();
+ try{
+  let sttRuns=0,submitted=0,hook;
+  const env={...f.env,PLIVO_AUTH_ID:'syntheticAuth',PLIVO_AUTH_TOKEN:token,
+   AR3D_SCRIPTED_PILOT_ENABLED:'enabled',AR3D_PLIVO_RECORDING_AUTH:'confirmed',
+   AR3D_SCRIPTED_PILOT_ORIGIN:origin,AR3D_PLIVO_CALLER_NUMBER:'+918000000000',
+   AR3D_SCRIPTED_PILOT_VERIFIED_NUMBER:internalNumber,AR3D_SCRIPTED_PILOT_TENANT_ID:tid,
+   AR3D_SCRIPTED_PILOT_LEAD_ID:lead,
+   RECORDINGS:{head:async()=>({size:4}),get:async()=>({size:4,body:new Uint8Array(4)})},
+   AI:{async run(){return {text:sttRuns++===0?'प्लॉट':'   '}}}
+  };
+  const fetcher=async(url,options)=>{
+   if(url.startsWith('https://api.plivo.com/')){
+    submitted++;
+    hook=JSON.parse(options.body).answer_url.replace(/\/answer$/,'');
+    return Response.json({request_uuid:requestId},{status:202});
+   }
+   return new Response('RIFF',{headers:{'Content-Type':'audio/wav'}});
+  };
+  const started=await handleScriptedPhoneAdmin(new Request(origin+'/v1/human/scripted-phone-pilot',{
+   method:'POST',headers:{Origin:origin},
+   body:JSON.stringify({language:'hi',confirm:'CALL_ONE_VERIFIED_INTERNAL_NUMBER'})
+  }),env,admin,{now,fetcher});
+  assert.equal(started.status,202);
+  const callback=(step,params={})=>handleScriptedPhoneCallback(
+   signed(hook+'/'+step,{CallUUID:callId,...params}),env,{now,fetcher});
+  await callback('answer',{ALegRequestUUID:requestId,
+   From:'918000000000',To:'919000000001',Direction:'outbound'});
+  await callback('consent',{Digits:'1'});
+  assert.match(await (await callback('turn/0',{RecordingID:'record-id-00'})).text(),/location\.mp3/);
+  for(let i=1;i<=3;i++){
+   const response=await callback('turn/'+i,{RecordingID:'record-id-0'+i});
+   assert.equal(response.status,200);
+   const xml=await response.text();
+   if(i<3)assert.match(xml,/repeat\.mp3[\s\S]*location\.mp3/);
+   else assert.match(xml,/review\.mp3/);
+  }
+  assert.equal(sttRuns,4);
+  assert.equal(submitted,1);
+  assert.equal(f.c.db.prepare('SELECT phase FROM scripted_phone_pilots').get().phase,'needs_review');
+  const leadRow=f.r.db.prepare('SELECT preferred_location,budget_max_inr,consent_status FROM leads WHERE tenant_id=? AND id=?').get(tid,lead);
+  assert.equal(leadRow.preferred_location,null);
+  assert.equal(leadRow.budget_max_inr,null);
+  assert.equal(leadRow.consent_status,'unknown');
+  assert.equal(f.r.db.prepare("SELECT COUNT(*) AS n FROM crm_audit_events WHERE action='lead.scripted_phone_pilot_saved'").get().n,0);
+  assert.match(await (await callback('turn/3',{RecordingID:'record-id-03'})).text(),/review\.mp3/);
+  assert.equal(sttRuns,4);
+  assert.equal(submitted,1);
+ }finally{f.close()}
+});
