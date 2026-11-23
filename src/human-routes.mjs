@@ -1,6 +1,7 @@
 import {handleScriptedPhoneAdmin} from './scripted-phone-pilot.mjs';
 import {handleScriptedCallingRequest} from './scripted-campaign-routes.mjs';
 import {handleClientAccountRequest} from './client-account-routes.mjs';
+import {handleClientAccessRequest} from './client-access-routes.mjs';
 import {enrichAdminTenantsWithUsage} from './admin-usage.mjs';
 import {handleCompanyProfile} from './company-profile.mjs';
 import {handleCompanyChangeRequests} from './company-change-requests.mjs';
@@ -251,6 +252,8 @@ export async function handleHumanRequest(req,env){
     if(scriptedPhone)return scriptedPhone;
     const accounts=await handleClientAccountRequest(req,env,user);
     if(accounts)return accounts;
+    const access=await handleClientAccessRequest(req,env,user);
+    if(access)return access;
     const profile=await handleCompanyProfile(req,env,user);
     if(profile)return profile;
     const changes=await handleCompanyChangeRequests(req,env,user);
