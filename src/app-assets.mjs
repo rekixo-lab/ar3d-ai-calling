@@ -357,7 +357,7 @@ async function superAdmin(main){
     node('input',{class:'field',value:location.origin+'/app',readonly:'readonly','aria-label':'Permanent client sign-in link'})
    ));
    notice('Invitation prepared; client account activates after invitation acceptance.');
-   f.reset();await refresh();await refreshAccess();document.dispatchEvent(new CustomEvent('client-created',{detail:d.id}));
+   f.reset();await refresh();await refreshAccess();populateMemberCompanies();document.dispatchEvent(new CustomEvent('client-created',{detail:d.id}));
   }catch(err){asError(err)}
   finally{submit.disabled=false}
  });
@@ -388,7 +388,7 @@ actionForm.addEventListener('submit',async e=>{e.preventDefault();try{
   if(!confirm((verb==='suspend'?'Suspend':'Resume')+' access for '+t.display_name+'?'))return;
   const result=await api('/v1/human/tenants/'+t.id+'/'+verb,'POST',{reason:reason.value});
   notice('Client access updated: '+result.status+'.');
-  reason.value='';await refresh();await refreshAccess();
+  reason.value='';await refresh();await refreshAccess();populateMemberCompanies();
 }catch(err){asError(err)}});
 await inviteSection(management);
 // Super Admin can review and revoke individual access without suspending a whole builder.
