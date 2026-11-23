@@ -24,6 +24,12 @@ Complete the [verified-number pilot](scripted-phone-pilot.md) before enabling cu
 - **Operations report** now shows interested leads, follow-up leads and already-due follow-ups, alongside campaign/visit counters. These are CRM statuses, not Plivo-verified answers, billed minutes or revenue.
 - Future automatic callback and carrier-integrated reminders must require provider-approved routing and independently verified recipient preference and DND status.
 
+## Plivo caller selected for AR3D Production
+
+The operator has rented `+918065491333` (Bengaluru 080 local number, linked to `AR3D_Production`). It is configured as the Calling Worker's **non-secret desired caller ID**, not a secret, prepaid wallet or permission to call all imported customers. The India business KYC screenshot shows approval for the local number; live origin/caller ownership should still be checked via Super Admin → **Check Plivo API & rented numbers** after deploy.
+
+**Operational policy:** The owner is not using 140 promotional calling at this stage. Therefore AR3D cannot activate the real-estate **new-lead marketing campaign** flow through this 080 caller. Existing customer service/transactional voice use remains possible **only** within provider-approved classification and recorded customer preference. A CSV upload and the presence of 100/200/300/400/500 planned credits never enable calling or move provider funds.
+
 ## Queue and results
 
 The Worker dispatches on a one-minute schedule within 09:00–20:00 India time. Customers without current clearance stay queued while approved customers proceed. Explicit suppression blocks a customer. It reserves one call at a time per company and enforces the daily cap including failed attempts. Pause or disable company calling to suspend further reservations. A call already being submitted can finish. An uncertain request locks that company's queue until operations confirms its outcome from Plivo and the application audit. The client pauses the campaign, then a current MFA Super Admin verifies the ended attempt in Plivo. After 30 minutes from submission, enter the provider evidence reference and use **Close verified attempt**. The client can then resume the remaining jobs. The closed attempt cannot be dialed again by resuming the same run.
