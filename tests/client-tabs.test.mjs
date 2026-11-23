@@ -37,3 +37,13 @@ test('AI Testing UI defaults to preview only; explicit auto-save is scoped to se
   assert.match(code,/canSave&&autoSave.checked/);
   assert.doesNotMatch(code,/\/v1\/human\/calls\/start|\/v1\/human\/calling\/runs/);
 });
+
+test('Operations & Security Report is tenant scoped, aggregate-only and cannot retry a call',()=>{
+  assert.match(js,/function operationsReportPanel\(tenantId,content\)/);
+  assert.match(js,/operationsReportPanel\(id,section\)/);
+  const panel=js.slice(js.indexOf('function operationsReportPanel('),js.indexOf('function campaignResultsPanel('));
+  assert.match(panel,/\/v1\/human\/operations\/report\?tenantId=/);
+  assert.match(panel,/Unknown provider outcomes/);
+  assert.match(panel,/must be reviewed manually/);
+  assert.doesNotMatch(panel,/\/v1\/human\/calling\/runs|action:'start'|\.startCall\(/);
+});
