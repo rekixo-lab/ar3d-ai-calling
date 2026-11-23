@@ -11,6 +11,7 @@ import {chromium} from 'playwright';
 import {html,css,js} from '../src/app-assets.mjs';
 import {fixedPropertyQuestions,PROPERTY_TYPES,normalizePropertySurvey} from '../src/fixed-property-survey.mjs';
 import {beginFixedVoicePreview,advanceFixedVoicePreview} from '../src/fixed-voice-turns.mjs';
+import {buildPlivoReadinessSnapshot} from '../src/launch-readiness-routes.mjs';
 
 const SESSION='synthetic-browser-session-only';
 const TEST_EMAIL='sandbox-operator@example.invalid';
@@ -58,6 +59,8 @@ const server=http.createServer(async(req,res)=>{
     if(!authenticated)return respond(res,401,{error:'sign in required'});
     if(req.method==='GET'&&path==='/v1/human/mfa')
       return respond(res,200,{enabled:false,configured:true});
+    if(req.method==='GET'&&path==='/v1/human/launch-readiness')
+      return respond(res,200,buildPlivoReadinessSnapshot({}));
     if(req.method==='GET'&&path==='/v1/human/tenants')
       return respond(res,200,{tenants:[]});
     if(req.method==='GET'&&path==='/v1/human/scripted-phone-pilot')return respond(res,200,{configured:false});
@@ -135,6 +138,9 @@ try{
     await page.getByRole('heading',{name:'Clients',exact:true}).waitFor();
     await page.getByRole('link',{name:'Calling Setup',exact:true}).click();
     await page.getByRole('heading',{name:'Internal phone test'}).waitFor();
+    await page.getByRole('heading',{name:'Plivo Go-Live Readiness'}).waitFor();
+    await page.getByText('Not yet production-ready. Plivo KYC alone is not the remaining step.').waitFor();
+    await page.getByRole('button',{name:'Refresh go-live checks'}).click();
     await page.getByText('Waiting for Plivo: approve a caller number and configure the internal test.',{exact:true}).waitFor();
     const nav=page.getByRole('link',{name:'Security',exact:true});
     const signout=page.getByRole('button',{name:'Sign out'});
