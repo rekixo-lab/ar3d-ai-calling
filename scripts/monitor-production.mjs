@@ -5,7 +5,9 @@ const TARGET='https://aicalling.ar3dstudio.in';
 export async function monitor({base=TARGET,fetchFn=fetch}={}){
   // smoke() enforces an exact Calling Worker hostname allowlist, HTTP paths,
   // methods, no redirects, expected content types and a 401 auth barrier.
-  const healthy=await smoke(base,fetchFn);
+  // The periodic monitor stays GET-only. Only the deploy acceptance smoke
+  // uses the safe POST-to-Hangup Plivo Application Answer check.
+  const healthy=await smoke(base,fetchFn,{checkPlivoAnswer:false});
   return {healthy,service:'ar3d-ai-calling',checkedWithoutSecrets:true};
 }
 if(process.argv[1]&&import.meta.url===new URL('file://'+process.argv[1]).href){
