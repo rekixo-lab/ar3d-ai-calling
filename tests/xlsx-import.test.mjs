@@ -93,3 +93,12 @@ test('Human XLSX requires write access, same origin and bounded upload',async()=
   assert.equal((await worker.fetch(request(payload,'preview',false),env().env)).status,403);
   assert.equal((await worker.fetch(request({...payload,xlsxBase64:'x'.repeat(1500000)}),env().env)).status,400);
 });
+
+test('XLSX customer imports require Name column and non-empty printable names',async()=>{
+ const wrongHeader=sheet.replace('<c r="A1" t="s"><v>0</v></c>',
+  '<c r="A1" t="inlineStr"><is><t>Other column</t></is></c>');
+ await assert.rejects(parseLeadXlsx(workbookZip(wrongHeader)),/Missing Name column/);
+ const emptyName=sheet.replace('<c r="A2" t="s"><v>2</v></c>',
+  '<c r="A2" t="inlineStr"><is><t></t></is></c>');
+ await assert.rejects(parseLeadXlsx(workbookZip(emptyName)),/customer name is required/);
+});
