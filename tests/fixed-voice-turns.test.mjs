@@ -176,3 +176,44 @@ test('Hindi refusal is not incorrectly classified as later; conflicting yes/no r
     assert.match(ambiguous.warning,/conflicting/);
   }
 });
+
+test('Audio trouble and repeat requests never become a saved location',()=>{
+  const locationState=()=>turn(beginFixedVoicePreview({language:'hi',now:stamp}).state,'प्लॉट').state;
+  for(const phrase of [
+    'आपकी आवाज नहीं आ रही', 'सुनाई नहीं दिया', 'माफ कीजिए फिर से बोलिए',
+    'दुबारा बताइए', 'can you repeat', 'I could not hear you',
+    'what did you say', 'पता नहीं', 'हाँ', 'हेलो'
+  ]){
+    const response=turn(locationState(),phrase);
+    assert.equal(response.action,'repeat',phrase);
+    assert.equal(response.state.index,1,phrase);
+    assert.equal(response.state.answers.location,undefined,phrase);
+    assert.equal(response.crmWrites,0,phrase);
+    assert.equal(response.phoneCallsStarted,0,phrase);
+  }
+  const accepted=turn(locationState(),'रायपुर');
+  assert.equal(accepted.action,'next_question');
+  assert.equal(accepted.state.answers.location,'रायपुर');
+  const areaRetry=turn(accepted.state,'आवाज कट रही है');
+  assert.equal(areaRetry.action,'repeat');
+  assert.equal(areaRetry.state.index,2);
+  assert.equal(areaRetry.state.answers.area,undefined);
+  const areaAccepted=turn(areaRetry.state,'शंकर नगर');
+  assert.equal(areaAccepted.state.answers.area,'शंकर नगर');
+});
+
+test('Three unintelligible answers end in review, without guessing a city or granting consent',()=>{
+  let state=turn(beginFixedVoicePreview({language:'hi',now:stamp}).state,'घर').state;
+  for(let attempt=1;attempt<=3;attempt++){
+    const response=turn(state,'मुझे सुनाई नहीं दिया');
+    assert.equal(response.action,attempt===3?'human_review':'repeat');
+    assert.equal(response.state.index,1);
+    assert.equal(response.state.answers.location,undefined);
+    assert.equal(response.crmWrites,0);
+    assert.equal(response.consentGranted,false);
+    assert.equal(response.dndCleared,false);
+    state=response.state;
+  }
+  assert.equal(state.status,'needs_review');
+  assert.throws(()=>turn(state,'दुर्ग'),/already finished/);
+});
