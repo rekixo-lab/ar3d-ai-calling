@@ -1250,7 +1250,14 @@ function launchReadinessPanel(main){
     ]));
    const external=table(['Provider / operator gate','Verification'],data.external.map(x=>[x.label,x.verified?'Verified':'Independent verification required']));
    const setup=table(['Plivo and Worker configuration','Configuration only'],data.environment.map(x=>[x.label,x.configured?'Present':'Missing / disabled']));
+   const steps=Array.isArray(data.setupActions)?data.setupActions:[];
+   const nextSteps=table(['Who','One-time Production setup','Status'],
+    steps.map(x=>[
+     x.owner,x.label+' — '+x.note,
+     x.ready?'Configured / verify independently':(x.owner==='Plivo/provider'||x.owner==='Provider/operator'?'Provider confirmation needed':'Manual step pending')
+    ]));
    details.replaceChildren(
+    title('Next steps before the first authorized Production call','h3'),nextSteps,
     node('p',{class:'muted',text:'Agreed v1: fixed-question Smart Voice Q&A, not an open-ended streaming AI. Live two-way interruption is optional later. No API key or R2 file proves Plivo KYC or a permitted call route.'}),
     title('Internal pilot audio (R2, read-only)','h3'),audio,
     node('p',{class:'muted',text:'Checks private R2 object presence and size, not pronunciation, sound quality or phone readiness. Customer campaign voice packs use separate tenant folders.'}),
