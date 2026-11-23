@@ -104,7 +104,7 @@ test('initial provisional INR client credit is chosen at account creation with c
   assert.equal(f.c.db.prepare('SELECT planned_paise AS n FROM tenant_credit_budgets WHERE tenant_id=?').get(d.id).n,50000);
   assert.equal(f.c.db.prepare('SELECT COUNT(*) AS n FROM tenant_credit_audit WHERE tenant_id=?').get(d.id).n,1);
   assert.equal(f.c.db.prepare('SELECT COUNT(*) AS n FROM human_invitations WHERE tenant_id=?').get(d.id).n,1);
-  assert.equal(f.c.db.prepare('SELECT COUNT(*) AS n FROM calling_policies WHERE tenant_id=?').get(d.id).n,0);
+  assert.equal(f.r.db.prepare('SELECT COUNT(*) AS n FROM calling_runs WHERE tenant_id=?').get(d.id).n,0);
  }finally{f.close()}
 });
 
