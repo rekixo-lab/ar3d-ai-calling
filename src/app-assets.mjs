@@ -977,9 +977,12 @@ async function customerCallingPanel(tenantId,content,role,openView){
   pause.disabled=busy||run?.state!=='running';
   start.querySelector('span').textContent=run?.state==='paused'?'Resume calling':'Start calling';
   if(!snapshot)return;
-  status.textContent=!snapshot.data.configuration.ready?'Calling disabled until Plivo setup and the internal pilot are complete.':
-   !policyReady?'Super Admin calling approval is required for this company.':
-   'Calling approved · up to '+policy.dailyLimit+' calls per day · 09:00–20:00 India time';
+  // Keep provider onboarding and consent paperwork in the AR3D operator view.
+  // Ordinary clients only need to prepare a list, start when enabled and see results.
+  status.textContent=!snapshot.data.configuration.ready?
+   'AI calling is being prepared by AR3D. You can import your customer list now.':
+   !policyReady?'AI calling for this company is waiting for AR3D activation.':
+   'Call your approved customers · up to '+policy.dailyLimit+' calls per day · 09:00–20:00 India time';
   status.className='note '+(ready?'ready-note':'');
   summary.replaceChildren(campaign?div('between row',
    node('strong',{text:campaign.name}),
