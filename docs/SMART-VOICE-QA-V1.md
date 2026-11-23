@@ -18,7 +18,7 @@ Build the smallest reliable, consent-gated, *fixed-question* Hindi/English real-
 5. "कॉल मत करना" / explicit opt-out takes priority over ordinary question parsing; actual customer-phone opt-out must be persisted via the existing verified campaign path, not through an unauthenticated browser preview.
 6. Do not confuse asking for a site-visit date with making a confirmed booking.
 7. Preserve tenant isolation, DND/consent checks, signed provider callbacks, campaign kill-switch, no-redial-on-uncertain-result and existing CRM manual-review protection.
-8. Test Hindi, Hinglish and English repair phrases and three-failure review. An STT transcript is **not** proof of accurate transcription; providers may not supply calibrated recognition confidence.
+8. Test Hindi, Hinglish and English repair phrases, misheard/corrected questions, mixed yes/no interest replies, and three-failure review. A customer saying "आप गलत समझ रहे हो" is not a city or an agreement. An STT transcript is **not** proof of accurate transcription; providers may not supply calibrated recognition confidence.
 
 ## Existing versus still needed
 
