@@ -987,6 +987,10 @@ function operationsReportPanel(tenantId,content){
    const jobs=data.jobs;
    const lines=[
     ['CRM customers',data.customers.total],
+    ['Interested customers',data.leadPipeline.interested],
+    ['Follow-up leads',data.leadPipeline.followup],
+    ['Follow-ups already due',data.leadPipeline.dueFollowups],
+    ['Not interested',data.leadPipeline.not_interested],
     ['Blocked / denied customers',data.customers.blockedOrDenied],
     ['Campaigns running',data.campaigns.running],
     ['Queued call jobs',jobs.queued],
