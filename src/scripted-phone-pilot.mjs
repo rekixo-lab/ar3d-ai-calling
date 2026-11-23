@@ -11,6 +11,8 @@ const ID=/^[a-zA-Z0-9-]{8,80}$/;
 const MOBILE=/^\+91[6-9]\d{9}$/;
 const FIELDS=['propertyType','location','area','size','budgetInr','interest','visitDate'];
 const PROMPTS=['opening','closing','review','size-plot','size-home',...FIELDS.filter(key=>key!=='size')];
+// Optional spoken apology before a retry. Never block ordinary scripts when absent.
+const AUDIO_PROMPTS=new Set([...PROMPTS,'repeat']);
 const terminal=new Set(['completed','declined','needs_review','ended','rejected']);
 const duration=180;
 const ttl=10*60000;
@@ -26,6 +28,37 @@ export async function scriptedPromptsReady(env,language,tenant){
  const files=await Promise.all(PROMPTS.map(name=>env.RECORDINGS.head(promptKey(language,name,tenant))));
  return files.every(file=>file&&file.size>0&&file.size<=ANSWER_MAX_BYTES);
 }
+
+// Metadata-only, bounded audio audit for the current-MFA Super Admin readiness
+// page. Never opens audio bytes, changes R2, queries Plivo or authorizes dialing.
+export async function inspectScriptedPromptPack(env,language='hi'){
+ if(!['hi','en'].includes(language))throw Error('invalid audio pack language');
+ const names=[...PROMPTS,'repeat'],bucket=env?.RECORDINGS;
+ if(typeof bucket?.head!=='function')
+  return Object.freeze({language,scope:'internal_pilot',requiredTotal:PROMPTS.length,
+   requiredReady:0,missing:[],invalid:[],unavailable:[...PROMPTS],
+   optionalRepeat:'unavailable',ready:false});
+ const checked=await Promise.allSettled(names.map(name=>
+  bucket.head(promptKey(language,name,null))));
+ const state=result=>{
+  if(result.status!=='fulfilled')return 'unavailable';
+  if(!result.value)return 'missing';
+  const size=result.value.size;
+  return Number.isSafeInteger(size)&&size>0&&size<=ANSWER_MAX_BYTES?'present':'invalid';
+ };
+ const required=checked.slice(0,PROMPTS.length),missing=[],invalid=[],unavailable=[];
+ required.forEach((result,i)=>{
+  const status=state(result);
+  if(status==='missing')missing.push(PROMPTS[i]+'.mp3');
+  else if(status==='invalid')invalid.push(PROMPTS[i]+'.mp3');
+  else if(status==='unavailable')unavailable.push(PROMPTS[i]+'.mp3');
+ });
+ const requiredReady=PROMPTS.length-missing.length-invalid.length-unavailable.length;
+ return Object.freeze({language,scope:'internal_pilot',requiredTotal:PROMPTS.length,
+  requiredReady,missing,invalid,unavailable,
+  optionalRepeat:state(checked[PROMPTS.length]),ready:requiredReady===PROMPTS.length});
+}
+
 const iso=now=>new Date(now).toISOString();
 const normalizePhone=value=>String(value||'').replace(/^\+/,'');
 const escapeXml=value=>value.replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&apos;'})[c]);
@@ -75,7 +108,7 @@ async function pilotCrm(env,tenantId){
 function callback(config,id,step){return config.origin+HOOK+'/'+id+'/'+step}
 const play=url=>'<Play>'+escapeXml(url)+'</Play>';
 
-function responseFor(config,row){
+function responseFor(config,row,{repeatCue=false}={}){
  const audio=name=>play(callback(config,row.id,'audio/'+name+'.mp3'));
  if(row.phase==='consent'){
   const action=escapeXml(callback(config,row.id,'consent'));
@@ -86,12 +119,29 @@ function responseFor(config,row){
   const prompt=field==='size'?(state.answers.propertyType==='plot'?'size-plot':'size-home'):field;
   if(!PROMPTS.includes(prompt))return end();
   // A distinct URL per attempt makes a retried callback safe to recognize.
-  return xml(audio(prompt)+'<Record action="'+escapeXml(callback(config,row.id,'turn/'+row.turn))+
+  return xml((repeatCue&&state.attempts>0?audio('repeat'):'')+audio(prompt)+'<Record action="'+escapeXml(callback(config,row.id,'turn/'+row.turn))+
    '" method="GET" fileFormat="mp3" maxLength="12" timeout="4" finishOnKey="#" playBeep="true"/><Hangup/>');
  }
  if(row.phase==='completed'||row.phase==='needs_review')
   return xml(audio(row.phase==='completed'?'closing':'review')+'<Hangup/>');
  return end();
+}
+
+// Look up a reviewed optional cue only on an actual retry. A missing object,
+// out-of-range object or R2 metadata failure must not break the phone survey.
+async function responseForPhoneQuestion(config,env,row){
+ let repeatCue=false;
+ if(row.phase==='question'){
+  const state=JSON.parse(row.survey_json);
+  if(state.attempts>0){
+   try{
+    const key=promptKey(row.language,'repeat',row.job_id?row.tenant_id:null);
+    const cue=await env.RECORDINGS.head(key);
+    repeatCue=!!cue&&cue.size>0&&cue.size<=ANSWER_MAX_BYTES;
+   }catch{repeatCue=false}
+  }
+ }
+ return responseFor(config,row,{repeatCue});
 }
 
 async function startPilot(req,env,user,config,now,fetcher){
@@ -298,7 +348,7 @@ export async function handleScriptedPhoneCallback(req,env,{now=Date.now(),fetche
  const control=env.CONTROL_DB;
  try{
   if(step==='audio'){
-   if(!arg?.endsWith('.mp3')||!PROMPTS.includes(arg.slice(0,-4))||url.search)return error('not_found',404);
+   if(!arg?.endsWith('.mp3')||!AUDIO_PROMPTS.has(arg.slice(0,-4))||url.search)return error('not_found',404);
    // Scoped to the random pilot ID; serves prerecorded questions only.
    const row=await control.prepare('SELECT language,tenant_id,job_id FROM scripted_phone_pilots WHERE id=? AND expires_at>? AND provider_account_id=?')
     .bind(id,now,config.authId).first();
@@ -354,7 +404,7 @@ export async function handleScriptedPhoneCallback(req,env,{now=Date.now(),fetche
   if(step!=='turn'||!/^\d{1,2}$/.test(arg||''))return end();
   const turn=Number(arg);
   if(row.phase==='finishing')return responseFor(config,await completePilot(env,row,now));
-  if(turn===row.turn-1&&row.phase==='question')return responseFor(config,row);
+  if(turn===row.turn-1&&row.phase==='question')return responseForPhoneQuestion(config,env,row);
   if(turn!==row.turn)return end();
   if(row.phase==='transcribing')return error('answer_processing',503);
   if(row.phase!=='question')return end();
@@ -379,6 +429,7 @@ export async function handleScriptedPhoneCallback(req,env,{now=Date.now(),fetche
    .bind(phase,phase,survey_json,id,turn).run();
   if(changed.meta.changes!==1)return end();
   const next={...row,phase,survey_json,turn:turn+1};
-  return responseFor(config,phase==='finishing'?await completePilot(env,next,now):next);
+  return phase==='question'?responseForPhoneQuestion(config,env,next):
+   responseFor(config,phase==='finishing'?await completePilot(env,next,now):next);
  }catch{return error('scripted_phone_callback_unavailable',503)}
 }

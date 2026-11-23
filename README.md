@@ -11,7 +11,7 @@ AR3D runs the property questionnaire, validates answers and saves them to the te
 3. A Super Admin runs an approved internal number through the seven-question test and verifies the CRM result. Customer campaigns require separate activation and tenant approval.
 4. An authorized client can start or pause approved campaigns. The application runs the queue in the background. **Results / CRM** shows call status and captured answers per customer. Customers can opt out by pressing 2 or stating a supported stop request. Valid, complete answers update the CRM.
 
-See [phone setup and pilot verification](docs/scripted-phone-pilot.md), [campaign operations](docs/CUSTOMER-CALLING.md), and [production deployment](docs/MAIN-DEPLOYMENT.md).
+See the agreed [Smart Voice Q&A v1 scope and manual checklist](docs/SMART-VOICE-QA-V1.md), [phone setup and pilot verification](docs/scripted-phone-pilot.md), [campaign operations](docs/CUSTOMER-CALLING.md), and [production deployment](docs/MAIN-DEPLOYMENT.md).
 
 ## Development verification
 

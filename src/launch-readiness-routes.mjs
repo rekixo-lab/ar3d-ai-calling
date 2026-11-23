@@ -1,3 +1,4 @@
+import {inspectScriptedPromptPack} from './scripted-phone-pilot.mjs';
 // Super Admin, current-MFA only. This endpoint is strictly read-only:
 // it never calls Plivo, creates secrets, changes CRM consent, or enables dialing.
 // Public descriptions are intentionally code-backed/explicitly unverified.
@@ -29,7 +30,7 @@ export function buildPlivoReadinessSnapshot(env){
   ['customerDispatchSwitch',env?.AR3D_SCRIPTED_CAMPAIGNS_ENABLED==='enabled','Customer campaign switch is enabled']
  ].map(([id,present,label])=>({id,configured:Boolean(present),label}));
  const engineering=[
-  {id:'open_conversation',ready:false,label:'Real-time conversational voice (live two-way media, STT, AI reasoning and TTS) is not implemented'},
+  {id:'open_conversation',ready:false,label:'Optional later upgrade: open-ended real-time conversation is not part of the agreed fixed-question v1'},
   {id:'provider_dnd',ready:false,label:'Independently verified provider DND/suppression lookup is not integrated'},
   {id:'privacy_disaster_recovery',ready:false,label:'Production PII deletion, scheduled backup and verified restore drill are not signed off'},
   {id:'billing',ready:false,label:'Durable provider-rated minute reconciliation, paid subscriptions and invoicing are not implemented'}
@@ -55,7 +56,7 @@ export function buildPlivoReadinessSnapshot(env){
   liveCallAttempted:false,
   customerCallsAuthorizedByThisReport:false,
   canClaimProductionReady:false,
-  notice:'Configuration flags are not carrier approval. KYC alone cannot make the current fixed-question product a fully conversational AI calling SaaS.'
+  notice:'The agreed v1 is a fixed-question Smart Voice Q&A, not an open-ended real-time LLM. Configuration or uploaded recordings do not prove carrier KYC, consent/DND or live audio quality.'
  };
 }
 
@@ -72,5 +73,8 @@ export async function handleLaunchReadiness(req,env,user){
     AND s.created_at>=m.enabled_at AND s.revoked_at IS NULL AND s.expires_at>? LIMIT 1`)
    .bind(user.id,user.token_hash,now).first();
  if(!mfa)return json({error:'current Super Admin MFA session required'},403);
- return json(buildPlivoReadinessSnapshot(env));
+ // R2 HEAD metadata only, after fresh MFA verification. No audio-body reads.
+ const audioPacks=await Promise.all(['hi','en'].map(language=>
+  inspectScriptedPromptPack(env,language)));
+ return json({...buildPlivoReadinessSnapshot(env),audioPacks});
 }
