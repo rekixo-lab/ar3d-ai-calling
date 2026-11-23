@@ -747,7 +747,7 @@ async function renderClient(id,content){
   results:async section=>{
    nextActionsPanel(id,section);
    operationsReportPanel(id,section);
-   campaignResultsPanel(id,section);
+   campaignResultsPanel(id,section,d.role);
    if(d.role==='client_admin'){
     const reports=node('details',{class:'card'},node('summary',{text:'Export and audit history'}));
     section.append(reports);
@@ -1023,9 +1023,10 @@ function operationsReportPanel(tenantId,content){
  });
 }
 
-function campaignResultsPanel(tenantId,content){
+function campaignResultsPanel(tenantId,content,role){
  const card=div('card',title('Campaign results & customer answers')),output=div('stack');
  const answer=div('answer-sheet');answer.hidden=true;
+ const chargeInfo=div('');
  card.id='client-reports';
  content.append(card);
  const campaign=node('select',{class:'field','aria-label':'Filter results by campaign'});
@@ -1052,14 +1053,27 @@ function campaignResultsPanel(tenantId,content){
    answer.hidden=true;
    output.replaceChildren(
     node('p',{class:'muted',text:total?(offset+1)+'–'+(offset+results.length)+' of '+total+' customers':'Campaign call attempts will appear here.'}),
-    table(['Customer','Campaign','Outcome','CRM','Answers'],results.map(r=>[
+    table(['Customer','Campaign','Outcome','CRM','Answers','Plivo charge'],results.map(r=>[
      r.name,r.campaign,outcomes[r.outcome]||outcomes[r.state]||r.state,
      r.answers?(r.savedToLead?'Saved to lead':'Lead needs review'):'—',
-     r.answers?btn('View answers',()=>showAnswers(r),true):'—'
+     r.answers?btn('View answers',()=>showAnswers(r),true):'—',
+     role==='client_admin'&&['completed','failed'].includes(r.state)?
+      btn('Check charge',()=>checkCharge(r),true):'—'
     ]))
    );
    back.disabled=offset===0;next.disabled=offset+results.length>=total;
   }finally{fetching=false;refreshBtn.disabled=false;campaign.disabled=false}
+ }
+ async function checkCharge(result){
+  try{
+   const query=new URLSearchParams({tenantId,jobId:result.id});
+   const bill=await api('/v1/human/plivo-cdr?'+query);
+   const nodeText='Plivo reports '+bill.providerReportedAmount+
+    ' (currency not verified), billed '+bill.billedSeconds+
+    ' seconds. No planned credits deducted.';
+   chargeInfo.replaceChildren(node('p',{class:'note',text:nodeText}));
+  }catch(err){chargeInfo.replaceChildren(node('p',{class:'note',
+   text:'This call has no verified provider bill yet. No credits were deducted.'}));asError(err)}
  }
  function showAnswers(result){
   const trigger=document.activeElement,q=result.answers;
@@ -1076,7 +1090,7 @@ function campaignResultsPanel(tenantId,content){
   answer.focus();
  }
  campaign.addEventListener('change',()=>{offset=0;refresh().catch(asError)});
- card.append(div('formrow',lab('Campaign',campaign),refreshBtn),answer,output,div('formrow',back,next));
+ card.append(div('formrow',lab('Campaign',campaign),refreshBtn),chargeInfo,answer,output,div('formrow',back,next));
  content.addEventListener('workspace-tab-shown',()=>refresh().catch(asError));
  if(!content.hidden)refresh().catch(asError);
 }
