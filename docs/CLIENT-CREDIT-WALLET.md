@@ -9,6 +9,12 @@
 - **Client Dashboard → Company overview:** a provisional ₹ amount is shown **for that client's own account only**. This explicitly says **not spendable**. No API secrets, global Plivo balance or other tenants' figures are visible to clients.
 - **No balance data?** The provider preview explicitly says unavailable. It does not manufacture ₹1,000 from the screenshot or assume a USD API balance is INR.
 
+## Plivo live API connection check (no call)
+
+Super Admin (current MFA) → **Plivo balance & client credit budgets (operator)** → **Check Plivo API & rented numbers**. Uses only Worker-side `PLIVO_AUTH_ID` and `PLIVO_AUTH_TOKEN` to make two read-only official requests: `GET /v1/Account/{auth_id}/` and `GET /v1/Account/{auth_id}/Number/?limit=20`. Shows whether authentication succeeded, masked last-four-digit numbers, whether a configured caller matches that first page, and whether Plivo marks voice enabled. No secret value, full provider number, account ID, customer number, recording or PII is sent to the browser.
+
+This diagnostic is **not** a KYC verification, permission-to-call check, number purchase, number configuration, cost reservation or test call. Plivo India compliance status still must be reviewed inside Plivo **Phone Numbers → KYC**; the chosen company traffic classification and rented India caller ID must be independently approved. Never set `AR3D_SCRIPTED_CAMPAIGNS_ENABLED=enabled` merely because this check succeeds.
+
 ## Provider distinction
 
 Official Plivo [Account API](https://www.plivo.com/docs/account/api/account) documents `GET /v1/Account/{auth_id}/`, HTTP Basic credentials and `cash_credits` **in USD**. The owner's India-region console screenshot shows **₹1,000 remaining trial credits** and an expiry; these are **not** a verified, unrestricted INR-funded customer balance. An Account API response missing an explicit, documented India billing currency must **not** be converted or represented as an INR-funded pool.
