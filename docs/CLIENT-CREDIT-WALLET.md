@@ -25,6 +25,6 @@ Official Plivo [Account API](https://www.plivo.com/docs/account/api/account) doc
 
 ## Migration and rollout safety
 
-`migrations/control/0020_client_credit_planning.sql` affects only the **isolated Calling Control D1**. Newly initialized empty Control DBs receive it through the existing migration loop. For an existing production Control D1, back up and manually apply the incremental migration after operator review. **Do not apply to AR3D Engine or AR3D Platform databases.** Do not deploy feature code before confirming the migration; the UI will otherwise report that the wallet is not configured.
+`migrations/control/0020_client_credit_planning.sql` affects only the **isolated Calling Control D1**. Newly initialized empty Control DBs receive it through the existing migration loop. For existing Cloudflare D1s, the guarded `deploy-production.yml` now accepts **only** the exact additive `control_credit_upgrade` and/or `crm_staff_upgrade` states after verifying both Calling database IDs, names, all other tables, CRM safety triggers and private R2. On a green main push it creates only the missing new tables, re-runs full `ready` inspection, then deploys. Any unrelated partial schema or wrong database stops before changes. **Do not apply these migrations to AR3D Engine or Platform**. These migrations do not make credits spendable.
 
 Test with `npm test`, then synthetic Chrome desktop/tablet/mobile checks. Neither these tests nor the read-only Plivo account endpoint attempt a real phone call.
