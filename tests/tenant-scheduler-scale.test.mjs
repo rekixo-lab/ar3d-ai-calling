@@ -91,7 +91,10 @@ test('sparse approved work beyond first 1,000 tenants is discovered in one bound
 test('directory rotation is stable, bounded and advances under different clock offsets',()=>{
  for(const total of [0,1,5,16,17,100,1000,1001,1024,1025,3000]){
   const seen=new Set(),firstSeen=new Set();
-  const rounds=total?Math.ceil(total/2)+2*Math.ceil(total/CAMPAIGN_SCAN_LIMIT):1;
+  // Allow all intra-page positions to rotate through both work slots.
+  // Small non-divisible directory sizes need more than ceil(total/2) minutes.
+  const rounds=total?Math.ceil(total/CAMPAIGN_SCAN_LIMIT)*
+   (CAMPAIGN_SCAN_LIMIT/CAMPAIGN_WORK_LIMIT+2):1;
   for(let t=0;t<rounds;t++){
    const index=campaignScanOffset(anchor+t*STEP,total);
    assert.ok(index>=0&&(!total||index<total));
