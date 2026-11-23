@@ -66,7 +66,7 @@ test('opt-in Hindi seven-turn test auto-saves one selected CRM lead and preserve
   assert.equal(stored.visit_date_preference,answers.at(-1));
   assert.deepEqual({
    name:stored.name,mobile:stored.mobile_e164,consent:stored.consent_status,dnd:stored.dnd_status
-  },before);
+  },{...before});
   const req=JSON.parse(stored.requirements_json);
   assert.equal(req.raw,'Excel source must survive');
   assert.equal(req.propertySurvey.channel,'auto_ai_test_browser');
