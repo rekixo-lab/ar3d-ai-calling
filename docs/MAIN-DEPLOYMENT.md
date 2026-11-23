@@ -176,6 +176,20 @@ The guarded Calling-only deploy now recognizes `verified_provider_call_costs` as
 
 The new table is an **immutable raw provider observation**, not a client credit deduction or bill. Production migration/deployment outcome must be verified in Cloudflare/GitHub Actions. No other AR3D databases or routes may be modified.
 
+## Single Production Plivo Voice Application (outbound-only AR3D)
+
+Create one Plivo **Application**, named `AR3D_Production`, not a Plivo AI Agent and not a SIP Trunk. Plivo requires an Application Answer URL. Set:
+
+- **Answer URL:** `https://aicalling.ar3dstudio.in/v1/provider/plivo/inbound-unavailable`
+- **Answer Method:** `POST`
+- **Hangup URL / Fallback Answer URL:** optional; leave blank. If fallback is mandatory in the specific Console flow, set the **same** `inbound-unavailable` URL with `POST`.
+- **Default Number Application / Default Endpoint Application / Public URI / high-availability backup:** leave off unless separately justified.
+- **Subaccount:** none for initial AR3D master account.
+
+The `inbound-unavailable` endpoint sends valid Plivo XML `<Response><Hangup/></Response>`. It creates no CRM records, calls, messages, webhook tokens or side effects. **It is deliberately NOT an inbound voice agent.** If customers will call back, build and separately approve a proper inbound-support workflow first. Check the live URL returns HTTP 200, XML and Hangup for a POST **after a successful Cloudflare deployment**; do not use it before deployment.
+
+AR3D makes **outbound** calls through Plivo Call API, specifying **each call's own signed Answer and Hangup callback URLs**, so these are separate from the static Application Answer URL. Selecting this application for a rented number does not approve promotional traffic, DND, 140 series or carrier KYC for builder campaigns. Verify external carrier/telemarketer and recipient permissions before enabling customer calls.
+
 ## Bootstrap 401: exact-token mismatch troubleshooting (non-secret)
 
 The live `POST /v1/human/bootstrap` returns HTTP 401 when the presented Bearer token is absent, differs from the Worker-only `ADMIN_BOOTSTRAP_TOKEN`, or the binding is absent/too short. Token values are intentionally inaccessible from the Cloudflare dashboard. The bootstrap helper now strips accidental surrounding paste whitespace, reports entered token character count **only**, and never logs the token/password. The Worker normalizes accidental surrounding whitespace before checking a constant-time hash comparison. Normal login and API tokens are unrelated.

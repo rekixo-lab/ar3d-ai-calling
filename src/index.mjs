@@ -1,4 +1,5 @@
 import {handleScriptedPhoneCallback} from './scripted-phone-pilot.mjs';
+import {handleUnavailableInboundVoice} from './plivo-inbound-unavailable.mjs';
 import {handleHumanRequest} from './human-routes.mjs';
 import {handleCallingCron} from './calling-schedule.mjs';
 import {
@@ -167,6 +168,10 @@ export default {
   async fetch(req,env){
     const path=new URL(req.url).pathname;
     if(path==='/health'&&isGet(req))return json({service:'AR3D AI Calling',status:'foundation'});
+    // A fixed Answer URL is mandatory for a Plivo Voice Application.
+    // This intentionally does not accept or redirect inbound callers.
+    const inboundUnavailable=handleUnavailableInboundVoice(req);
+    if(inboundUnavailable)return inboundUnavailable;
     const scriptedPhone=await handleScriptedPhoneCallback(req,env);
     if(scriptedPhone)return scriptedPhone;
     // Old provider webhooks have no active adapter; reject unknown routes without touching provider APIs.
