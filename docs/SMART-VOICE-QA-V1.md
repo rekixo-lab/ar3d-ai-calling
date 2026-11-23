@@ -26,7 +26,7 @@ Existing: fixed 7-question engine, browser preview, Plivo scripted pilot/campaig
 
 This increment: strengthen deterministic repair detection so an audio complaint or filler cannot be saved as a city/area; add repeat/review regression tests.
 
-Still needed before real customer calling: provider account + approved Indian number / route; operator-verified permitted traffic category, DND and customer consent evidence; staging internal-phone tests with reviewed voice prompts; real Hindi accent/noise tests, monitoring and privacy/backup sign-off. A polished spoken "माफ कीजिए, दोबारा बताइए" apology would require a reviewed extra audio clip (or a separately approved speech provider). Until then the system safely **replays the question**; do not claim it speaks an apology.
+Still needed before real customer calling: provider account + approved Indian number / route; operator-verified permitted traffic category, DND and customer consent evidence; staging internal-phone tests with reviewed voice prompts; real Hindi accent/noise tests, monitoring and privacy/backup sign-off. A spoken apology is supported **only when an operator uploads a reviewed optional `repeat.mp3`** for the same language and tenant (or internal pilot). On an unclear answer, the callback checks for that clip and plays it immediately before replaying the unchanged question. If the clip is missing, oversized or inaccessible, the question is simply repeated. No extra AI model, provider or secret is required. See [pilot audio instructions](scripted-phone-pilot.md). This has only been tested using synthetic phone callbacks; no live speech performance claim is made.
 
 ## Manual operator actions (never send credentials in chat)
 
