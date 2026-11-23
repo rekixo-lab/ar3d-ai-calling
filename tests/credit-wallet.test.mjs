@@ -99,3 +99,74 @@ test('Plivo balance is only Super Admin MFA, account type/currency are never inf
   assert.equal((await noKeys.json()).reason,'plivo_credentials_not_configured');
  }finally{f.close()}
 });
+
+
+test('Plivo connection check verifies only server credentials and masked rented-number inventory',async()=>{
+ const f=fixture();
+ try{
+  f.env.PLIVO_AUTH_ID='TESTACCOUNT123';
+  f.env.PLIVO_AUTH_TOKEN='SYNTHETICAUTHTOKEN123';
+  f.env.AR3D_PLIVO_CALLER_NUMBER='+919123456789';
+  assert.equal((await route(f,'provider-check',client)).status,403);
+  freshMfa(f);
+  const urls=[];
+  const provider=async(url,opts)=>{
+   urls.push(url);
+   assert.equal(opts.method,'GET');
+   assert.ok(opts.headers.Authorization.startsWith('Basic '));
+   if(url.endsWith('/Number/?limit=20'))return Response.json({
+    meta:{total_count:1},objects:[{number:'919123456789',voice_enabled:true}]
+   });
+   return Response.json({account_type:'developer'});
+  };
+  const r=await route(f,'provider-check',admin,'GET',undefined,{fetcher:provider});
+  assert.equal(r.status,200,await r.clone().text());
+  const d=await r.json();
+  assert.equal(d.credentialsVerified,true);
+  assert.equal(d.accountType,'developer');
+  assert.equal(d.numberListAvailable,true);
+  assert.equal(d.totalNumberCount,1);
+  assert.equal(d.configuredCallerPresent,true);
+  assert.equal(d.listedNumbers[0].maskedNumber,'••••6789');
+  assert.equal(d.listedNumbers[0].voiceEnabled,true);
+  assert.equal(d.kycVerified,false);
+  assert.equal(d.routeApproved,false);
+  assert.equal(d.callsEnabledByThisCheck,false);
+  assert.deepEqual(urls,[
+   'https://api.plivo.com/v1/Account/TESTACCOUNT123/',
+   'https://api.plivo.com/v1/Account/TESTACCOUNT123/Number/?limit=20'
+  ]);
+  const raw=JSON.stringify(d);
+  for(const secret of ['TESTACCOUNT123','SYNTHETICAUTHTOKEN123','919123456789'])
+   assert.ok(!raw.includes(secret));
+  assert.equal(f.r.db.prepare('SELECT COUNT(*) AS n FROM calls').get().n,0);
+  assert.equal(f.r.db.prepare('SELECT COUNT(*) AS n FROM calling_jobs').get().n,0);
+ }finally{f.close()}
+});
+
+test('Plivo setup check fails safely on API rejection or partial rented-number inventory',async()=>{
+ const f=fixture();
+ try{
+  freshMfa(f);
+  f.env.PLIVO_AUTH_ID='TESTACCOUNT123';
+  f.env.PLIVO_AUTH_TOKEN='SYNTHETICAUTHTOKEN123';
+  f.env.AR3D_PLIVO_CALLER_NUMBER='+919123456789';
+  const rejected=await route(f,'provider-check',admin,'GET',undefined,{
+   fetcher:async()=>new Response('unauthorized',{status:401})
+  });
+  const denied=await rejected.json();
+  assert.equal(denied.credentialsVerified,false);
+  assert.equal(denied.kycVerified,false);
+  const fallback=await route(f,'provider-check',admin,'GET',undefined,{
+   fetcher:async(url)=>url.endsWith('/Number/?limit=20')?
+    new Response('unavailable',{status:503}):Response.json({account_type:'standard'})
+  });
+  const d=await fallback.json();
+  assert.equal(d.credentialsVerified,true);
+  assert.equal(d.numberListAvailable,false);
+  assert.equal(d.configuredCallerPresent,null);
+  assert.equal(d.callsEnabledByThisCheck,false);
+  assert.equal((await route(f,'provider-check?forceCall=true')).status,400);
+  assert.equal((await route(f,'provider-check',admin,'POST',{x:1})).status,400);
+ }finally{f.close()}
+});
