@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createHmac} from 'node:crypto';
 import {fixture,tid,lead,admin,client,now,until,route,configureScriptedCampaign,setup,accepted} from './helpers/calling-fixture.mjs';
-import {approvedCampaignPhone,handleScriptedPhoneAdmin,handleScriptedPhoneCallback} from '../src/scripted-phone-pilot.mjs';
+import {approvedCampaignPhone,handleScriptedPhoneAdmin,handleScriptedPhoneCallback,scriptedPromptsReady} from '../src/scripted-phone-pilot.mjs';
 import {tickScriptedTenant} from '../src/scripted-campaign-dispatch.mjs';
 import worker from '../src/index.mjs';
 import {handleCrmRequest} from '../src/crm-routes.mjs';
@@ -263,7 +263,32 @@ test('Scripted phone repeats the location prompt after hearing trouble instead o
   assert.match(await (await callback('turn/0',{RecordingID:'record-id-00'})).text(),/location\.mp3/);
   const bad=await callback('turn/1',{RecordingID:'record-id-01'});
   assert.equal(bad.status,200);
-  assert.match(await bad.text(),/location\.mp3/);
+  const retryXml=await bad.text();
+  // The optional audio goes BEFORE the original question, not in place of it.
+  assert.match(retryXml,/audio\/repeat\.mp3[\s\S]*audio\/location\.mp3/);
+  const clip=await handleScriptedPhoneCallback(new Request(hook+'/audio/repeat.mp3'),env,{now,fetcher});
+  assert.equal(clip.status,200);
+  assert.equal(clip.headers.get('Content-Type'),'audio/mpeg');
+  const spokenCount=spoken.length;
+  // Duplicate signed Plivo turn callback never transcribes again or double-saves.
+  assert.match(await (await callback('turn/1',{RecordingID:'record-id-01'})).text(),
+   /audio\/repeat\.mp3[\s\S]*audio\/location\.mp3/);
+  assert.equal(spoken.length,spokenCount);
+  const originalHead=env.RECORDINGS.head;
+  for(const fallback of [null,{size:524289},'error']){
+   env.RECORDINGS.head=async key=>{
+    if(!key.endsWith('/repeat.mp3'))return originalHead(key);
+    if(fallback==='error')throw Error('synthetic R2 metadata outage');
+    return fallback;
+   };
+   const retry=await callback('turn/1',{RecordingID:'record-id-01'});
+   assert.equal(retry.status,200);
+   const xml=await retry.text();
+   assert.doesNotMatch(xml,/audio\/repeat\.mp3/);
+   assert.match(xml,/audio\/location\.mp3/);
+   assert.equal(spoken.length,spokenCount);
+  }
+  env.RECORDINGS.head=originalHead;
   assert.equal(f.r.db.prepare("SELECT COUNT(*) AS n FROM crm_audit_events WHERE action='lead.scripted_phone_pilot_saved'").get().n,0);
   for(let i=2;i<=6;i++){
    const res=await callback('turn/'+i,{RecordingID:'record-id-0'+i});
@@ -277,4 +302,21 @@ test('Scripted phone repeats the location prompt after hearing trouble instead o
   assert.equal(f.r.db.prepare("SELECT COUNT(*) AS n FROM crm_audit_events WHERE action='lead.scripted_phone_pilot_saved'").get().n,1);
   assert.equal(providerCalls,1);
  }finally{f.close()}
+});
+
+
+test('Optional retry audio is not required for a complete campaign prompt set',async()=>{
+ const requested=[];
+ const ready=await scriptedPromptsReady({
+  RECORDINGS:{head:async key=>{
+   requested.push(key);
+   if(key.endsWith('/repeat.mp3'))throw Error('optional clip missing');
+   return {size:4};
+  }}
+ },'hi','88888888-8888-4888-8888-888888888888');
+ assert.equal(ready,true);
+ assert.ok(requested.length>0);
+ assert.ok(requested.every(key=>!key.endsWith('/repeat.mp3')));
+ assert.ok(requested.every(key=>key.startsWith(
+  'scripted-phone-campaigns/88888888-8888-4888-8888-888888888888/hi/')));
 });
