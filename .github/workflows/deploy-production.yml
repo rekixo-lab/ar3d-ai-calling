@@ -97,6 +97,15 @@ jobs:
       - name: Add isolated Calling campaign queue (dispatch remains opt-in)
         if: github.event_name == 'push' && steps.schema.outputs.schema_state == 'crm_dispatch_upgrade'
         run: npx --yes wrangler@4 d1 execute ar3d-calling-shared-crm --remote --yes --config wrangler.jsonc --file migrations/crm/0011_scripted_campaign_dispatch.sql
+      # These exact isolated Calling-only migrations are additive: new tables,
+      # no modifications to existing customer/lead data. The preflight verifies
+      # the D1 names, all other tables and CRM safety triggers before allowing.
+      - name: Create isolated Calling Control provisional credit tables
+        if: github.event_name == 'push' && (steps.schema.outputs.schema_state == 'control_credit_upgrade' || steps.schema.outputs.schema_state == 'credit_staff_upgrade')
+        run: npx --yes wrangler@4 d1 execute ar3d-calling-control --remote --yes --config wrangler.jsonc --file migrations/control/0020_client_credit_planning.sql
+      - name: Create isolated Calling CRM staff assignment table
+        if: github.event_name == 'push' && (steps.schema.outputs.schema_state == 'crm_staff_upgrade' || steps.schema.outputs.schema_state == 'credit_staff_upgrade')
+        run: npx --yes wrangler@4 d1 execute ar3d-calling-shared-crm --remote --yes --config wrangler.jsonc --file migrations/crm/0020_lead_staff_assignments.sql
       # Never auto-migrate partial or mixed schemas. Re-check the EMPTY state
       # immediately before writing, even if the previous read said fresh.
       - name: Confirm both isolated D1 schemas are still empty
@@ -118,6 +127,7 @@ jobs:
           npx --yes wrangler@4 d1 execute ar3d-calling-control --remote --yes --config wrangler.jsonc --file migrations/control/0014_client_accounts.sql
           npx --yes wrangler@4 d1 execute ar3d-calling-control --remote --yes --config wrangler.jsonc --file migrations/control/0015_company_change_requests.sql
           npx --yes wrangler@4 d1 execute ar3d-calling-control --remote --yes --config wrangler.jsonc --file migrations/control/0016_scripted_phone_pilots.sql
+          npx --yes wrangler@4 d1 execute ar3d-calling-control --remote --yes --config wrangler.jsonc --file migrations/control/0020_client_credit_planning.sql
       - name: Initialize NEW AR3D Calling Shared CRM D1 database
         if: (github.event_name == 'push' && steps.schema.outputs.schema_state == 'fresh') || (github.event_name == 'workflow_dispatch' && inputs.operation == 'initialize')
         run: |
@@ -132,6 +142,7 @@ jobs:
           npx --yes wrangler@4 d1 execute ar3d-calling-shared-crm --remote --yes --config wrangler.jsonc --file migrations/crm/0010_call_intent_proposals.sql
           npx --yes wrangler@4 d1 execute ar3d-calling-shared-crm --remote --yes --config wrangler.jsonc --file migrations/crm/0011_scripted_campaign_dispatch.sql
           npx --yes wrangler@4 d1 execute ar3d-calling-shared-crm --remote --yes --config wrangler.jsonc --file migrations/crm/0013_scripted_call_results.sql
+          npx --yes wrangler@4 d1 execute ar3d-calling-shared-crm --remote --yes --config wrangler.jsonc --file migrations/crm/0020_lead_staff_assignments.sql
       - name: Verify post-initialization schema before proceeding
         if: (github.event_name == 'push' && steps.schema.outputs.schema_state == 'fresh') || (github.event_name == 'workflow_dispatch' && inputs.operation == 'initialize')
         run: node scripts/main-cloudflare.mjs ready
