@@ -2,6 +2,10 @@
 
 **Current release:** multi-tenant CRM and scripted Hindi/English Plivo calling implementation, plus browser AI test. It is **not** an approved, full-duplex conversational AI calling SaaS. In particular, receiving Plivo KYC approval or Auth ID/Auth Token alone **does not** complete the product.
 
+## Agreed narrow v1 scope
+
+The owner has selected a **fixed-question Smart Voice Q&A**, not a general, realtime conversational LLM, as the first usable product. See [Smart Voice QA v1](SMART-VOICE-QA-V1.md). Realtime bidirectional streaming, human-like interruption and open-ended LLM are optional *future* features rather than v1 requirements. This scope reduction **does not** waive India carrier approval, consent/DND, internal audio tests, privacy/security review or safe rollout.
+
 ## Read-only Super Admin check
 
 Open **/app → Super Admin → Calling Setup → Plivo Go-Live Readiness**. The **Refresh go-live checks** button reads `GET /v1/human/launch-readiness`.
