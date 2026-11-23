@@ -201,11 +201,24 @@ async function overview(req,env,user){
 async function addLead(req,env,user){
   const d=await payload(req),tenant=await requireMembership(env.CONTROL_DB,user,d.tenantId,true);
   if(!tenant)return fail('forbidden',403);
-  const mobile=normalizeIndianPhone(d.mobile),name=String(d.name||'').trim(),source=d.sourceType||'other';
-  if(name.length>120||!SOURCES.includes(source))return fail('invalid name or source',400);
+  if(Object.keys(d).some(key=>!['tenantId','name','mobile','sourceType'].includes(key)))
+    return fail('invalid customer field',400);
+  const mobile=normalizeIndianPhone(d.mobile),name=checkName(d.name),source=d.sourceType||'other';
+  if(/[\u0000-\u001f\u007f]/u.test(name)||!SOURCES.includes(source))return fail('invalid name or source',400);
   const db=resolveCrmDb(env,tenant),id=crypto.randomUUID(),date=now();
-  await db.prepare(`INSERT INTO leads(tenant_id,id,name,mobile_e164,source_type,consent_status,dnd_status,created_at,updated_at)
-    VALUES(?,?,?,?,?,'unknown','unknown',?,?)`).bind(tenant.tenant_id,id,name,mobile,source,date,date).run();
+  const existing=await db.prepare('SELECT id FROM leads WHERE tenant_id=? AND mobile_e164=?')
+    .bind(tenant.tenant_id,mobile).first();
+  if(existing)return fail('customer already exists in this company CRM',409);
+  // Customer creation and its tenant audit event are atomic. Never set calling consent.
+  const result=await db.batch([
+    db.prepare(`INSERT INTO leads(tenant_id,id,name,mobile_e164,source_type,consent_status,dnd_status,created_at,updated_at)
+      VALUES(?,?,?,?,?,'unknown','unknown',?,?)`).bind(tenant.tenant_id,id,name,mobile,source,date,date),
+    db.prepare(`INSERT INTO crm_audit_events(tenant_id,id,actor,action,target_id,created_at)
+      VALUES(?,?,'human:'||?,'lead.created',?,?)`)
+      .bind(tenant.tenant_id,crypto.randomUUID(),user.id,id,date)
+  ]);
+  if(Number(result[0]?.meta?.changes)!==1||Number(result[1]?.meta?.changes)!==1)
+    throw Error('customer creation not confirmed');
   return response({id,notice:'Lead saved, calling consent not assumed'},201);
 }
 async function addAgent(req,env,user){
