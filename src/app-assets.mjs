@@ -302,19 +302,34 @@ async function mfaPanel(main){
 }
 async function superAdmin(main){
  const panel=div('card client-directory',title('Client directory'));panel.id='clients-panel';main.append(panel);
- const list=div('');panel.append(list);
- let existing=null,tenantRowsAll=[];
+ const list=div(''),directorySearch=input('clientDirectorySearch','search','Search company name, slug or email');
+ const prev=btn('← Previous companies',async()=>{pageOffset=Math.max(0,pageOffset-100);await refresh()},true);
+ const next=btn('Next companies →',async()=>{pageOffset+=100;await refresh()},true);
+ const searchButton=btn('Search clients',async()=>{pageOffset=0;await refresh()},true);
+ const pagination=div('formrow',prev,next);
+ directorySearch.maxLength=80;
+ directorySearch.setAttribute('aria-label','Search all clients');
+ directorySearch.addEventListener('keydown',e=>{
+  if(e.key==='Enter'){e.preventDefault();pageOffset=0;refresh().catch(asError)}
+ });
+ panel.append(div('formrow',lab('Find any company',directorySearch),searchButton),list,pagination);
+ let existing=null,tenantRowsAll=[],pageOffset=0;
  async function refresh(){
   try{
-   const d=await api('/v1/human/tenants');tenantRowsAll=d.tenants;
+   const query=new URLSearchParams({limit:'100',offset:String(pageOffset),q:directorySearch.value.trim()});
+   const d=await api('/v1/human/tenants?'+query);tenantRowsAll=d.tenants;
+   const total=Number.isSafeInteger(d.total)?d.total:d.tenants.length;
+   const matched=Number.isSafeInteger(d.matched)?d.matched:d.tenants.length;
+   prev.disabled=pageOffset===0;next.disabled=pageOffset+d.tenants.length>=matched;
    list.replaceChildren(
     div('cards',...[
-      ['Total clients',d.tenants.length,'users'],
-      ['Active clients',d.tenants.filter(t=>t.status==='active').length,'phone'],
-      ['Team members',d.tenants.reduce((n,t)=>n+Number(t.member_count||0),0),'shield']
+      ['Total clients',total,'users'],
+      ['Active clients',Number.isSafeInteger(d.active)?d.active:d.tenants.filter(t=>t.status==='active').length,'phone'],
+      ['Team members',Number.isSafeInteger(d.members)?d.members:d.tenants.reduce((n,t)=>n+Number(t.member_count||0),0),'shield']
     ].map(([label,value,symbol])=>div('card metric',div('metric-symbol',icon(symbol)),node('span',{class:'muted',text:label}),node('strong',{text:String(value)})))),
+    node('p',{class:'muted',text:'Showing '+d.tenants.length+' of '+matched+
+      ' matching companies · page '+(Math.floor(pageOffset/100)+1)}),
     table(['Company','Contact email','Mobile','Status','Members'],d.tenants.map(t=>[t.display_name,t.contact_email||'—',t.contact_mobile||'—',t.status,t.member_count]))
-
    );
    if(existing){
     const old=existing.value;
