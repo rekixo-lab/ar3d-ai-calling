@@ -217,3 +217,47 @@ test('Three unintelligible answers end in review, without guessing a city or gra
   assert.equal(state.status,'needs_review');
   assert.throws(()=>turn(state,'दुर्ग'),/already finished/);
 });
+
+test('Misheard speech and mixed interest responses are never accepted as customer choices',()=>{
+  const original=beginFixedVoicePreview({language:'hi',now:stamp}).state;
+  const cityState=turn(original,'प्लॉट').state;
+  for(const text of [
+    'आप गलत बोल रहे हो', 'आपने मुझे गलत समझा', 'आप क्या बोल रहे हो?',
+    'क्या सवाल था', 'you misunderstood me', 'that is not what I said',
+    'dobara boliye', 'sunai nahi diya'
+  ]){
+    const x=turn(cityState,text);
+    assert.equal(x.action,'repeat',text);
+    assert.equal(x.state.index,1,text);
+    assert.equal(x.state.answers.location,undefined,text);
+    assert.equal(x.phoneCallsStarted,0,text);
+    assert.equal(x.crmWrites,0,text);
+  }
+  const correct=turn(cityState,'Korba').state;
+  assert.equal(correct.index,2);
+  const wrongArea=turn(correct,'आपने गलत सुना');
+  assert.equal(wrongArea.action,'repeat');
+  assert.equal(wrongArea.state.answers.area,undefined);
+
+  let interestState=beginFixedVoicePreview({language:'hi',now:stamp}).state;
+  for(const answer of ['प्लॉट','कोरबा','पुराना बस स्टैंड','1200 वर्ग फुट','15 लाख']){
+    const step=turn(interestState,answer);
+    assert.equal(step.action,'next_question',answer);
+    interestState=step.state;
+  }
+  assert.equal(interestState.index,5);
+  for(const ambiguous of ['yes no','हाँ नहीं','हाँ, नहीं अभी','yes, नहीं']){
+    const x=turn(interestState,ambiguous);
+    assert.equal(x.action,'repeat',ambiguous);
+    assert.equal(x.state.index,5,ambiguous);
+    assert.equal(x.state.answers.interest,undefined,ambiguous);
+    assert.equal(x.crmWrites,0,ambiguous);
+  }
+  const later=turn(interestState,'अभी नहीं, कुछ दिन बाद');
+  assert.equal(later.action,'completed');
+  assert.equal(later.state.answers.interest,'later');
+  const optout=turn(interestState,'कॉल मत करना, आप गलत बोल रहे हो');
+  assert.equal(optout.action,'opt_out_requested');
+  assert.equal(optout.state.answers.interest,undefined);
+  assert.equal(optout.consentGranted,false);
+});
