@@ -15,6 +15,7 @@ import {initialClientAI} from './default-client-ai.mjs';
 import {handleDataPortabilityRequest} from './data-portability-routes.mjs';
 import {handleOperationsReportRequest} from './operations-report-routes.mjs';
 import {handleNextActionsRequest} from './next-actions-routes.mjs';
+import {handleLeadStaffRequest} from './lead-staff-routes.mjs';
 import {handleLaunchReadiness} from './launch-readiness-routes.mjs';
 import {handleAgentSettingsRequest} from './agent-settings-routes.mjs';
 import {handleAuditRequest} from './audit-routes.mjs';
@@ -337,6 +338,8 @@ export async function handleHumanRequest(req,env){
     if(operationsReportResponse)return operationsReportResponse;
     const nextActions=await handleNextActionsRequest(req,env,user);
     if(nextActions)return nextActions;
+    const leadStaff=await handleLeadStaffRequest(req,env,user);
+    if(leadStaff)return leadStaff;
     const voicePreviewResponse=await handleFixedVoicePreviewRequest(req,env,user);
     if(voicePreviewResponse)return voicePreviewResponse;
     const aiTestCrmResponse=await handleAiTestCrmRequest(req,env,user);

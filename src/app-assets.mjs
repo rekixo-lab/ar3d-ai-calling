@@ -1568,6 +1568,42 @@ async function crmWorkflow(tenantId,content,role,refreshContent=content){
         notice('Lead updated');await refresh();
       }catch(err){asError(err)}})}else{form.querySelectorAll('input,select').forEach(el=>el.disabled=true)}
     details.append(form);
+    if(editable){
+      const team=div('card',title('Assign customer to sales staff','h3'),
+       node('p',{class:'muted',text:'Assign an interested customer to someone on your team. This only updates the CRM; it does not place a call.'}));
+      const assignee=node('select',{class:'field','aria-label':'Assigned sales staff'});
+      const status=node('p',{class:'muted',role:'status',text:'Loading company staff…'});
+      const saveStaff=btn('Save staff assignment',async()=>{
+        saveStaff.disabled=true;
+        try{
+          const chosen=assignee.value||null;
+          const data=await api('/v1/human/lead-staff','POST',{
+           tenantId,leadId:lead.id,userId:chosen,expectedUserId:currentAssignee
+          });
+          currentAssignee=data.assignedUserId;
+          status.textContent='Sales staff saved. No calls or messages were sent.';
+        }catch(err){asError(err)}finally{saveStaff.disabled=false}
+      },true);
+      saveStaff.disabled=true;
+      let currentAssignee=null;
+      team.append(div('formrow',lab('Team member',assignee),saveStaff),status);
+      details.append(team);
+      api('/v1/human/lead-staff?'+new URLSearchParams({tenantId,leadId:lead.id})).then(data=>{
+        if(!team.isConnected)return;
+        currentAssignee=data.assignedUserId;
+        assignee.replaceChildren(
+         node('option',{value:'',text:'Unassigned'}),
+         ...data.members.map(m=>node('option',{value:m.id,text:m.email+' · '+m.role}))
+        );
+        if(currentAssignee&&!data.members.some(m=>m.id===currentAssignee))
+         assignee.append(node('option',{value:currentAssignee,text:'Former team member · reassignment needed'}));
+        assignee.value=currentAssignee||'';
+        saveStaff.disabled=false;
+        status.textContent=currentAssignee?'Staff assigned. You can change it here.':'No staff member assigned yet.';
+      }).catch(()=>{
+       if(team.isConnected)status.textContent='Team list unavailable. No changes were made.';
+      });
+    }
     if(editable)details.append(fixedSurveyPanel(tenantId,lead,async()=>{
       await refresh();await visitList();
     }));
