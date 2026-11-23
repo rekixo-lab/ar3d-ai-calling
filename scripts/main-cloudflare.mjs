@@ -15,11 +15,11 @@ export const REQUIRED_TABLES = Object.freeze({
   CONTROL_DB: Object.freeze([
     'tenants','tenant_keys','project_links','tenant_numbers','tenant_audit_events',
     'human_users','tenant_memberships','human_sessions','human_invitations',
-    'human_login_limits','human_bootstrap_claim','human_ip_login_limits','human_mfa_settings','human_mfa_challenges','human_mfa_recovery_codes','provider_event_inbox','exotel_voicebot_event_receipts','exotel_operator_test_calls','exotel_operator_status_checks','calling_script_bindings','calling_script_versions','company_profile_versions','calling_agent_publications','shared_voice_gateway','voice_call_routes','client_account_contacts','company_change_requests','scripted_phone_pilots',
+    'human_login_limits','human_bootstrap_claim','human_ip_login_limits','human_mfa_settings','human_mfa_challenges','human_mfa_recovery_codes','provider_event_inbox','calling_script_bindings','calling_script_versions','company_profile_versions','calling_agent_publications','shared_voice_gateway','voice_call_routes','client_account_contacts','company_change_requests','scripted_phone_pilots',
   ]),
   CRM_DB: Object.freeze([
     'leads','agents','calls','site_visits','crm_audit_events',
-    'lead_notes','conversation_simulations','lead_opt_out_events','lead_consent_evidence','call_campaign_drafts','call_campaign_candidates','voicebot_qualification_reviews','call_intent_proposals','calling_policies','calling_clearances','calling_runs','calling_jobs','voicebot_verified_turns','scripted_call_results',
+    'lead_notes','conversation_simulations','lead_opt_out_events','lead_consent_evidence','call_campaign_drafts','call_campaign_candidates','call_intent_proposals','calling_policies','calling_clearances','calling_runs','calling_jobs','scripted_call_results',
   ]),
 });
 export const REQUIRED_COLUMNS = Object.freeze({
@@ -30,7 +30,6 @@ export const REQUIRED_COLUMNS = Object.freeze({
     human_mfa_settings: Object.freeze(['user_id','recovery_generation_id','enabled_at']),
     human_mfa_recovery_codes: Object.freeze(['user_id','code_hash','used_at']),
     provider_event_inbox: Object.freeze(['tenant_id','provider','event_id','status']),
-    exotel_voicebot_event_receipts: Object.freeze(['receipt_key','account_fingerprint','session_fingerprint','call_fingerprint','conversation_fingerprint','event_fingerprint','payload_digest','event_kind','turn_status','possible_opt_out','status','received_at','expires_at']),
     company_profile_versions: Object.freeze(['tenant_id','revision','config_json','created_by','created_at']),
     calling_agent_publications: Object.freeze(['tenant_id','id','script_revision','profile_revision','prompt','greeting','provider_state','provider_version','provider_bot_id','provider_assistant_id']),
     shared_voice_gateway: Object.freeze(['id','bot_id','flow_id','template_assistant_id','template_version','guard_assistant_id','gateway_version','state','last_verified_at']),
@@ -41,8 +40,6 @@ export const REQUIRED_COLUMNS = Object.freeze({
     calling_script_bindings: Object.freeze(['tenant_id','bot_id','assistant_id','source_version']),
     calling_script_versions: Object.freeze(['tenant_id','id','revision','config_json','prompt','provider_state','provider_version']),
     human_ip_login_limits: Object.freeze(['ip_hash','attempt_count','blocked_until']),
-    exotel_operator_test_calls: Object.freeze(['id','actor_user_id','rate_slot','provider_call_sid','state','error_code','created_at','updated_at']),
-    exotel_operator_status_checks: Object.freeze(['id','call_request_id','actor_user_id','check_slot','state','provider_status','duration_seconds','error_code','created_at','finished_at']),
   }),
   CRM_DB: Object.freeze({
     leads: Object.freeze(['tenant_id','consent_status','dnd_status','interest_status','followup_at',
@@ -53,8 +50,6 @@ export const REQUIRED_COLUMNS = Object.freeze({
     call_campaign_drafts: Object.freeze(['tenant_id','status','language_mode']),
     call_campaign_candidates: Object.freeze(['tenant_id','campaign_id','lead_id']),
     agents: Object.freeze(['tenant_id','status','questions_json']),
-    voicebot_qualification_reviews: Object.freeze(['tenant_id','lead_id','provider','status','survey_json','source_verified','mapping_verified','possible_opt_out']),
-    voicebot_verified_turns: Object.freeze(['tenant_id','call_sid','lead_id','session_id','conversation_id','event_id','sequence','kind','answer_text','possible_opt_out','expires_at']),
     calling_policies: Object.freeze(['tenant_id','enabled','flow_id','expires_at','daily_limit','max_seconds']),
     calling_clearances: Object.freeze(['tenant_id','lead_id','purpose','expires_at']),
     calling_runs: Object.freeze(['tenant_id','id','campaign_id','state']),
@@ -132,17 +127,14 @@ export const REQUIRED_SAFETY_TRIGGERS = Object.freeze({
   trg_no_call_launch: ['before insert on calls','raise(abort'],
   trg_agents_block_active_insert: ['before insert on agents','raise(abort'],
   trg_agents_block_active_update: ['before update of status on agents','raise(abort'],
-  trg_voicebot_review_terminal: ['before update of status on voicebot_qualification_reviews','raise(abort'],
-  trg_voicebot_review_immutable: ['before update of tenant_id','voicebot_qualification_reviews','raise(abort'],
   trg_call_intent_proposal_immutable: ['before update on call_intent_proposals','raise(abort'],
   trg_call_intent_proposal_no_provider: ['before insert on call_intent_proposals','raise(abort'],
 });
-export function checkSafetyTriggers(records,{allowAdditiveUpgrade=false,allowCallIntentUpgrade=false}={}) {
+export function checkSafetyTriggers(records,{allowCallIntentUpgrade=false}={}) {
   if (!Array.isArray(records)) throw Error('Invalid CRM trigger inspection result.');
   const triggers = new Map(records.map(row => [row?.name, String(row?.sql || '')
     .toLowerCase().replace(/\s+/g, ' ').trim()]));
   for (const [name, signatures] of Object.entries(REQUIRED_SAFETY_TRIGGERS)) {
-    if (allowAdditiveUpgrade && name.startsWith('trg_voicebot_review_')) continue;
     if (allowCallIntentUpgrade && name.startsWith('trg_call_intent_')) continue;
     const sql = triggers.get(name);
     if (!sql || signatures.some(signature => !sql.includes(signature)))
@@ -166,7 +158,6 @@ export function checkTables(tables, binding, mode) {
   if(mode==='preflight'&&binding==='CONTROL_DB'&&missing.length===3&&['calling_agent_publications','shared_voice_gateway','voice_call_routes'].every(t=>missing.includes(t)))return 'control_publication_upgrade';
   const dispatchTables=['calling_policies','calling_clearances','calling_runs','calling_jobs'];
   if(mode==='preflight'&&binding==='CRM_DB'&&missing.length===1&&missing[0]==='scripted_call_results')return 'crm_scripted_results_upgrade';
-  if(mode==='preflight'&&binding==='CRM_DB'&&missing.length===1&&missing[0]==='voicebot_verified_turns')return 'crm_voice_turn_upgrade';
   if(mode==='preflight'&&binding==='CRM_DB'&&missing.length===4&&dispatchTables.every(x=>missing.includes(x)))return 'crm_dispatch_upgrade';
   if(mode==='preflight'&&binding==='CONTROL_DB'&&missing.length===2&&['calling_script_bindings','calling_script_versions'].every(t=>missing.includes(t)))return 'control_script_upgrade';
   if (mode === 'ready') {
@@ -178,18 +169,6 @@ export function checkTables(tables, binding, mode) {
     // Only one specifically reviewed ADDITIVE table may be absent on an
     // existing CRM D1. Every original table and calling safety trigger must
     // already exist; unknown partial schemas still fail closed.
-    if (binding === 'CONTROL_DB' && missing.length === 1 &&
-        missing[0] === 'exotel_voicebot_event_receipts')
-      return 'control_additive_upgrade';
-    if (binding === 'CONTROL_DB' && missing.length === 1 &&
-        missing[0] === 'exotel_operator_test_calls')
-      return 'control_operator_test_upgrade';
-    if (binding === 'CONTROL_DB' && missing.length === 1 &&
-        missing[0] === 'exotel_operator_status_checks')
-      return 'control_operator_status_upgrade';
-    if (binding === 'CRM_DB' && missing.length === 1 &&
-        missing[0] === 'voicebot_qualification_reviews')
-      return 'crm_additive_upgrade';
     if (binding === 'CRM_DB' && missing.length === 1 &&
         missing[0] === 'call_intent_proposals')
       return 'crm_call_intent_upgrade';
@@ -233,18 +212,13 @@ export async function inspectCloudflare({ credentials, mode, apiFetch = fetch, t
     const names = rows.map(x => x.name);
     const state = checkTables(names, binding, mode);
     modes[binding] = state;
-    if (state === 'control_client_accounts_upgrade' || state === 'control_publication_upgrade' || state === 'control_profile_upgrade' || state === 'control_script_upgrade' || state === 'crm_dispatch_upgrade' || state === 'ready' || state === 'crm_additive_upgrade' ||
-        state === 'crm_call_intent_upgrade' || state === 'crm_voice_turn_upgrade' || state === 'crm_scripted_results_upgrade' ||
-        state === 'control_additive_upgrade' ||
-        state === 'control_operator_test_upgrade' ||
-        state === 'control_operator_status_upgrade' ||
-        state === 'control_company_change_upgrade' || state === 'control_scripted_pilot_upgrade') {
+    if (['control_client_accounts_upgrade','control_publication_upgrade','control_profile_upgrade',
+         'control_script_upgrade','crm_dispatch_upgrade','ready','crm_call_intent_upgrade',
+         'crm_scripted_results_upgrade','control_company_change_upgrade',
+         'control_scripted_pilot_upgrade'].includes(state)) {
       if (binding === 'CRM_DB') {
         const triggers = await query(id, "SELECT name,sql FROM sqlite_master WHERE type='trigger' AND name LIKE 'trg_%'");
-        checkSafetyTriggers(triggers,{
-          allowAdditiveUpgrade:state === 'crm_additive_upgrade',
-          allowCallIntentUpgrade:state === 'crm_call_intent_upgrade'
-        });
+        checkSafetyTriggers(triggers,{allowCallIntentUpgrade:state === 'crm_call_intent_upgrade'});
       }
       for (const table of Object.keys(REQUIRED_COLUMNS[binding])) {
         if(state==='control_client_accounts_upgrade'&&table==='client_account_contacts')continue;
@@ -254,13 +228,8 @@ export async function inspectCloudflare({ credentials, mode, apiFetch = fetch, t
         if(state==='control_profile_upgrade'&&table==='company_profile_versions')continue;
         if(state==='control_script_upgrade'&&table.startsWith('calling_script_'))continue;
         if(state==='crm_dispatch_upgrade'&&table.startsWith('calling_'))continue;
-        if (state === 'crm_additive_upgrade' && table === 'voicebot_qualification_reviews')continue;
         if (state === 'crm_call_intent_upgrade' && table === 'call_intent_proposals')continue;
         if (state === 'crm_scripted_results_upgrade' && table === 'scripted_call_results')continue;
-        if (state === 'crm_voice_turn_upgrade' && table === 'voicebot_verified_turns')continue;
-        if (state === 'control_additive_upgrade' && table === 'exotel_voicebot_event_receipts')continue;
-        if (state === 'control_operator_test_upgrade' && table === 'exotel_operator_test_calls')continue;
-        if (state === 'control_operator_status_upgrade' && table === 'exotel_operator_status_checks')continue;
         const columns = await query(id, 'PRAGMA table_info(' + table + ')');
         checkColumns(columns.map(x => x.name), binding, table);
       }
@@ -287,18 +256,9 @@ export function verifiedSchemaState(modes) {
   if(modes?.CONTROL_DB==='control_profile_upgrade'&&modes?.CRM_DB==='ready')return 'control_profile_upgrade';
   if(modes?.CONTROL_DB==='control_script_upgrade'&&modes?.CRM_DB==='ready')return 'control_script_upgrade';
   if(modes?.CONTROL_DB==='ready'&&modes?.CRM_DB==='crm_dispatch_upgrade')return 'crm_dispatch_upgrade';
-  if (modes?.CONTROL_DB === 'ready' && modes?.CRM_DB === 'crm_additive_upgrade')
-    return 'crm_additive_upgrade';
   if (modes?.CONTROL_DB === 'ready' && modes?.CRM_DB === 'crm_scripted_results_upgrade')return 'crm_scripted_results_upgrade';
-  if (modes?.CONTROL_DB === 'ready' && modes?.CRM_DB === 'crm_voice_turn_upgrade')return 'crm_voice_turn_upgrade';
   if (modes?.CONTROL_DB === 'ready' && modes?.CRM_DB === 'crm_call_intent_upgrade')
     return 'crm_call_intent_upgrade';
-  if (modes?.CONTROL_DB === 'control_additive_upgrade' && modes?.CRM_DB === 'ready')
-    return 'control_additive_upgrade';
-  if (modes?.CONTROL_DB === 'control_operator_test_upgrade' && modes?.CRM_DB === 'ready')
-    return 'control_operator_test_upgrade';
-  if (modes?.CONTROL_DB === 'control_operator_status_upgrade' && modes?.CRM_DB === 'ready')
-    return 'control_operator_status_upgrade';
   if (!modes || !['fresh','ready'].includes(modes.CONTROL_DB) ||
       modes.CONTROL_DB !== modes.CRM_DB)
     throw Error('Refusing automated deployment: D1 schema states are mixed or invalid.');

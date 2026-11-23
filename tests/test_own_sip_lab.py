@@ -45,7 +45,7 @@ class OwnSIPLabTest(unittest.TestCase):
         self.assertNotIn("type=registration", sip)
         self.assertNotIn("outbound_auth=", sip)
         self.assertNotIn("sip:jio", sip.lower())
-        self.assertNotIn("sip:exotel", sip.lower())
+        self.assertNotIn("sip:plivo", sip.lower())
         self.assertNotIn("0.0.0.0", sip)
 
     def test_declines_without_consent_and_does_not_create_audio(self):

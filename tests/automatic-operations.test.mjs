@@ -65,7 +65,7 @@ test('Periodic monitor is secretless, GET-only and checks the exact Calling orig
     '/app/assets/style.css':[200,'text/css',css],
     '/app/assets/app.js':[200,'text/javascript','Calling Setup /v1/human/scripted-phone-pilot Sign out']
   };
-  content['/v1/provider/exotel/voicebot']=[410,'application/json',JSON.stringify({error:'provider_route_retired'})];
+  content['/v1/provider/unknown-transport']=[404,'application/json',JSON.stringify({error:'not found'})];
   for(const path of ['/v1/human/me','/v1/human/scripted-phone-pilot',
     '/v1/human/leads/33333333-3333-4333-8333-333333333333/qualification',
     '/v1/human/call-intent-proposals',
