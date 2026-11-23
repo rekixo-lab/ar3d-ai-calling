@@ -88,6 +88,40 @@ test('onboarding refuses mismatched tenant, unsupported phone, unexpected fields
  }finally{f.close()}
 });
 
+
+test('initial provisional INR client credit is chosen at account creation with current MFA',async()=>{
+ const f=fixture();
+ try{
+  const now=Date.now();
+  f.c.db.prepare("UPDATE human_sessions SET created_at=?,expires_at=? WHERE user_id='admin'")
+   .run(new Date(now).toISOString(),now+3600000);
+  const r=await post(f,{displayName:'Credit Builder',email:'credit@example.test',
+   mobile:'9000000022',initialCreditInr:500});
+  assert.equal(r.status,201,await r.clone().text());
+  const d=await r.json();
+  assert.equal(d.plannedCreditInr,500);
+  assert.equal(d.creditStatus,'provisional_only');
+  assert.equal(f.c.db.prepare('SELECT planned_paise AS n FROM tenant_credit_budgets WHERE tenant_id=?').get(d.id).n,50000);
+  assert.equal(f.c.db.prepare('SELECT COUNT(*) AS n FROM tenant_credit_audit WHERE tenant_id=?').get(d.id).n,1);
+  assert.equal(f.c.db.prepare('SELECT COUNT(*) AS n FROM human_invitations WHERE tenant_id=?').get(d.id).n,1);
+  assert.equal(f.c.db.prepare('SELECT COUNT(*) AS n FROM calling_policies WHERE tenant_id=?').get(d.id).n,0);
+ }finally{f.close()}
+});
+
+test('stale MFA cannot grant new client credits or create partial invitations',async()=>{
+ const f=fixture();
+ try{
+  const r=await post(f,{displayName:'Unapproved Builder',email:'other@example.test',
+   mobile:'9000000024',initialCreditInr:1000});
+  assert.equal(r.status,403);
+  assert.equal(f.c.db.prepare("SELECT COUNT(*) AS n FROM tenants WHERE slug='unapproved-builder'").get().n,0);
+  assert.equal(f.c.db.prepare('SELECT COUNT(*) AS n FROM tenant_credit_budgets').get().n,0);
+  const bad=await post(f,{displayName:'No Budget Builder',email:'other2@example.test',
+   mobile:'9000000025',initialCreditInr:-100});
+  assert.equal(bad.status,400);
+ }finally{f.close()}
+});
+
 test('non-Latin company name receives a deterministic valid slug',async()=>{
  const result=await clientSlug('श्री रियल एस्टेट');
  assert.match(result,/^client-[a-f0-9]{16}$/);
