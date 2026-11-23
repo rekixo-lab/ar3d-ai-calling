@@ -128,6 +128,66 @@ async function checkPlivoConnection(env,fetcher){
   notice:'Read-only provider API check. An authenticated account and listed number do not prove Indian KYC or legal outbound route approval. No call was placed.'
  });
 }
+// Operator-only aggregated Voice UsageSummary. Unlike Account cash_credits,
+// UsageSummary reports its own currency. We NEVER infer credit fundability or
+// settle a client wallet from this account-wide aggregate.
+async function providerSevenDayUsage(env,fetcher,now=Date.now()){
+ const auth=env.PLIVO_AUTH_ID,token=env.PLIVO_AUTH_TOKEN;
+ if(typeof auth!=='string'||!/^[A-Za-z0-9]{8,64}$/.test(auth)||
+    typeof token!=='string'||!/^[A-Za-z0-9]{16,128}$/.test(token))
+  return json({available:false,reason:'plivo_credentials_not_configured'});
+ const today=Math.floor(now/86400000)*86400000;
+ const from=new Date(today-6*86400000).toISOString().slice(0,10);
+ const until=new Date(today+86400000).toISOString().slice(0,10);
+ const params=new URLSearchParams({
+  granularity:'day',from_date:from,to_date:until,product:'voice',
+  direction:'outbound',country:'IN',page_size:'100'
+ });
+ try{
+  const res=await fetcher('https://api.plivo.com/v1/Account/'+encodeURIComponent(auth)+
+   '/UsageSummary/?'+params,{
+    method:'GET',redirect:'error',signal:AbortSignal.timeout(5000),
+    headers:{Authorization:'Basic '+btoa(auth+':'+token),Accept:'application/json'}
+   });
+  if(!res.ok||!res.headers.get('content-type')?.toLowerCase().includes('json')||
+     Number(res.headers.get('content-length'))>32768)
+   return json({available:false,reason:'provider_usage_unavailable'});
+  const raw=await res.text();
+  if(raw.length>32768)return json({available:false,reason:'provider_usage_unavailable'});
+  const data=JSON.parse(raw),meta=data?.meta;
+  if(meta?.auth_id!==auth||typeof meta.currency!=='string'||
+     !/^[A-Z]{3}$/.test(meta.currency)||!Array.isArray(data.usage)||
+     data.usage.length>100)
+   return json({available:false,reason:'provider_usage_mismatch'});
+  // Amounts are for display only. Never sum floating-point money into a
+  // billable wallet. Use per-call idempotent CDR settlement for that later.
+  const validAmount=v=>typeof v==='number'&&Number.isFinite(v)&&v>=0&&v<=1e9;
+  if(!data.usage.every(x=>x&&x.product==='voice'&&x.direction==='outbound'&&
+     x.country==='IN'&&validAmount(x.total_amount)&&
+     Number.isFinite(x.duration_seconds)&&x.duration_seconds>=0&&
+     x.duration_seconds<=1e12&&Number.isSafeInteger(x.total_units)&&
+     x.total_units>=0&&x.total_units<=1e9))
+   return json({available:false,reason:'provider_usage_mismatch'});
+  const total=meta.total_spend;
+  if(total!==undefined&&!validAmount(total))
+   return json({available:false,reason:'provider_usage_mismatch'});
+  const calls=data.usage.reduce((sum,row)=>sum+row.total_units,0);
+  const seconds=data.usage.reduce((sum,row)=>sum+row.duration_seconds,0);
+  const listedAmount=data.usage.reduce((sum,row)=>sum+row.total_amount,0);
+  const partial=typeof meta.next_page_token==='string'&&meta.next_page_token.length>0;
+  return json({available:true,provider:'Plivo',currency:meta.currency,
+   fromDate:from,toDateExclusive:until,product:'voice',country:'IN',direction:'outbound',
+   listedCalls:calls,listedBilledSeconds:seconds,
+   listedAmount:listedAmount.toFixed(6),
+   listedRowsComplete:!partial,hasMorePages:partial,
+   providerWindowTotalSpend:total===undefined?null:total.toFixed(6),
+   providerCurrencyReported:true,
+   clientWalletDebited:false,clientFundingVerified:false,
+   notice:'Provider account-level voice usage for the UTC dates shown, not per-client debits. Report currency is not proof that Plivo trial funds can be sold or that any client may dial.'});
+ }catch{
+  return json({available:false,reason:'provider_usage_unavailable'});
+ }
+}
 export async function handleCreditWalletRequest(req,env,user,{fetcher=fetch}={}){
  const url=new URL(req.url);
  if(!url.pathname.startsWith(base+'/'))return null;
@@ -135,6 +195,11 @@ export async function handleCreditWalletRequest(req,env,user,{fetcher=fetch}={})
  if(!env.CONTROL_DB)return fail('database unavailable',503);
  const db=env.CONTROL_DB,path=url.pathname.slice(base.length+1);
  try{
+  if(path==='usage-summary'){
+   if(req.method!=='GET'||url.search)return fail('invalid usage query',400);
+   if(!await currentMfa(env,user))return fail('current MFA Super Admin required',403);
+   return providerSevenDayUsage(env,fetcher);
+  }
   if(path==='provider-check'){
    if(req.method!=='GET'||url.search)return fail('invalid connection check',400);
    if(!await currentMfa(env,user))return fail('current MFA Super Admin required',403);
