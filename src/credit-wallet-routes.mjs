@@ -72,6 +72,62 @@ async function providerPreview(env,fetcher){
   return json({available:false,reason:'provider_balance_unavailable',verifiedInr:false});
  }
 }
+// A diagnostics-only Plivo read. A valid Account API response verifies only
+// credentials, not India KYC, approved number status or permission to dial.
+async function checkPlivoConnection(env,fetcher){
+ const auth=env.PLIVO_AUTH_ID,token=env.PLIVO_AUTH_TOKEN;
+ const valid=typeof auth==='string'&&/^[A-Za-z0-9]{8,64}$/.test(auth)&&
+  typeof token==='string'&&/^[A-Za-z0-9]{16,128}$/.test(token);
+ if(!valid)return json({
+  credentialsVerified:false,numberListAvailable:false,reason:'plivo_credentials_not_configured',
+  kycVerified:false,routeApproved:false,callsEnabledByThisCheck:false
+ });
+ const url='https://api.plivo.com/v1/Account/'+encodeURIComponent(auth)+'/';
+ const headers={Authorization:'Basic '+btoa(auth+':'+token),Accept:'application/json'};
+ const read=async path=>{
+  const res=await fetcher(url+path,{method:'GET',redirect:'error',
+   signal:AbortSignal.timeout(5000),headers});
+  if(!res.ok||!res.headers.get('content-type')?.toLowerCase().includes('json')||
+   Number(res.headers.get('content-length'))>16384)throw Error('provider unavailable');
+  const body=await res.text();
+  if(body.length>16384)throw Error('provider oversized');
+  return JSON.parse(body);
+ };
+ let account;
+ try{account=await read('')}
+ catch{return json({
+  credentialsVerified:false,numberListAvailable:false,reason:'plivo_account_api_unavailable',
+  kycVerified:false,routeApproved:false,callsEnabledByThisCheck:false
+ })}
+ let list=null;
+ try{list=await read('Number/?limit=20')}catch{}
+ const rows=Array.isArray(list?.objects)?list.objects.filter(x=>x&&typeof x==='object').slice(0,20):null;
+ const known=rows!==null;
+ const digits=x=>typeof x==='string'?x.replace(/^\+/,''):null;
+ const configured=digits(env.AR3D_PLIVO_CALLER_NUMBER);
+ const validNumber=x=>typeof x==='string'&&/^\+?[0-9]{8,15}$/.test(x);
+ const owned=known&&configured?rows.some(x=>validNumber(x.number)&&digits(x.number)===configured):null;
+ const total=list?.meta?.total_count;
+ const totalNumbers=Number.isSafeInteger(total)&&total>=0?total:null;
+ const listComplete=known&&totalNumbers!==null&&totalNumbers<=rows.length;
+ return json({
+  credentialsVerified:true,
+  accountType:['developer','standard'].includes(account?.account_type)?account.account_type:'unverified',
+  numberListAvailable:known,
+  listedNumberCount:known?rows.length:null,
+  totalNumberCount:totalNumbers,
+  listedNumbers:known?rows.filter(x=>validNumber(x.number)).map(x=>({
+   maskedNumber:'••••'+digits(x.number).slice(-4),
+   voiceEnabled:x.voice_enabled===true,
+   inIndia:digits(x.number).startsWith('91')&&digits(x.number).length===12
+  })):[],
+  configuredCallerPresent:owned===true?true:owned===false&&listComplete?false:null,
+  configuredCallerSyntaxValid:typeof env.AR3D_PLIVO_CALLER_NUMBER==='string'&&
+   /^\+91[1-9]\d{9}$/.test(env.AR3D_PLIVO_CALLER_NUMBER),
+  kycVerified:false,routeApproved:false,callsEnabledByThisCheck:false,
+  notice:'Read-only provider API check. An authenticated account and listed number do not prove Indian KYC or legal outbound route approval. No call was placed.'
+ });
+}
 export async function handleCreditWalletRequest(req,env,user,{fetcher=fetch}={}){
  const url=new URL(req.url);
  if(!url.pathname.startsWith(base+'/'))return null;
@@ -79,6 +135,11 @@ export async function handleCreditWalletRequest(req,env,user,{fetcher=fetch}={})
  if(!env.CONTROL_DB)return fail('database unavailable',503);
  const db=env.CONTROL_DB,path=url.pathname.slice(base.length+1);
  try{
+  if(path==='provider-check'){
+   if(req.method!=='GET'||url.search)return fail('invalid connection check',400);
+   if(!await currentMfa(env,user))return fail('current MFA Super Admin required',403);
+   return checkPlivoConnection(env,fetcher);
+  }
   if(path==='provider'){
    if(req.method!=='GET')return fail('method not allowed',405);
    if(url.search)return fail('unsupported query',400);
