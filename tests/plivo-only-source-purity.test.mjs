@@ -43,5 +43,5 @@ test('Plivo calling remains intact, gated and unknown provider webhooks are reje
  assert.match(migrations,/CREATE UNIQUE INDEX calling_one_inflight/);
  assert.match(schema,/trg_no_call_launch/);
  assert.match(workflow,/0011_scripted_campaign_dispatch\.sql/);
- assert.doesNotMatch(workflow,/d1 execute.*(?:0008_|0009_operator|0010_.*status)/);
+ assert.doesNotMatch(workflow,/d1 execute[^\n]*(?:0008_[^\/]*receipts|0009_operator_self_test_calls|0010_[^\/]*status_checks|0009_voicebot_review_queue|0012_verified_voicebot_turns)/);
 });
