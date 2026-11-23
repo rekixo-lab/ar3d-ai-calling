@@ -92,7 +92,7 @@ export async function handleClientAccountRequest(req,env,user){
     if(initialCreditInr>0){
       actions.push(db.prepare(
        'INSERT INTO tenant_credit_budgets(tenant_id,planned_paise,updated_by,updated_at) '+
-       'VALUES(?,?,?,?) ON CONFLICT(tenant_id) DO NOTHING')
+       'VALUES(?,?,?,?)')
        .bind(tenant.id,initialCreditInr*100,user.id,at));
       actions.push(db.prepare(
        'INSERT INTO tenant_credit_audit(id,tenant_id,actor,previous_paise,new_paise,reason,created_at) '+
