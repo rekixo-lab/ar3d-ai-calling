@@ -19,7 +19,7 @@ AR3D CRM and Cloudflare Worker remain separate.
                                         +-- assigned 140 caller number
                                         +-- Indian telecom/mobile network
 
-We can remove **Exotel**, not the **authorized Telecom Operator**
+A local Asterisk lab cannot replace an **authorized Telecom Operator**
 or its charges. Jio Business officially offers 140-series telemarketing
 outbound trunks: https://www.jio.com/business/services/voice-and-collaboration/sip-trunk/
 
@@ -103,5 +103,5 @@ this demo has no production retention, encryption or recording policy.
    fully tested hangup/busy/no-answer/opt-out/reconciliation.
 
 **Status:** This is source code for a working LOCAL seven-question
-Asterisk pilot, not an active Exotel replacement on mobile networks.
+Asterisk pilot, not an active Plivo production replacement on mobile networks.
 Buying a 140 number alone cannot connect calls.
