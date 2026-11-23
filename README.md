@@ -13,6 +13,8 @@ AR3D runs the property questionnaire, validates answers and saves them to the te
 
 For the privacy and pre-KYC backup/restore safety plan, see [Privacy & Recovery](docs/PRIVACY-RECOVERY.md). This is a synthetic drill; real customer deletion and production backup/restore remain disabled until independently reviewed.
 
+For the purchased production Bengaluru caller and one-time Plivo/Cloudflare operator configuration, follow [Production Plivo Operator Setup](docs/PRODUCTION-PLIVO-OPERATOR-SETUP.md). No customer campaign is enabled by the setup checklist.
+
 See the agreed [Smart Voice Q&A v1 scope and manual checklist](docs/SMART-VOICE-QA-V1.md), [phone setup and pilot verification](docs/scripted-phone-pilot.md), [campaign operations](docs/CUSTOMER-CALLING.md), and [production deployment](docs/MAIN-DEPLOYMENT.md).
 
 ## Development verification
