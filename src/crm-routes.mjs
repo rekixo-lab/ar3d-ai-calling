@@ -62,6 +62,10 @@ export async function handleCrmRequest(req,env,user){
   const importMatch=path==='/v1/human/import/preview'||path==='/v1/human/import/commit';
   const leadMatch=path.match(/^\/v1\/human\/leads\/([0-9a-f-]{36})$/i);
   const optOutMatch=path.match(/^\/v1\/human\/leads\/([0-9a-f-]{36})\/opt-out$/i);
+  // Manual single-customer POST belongs to the authenticated addLead handler in
+  // human-routes. Previously this router swallowed it with HTTP 405, so the
+  // Client Dashboard's "Add customer" form could never work.
+  if(path==='/v1/human/leads'&&method==='POST')return null;
   if(!importMatch&&!leadMatch&&!optOutMatch&&!['/v1/human/leads','/v1/human/visits','/v1/human/notes'].includes(path))return null;
   if(!env.CONTROL_DB)return fail('control database unavailable',503);
   try{
