@@ -459,7 +459,41 @@ async function loadMembers(){
    table(['Email','Role','Expires','Action'],invites));
 }
 }
-async function inviteSection(main){const previous=document.getElementById('invite-card');if(previous)previous.remove();const card=div('card invite-card');card.id='invite-card';card.append(title('Invite an existing client user','h3'),node('p',{class:'muted',text:'Create a new invitation for an existing company.'}));const select=node('select',{class:'field'},[node('option',{value:'',text:'Choose company'})]);const tenants=await api('/v1/human/tenants');tenants.tenants.forEach(t=>select.append(node('option',{value:t.id,text:t.display_name})));const email=input('email','email','client@builder.com');const role=node('select',{class:'field'},['client_admin','viewer'].map(x=>node('option',{value:x,text:x})));const f=node('form',{class:'formrow'},[lab('Company',select),lab('Client email',email),lab('Role',role),node('button',{type:'submit',class:'btn',text:'Create invitation'})]);f.addEventListener('submit',async e=>{e.preventDefault();try{const d=await api('/v1/human/invitations','POST',{tenantId:select.value,email:email.value,role:role.value});const share=node('input',{class:'field',value:d.inviteUrl,readonly:'readonly',style:'width:100%'});card.append(div('banner',node('p',{text:'Share this one-time link securely:'}),share));notice('Invitation generated for '+email.value)}catch(err){asError(err)}});card.append(f);main.append(card)}
+async function inviteSection(main){
+ const previous=document.getElementById('invite-card');if(previous)previous.remove();
+ const card=div('card invite-card');card.id='invite-card';
+ card.append(title('Invite an existing client user','h3'),
+  node('p',{class:'muted',text:'Create a private invitation for a company. Search across all companies.'}));
+ const select=node('select',{class:'field','aria-label':'Company to invite'}),
+  search=input('inviteCompanySearch','search','Find any company by name or email');
+ search.maxLength=80;
+ async function find(){
+  const q=new URLSearchParams({q:search.value.trim(),limit:'100'});
+  const result=await api('/v1/human/tenants?'+q);
+  const old=select.value;
+  select.replaceChildren(node('option',{value:'',text:'Choose company'}),
+   ...result.tenants.map(t=>node('option',{value:t.id,text:t.display_name})));
+  if(result.tenants.some(t=>t.id===old))select.value=old;
+ }
+ const email=input('email','email','client@builder.com');
+ const role=node('select',{class:'field'},['client_admin','viewer'].map(x=>node('option',{value:x,text:x})));
+ const f=node('form',{class:'formrow'},[lab('Company',select),lab('Client email',email),lab('Role',role),
+  node('button',{type:'submit',class:'btn',text:'Create invitation'})]);
+ f.addEventListener('submit',async e=>{
+  e.preventDefault();
+  if(!select.value){asError(Error('Choose a company before inviting'));return}
+  try{
+   const d=await api('/v1/human/invitations','POST',{tenantId:select.value,email:email.value,role:role.value});
+   const share=node('input',{class:'field',value:d.inviteUrl,readonly:'readonly',style:'width:100%'});
+   card.append(div('banner',node('p',{text:'Share this one-time link securely:'}),share));
+   notice('Invitation generated for '+email.value);
+  }catch(err){asError(err)}
+ });
+ const findBtn=btn('Find company',()=>find().catch(asError),true);
+ search.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();find().catch(asError)}});
+ card.append(div('formrow',lab('Search client directory',search),findBtn),f);
+ main.append(card);await find().catch(asError);
+}
 async function adminCompanyChangesPanel(main){
  const card=div('card client-directory',title('Client Change Requests','h3'),
   node('p',{class:'note',text:'Clients request corrections here. Update the company profile before marking a change request handled.'}));
