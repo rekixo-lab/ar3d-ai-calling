@@ -51,6 +51,8 @@ export function buildPlivoReadinessSnapshot(env){
   external,
   scriptedCallingImplemented:true,
   realTimeConversationImplemented:false,
+  approvedLocalCallerBinding:env?.AR3D_PLIVO_CALLER_NUMBER==='+918065491333',
+  productionOriginMatched:env?.AR3D_SCRIPTED_PILOT_ORIGIN==='https://aicalling.ar3dstudio.in',
   credentialsValidatedWithProvider:false,
   kycStatusVerified:false,
   liveCallAttempted:false,
@@ -60,6 +62,42 @@ export function buildPlivoReadinessSnapshot(env){
  };
 }
 
+// This concise operator checklist is derived only from Worker binding shape
+// and R2 metadata. It does not prove telecom authorization, deployment or
+// actual provider calls; no secrets or customer records are exposed.
+export function productionSetupActions(snapshot,audioPacks){
+ const flags=Object.fromEntries((snapshot?.environment||[]).map(x=>[x.id,!!x.configured]));
+ const hindi=Array.isArray(audioPacks)?audioPacks.find(x=>x?.language==='hi'):null;
+ const step=(id,owner,label,ready,note)=>({id,owner,label,ready:Boolean(ready),note});
+ return [
+  step('deploy','Operator','Verify production Cloudflare main-push deployment',false,
+   'Check the latest deploy-production.yml main run and Cloudflare ar3d-ai-calling Deployments. Confirm the safe POST Hangup smoke. PR CI is not proof of deployment.'),
+  step('plivo_secrets','Operator','Set server-side Plivo Auth ID and Token',
+   flags.plivoAuthId&&flags.plivoAuthToken,
+   'Use Worker Secrets PLIVO_AUTH_ID and PLIVO_AUTH_TOKEN, not chat, code or a public Variable.'),
+  step('caller','Operator','Verify selected 080 caller and Plivo number ownership',
+   flags.plivoCallerNumber&&snapshot?.approvedLocalCallerBinding,
+   'Caller must be +918065491333; use MFA-only Check Plivo API & rented numbers. A matching number does not authorize promotional calling.'),
+  step('callback','Operator','Set exact HTTPS callback origin',
+   flags.pilotOrigin&&snapshot?.productionOriginMatched,
+   'AR3D_SCRIPTED_PILOT_ORIGIN must be https://aicalling.ar3dstudio.in in the isolated Worker.'),
+  step('hindi_audio','Operator','Review Hindi private R2 prompt pack and actual sound',
+   !!hindi?.ready,
+   'All scripted-phone-pilot/hi required MP3 object metadata must be ready; listen to opening, question and closing manually.'),
+  step('recording','Operator','Confirm recording authorization and notice',
+   flags.recordingAuthorizationMarked,
+   'Set AR3D_PLIVO_RECORDING_AUTH=confirmed only after verifying recording permission, access and recipient notice.'),
+  step('recipient','Operator','Enter owned verified internal mobile and CRM identifiers',
+   flags.pilotDestination&&flags.pilotTenantId&&flags.pilotLeadId,
+   'Configure AR3D_SCRIPTED_PILOT_VERIFIED_NUMBER, AR3D_SCRIPTED_PILOT_TENANT_ID and AR3D_SCRIPTED_PILOT_LEAD_ID for an internal consenting recipient.'),
+  step('traffic','Plivo/provider','Verify permitted service/transactional calling purpose',false,
+   'India Business KYC and 080 caller ownership do not authorize promotional builder lead calls or unrelated client traffic.'),
+  step('internal_call','Operator','Complete one signed Production acceptance call',false,
+   'With allowed purpose and verified owned recipient only, temporarily enable the internal pilot, then review Plivo Logs, seven Hindi turns, signed callbacks and CRM.'),
+  step('customer_campaigns','Provider/operator','Keep customer campaigns disabled until independent gates pass',false,
+   'Do not enable AR3D_SCRIPTED_CAMPAIGNS_ENABLED for new property marketing on this 080 number. Planned credits do not grant dial permission.')
+ ];
+}
 export async function handleLaunchReadiness(req,env,user){
  const url=new URL(req.url);
  if(url.pathname!==PATH)return null;
@@ -76,5 +114,7 @@ export async function handleLaunchReadiness(req,env,user){
  // R2 HEAD metadata only, after fresh MFA verification. No audio-body reads.
  const audioPacks=await Promise.all(['hi','en'].map(language=>
   inspectScriptedPromptPack(env,language)));
- return json({...buildPlivoReadinessSnapshot(env),audioPacks});
+ const snapshot=buildPlivoReadinessSnapshot(env);
+ return json({...snapshot,audioPacks,
+  setupActions:productionSetupActions(snapshot,audioPacks)});
 }
