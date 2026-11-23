@@ -30,7 +30,7 @@ export async function smoke(base,fetchFn=fetch){
     }],
     ['/v1/human/me',401,'application/json',async r=>(await r.json()).error==='sign in required'],
     ['/v1/human/scripted-phone-pilot',401,'application/json',async r=>(await r.json()).error==='sign in required'],
-    ['/v1/provider/exotel/voicebot',410,'application/json',async r=>(await r.json()).error==='provider_route_retired'],
+    ['/v1/provider/unknown-transport',404,'application/json',async r=>(await r.json()).error==='not found'],
     ['/v1/human/leads/33333333-3333-4333-8333-333333333333/qualification',401,'application/json',async r=>(await r.json()).error==='sign in required'],
     ['/v1/human/call-intent-proposals',401,'application/json',async r=>(await r.json()).error==='sign in required'],
     ['/v1/human/voice-preview',401,'application/json',async r=>(await r.json()).error==='sign in required'],
