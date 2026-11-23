@@ -499,6 +499,8 @@ async function adminCompanyChangesPanel(main){
   node('p',{class:'note',text:'Clients request corrections here. Update the company profile before marking a change request handled.'}));
  card.id='company-change-inbox';main.append(card);
  const company=node('select',{class:'field','aria-label':'Review client company'}),items=div('stack');
+ const search=input('changeRequestCompanySearch','search','Search all companies');
+ search.maxLength=80;
  const refreshList=async()=>{
   items.replaceChildren();
   if(!company.value)return;
@@ -532,15 +534,18 @@ async function adminCompanyChangesPanel(main){
  };
  const refreshCompanies=async()=>{
   const old=company.value;
-  const d=await api('/v1/human/tenants');
+  const d=await api('/v1/human/tenants?'+new URLSearchParams({q:search.value.trim(),limit:'100'}));
   company.replaceChildren(...d.tenants.filter(t=>['trial','active'].includes(t.status))
    .map(t=>node('option',{value:t.id,text:t.display_name})));
   if([...company.options].some(x=>x.value===old))company.value=old;
   await refreshList();
  };
  company.addEventListener('change',()=>refreshList().catch(asError));
- card.append(div('formrow',lab('Client',company),
-  btn('Refresh client requests',()=>refreshCompanies().catch(asError),true)),items);
+ const find=btn('Find companies',()=>refreshCompanies().catch(asError),true);
+ search.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();refreshCompanies().catch(asError)}});
+ card.append(div('formrow',lab('Find company',search),find),
+  div('formrow',lab('Client',company),
+   btn('Refresh client requests',()=>refreshCompanies().catch(asError),true)),items);
  await refreshCompanies();
 }
 async function clientCompanySummary(tenantId,content,role,companyName=''){
