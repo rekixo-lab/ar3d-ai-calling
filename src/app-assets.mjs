@@ -407,6 +407,9 @@ async function adminDashboard(main,openView){
     overviewMetric('Ended internal tests',safeCount(d.internal.ended),'phone'),
     overviewMetric('Ended campaign calls',safeCount(d.campaign.ended),'phone')),
     div('overview-actions',btn('Manage clients',()=>openView('clients',{focus:true,resetScroll:true})),btn('Credit transactions',()=>openView('wallet',{focus:true,resetScroll:true}),true),btn('Calling setup',()=>openView('calling',{focus:true,resetScroll:true}),true)),
+    title('Funding review','h3'),
+    div('overview-grid',overviewMetric('Reviewed cumulative capacity',formatSeconds(d.funding?.capSeconds),'wallet'),overviewMetric('Remaining funded capacity',formatSeconds(d.funding?.remainingFundedSeconds),'wallet'),overviewMetric('Unbacked allocations',formatSeconds(d.funding?.unbackedAllocationSeconds),'receipt')),
+    node('p',{class:'note',text:'Operator-reviewed ceiling, not a live provider balance. Unconfigured capacity blocks new campaigns.'}),
     title('Recent credit adjustments','h3'),
     table(['Date (IST)','Company','Adjustment','Minutes','Balance'],d.transactions.map(t=>[formatIst(t.createdAt),t.company,t.kind,String(t.deltaSeconds/60),formatSeconds(t.balanceSeconds)])),
     node('p',{class:'note',text:'Uncommitted credits are ledger balances, not carrier funds or authorization to dial. External payments and revenue are not recorded here.'}));
@@ -517,17 +520,16 @@ function minuteUsagePanel(main,tenantId,admin){
    body.replaceChildren(div('cards wallet-metrics',
     metric('Connected time',formatSeconds(d.connectedSeconds),d.connectedSeconds+' exact seconds · verified calls'),
     metric('Provider billed time',formatSeconds(d.billedSeconds),d.billedSeconds+' exact billed seconds'),
-    metric('Planned budget','₹'+(d.plannedPaise/100).toFixed(2),'Not a spendable wallet'),
+    ...(admin?[metric('Historical planned budget','₹'+(d.plannedPaise/100).toFixed(2),'Not a spendable wallet')]:[]),
     metric('Verified calls',String(d.verifiedCalls),'Final provider records'),
-    metric('Awaiting CDR',String(d.pendingCalls),'Not included in verified totals'),
-    metric('Available minutes','Not active','No paid credit or deductions')),
+    metric('Awaiting CDR',String(d.pendingCalls),'Not included in verified totals')),
     node('p',{class:'note',text:'Connected and billed durations are separate. A provider may bill in increments. A matched held call can settle billed seconds after verification. No online payments or calling approval from this report.'}),
     ...(admin&&d.internal?[node('p',{class:'muted',text:'Internal tests (not client charges): '+d.internal.calls+' calls · '+formatSeconds(d.internal.connectedSeconds)+' signed hangup time.'})]:[]),
     title('Call usage records','h3'),table(['Updated','Status','Connected','Provider billed','CDR'],rows),
-    title('Budget transaction history','h3'),table(['Date (IST)','Reference','Type','Change (₹)','Before (₹)','After (₹)',...(admin?['Actor','Reason']:[])],
+    ...(admin?[title('Historical budget transaction history','h3'),table(['Date (IST)','Reference','Type','Change (₹)','Before (₹)','After (₹)','Actor','Reason'],
      d.transactions.map(t=>[formatIst(t.createdAt),t.transactionId,t.type==='allocation'?'Planned allocation':t.type==='recovery'?'Planned recovery':'Unchanged',
       (t.deltaPaise>0?'+':'')+(t.deltaPaise/100).toFixed(2),(t.previousPaise/100).toFixed(2),(t.newPaise/100).toFixed(2),...(admin?[t.actor,t.reason]:[])])),
-    node('p',{class:'muted',text:'Budget adjustments are audited planning transactions, not purchases or charges.'}));
+    node('p',{class:'muted',text:'Budget adjustments are historical planning transactions, not purchases or charges.'})]:[]));
    previous.disabled=offset===0;next.disabled=!d.hasMore;
   }catch(e){if(seq===version){body.replaceChildren(node('p',{class:'err',text:'Usage unavailable. Refresh to retry.'}));throw e}}
   finally{if(seq===version)refresh.disabled=false}
@@ -580,14 +582,25 @@ function manualMinuteLedger(main,tenantId,admin){
  });
  const reset=btn('Clear pending adjustment & refresh',()=>{if(busy)return;if(pending&&!confirm('Check transaction history before creating another adjustment. Clear this pending request?'))return;pending=null;offset=0;load().catch(asError)},true);
  if(admin)form.append(div('formrow',lab('Adjustment',mode),lab('Whole calling minutes',minutes),lab('Audit reason',reason)),div('formrow',submit,reset));
+ async function reverseCall(h){
+  if(!admin||busy||balance===null||pending)return;
+  const auditReason=prompt('Reason / evidence reference for returning '+formatSeconds(h.chargedSeconds)+' to this client (at least 10 characters).');
+  if(auditReason===null)return;
+  if(auditReason.trim().length<10||auditReason.trim().length>200){notice('Enter a valid audit reason.',true);return}
+  if(!confirm('Return the full settled charge once? The original provider cost and call record remain unchanged.'))return;
+  busy=true;submit.disabled=true;
+  try{await api('/v1/human/credits/reverse-call-charge','POST',{tenantId,jobId:h.jobId,expectedBalanceSeconds:balance,reason:auditReason.trim()});offset=0;await load();notice('Calling credit reversal recorded.')}
+  catch(e){asError(e);await load().catch(asError)}
+  finally{busy=false;submit.disabled=balance===null}
+ }
  async function load(){
   const id=++seq;refresh.disabled=prev.disabled=next.disabled=submit.disabled=true;
   try{const d=await api('/v1/human/credits/minute-ledger?'+new URLSearchParams({tenantId,offset:String(offset)}));if(id!==seq)return;balance=d.allocatedSeconds;uncommitted=d.uncommittedSeconds;
    const metric=(name,value)=>div('card metric',node('span',{class:'muted',text:name}),node('strong',{text:formatSeconds(value)}));
-   body.replaceChildren(div('metrics',metric('Net allocated',balance),metric('Reserved',d.heldSeconds),metric('Used',d.usedSeconds),metric('Uncommitted',d.uncommittedSeconds)),
-    node('p',{class:'note',text:'Net allocation, holds and settled usage. Calling requires independent funding and telecom approval. No online payments.'}),
+   body.replaceChildren(div('metrics',metric('Net allocated',balance),metric('Reserved',d.heldSeconds),metric('Used',d.usedSeconds),metric('Uncommitted',d.uncommittedSeconds),metric('Funding-checked minutes',d.spendableSeconds)),
+    node('p',{class:'note',text:'Funding-checked minutes are a current snapshot, not a reservation or permission for a specific customer. Independent telecom clearance and dispatch limits still apply. No online payments.'}),
     title('Credit adjustments','h3'),table(['Date (IST)','Transaction ID','Type','Change (min)','Before','After',...(admin?['Actor','Reason']:[])],d.transactions.map(t=>[formatIst(t.createdAt),t.transactionId,t.kind,(t.deltaSeconds>0?'+':'')+String(t.deltaSeconds/60),formatSeconds(t.previousSeconds),formatSeconds(t.balanceSeconds),...(admin?[t.actor,t.reason]:[])])),
-    title('Call credit history','h3'),table(['Created (IST)','Call reference','Status','Reserved','Charged','Closed (IST)'],(d.callTransactions||[]).map(h=>[formatIst(h.createdAt),h.jobId,h.state,formatSeconds(h.reservedSeconds),formatSeconds(h.chargedSeconds),h.closedAt?formatIst(h.closedAt):'—'])));
+    title('Call credit history','h3'),table(['Created (IST)','Call reference','Status','Reserved','Charged','Returned','Closed (IST)',...(admin?['Action']:[])],(d.callTransactions||[]).map(h=>[formatIst(h.createdAt),h.jobId,h.state,formatSeconds(h.reservedSeconds),formatSeconds(h.chargedSeconds),formatSeconds(h.reversedSeconds),h.closedAt?formatIst(h.closedAt):'—',...(admin?[h.state==='settled'&&h.chargedSeconds>0&&!h.reversedSeconds?btn('Reverse charge',()=>reverseCall(h),true):'—']:[])])));
    prev.disabled=offset===0;next.disabled=!d.hasMore;
   }catch(e){if(id===seq){balance=null;uncommitted=null;body.replaceChildren(node('p',{class:'err',text:'Credit ledger unavailable. Refresh to retry.'}))}throw e}
   finally{if(id===seq){refresh.disabled=false;submit.disabled=busy||balance===null}}
@@ -1113,7 +1126,7 @@ async function renderClient(id,content){
   campaignMetric.querySelector('strong').textContent=safeCount(report.jobs?.completed);
  }).catch(()=>{if(current())campaignMetric.querySelector('strong').textContent='Unavailable'});
  if(d.role==='client_admin'){
-  const creditRows=[['Uncommitted','uncommittedSeconds','wallet'],['Net allocated','allocatedSeconds','wallet'],['Reserved','heldSeconds','clock'],['Used','usedSeconds','receipt']];
+  const creditRows=[['Funding-checked','spendableSeconds','wallet'],['Uncommitted','uncommittedSeconds','wallet'],['Net allocated','allocatedSeconds','wallet'],['Reserved','heldSeconds','clock'],['Used','usedSeconds','receipt']];
   const creditMetrics=creditRows.map(([label,key,symbol])=>({key,metric:overviewMetric(label,'Loading…',symbol)}));
   grid.append(...creditMetrics.map(x=>x.metric));
   overview.append(node('p',{class:'note',text:'Credits are manually allocated by your administrator. Uncommitted balance does not itself authorize calls.'}),
@@ -1473,12 +1486,12 @@ function campaignResultsPanel(tenantId,content,role){
    answer.hidden=true;
    output.replaceChildren(
     node('p',{class:'muted',text:total?(offset+1)+'–'+(offset+results.length)+' of '+total+' customers':'Campaign call attempts will appear here.'}),
-    table(['Customer','Campaign','Outcome','CRM','Answers','Plivo charge'],results.map(r=>[
+    table(['Customer','Campaign','Outcome','CRM','Answers','Calling credits'],results.map(r=>[
      r.name,r.campaign,outcomes[r.outcome]||outcomes[r.state]||r.state,
      r.answers?(r.partial?'Partial · review needed':r.savedToLead?'Saved to lead':'Lead needs review'):'—',
      r.answers?btn(r.partial?'View partial answers':'View answers',()=>showAnswers(r),true):'—',
      role==='client_admin'&&['completed','failed'].includes(r.state)?
-      btn('Check charge',()=>checkCharge(r),true):'—'
+      btn('Check credits',()=>checkCharge(r),true):'—'
     ]))
    );
    back.disabled=offset===0;next.disabled=offset+results.length>=total;
@@ -1488,12 +1501,13 @@ function campaignResultsPanel(tenantId,content,role){
   try{
    const query=new URLSearchParams({tenantId,jobId:result.id});
    const bill=await api('/v1/human/plivo-cdr?'+query);
-   const nodeText='Plivo reports '+bill.providerReportedAmount+
-    ' (currency not verified), billed '+bill.billedSeconds+
-    ' seconds. Check the minute ledger for actual settled usage.';
+   const nodeText=bill.settlementStatus==='settled'?'Charged: '+formatSeconds(bill.chargedSeconds)+(bill.reversedSeconds?' · returned '+formatSeconds(bill.reversedSeconds):''):
+    bill.settlementStatus==='released'?'Reservation released; no minutes charged.':
+    bill.settlementStatus==='held'?'Reserved: '+formatSeconds(bill.reservedSeconds)+' · awaiting settlement.':
+    'No calling credit transaction recorded for this attempt.';
    chargeInfo.replaceChildren(node('p',{class:'note',text:nodeText}));
   }catch(err){chargeInfo.replaceChildren(node('p',{class:'note',
-   text:'This call has no verified provider bill available here. Check minute history for settlement status.'}));asError(err)}
+   text:'Call credit history is unavailable. Refresh to retry.'}));asError(err)}
  }
  function showAnswers(result){
   const trigger=document.activeElement,q=result.answers;
@@ -1547,7 +1561,7 @@ async function customerCallingPanel(tenantId,content,role,openView){
   const run=snapshot?.data.runs.find(r=>r.campaignId===campaign?.id);
   const policy=snapshot?.data.policy;
   const policyReady=policy?.enabled&&Date.parse(policy.expiresAt)>Date.now();
-  const ready=snapshot?.data.configuration.ready&&policyReady;
+  const ready=snapshot?.data.configuration.ready&&policyReady&&snapshot?.data.credits?.ready===true;
   const languageOK=campaign&&['hi','en'].includes(campaign.languageMode);
   pick.disabled=busy||!snapshot?.campaigns.length;
   refreshBtn.disabled=busy;
@@ -1560,13 +1574,15 @@ async function customerCallingPanel(tenantId,content,role,openView){
   status.textContent=!snapshot.data.configuration.ready?
    'AI calling is being prepared by AR3D. You can import your customer list now.':
    !policyReady?'AI calling for this company is waiting for AR3D activation.':
-   'Call your approved customers · up to '+policy.dailyLimit+' calls per day · 09:00–20:00 India time';
+   !snapshot.data.credits?.ready?(snapshot.data.credits?.reason==='insufficient_credits'?'Not enough calling credits. Ask AR3D to allocate more minutes.':'Waiting for AR3D funding or calling approval.'):
+   (snapshot.data.configuration.creditOnly?'Credit-based calling · provider safety limits apply':'Call your approved customers · up to '+policy.dailyLimit+' calls per day')+' · 09:00–20:00 India time';
   status.className='note '+(ready?'ready-note':'');
   summary.replaceChildren(campaign?div('between row',
    node('strong',{text:campaign.name}),
    node('span',{class:'badge '+(run?.state==='completed'||run?.state==='running'?'positive':'pending'),text:run?.state||'draft'}),
    node('span',{class:'muted',text:languageOK?(campaign.languageMode==='hi'?'Hindi':'English'):'Use a Hindi or English campaign for the phone flow.'})
   ):node('p',{class:'muted',text:'Import a customer file to prepare your first campaign.'}));
+  if(snapshot.data.credits)summary.append(node('p',{class:'muted',text:'Available allocated credits: '+formatSeconds(snapshot.data.credits.availableSeconds)+' · minimum reserve for one call: '+formatSeconds(snapshot.data.credits.requiredSeconds)}));
  }
  async function refresh(){
   refreshBtn.disabled=true;
@@ -1666,7 +1682,7 @@ async function callingAdminPanel(main){
  const limit=input('dailyLimit','number');limit.value='10';limit.min='1';limit.max='100';
  const seconds=input('maxSeconds','number');seconds.value='180';seconds.min='180';seconds.max='300';
  const enabled=node('input',{type:'checkbox','aria-label':'Enable company calling'});
- const policyForm=node('form',{class:'stack'},[title('Company approval','h3'),lab('Provider approval reference',approval),div('formrow',lab('Approval days (1–30)',days),lab('Daily calls (1–100)',limit),lab('Maximum call seconds (180–300)',seconds)),lab('Enable company calling',enabled),node('button',{class:'btn',type:'submit',text:'Save company calling approval'})]);
+ const policyForm=node('form',{class:'stack'},[title('Company approval','h3'),lab('Provider approval reference',approval),div('formrow',lab('Approval days (1–30)',days),lab('Fallback daily safety cap (1–100)',limit),lab('Maximum call seconds (180–300)',seconds)),lab('Enable company calling',enabled),node('button',{class:'btn',type:'submit',text:'Save company calling approval'})]);
  const consent=input('consent','text','Purpose-specific opt-in evidence reference'),dnd=input('dnd','text','Provider DND check reference');
  const choices=div('stack approval-list');
  const draft=node('select',{class:'field','aria-label':'Uploaded campaign'});

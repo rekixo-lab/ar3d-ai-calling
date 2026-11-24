@@ -26,3 +26,14 @@ test('atomic reservations, exact-once settlement, recovery guard and uncertain h
  assert.throws(()=>f.c.db.prepare("UPDATE tenant_minute_holds SET charged_seconds=0 WHERE tenant_id=? AND job_id=?").run(tid,job),/immutable/);
  assert.equal((await reserveMinutes(db,{tenantId:'99999999-9999-4999-8999-999999999999',job:three,maxSeconds:30})).ok,false);
 }finally{f.close()}});
+
+test('shared funded capacity is enforced atomically across tenant wallets',async()=>{const f=fixture();try{
+ const db=f.env.CONTROL_DB,other='99999999-9999-4999-8999-999999999999';
+ f.c.db.prepare("INSERT INTO tenants(id,slug,display_name,plan_code,storage_mode,status,created_at,updated_at) VALUES(?,'other','Other','starter','shared','active','2026-11-24','2026-11-24')").run(other);
+ for(const tenantId of [tid,other])f.c.db.prepare("INSERT INTO tenant_minute_ledger(id,tenant_id,kind,delta_seconds,previous_seconds,balance_seconds,actor,reason,created_at) VALUES(?,?,'allocation',300,0,300,'admin','Synthetic allocation','2026-11-24')").run(tenantId,tenantId);
+ const results=await Promise.all([reserveMinutes(db,{tenantId:tid,job:one,maxSeconds:120,globalCap:180}),reserveMinutes(db,{tenantId:other,job:two,maxSeconds:120,globalCap:180})]);
+ assert.equal(results.filter(x=>x.ok).length,1);
+ const {fundingPosition,fundingCap}=await import('../src/minute-holds.mjs');
+ const p=await fundingPosition(db,180);assert.equal(p.remainingFundedSeconds,60);assert.equal(p.unbackedAllocationSeconds,420);
+ assert.equal(fundingCap({}),null);assert.equal(fundingCap({AR3D_FUNDED_CUMULATIVE_SECONDS:'-1'}),null);
+}finally{f.close()}});

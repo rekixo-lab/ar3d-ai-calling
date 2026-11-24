@@ -1,6 +1,7 @@
 import {requireMembership,mutationOriginAllowed} from './human-auth.mjs';
 import {resolveCrmDb,parseJsonBody} from './core.mjs';
 import {scriptedCampaignConfiguration} from './scripted-campaign-dispatch.mjs';
+import {minutePosition,fundingCap,fundingPosition} from './minute-holds.mjs';
 import {SCRIPTED_CALLING_POLICY,scriptedPromptsReady} from './scripted-phone-pilot.mjs';
 const BASE='/v1/human/calling';
 const UUID=/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
@@ -24,6 +25,15 @@ async function freshAdmin(env,user,now){
 async function audit(db,tid,user,action,target,at){
  await db.prepare("INSERT INTO crm_audit_events(tenant_id,id,actor,action,target_id,created_at) VALUES(?,?,'human:'||?,?,?,?)")
  .bind(tid,crypto.randomUUID(),user.id,action,target,at).run();
+}
+async function creditPreflight(env,tid,policy,configuration){
+ const position=await minutePosition(env.CONTROL_DB,tid);
+ const requiredSeconds=policy?Math.ceil(policy.maxSeconds/30)*30:null;
+ if(!configuration.ready||!policy?.enabled||requiredSeconds===null)return {availableSeconds:position.uncommittedSeconds,requiredSeconds,ready:false,reason:'approval_required'};
+ if(position.uncommittedSeconds<requiredSeconds)return {availableSeconds:position.uncommittedSeconds,requiredSeconds,ready:false,reason:'insufficient_credits'};
+ const funding=await fundingPosition(env.CONTROL_DB,fundingCap(env));
+ const ready=funding.remainingFundedSeconds!==null&&funding.remainingFundedSeconds>=requiredSeconds;
+ return {availableSeconds:position.uncommittedSeconds,requiredSeconds,ready,reason:ready?null:'funding_review_required'};
 }
 export async function handleScriptedCallingRequest(req,env,user,{now=Date.now()}={}){
  const url=new URL(req.url),path=url.pathname;
@@ -155,9 +165,12 @@ export async function handleScriptedCallingRequest(req,env,user,{now=Date.now()}
    const [runs,jobs,policy]=await Promise.all([
     db.prepare('SELECT r.id,r.campaign_id AS campaignId,c.name,r.state,r.created_at AS createdAt FROM calling_runs r JOIN call_campaign_drafts c ON c.tenant_id=r.tenant_id AND c.id=r.campaign_id WHERE r.tenant_id=? ORDER BY r.created_at DESC LIMIT 50').bind(tid).all(),
     db.prepare('SELECT j.id,j.run_id AS runId,j.lead_id AS leadId,l.name,j.state,j.provider_status AS providerStatus,j.duration_seconds AS durationSeconds,j.error_code AS errorCode,j.updated_at AS updatedAt FROM calling_jobs j JOIN leads l ON l.tenant_id=j.tenant_id AND l.id=j.lead_id WHERE j.tenant_id=? ORDER BY j.created_at DESC,j.id DESC LIMIT 200').bind(tid).all(),
-    db.prepare('SELECT enabled,expires_at AS expiresAt,daily_limit AS dailyLimit FROM calling_policies WHERE tenant_id=? AND flow_id=?').bind(tid,SCRIPTED_CALLING_POLICY).first()
+    db.prepare('SELECT enabled,expires_at AS expiresAt,daily_limit AS dailyLimit,max_seconds AS maxSeconds FROM calling_policies WHERE tenant_id=? AND flow_id=?').bind(tid,SCRIPTED_CALLING_POLICY).first()
    ]);
-   return json({runs:runs.results,jobs:jobs.results,policy,configuration:await scriptedCampaignConfiguration(env),window:'09:00–20:00 Asia/Kolkata',recordingEnabled:true});
+   const configuration=await scriptedCampaignConfiguration(env);
+   const activePolicy=policy?.enabled&&Date.parse(policy.expiresAt)>now&&member.status==='active'?policy:null;
+   const credits=member.role==='client_admin'?await creditPreflight(env,tid,activePolicy,configuration):null;
+   return json({runs:runs.results,jobs:jobs.results,policy,configuration,credits,window:'09:00–20:00 Asia/Kolkata',recordingEnabled:true});
   }
   if(req.method!=='POST')return fail('method_not_allowed',405);
   if(Object.keys(d).some(k=>!['tenantId','campaignId','action'].includes(k))||!UUID.test(d.campaignId||'')||!['start','pause'].includes(d.action))return fail('invalid_run');
@@ -166,9 +179,12 @@ export async function handleScriptedCallingRequest(req,env,user,{now=Date.now()}
    await audit(db,tid,user,'calling.paused',d.campaignId,at);return json({state:'paused',notice:'A call already submitted to Plivo may finish.'});
   }
   if(member.status!=='active')return fail('super_admin_must_activate_tenant',409);
-  if(!(await scriptedCampaignConfiguration(env)).ready)return fail('scripted_customer_campaigns_unconfigured',503);
-  const policy=await db.prepare('SELECT tenant_id,flow_id FROM calling_policies WHERE tenant_id=? AND enabled=1 AND expires_at>? AND flow_id=?').bind(tid,at,SCRIPTED_CALLING_POLICY).first();
+  const configuration=await scriptedCampaignConfiguration(env);
+  if(!configuration.ready)return fail('scripted_customer_campaigns_unconfigured',503);
+  const policy=await db.prepare('SELECT tenant_id,flow_id,enabled,max_seconds AS maxSeconds FROM calling_policies WHERE tenant_id=? AND enabled=1 AND expires_at>? AND flow_id=?').bind(tid,at,SCRIPTED_CALLING_POLICY).first();
   if(!policy)return fail('super_admin_calling_approval_required',409);
+  const credits=await creditPreflight(env,tid,policy,configuration);
+  if(!credits.ready)return fail(credits.reason,409);
   const draft=await db.prepare('SELECT language_mode FROM call_campaign_drafts WHERE tenant_id=? AND id=?').bind(tid,d.campaignId).first();
   if(!['hi','en'].includes(draft?.language_mode))return fail('choose_hindi_or_english_recordings',409);
   if(!await scriptedPromptsReady(env,draft.language_mode,tid))return fail('campaign_prompt_recordings_incomplete',409);

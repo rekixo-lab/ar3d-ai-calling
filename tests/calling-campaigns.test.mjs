@@ -138,3 +138,40 @@ test('provider POST is preceded by held minutes; definite rejection releases and
   }finally{f.close()}
  }
 });
+
+test('dispatch blocks when shared funding cap is exhausted, despite allocated client minutes',async()=>{
+ const f=fixture();try{await setup(f);f.env.AR3D_FUNDED_CUMULATIVE_SECONDS='60';
+ const result=await tickTenant(f.env,f.r.wrap,tid,{now,apiFetch:()=>assert.fail('must not dial')});
+ assert.equal(result.state,'provider_funding_exhausted');assert.equal(f.r.db.prepare('SELECT state FROM calling_jobs').get().state,'queued');
+ assert.equal(f.c.db.prepare('SELECT COUNT(*) AS n FROM tenant_minute_holds').get().n,0);
+ delete f.env.AR3D_FUNDED_CUMULATIVE_SECONDS;
+ assert.equal((await scriptedCampaignConfiguration(f.env)).ready,false);
+ }finally{f.close()}
+});
+
+test('campaign start checks credits before creating a new run',async()=>{
+ const f=fixture();try{await setup(f);
+  const before=f.r.db.prepare('SELECT COUNT(*) AS n FROM calling_runs').get().n;
+  f.env.AR3D_FUNDED_CUMULATIVE_SECONDS='60';
+  const state=await (await route(f,'state',{tenantId:tid},client,'GET')).json();
+  assert.equal(state.credits.ready,false);assert.equal(state.credits.requiredSeconds,180);assert.equal(state.credits.reason,'funding_review_required');
+  assert.equal(Object.hasOwn(state.credits,'capSeconds'),false);
+  assert.equal((await route(f,'runs',{tenantId:tid,campaignId:cid,action:'start'})).status,409);
+  assert.equal(f.r.db.prepare('SELECT COUNT(*) AS n FROM calling_runs').get().n,before);
+  assert.equal((await route(f,'runs',{tenantId:tid,campaignId:cid,action:'pause'})).status,200);
+ }finally{f.close()}
+});
+test('explicitly approved credit-only mode bypasses business daily cap, not funded capacity or consent',async()=>{
+ const f=fixture();try{await setup(f);f.r.db.exec('UPDATE calling_policies SET daily_limit=1');
+  await tickTenant(f.env,f.r.wrap,tid,{now,apiFetch:async()=>new Response('',{status:400})});
+  const second='44444444-4444-4444-8444-444444444444',job='b'.repeat(32);
+  f.r.db.prepare("INSERT INTO leads(tenant_id,id,name,mobile_e164,source_type,created_at,updated_at) VALUES(?,?,'Second fictional','+919000000002','excel',?,?)").run(tid,second,at,at);
+  f.r.db.prepare("INSERT INTO calling_clearances SELECT tenant_id,?,purpose,consent_reference,dnd_reference,expires_at,reviewed_by,reviewed_at FROM calling_clearances WHERE lead_id=?").run(second,lead);
+  const run=f.r.db.prepare('SELECT id FROM calling_runs').get();
+  f.r.db.prepare("INSERT INTO calling_jobs(tenant_id,id,run_id,lead_id,state,flow_id,created_at,updated_at) VALUES(?,?,?,?,'queued',?,?,?)").run(tid,job,run.id,second,SCRIPTED_CALLING_POLICY,at,at);
+  f.env.AR3D_CREDIT_ONLY_CALLING='approved';
+  assert.equal((await scriptedCampaignConfiguration(f.env)).creditOnly,true);
+  let posted=0;const result=await tickTenant(f.env,f.r.wrap,tid,{now:now+60000,apiFetch:async()=>{posted++;return accepted()}});
+  assert.equal(result.state,'submitted');assert.equal(posted,1);
+ }finally{f.close()}
+});

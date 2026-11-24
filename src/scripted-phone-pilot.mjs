@@ -823,10 +823,11 @@ async function applyPhoneAnswer(config,env,row,answer,now,fetcher=fetch){
   }
   // Transport, empty audio and STT errors use the SAME bounded retry budget
   // as unclear speech. Never invent an answer or repeat a paid outbound call.
-  const args={transcript:answer.text||'repeat',confidence:answer.confidence??1,now};
+  const args={transcript:answer.text||'repeat',confidence:answer.confidence??1,now,...(row.job_id?{strictGrounding:true}:{})};
   // One STT request per recorded answer; only unclear text may use one LLM.
   // No automatic cross-provider retry. Missing key during a call fails closed.
-  const adapter=isSarvam(row)&&internalDirect(row)&&sarvamConfigured(env)?createSarvamContextualAdapter(env.SARVAM_API_KEY,fetcher):null;
+  const customerContextApproved=Boolean(row.job_id&&env.AR3D_CAMPAIGN_CONTEXTUAL_DISCLOSURE==='approved'&&env.AR3D_CAMPAIGN_SARVAM_DISCLOSURE==='approved');
+  const adapter=isSarvam(row)&&(internalDirect(row)||customerContextApproved)&&sarvamConfigured(env)?createSarvamContextualAdapter(env.SARVAM_API_KEY,fetcher):null;
   const interpretationStarted=Date.now();
   const {result,interpreter,pendingQuantity=null}=(internalDirect(row)||isSarvam(row))&&answer.reason==='recognized'&&answer.text?
    await advanceInternalVoice(isSarvam(row)?adapter:env.AI,prior,args,phoneMeta.pendingQuantity):{result:advanceFixedVoicePreview(prior,args),interpreter:'direct'};

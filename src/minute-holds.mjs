@@ -11,9 +11,25 @@ export async function minutePosition(db,tenantId){
  COALESCE(SUM(CASE WHEN state='settled' THEN charged_seconds ELSE 0 END),0) AS used FROM tenant_minute_holds WHERE tenant_id=?`).bind(tenantId,tenantId).first();
  return {allocatedSeconds:r.allocated,heldSeconds:r.held,usedSeconds:r.used,uncommittedSeconds:r.allocated-r.held-r.used};
 }
+// Operator-reviewed cumulative funded capacity (including already settled
+// seconds), not an inferred provider balance. Unset/invalid => no live dispatch.
+export function fundingCap(env){
+ const raw=env?.AR3D_FUNDED_CUMULATIVE_SECONDS;
+ if(typeof raw!=='string'||!/^\d{1,12}$/.test(raw))return null;
+ const n=Number(raw);return integer(n,0,999999999999)?n:null;
+}
+export async function fundingPosition(db,cap){
+ const r=await db.prepare(`SELECT COALESCE(SUM(CASE WHEN state='held' THEN reserved_seconds ELSE 0 END),0) AS held,
+ COALESCE(SUM(CASE WHEN state='settled' THEN charged_seconds ELSE 0 END),0) AS used,
+ COALESCE((SELECT SUM(balance_seconds) FROM tenant_minute_ledger l WHERE sequence=(SELECT MAX(sequence) FROM tenant_minute_ledger WHERE tenant_id=l.tenant_id)),0) AS allocated FROM tenant_minute_holds`).first();
+ return {capSeconds:cap,heldSeconds:r.held,usedSeconds:r.used,allocatedSeconds:r.allocated,
+  remainingFundedSeconds:cap===null?null:Math.max(0,cap-r.held-r.used),
+  unbackedAllocationSeconds:cap===null?null:Math.max(0,r.allocated-cap)};
+}
 async function find(db,tenantId,job){return db.prepare('SELECT * FROM tenant_minute_holds WHERE tenant_id=? AND job_id=?').bind(tenantId,job).first()}
-export async function reserveMinutes(db,{tenantId,job,maxSeconds,now=Date.now()}){
+export async function reserveMinutes(db,{tenantId,job,maxSeconds,now=Date.now(),globalCap=null}){
  identity(tenantId,job);if(!integer(maxSeconds,1,86400))throw Error('invalid duration');
+ if(globalCap!==null&&!integer(globalCap,0,999999999999))throw Error('invalid global funding ceiling');
  const seconds=Math.ceil(maxSeconds/30)*30;
  const old=await find(db,tenantId,job);
  if(old)return {ok:old.state==='held'&&old.reserved_seconds===seconds,replayed:true,state:old.state};
@@ -21,8 +37,9 @@ export async function reserveMinutes(db,{tenantId,job,maxSeconds,now=Date.now()}
  SELECT id,?,?,? FROM tenants WHERE id=? AND status='active'
  AND NOT EXISTS(SELECT 1 FROM tenant_minute_holds WHERE tenant_id=? AND job_id=?)
  AND COALESCE((SELECT balance_seconds FROM tenant_minute_ledger WHERE tenant_id=? ORDER BY sequence DESC LIMIT 1),0)>=?+
- COALESCE((SELECT SUM(CASE WHEN state='held' THEN reserved_seconds ELSE charged_seconds END) FROM tenant_minute_holds WHERE tenant_id=?),0)`)
- .bind(job,seconds,new Date(now).toISOString(),tenantId,tenantId,job,tenantId,seconds,tenantId).run();
+ COALESCE((SELECT SUM(CASE WHEN state='held' THEN reserved_seconds ELSE charged_seconds END) FROM tenant_minute_holds WHERE tenant_id=?),0)
+ AND (? IS NULL OR ?>=?+COALESCE((SELECT SUM(CASE WHEN state='held' THEN reserved_seconds ELSE charged_seconds END) FROM tenant_minute_holds),0))`)
+ .bind(job,seconds,new Date(now).toISOString(),tenantId,tenantId,job,tenantId,seconds,tenantId,globalCap,globalCap,seconds).run();
  if(r.meta.changes===1)return {ok:true,replayed:false,state:'held'};
  const current=await find(db,tenantId,job);
  return current?{ok:current.state==='held'&&current.reserved_seconds===seconds,replayed:true,state:current.state}:{ok:false,replayed:false,state:'insufficient_or_unavailable'};

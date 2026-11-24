@@ -333,7 +333,7 @@ const FIELD_HINTS={
  interest:'Interpret only the answer to the viewing-interest question: yes/interested, no/not interested, later/follow up. A short affirmative or negative is enough. Mixed/conflicting answers: unclear. Not permission to call.',
  visitDate:'Resolve one explicitly stated future date in India (YYYY-MM-DD). No vague timeframe or invented appointment. Do not schedule or promise a booking.'
 };
-export async function advanceContextualVoice(ai,current,{transcript,confidence=1,now=Date.now(),timeoutMs=3500}={}){
+export async function advanceContextualVoice(ai,current,{transcript,confidence=1,now=Date.now(),timeoutMs=3500,strictGrounding=false}={}){
  const base=advanceFixedVoicePreview(current,{transcript,confidence,now});
  const field=FIELDS[current.index],input=cleaned(transcript);
  // Short/direct recognized answers stay fast. Never undo a clear opt-out,
@@ -366,7 +366,7 @@ export async function advanceContextualVoice(ai,current,{transcript,confidence=1
   if(!evidence||evidence.length>220||!input.includes(evidence))throw Error('contextual_ungrounded');
   if(payload.action==='stop'){
    // Internal only: ending a test is safe; does not authorize customer DNC writes.
-   if(value)throw Error('contextual_invalid');
+   if(value||(strictGrounding&&!STOP.test(evidence)))throw Error('contextual_invalid');
    return {result:advanceFixedVoicePreview(current,{transcript:'कॉल मत करना',now}),interpreter:'contextual_stop'};
   }
   if(!value||value.length>120||/[\u0000-\u001f\u007f]/u.test(value))throw Error('contextual_invalid');
@@ -380,6 +380,11 @@ export async function advanceContextualVoice(ai,current,{transcript,confidence=1
   if(!['next_question','completed'].includes(proposal.action))throw Error('contextual_invalid_answer');
   if(['next_question','completed'].includes(directEvidence.action)&&directEvidence.state.answers[field]!==proposal.state.answers[field])
    throw Error('contextual_conflicting_evidence');
+  if(strictGrounding){
+   if(!['next_question','completed'].includes(directEvidence.action)||directEvidence.state.answers[field]!==proposal.state.answers[field]||
+    (field==='budgetInr'&&directEvidence.state.answers.budgetMinInr!==proposal.state.answers.budgetMinInr))throw Error('contextual_customer_evidence_not_parseable');
+   return {result:directEvidence,interpreter:'contextual_grounded'};
+  }
   return {result:proposal,interpreter:'contextual'};
  }catch{return {result:base,interpreter:'contextual_unavailable'}}
  finally{if(timer!==undefined)clearTimeout(timer)}
@@ -425,12 +430,39 @@ function advanceLabelledFields(current,input,confidence,now){
  }
  return {result:last,interpreter:'labelled_multi_answer',pendingQuantity:null};
 }
+// Only explicitly labelled corrections of already accepted numeric fields.
+// No implied changes to property type, geographic dependencies, or consent.
+function advanceExplicitCorrection(current,input,confidence,now){
+ const prefix=input.match(/^(?:सुधार(?: कीजिए)?|correction|actually|नहीं|नही)\s*[:：,।]?\s+/iu);
+ if(!prefix)return null;
+ const phrase=input.slice(prefix[0].length);
+ const labels=LABELLED_FIELDS.map(([field,re])=>({field,match:phrase.match(re)})).filter(x=>x.match);
+ if(labels.length!==1)return null;
+ const {field,match}=labels[0];
+ const index=FIELDS.indexOf(field);
+ if(index>=current.index)return null; // current question uses normal parser
+ const repeat=()=>({result:advanceFixedVoicePreview(current,{transcript:'repeat',confidence,now}),interpreter:'correction_unclear',pendingQuantity:null});
+ if(confidence<.7||STOP.test(input)||NOT_HEARD.test(input)||MISUNDERSTOOD.test(input)||
+    !['budgetInr','size'].includes(field)||!Object.hasOwn(current.answers,field)||/[;；।]/u.test(match[1]))return repeat();
+ try{
+  const out={...current,answers:{...current.answers},turns:current.turns+1,attempts:0};
+  if(out.turns>MAX_TURNS)return repeat();
+  if(field==='size')out.answers.size=parseSize(match[1],out.answers.propertyType);
+  else{
+   const range=parseBudgetRange(match[1]);
+   out.answers.budgetInr=range?range.upper:parseBudget(match[1]);
+   if(range)out.answers.budgetMinInr=range.lower;else delete out.answers.budgetMinInr;
+  }
+  validate(out,now);
+  return {result:response(out,'next_question'),interpreter:'explicit_correction',pendingQuantity:null};
+ }catch{return repeat()}
+}
 export async function advanceInternalVoice(ai,current,args,memory=null){
  const {transcript,confidence=1,now=Date.now()}=args;
  const field=FIELDS[current.index],input=cleaned(transcript);
  const supported=field==='budgetInr'||(field==='size'&&current.answers.propertyType==='plot');
  const direct=advanceFixedVoicePreview(current,{transcript,confidence,now});
- if(direct.action!=='opt_out_requested'){const labelled=advanceLabelledFields(current,input,confidence,now);if(labelled)return labelled;}
+ if(direct.action!=='opt_out_requested'){const corrected=advanceExplicitCorrection(current,input,confidence,now);if(corrected)return corrected;const labelled=advanceLabelledFields(current,input,confidence,now);if(labelled)return labelled;}
  if(!supported||direct.action==='opt_out_requested'||confidence<.7||AGAIN.test(input)||NOT_HEARD.test(input)||MISUNDERSTOOD.test(input))
   return {...await advanceContextualVoice(ai,current,args),pendingQuantity:null};
  if(['next_question','completed'].includes(direct.action))

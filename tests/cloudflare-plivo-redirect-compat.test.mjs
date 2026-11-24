@@ -20,13 +20,15 @@ test('every deployed Cloudflare Worker module avoids unsupported error redirects
  assert.ok(count>10,'must check actual deployed source modules');
 });
 
-test('all seven Plivo network call sites use manual redirect with no token forwarding',()=>{
+test('Plivo network call sites use manual redirects, and client credit lookup is local only',()=>{
  const files={
-  'credit-wallet-routes.mjs':3,
+  'credit-wallet-routes.mjs':4,
   'plivo-cost-reconcile-routes.mjs':1,
-  'plivo-cdr-routes.mjs':1,
-  'scripted-phone-pilot.mjs':2
+  'cost-intelligence.mjs':1,
+  'scripted-phone-pilot.mjs':5
  };
+ const client=readFileSync(join(src,'plivo-cdr-routes.mjs'),'utf8');
+ assert.doesNotMatch(client,/\bfetch\s*\(|\bfetcher\b|api\.plivo\.com|Authorization\s*:/,'client credit lookup must not contact the carrier');
  for(const [name,total] of Object.entries(files)){
   const s=readFileSync(join(src,name),'utf8');
   const manual=[...s.matchAll(/redirect\s*:\s*['"]manual['"]/g)].length;
