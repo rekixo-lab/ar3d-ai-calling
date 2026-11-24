@@ -21,9 +21,10 @@ export async function handlePlivoCdrRequest(req,env,user){
   if(!job)return fail('call attempt not found',404);
   const hold=await env.CONTROL_DB.prepare('SELECT state,reserved_seconds AS reservedSeconds,charged_seconds AS chargedSeconds,closed_at AS closedAt FROM tenant_minute_holds WHERE tenant_id=? AND job_id=?').bind(tid,jid).first();
   const status=hold?.state??'not_recorded';
+  const reversal=hold&&status==='settled'?await env.CONTROL_DB.prepare('SELECT delta_seconds AS credited FROM tenant_minute_ledger WHERE tenant_id=? AND id=?').bind(tid,'call-reversal:'+tid+':'+jid).first():null;
   return json({tenantId:tid,jobId:jid,callState:job.state,connectedSeconds:job.connectedSeconds,
    settlementStatus:status,reservedSeconds:hold?.state==='held'?hold.reservedSeconds:0,
    chargedSeconds:hold&&['settled','released'].includes(status)?hold.chargedSeconds:null,
-   closedAt:hold?.closedAt??null});
+   reversedSeconds:reversal?.credited??0,closedAt:hold?.closedAt??null});
  }catch{return fail('call credit record unavailable',503)}
 }

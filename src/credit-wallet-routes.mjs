@@ -287,9 +287,39 @@ export async function handleCreditWalletRequest(req,env,user,{fetcher=fetch}={})
    const [clients,sessions,transactions,funding]=await Promise.all([
     db.prepare("SELECT COUNT(*) AS total,COALESCE(SUM(CASE WHEN status='active' THEN 1 ELSE 0 END),0) AS active FROM tenants").first(),
     db.prepare("SELECT COALESCE(SUM(CASE WHEN job_id IS NULL THEN 1 ELSE 0 END),0) AS internalEnded,COALESCE(SUM(CASE WHEN job_id IS NOT NULL THEN 1 ELSE 0 END),0) AS campaignEnded FROM scripted_phone_pilots WHERE hangup_at IS NOT NULL").first(),
-    db.prepare("SELECT l.created_at AS createdAt,t.display_name AS company,l.kind,l.delta_seconds AS deltaSeconds,l.balance_seconds AS balanceSeconds FROM tenant_minute_ledger l JOIN tenants t ON t.id=l.tenant_id ORDER BY l.sequence DESC LIMIT 10").all(),fundingPosition(db,fundingCap(env))
+    db.prepare("SELECT l.created_at AS createdAt,t.display_name AS company,CASE WHEN l.id LIKE 'call-reversal:%' THEN 'call_reversal' ELSE l.kind END AS kind,l.delta_seconds AS deltaSeconds,l.balance_seconds AS balanceSeconds FROM tenant_minute_ledger l JOIN tenants t ON t.id=l.tenant_id ORDER BY l.sequence DESC LIMIT 10").all(),fundingPosition(db,fundingCap(env))
    ]);
    return json({clients,funding,position:{...position,uncommittedSeconds:position.allocatedSeconds-position.heldSeconds-position.usedSeconds},internal:{ended:sessions.internalEnded},campaign:{ended:sessions.campaignEnded},transactions:transactions.results,providerRequests:0,externalPaymentsRecorded:false,dispatchEnabledByDashboard:false});
+  }
+  if(path==='reverse-call-charge'){
+   if(req.method!=='POST')return fail('method not allowed',405);
+   if(!await currentMfa(env,user)||!mutationOriginAllowed(req))return fail('current MFA Super Admin and same origin required',403);
+   if(url.search)return fail('unsupported query',400);
+   const d=await boundedBody(req);
+   const jid=d?.jobId,tid=d?.tenantId;
+   if(!d||Object.keys(d).length!==4||Object.keys(d).some(k=>!['tenantId','jobId','expectedBalanceSeconds','reason'].includes(k))||
+    !uuid.test(tid||'')||!(uuid.test(jid||'')||/^[a-f0-9]{32}$/i.test(jid||''))||
+    !Number.isSafeInteger(d.expectedBalanceSeconds)||d.expectedBalanceSeconds<0||d.expectedBalanceSeconds>1000000000||
+    typeof d.reason!=='string'||d.reason.trim().length<10||d.reason.trim().length>200||/[\u0000-\u001f]/u.test(d.reason))return fail('invalid call reversal',400);
+   // A compensating allocation, not modification of the historical provider
+   // charge. Reserved ID namespace cannot be used by normal allocation API.
+   const id='call-reversal:'+tid+':'+jid,reason=d.reason.trim();
+   const h=await db.prepare("SELECT charged_seconds AS charged FROM tenant_minute_holds WHERE tenant_id=? AND job_id=? AND state='settled'").bind(tid,jid).first();
+   if(!h||!Number.isSafeInteger(h.charged)||h.charged<=0)return fail('no settled charge to reverse',409);
+   const lookup=()=>db.prepare('SELECT tenant_id AS tenantId,actor,delta_seconds AS creditedSeconds,balance_seconds AS balanceSeconds,reason FROM tenant_minute_ledger WHERE id=?').bind(id).first();
+   const replay=old=>old&&old.tenantId===tid&&old.actor===user.id&&old.creditedSeconds===h.charged&&old.reason===reason?
+    json({transactionId:id,creditedSeconds:h.charged,allocatedSeconds:old.balanceSeconds,replayed:true}):fail('charge already reversed or conflicting request',409);
+   const prior=await lookup();if(prior)return replay(prior);
+   const next=d.expectedBalanceSeconds+h.charged;
+   if(next>1000000000)return fail('balance out of range',409);
+   const inserted=await db.prepare(`INSERT INTO tenant_minute_ledger(id,tenant_id,kind,delta_seconds,previous_seconds,balance_seconds,actor,reason,created_at)
+    SELECT ?,t.id,'allocation',h.charged_seconds,?,?,?,?,? FROM tenants t JOIN tenant_minute_holds h ON h.tenant_id=t.id
+    WHERE t.id=? AND t.status IN('trial','active','suspended') AND h.job_id=? AND h.state='settled' AND h.charged_seconds=?
+    AND COALESCE((SELECT balance_seconds FROM tenant_minute_ledger WHERE tenant_id=t.id ORDER BY sequence DESC LIMIT 1),0)=?
+    AND NOT EXISTS(SELECT 1 FROM tenant_minute_ledger WHERE id=?)`)
+    .bind(id,d.expectedBalanceSeconds,next,user.id,reason,new Date().toISOString(),tid,jid,h.charged,d.expectedBalanceSeconds,id).run();
+   if(Number(inserted.meta.changes)!==1){const old=await lookup();return old?replay(old):fail('balance changed; refresh before reversing',409)}
+   return json({transactionId:id,creditedSeconds:h.charged,allocatedSeconds:next,replayed:false},201);
   }
   if(path==='minute-ledger'){
    const isAdmin=user?.globalRole==='super_admin';
@@ -300,14 +330,15 @@ export async function handleCreditWalletRequest(req,env,user,{fetcher=fetch}={})
     const t=isAdmin?await tenant(env,tid):await requireMembership(db,user,tid,true);
     if(!t)return fail(isAdmin?'tenant not found':'forbidden',isAdmin?404:403);
     // Single SELECT gives a consistent balance and history snapshot.
-    const rows=(await db.prepare(`SELECT id AS transactionId,kind,delta_seconds AS deltaSeconds,previous_seconds AS previousSeconds,balance_seconds AS balanceSeconds,created_at AS createdAt${isAdmin?',actor,reason':''},
+    const rows=(await db.prepare(`SELECT id AS transactionId,CASE WHEN id LIKE 'call-reversal:%' THEN 'call_reversal' ELSE kind END AS kind,delta_seconds AS deltaSeconds,previous_seconds AS previousSeconds,balance_seconds AS balanceSeconds,created_at AS createdAt${isAdmin?',actor,reason':''},
      (SELECT balance_seconds FROM tenant_minute_ledger WHERE tenant_id=? ORDER BY sequence DESC LIMIT 1) AS currentBalance
      FROM tenant_minute_ledger WHERE tenant_id=? ORDER BY sequence DESC LIMIT 51 OFFSET ?`).bind(tid,tid,Number(offset)).all()).results;
     const position=await minutePosition(db,tid);
     // Financial position is a single SQL snapshot. Transaction pages are
     // observational; a concurrent adjustment must still pass the write CAS.
-    const holds=(await db.prepare(`SELECT job_id AS jobId,state,reserved_seconds AS reservedSeconds,charged_seconds AS chargedSeconds,created_at AS createdAt,closed_at AS closedAt
-     FROM tenant_minute_holds WHERE tenant_id=? ORDER BY created_at DESC,job_id DESC LIMIT 51 OFFSET ?`).bind(tid,Number(offset)).all()).results;
+    const holds=(await db.prepare(`SELECT h.job_id AS jobId,h.state,h.reserved_seconds AS reservedSeconds,h.charged_seconds AS chargedSeconds,h.created_at AS createdAt,h.closed_at AS closedAt,COALESCE(r.delta_seconds,0) AS reversedSeconds
+     FROM tenant_minute_holds h LEFT JOIN tenant_minute_ledger r ON r.tenant_id=h.tenant_id AND r.id='call-reversal:'||h.tenant_id||':'||h.job_id
+     WHERE h.tenant_id=? ORDER BY h.created_at DESC,h.job_id DESC LIMIT 51 OFFSET ?`).bind(tid,Number(offset)).all()).results;
     const configuration=await scriptedCampaignConfiguration(env);
     let dispatchEnabled=false,spendableSeconds=null;
     if(configuration.ready&&t.status==='active'){

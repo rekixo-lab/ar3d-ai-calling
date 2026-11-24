@@ -486,3 +486,26 @@ test('admin dashboard reports actual balances, is MFA-only and never queries car
 
 
 test('admin funding overview is private and missing funding is not zero',async()=>{const f=fixture();try{freshMfa(f);let d=await (await route(f,'admin-dashboard')).json();assert.equal(d.funding.capSeconds,null);assert.equal(d.funding.remainingFundedSeconds,null);f.env.AR3D_FUNDED_CUMULATIVE_SECONDS='120';d=await (await route(f,'admin-dashboard')).json();assert.equal(d.funding.capSeconds,120);assert.equal(d.funding.remainingFundedSeconds,120);const clientView=await (await route(f,'minute-ledger?tenantId='+tid,client)).json();assert.equal(clientView.spendableSeconds,null);assert.equal(clientView.dispatchEnabled,false);assert.equal(Object.hasOwn(clientView,'funding'),false);}finally{f.close()}});
+
+
+test('one full compensating call reversal is MFA protected, tenant scoped and immutable',async()=>{const f=fixture();try{
+ freshMfa(f);const {reserveMinutes,closeMinuteHold}=await import('../src/minute-holds.mjs');
+ const d={tenantId:tid,transactionId:'44444444-4444-4444-8444-444444444444',deltaSeconds:300,expectedBalanceSeconds:0,reason:'Manual synthetic allocation'};
+ assert.equal((await route(f,'minute-ledger',admin,'POST',d)).status,201);
+ const job='a'.repeat(32);
+ await reserveMinutes(f.env.CONTROL_DB,{tenantId:tid,job,maxSeconds:120});
+ const req={tenantId:tid,jobId:job,expectedBalanceSeconds:300,reason:'Reviewed billing correction'};
+ assert.equal((await route(f,'reverse-call-charge',client,'POST',req)).status,403);
+ assert.equal((await route(f,'reverse-call-charge',admin,'POST',req)).status,409);
+ await closeMinuteHold(f.env.CONTROL_DB,{tenantId:tid,job,billedSeconds:60,kind:'verified_cdr',evidenceRef:'synthetic-cdr'});
+ assert.equal((await route(f,'reverse-call-charge',admin,'POST',{...req,tenantId:'99999999-9999-4999-8999-999999999999'})).status,409);
+ assert.equal((await route(f,'reverse-call-charge',admin,'POST',{...req,expectedBalanceSeconds:100})).status,409);
+ const first=await route(f,'reverse-call-charge',admin,'POST',req);assert.equal(first.status,201,await first.clone().text());
+ assert.equal((await first.json()).creditedSeconds,60);
+ const replay=await route(f,'reverse-call-charge',admin,'POST',req);assert.equal(replay.status,200);assert.equal((await replay.json()).replayed,true);
+ assert.equal((await route(f,'reverse-call-charge',admin,'POST',{...req,reason:'Different correction request'})).status,409);
+ const ledger=await (await route(f,'minute-ledger?tenantId='+tid,client)).json();
+ assert.equal(ledger.allocatedSeconds,360);assert.equal(ledger.usedSeconds,60);assert.equal(ledger.uncommittedSeconds,300);
+ assert.equal(ledger.transactions[0].kind,'call_reversal');assert.equal(ledger.callTransactions[0].reversedSeconds,60);
+ assert.equal(f.c.db.prepare("SELECT charged_seconds FROM tenant_minute_holds WHERE job_id=?").get(job).charged_seconds,60);
+}finally{f.close()}});

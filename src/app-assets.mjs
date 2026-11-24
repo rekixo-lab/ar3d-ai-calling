@@ -582,6 +582,17 @@ function manualMinuteLedger(main,tenantId,admin){
  });
  const reset=btn('Clear pending adjustment & refresh',()=>{if(busy)return;if(pending&&!confirm('Check transaction history before creating another adjustment. Clear this pending request?'))return;pending=null;offset=0;load().catch(asError)},true);
  if(admin)form.append(div('formrow',lab('Adjustment',mode),lab('Whole calling minutes',minutes),lab('Audit reason',reason)),div('formrow',submit,reset));
+ async function reverseCall(h){
+  if(!admin||busy||balance===null||pending)return;
+  const auditReason=prompt('Reason / evidence reference for returning '+formatSeconds(h.chargedSeconds)+' to this client (at least 10 characters).');
+  if(auditReason===null)return;
+  if(auditReason.trim().length<10||auditReason.trim().length>200){notice('Enter a valid audit reason.',true);return}
+  if(!confirm('Return the full settled charge once? The original provider cost and call record remain unchanged.'))return;
+  busy=true;submit.disabled=true;
+  try{await api('/v1/human/credits/reverse-call-charge','POST',{tenantId,jobId:h.jobId,expectedBalanceSeconds:balance,reason:auditReason.trim()});offset=0;await load();notice('Calling credit reversal recorded.')}
+  catch(e){asError(e);await load().catch(asError)}
+  finally{busy=false;submit.disabled=balance===null}
+ }
  async function load(){
   const id=++seq;refresh.disabled=prev.disabled=next.disabled=submit.disabled=true;
   try{const d=await api('/v1/human/credits/minute-ledger?'+new URLSearchParams({tenantId,offset:String(offset)}));if(id!==seq)return;balance=d.allocatedSeconds;uncommitted=d.uncommittedSeconds;
@@ -589,7 +600,7 @@ function manualMinuteLedger(main,tenantId,admin){
    body.replaceChildren(div('metrics',metric('Net allocated',balance),metric('Reserved',d.heldSeconds),metric('Used',d.usedSeconds),metric('Uncommitted',d.uncommittedSeconds),metric('Funding-checked minutes',d.spendableSeconds)),
     node('p',{class:'note',text:'Funding-checked minutes are a current snapshot, not a reservation or permission for a specific customer. Independent telecom clearance and dispatch limits still apply. No online payments.'}),
     title('Credit adjustments','h3'),table(['Date (IST)','Transaction ID','Type','Change (min)','Before','After',...(admin?['Actor','Reason']:[])],d.transactions.map(t=>[formatIst(t.createdAt),t.transactionId,t.kind,(t.deltaSeconds>0?'+':'')+String(t.deltaSeconds/60),formatSeconds(t.previousSeconds),formatSeconds(t.balanceSeconds),...(admin?[t.actor,t.reason]:[])])),
-    title('Call credit history','h3'),table(['Created (IST)','Call reference','Status','Reserved','Charged','Closed (IST)'],(d.callTransactions||[]).map(h=>[formatIst(h.createdAt),h.jobId,h.state,formatSeconds(h.reservedSeconds),formatSeconds(h.chargedSeconds),h.closedAt?formatIst(h.closedAt):'—'])));
+    title('Call credit history','h3'),table(['Created (IST)','Call reference','Status','Reserved','Charged','Returned','Closed (IST)',...(admin?['Action']:[])],(d.callTransactions||[]).map(h=>[formatIst(h.createdAt),h.jobId,h.state,formatSeconds(h.reservedSeconds),formatSeconds(h.chargedSeconds),formatSeconds(h.reversedSeconds),h.closedAt?formatIst(h.closedAt):'—',...(admin?[h.state==='settled'&&h.chargedSeconds>0&&!h.reversedSeconds?btn('Reverse charge',()=>reverseCall(h),true):'—']:[])])));
    prev.disabled=offset===0;next.disabled=!d.hasMore;
   }catch(e){if(id===seq){balance=null;uncommitted=null;body.replaceChildren(node('p',{class:'err',text:'Credit ledger unavailable. Refresh to retry.'}))}throw e}
   finally{if(id===seq){refresh.disabled=false;submit.disabled=busy||balance===null}}
@@ -1490,7 +1501,7 @@ function campaignResultsPanel(tenantId,content,role){
   try{
    const query=new URLSearchParams({tenantId,jobId:result.id});
    const bill=await api('/v1/human/plivo-cdr?'+query);
-   const nodeText=bill.settlementStatus==='settled'?'Charged: '+formatSeconds(bill.chargedSeconds):
+   const nodeText=bill.settlementStatus==='settled'?'Charged: '+formatSeconds(bill.chargedSeconds)+(bill.reversedSeconds?' · returned '+formatSeconds(bill.reversedSeconds):''):
     bill.settlementStatus==='released'?'Reservation released; no minutes charged.':
     bill.settlementStatus==='held'?'Reserved: '+formatSeconds(bill.reservedSeconds)+' · awaiting settlement.':
     'No calling credit transaction recorded for this attempt.';
