@@ -10,6 +10,7 @@ import {scriptedCampaignConfiguration} from './scripted-campaign-dispatch.mjs';
 import {providerSafety,reviewProviderFault} from './provider-safety.mjs';
 import {moneyBudgetConfig,providerBudgetPosition} from './provider-cost-reservations.mjs';
 import {validReconciliation,reconcileProviderCost,providerCostRows} from './provider-cost-reconciliation.mjs';
+import {clientFinancialReport} from './client-financial-report.mjs';
 
 const base='/v1/human/credits';
 const uuid=/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
@@ -387,6 +388,13 @@ export async function handleCreditWalletRequest(req,env,user,{fetcher=fetch}={})
     WHERE (?='all' OR e.kind=?) ORDER BY e.createdAt DESC,e.tenantId,e.reference LIMIT 51 OFFSET ?`).bind(tid,tid,tid,tid,kind,kind,Number(offset)).all()).results;
    return json({transactions:rows.slice(0,50),offset:Number(offset),hasMore:rows.length>50,providerRequests:0});
   }
+  if(path==='client-financial-report'){
+   if(req.method!=='GET')return fail('method not allowed',405);
+   if(!await currentMfa(env,user))return fail('current MFA Super Admin required',403);
+   const keys=[...url.searchParams.keys()],tid=url.searchParams.get('tenantId'),offset=url.searchParams.get('offset')||'0';
+   if((tid!==null&&!uuid.test(tid))||keys.some(k=>!['tenantId','offset'].includes(k)||url.searchParams.getAll(k).length!==1)||!/^\d{1,6}$/.test(offset))return fail('invalid financial report query');
+   return json(await clientFinancialReport(db,{tenantId:tid,offset:Number(offset)}));
+  }
   if(path==='admin-dashboard'){
    if(req.method!=='GET')return fail('method not allowed',405);
    if(!await currentMfa(env,user))return fail('current MFA Super Admin required',403);
@@ -409,7 +417,7 @@ export async function handleCreditWalletRequest(req,env,user,{fetcher=fetch}={})
     COALESCE(SUM(CASE WHEN p.id IS NOT NULL AND p.hangup_at IS NULL THEN 1 ELSE 0 END),0) AS awaitingHangup,
     COALESCE(SUM(CASE WHEN p.hangup_at IS NOT NULL THEN 1 ELSE 0 END),0) AS endedAwaitingReview,
     MIN(h.created_at) AS oldestHeldAt FROM tenant_minute_holds h LEFT JOIN scripted_phone_pilots p ON p.tenant_id=h.tenant_id AND p.job_id=h.job_id WHERE h.state='held'`).first();
-   return json({clients,purchases,providerBudget:await providerBudgetPosition(db,moneyBudgetConfig(env)),providerSafety:await providerSafety(db),settlementQueue:{...settlementQueue,automaticApproved:env.AR3D_AUTO_CDR_SETTLEMENT==='approved'},funding:{...funding,reviewedProviderCeilings:providerFundingCaps(env)},position:{...position,uncommittedSeconds:position.allocatedSeconds-position.heldSeconds-position.usedSeconds},internal:{ended:sessions.internalEnded},campaign:{ended:sessions.campaignEnded},transactions:transactions.results,providerRequests:0,externalPaymentsRecorded:purchases.count>0,dispatchEnabledByDashboard:false});
+   return json({clients,purchases,providerBudget:await providerBudgetPosition(db,moneyBudgetConfig(env)),providerSafety:await providerSafety(db),settlementQueue:{...settlementQueue,automaticApproved:env.AR3D_AUTO_CDR_SETTLEMENT==='approved'},funding:{...funding,reviewedProviderCeilings:providerFundingCaps(env)},position:{...position,outstandingSeconds:position.allocatedSeconds-position.usedSeconds,uncommittedSeconds:position.allocatedSeconds-position.heldSeconds-position.usedSeconds},internal:{ended:sessions.internalEnded},campaign:{ended:sessions.campaignEnded},transactions:transactions.results,providerRequests:0,externalPaymentsRecorded:purchases.count>0,dispatchEnabledByDashboard:false});
   }
   if(path==='reverse-call-charge'){
    if(req.method!=='POST')return fail('method not allowed',405);
