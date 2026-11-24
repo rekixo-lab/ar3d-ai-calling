@@ -145,6 +145,15 @@ function scriptedPhonePilotPanel(){
      node('p',{class:'muted',text:'No new phone call, audio download or transcription. Matching recording duration: '+(d.recordings.durationMs??'—')+' ms. A zero count or unavailable API is not proof of provider failure.'}));
    }catch(e){asError(e)}finally{mediaCheck.disabled=false}
   },true);
+  const probeReport=div('stack');
+  const probe=btn('Test one saved recording (no call)',async()=>{
+   if(!window.confirm('Confirm the recipient of the latest recorded internal test has agreed to reprocess one saved answer with Workers AI. AI usage may be charged. No new call or CRM update.'))return;
+   probe.disabled=true;
+   try{
+    const d=await api('/v1/human/scripted-phone-pilot/recording-probe','POST',{confirm:'REPROCESS_ONE_CONSENTED_INTERNAL_RECORDING'});
+    probeReport.replaceChildren(table(['Diagnostic','Result'],[['Outcome',d.state.replaceAll('_',' ')],['Metadata HTTP',d.metadataHttp??'—'],['Verified media host',d.mediaHost??'—'],['Media HTTP',d.mediaHttp??'—'],['Downloaded bytes',d.bytes],['Whisper STT',d.stt.replaceAll('_',' ')]]),node('p',{class:'muted',text:'No new call or CRM change. Audio and transcript are not retained by this diagnostic.'}));
+   }catch(e){asError(e)}finally{probe.disabled=false}
+  },true);
   const device=node('select',{class:'field','aria-label':'Internal test number'});
   const engine=node('select',{class:'field','aria-label':'Speech recognition engine'},[
     node('option',{value:'deepgram_stream',text:'Deepgram Nova-3 · live stream (pilot)'}),
@@ -229,7 +238,7 @@ function scriptedPhonePilotPanel(){
   }
   enrollment.hidden=true;device.addEventListener('change',updateAvailability);
   card.append(status,prepare,prepared,enrollment,div('formrow',lab('Internal test number',device),lab('Recorded prompt language',language),lab('Speech recognition engine',engine),call,
-    btn('Refresh fixed-question pilot status',()=>refresh().catch(asError),true)),cooldown,results,mediaCheck,mediaReport);
+    btn('Refresh fixed-question pilot status',()=>refresh().catch(asError),true)),cooldown,results,mediaCheck,mediaReport,probe,probeReport);
   refresh().catch(()=>{status.textContent='Pilot status requires a current MFA Super Admin session.'});
   return card;
 }

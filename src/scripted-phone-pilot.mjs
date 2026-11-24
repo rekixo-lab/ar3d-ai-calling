@@ -393,7 +393,7 @@ async function prepareInternalTestLead(req,env,user,now){
 
 export async function handleScriptedPhoneAdmin(req,env,user,{now=Date.now(),fetcher=fetch}={}){
  const path=new URL(req.url).pathname;
- if(path!==ADMIN&&path!==ADMIN+'/prepare-lead'&&path!==ADMIN+'/devices'&&path!==ADMIN+'/media-diagnostics')return null;
+ if(path!==ADMIN&&path!==ADMIN+'/prepare-lead'&&path!==ADMIN+'/devices'&&path!==ADMIN+'/media-diagnostics'&&path!==ADMIN+'/recording-probe')return null;
  if(user?.globalRole!=='super_admin'||!await currentMfa(env.CONTROL_DB,user,now))return error('current_super_admin_mfa_required',403);
  if(path===ADMIN+'/prepare-lead'){
   try{return await prepareInternalTestLead(req,env,user,now)}
@@ -401,6 +401,14 @@ export async function handleScriptedPhoneAdmin(req,env,user,{now=Date.now(),fetc
  }
  if(!['GET','POST'].includes(req.method))return error('method_not_allowed',405);
  const config=configuration(env);
+ if(path===ADMIN+'/recording-probe'){
+  if(req.method!=='POST'||!config||!mutationOriginAllowed(req)||new URL(req.url).origin!==config.origin||new URL(req.url).search)return error('invalid_recording_probe_request',400);
+  try{
+   const data=parseJsonBody(new TextDecoder('utf-8',{fatal:true}).decode(await readBoundedBytes(req,512)),512);
+   if(Object.keys(data).join(',')!=='confirm'||data.confirm!=='REPROCESS_ONE_CONSENTED_INTERNAL_RECORDING')return error('explicit_recording_probe_confirmation_required',400);
+   return json(await probeInternalRecording(env,config,fetcher));
+  }catch{return error('recording_probe_unavailable',503)}
+ }
  if(path===ADMIN+'/media-diagnostics'){
   if(req.method!=='GET'||new URL(req.url).search)return error('invalid_diagnostic_request',400);
   if(!config)return error('pilot_configuration_missing',503);
@@ -568,6 +576,40 @@ function verifiedRecordingUrl(config,row,recording,body){
   if(!['https://media.plivo.com','https://aps1.media.plivo.com'].includes(url.origin)||url.username||url.password||url.hash||url.pathname!==expected)return null;
   return url.href;
  }catch{return null}
+}
+
+// Deliberately reuse one already recorded answer. Only current-MFA operator,
+// explicit renewed consent, eligible enrolled internal lead, signed ended call.
+// No recording or transcript is returned, retained, logged or written to CRM.
+async function probeInternalRecording(env,config,fetcher){
+ const result={phoneCallsStarted:0,crmChanged:false,metadataHttp:null,mediaHost:null,mediaHttp:null,bytes:0,stt:'not_started'};
+ const row=await env.CONTROL_DB.prepare(
+  "SELECT provider_call_id,lead_id,destination,language FROM scripted_phone_pilots WHERE tenant_id=? AND job_id IS NULL AND provider_account_id=? AND caller=? AND hangup_at IS NOT NULL AND provider_call_id IS NOT NULL AND turn>0 AND CASE WHEN json_valid(survey_json) THEN COALESCE(json_extract(survey_json,'$.phoneMeta.engine'),'whisper')='whisper' ELSE 0 END ORDER BY created_at DESC LIMIT 1")
+  .bind(config.tenant,config.authId,config.caller).first();
+ if(!row||!ID.test(row.provider_call_id)||!['hi','en'].includes(row.language))return {...result,state:'no_matching_recorded_call'};
+ const target=await selectDevice(env,config,row.lead_id),crm=await pilotCrm(env,config.tenant);
+ if(!target||target.destination!==row.destination||!crm||!await eligiblePilotLead(crm,target))return {...result,state:'internal_device_unavailable'};
+ const metadata=await providerMetadata(config,'Recording/?call_uuid='+encodeURIComponent(row.provider_call_id)+'&limit=20',fetcher);
+ result.metadataHttp=metadata.httpStatus;
+ if(!Array.isArray(metadata.body?.objects))return {...result,state:'recording_metadata_unavailable'};
+ const candidates=metadata.body.objects.filter(x=>x?.call_uuid===row.provider_call_id&&ID.test(x.recording_id||'')&&Number(x.recording_duration_ms)>0&&Number(x.recording_duration_ms)<=20000)
+  .sort((a,b)=>Number(a.recording_start_ms||0)-Number(b.recording_start_ms||0));
+ if(!candidates.length)return {...result,state:'no_matching_short_recording'};
+ const recording=candidates[0],url=verifiedRecordingUrl(config,row,recording.recording_id,recording);
+ if(!url)return {...result,state:'recording_url_not_allowlisted'};
+ result.mediaHost=new URL(url).hostname;
+ let bytes;
+ try{
+  const response=await fetcher(url,{method:'GET',headers:{Authorization:config.authorization},redirect:'manual',signal:AbortSignal.timeout(5000)});
+  result.mediaHttp=response.status;
+  if(!response.ok){try{await response.body?.cancel()}catch{}return {...result,state:'media_http_'+response.status}}
+  if(!supportsAnswerAudio(answerContentType(response.headers))){try{await response.body?.cancel()}catch{}return {...result,state:'media_type_invalid'}}
+  bytes=await readBoundedBytes(response,ANSWER_MAX_BYTES);result.bytes=bytes.length;
+ }catch{return {...result,state:'media_read_failed'}}
+ try{
+  const text=await transcribeScriptedAnswer(env.AI,bytes,row.language,{vadFilter:false});
+  return {...result,state:'media_downloaded',stt:text?'text_received':'empty_text'};
+ }catch{return {...result,state:'media_downloaded',stt:'service_failed'}}
 }
 
 async function recordingAnswer(config,env,row,params,fetcher){
