@@ -658,6 +658,7 @@ test('streaming pilot XML and one-time authenticated turn claim preserve existin
   }),env,admin,{now,fetcher});assert.equal(start.status,202);
   const cb=(step,params)=>handleScriptedPhoneCallback(signed(hook+'/'+step,{CallUUID:callId,...params}),env,{now,fetcher});
   const opening=await (await cb('answer',{ALegRequestUUID:requestId,From:'918000000000',To:'919000000001',Direction:'outbound'})).text();
+  assert.match(opening,/ए आई असिस्टेंट हूँ/);assert.doesNotMatch(opening,/टेक्स्ट में दर्ज|रिकॉर्ड किए जाएंगे/);
   assert.match(opening,/propertyType\.mp3.*<Stream/);assert.doesNotMatch(opening,/<Record |<GetDigits/);
   assert.match(opening,/audio\/x-mulaw;rate=8000/);assert.match(opening,/stream-next\/0/);
   const url=opening.match(/>(wss:[^<]+)<\/Stream>/)[1].replace(/^wss:/,'https:');
@@ -673,10 +674,10 @@ test('streaming pilot XML and one-time authenticated turn claim preserve existin
   const next=await (await cb('stream-next/0',{})).text();assert.match(next,/location\.mp3.*<Stream/);
   assert.match(next,/stream-next\/1/);
   assert.equal((await claim(url)).status,403);
-  assert.match(await (await cb('stream-next/1',{})).text(),/location\.mp3/);
+  assert.match(await (await cb('stream-next/1',{})).text(),/तकनीकी सेवा/);
   const row=JSON.parse(f.c.db.prepare('SELECT survey_json FROM scripted_phone_pilots').get().survey_json);
-  assert.equal(row.answers.propertyType,'plot');assert.equal(row.attempts,1);
-  assert.equal(row.phoneMeta.lastAudioOutcome,'stream_disconnected');
+  assert.equal(row.answers.propertyType,'plot');assert.equal(row.attempts,0);
+  assert.equal(row.phoneMeta.lastAudioOutcome,'stream_start_missing');assert.equal(row.phoneMeta.technicalFailure,true);
   assert.equal((await cb('hangup',{Duration:'30'})).status,204);
  }finally{f.close()}
 });
