@@ -7,6 +7,7 @@ import {estimateProductionCost} from './production-cost-plan.mjs';
 import {costObservation,readInternalPlivoCdr} from './cost-intelligence.mjs';
 import {minutePosition,fundingCap,fundingPosition,affordableCallSeconds,providerFundingCaps} from './minute-holds.mjs';
 import {scriptedCampaignConfiguration} from './scripted-campaign-dispatch.mjs';
+import {providerSafety,reviewProviderFault} from './provider-safety.mjs';
 
 const base='/v1/human/credits';
 const uuid=/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
@@ -306,6 +307,16 @@ export async function handleCreditWalletRequest(req,env,user,{fetcher=fetch}={})
    if(keys.length!==1||keys[0]!=='days'||!['7','30'].includes(days))return fail('invalid usage window',400);
    return providerUsageSummary(env,fetcher,Number(days));
   }
+  if(path==='provider-safety'){
+   if(!await currentMfa(env,user))return fail('current MFA Super Admin required',403);
+   if(url.search)return fail('invalid provider safety query');
+   if(req.method==='GET')return json({providers:await providerSafety(db),dispatchEnabledByReview:false});
+   if(!mutationOriginAllowed(req))return fail('same origin required',403);
+   const d=await boundedBody(req);
+   if(!d||Object.keys(d).sort().join(',')!=='evidenceRef,expectedSequence,provider')return fail('invalid provider review');
+   const ok=await reviewProviderFault(db,{...d,actor:user.id});
+   return ok?json({reviewed:true,dispatchEnabledByReview:false}):fail('fault changed or evidence already used; refresh',409);
+  }
   if(path==='provider-journal'){
    if(!await currentMfa(env,user))return fail('current MFA Super Admin required',403);
    if(req.method==='GET'){
@@ -383,7 +394,7 @@ export async function handleCreditWalletRequest(req,env,user,{fetcher=fetch}={})
     COALESCE(SUM(CASE WHEN p.id IS NOT NULL AND p.hangup_at IS NULL THEN 1 ELSE 0 END),0) AS awaitingHangup,
     COALESCE(SUM(CASE WHEN p.hangup_at IS NOT NULL THEN 1 ELSE 0 END),0) AS endedAwaitingReview,
     MIN(h.created_at) AS oldestHeldAt FROM tenant_minute_holds h LEFT JOIN scripted_phone_pilots p ON p.tenant_id=h.tenant_id AND p.job_id=h.job_id WHERE h.state='held'`).first();
-   return json({clients,purchases,settlementQueue:{...settlementQueue,automaticApproved:env.AR3D_AUTO_CDR_SETTLEMENT==='approved'},funding:{...funding,reviewedProviderCeilings:providerFundingCaps(env)},position:{...position,uncommittedSeconds:position.allocatedSeconds-position.heldSeconds-position.usedSeconds},internal:{ended:sessions.internalEnded},campaign:{ended:sessions.campaignEnded},transactions:transactions.results,providerRequests:0,externalPaymentsRecorded:purchases.count>0,dispatchEnabledByDashboard:false});
+   return json({clients,purchases,providerSafety:await providerSafety(db),settlementQueue:{...settlementQueue,automaticApproved:env.AR3D_AUTO_CDR_SETTLEMENT==='approved'},funding:{...funding,reviewedProviderCeilings:providerFundingCaps(env)},position:{...position,uncommittedSeconds:position.allocatedSeconds-position.heldSeconds-position.usedSeconds},internal:{ended:sessions.internalEnded},campaign:{ended:sessions.campaignEnded},transactions:transactions.results,providerRequests:0,externalPaymentsRecorded:purchases.count>0,dispatchEnabledByDashboard:false});
   }
   if(path==='reverse-call-charge'){
    if(req.method!=='POST')return fail('method not allowed',405);

@@ -4,6 +4,7 @@ import {mutationOriginAllowed} from './human-auth.mjs';
 import {beginFixedVoicePreview,advanceFixedVoicePreview,advanceContextualVoice,advanceInternalVoice} from './fixed-voice-turns.mjs';
 import {normalizePropertySurvey,surveyToCrm} from './fixed-property-survey.mjs';
 import {createSarvamContextualAdapter} from './sarvam-contextual.mjs';
+import {providerFaultBlocked,recordProviderFault} from './provider-safety.mjs';
 import {streamToken,validStreamToken,openNovaSocket,upgradePlivoTurn} from './streaming-speech.mjs';
 import {ANSWER_MAX_BYTES,answerContentType,readBoundedBytes,supportsAnswerAudio,transcribeScriptedAnswer,transcribeNovaRecordedAnswer,speechFailureCode,transcribeSarvamRecordedAnswer} from './scripted-speech.mjs';
 
@@ -344,10 +345,14 @@ export async function reserveCampaignQuestionnaire(control,config,job,now){
  return id;
 }
 
-export async function submitScriptedPhone(control,config,id,destination,maxSeconds,fetcher){
+export async function submitScriptedPhone(control,config,id,destination,maxSeconds,fetcher,{commercial=false}={}){
  // ring_timeout stops unanswered ringing; hangup_on_ring schedules a hangup
  // from the start of ringing even if the recipient has answered (6000).
  try{
+  if(commercial&&await providerFaultBlocked(control)){
+   const stopped=await control.prepare("UPDATE scripted_phone_pilots SET phase='rejected' WHERE id=? AND phase='requested' AND provider_request_id IS NULL AND provider_call_id IS NULL").bind(id).run();
+   return stopped.meta.changes===1?'rejected':'unknown';
+  }
   const response=await fetcher('https://api.plivo.com/v1/Account/'+config.authId+'/Call/',{
    method:'POST',redirect:'manual',signal:AbortSignal.timeout(8000),
    headers:{Authorization:config.authorization,'Content-Type':'application/json'},body:JSON.stringify({
@@ -355,6 +360,7 @@ export async function submitScriptedPhone(control,config,id,destination,maxSecon
     hangup_url:callback(config,id,'hangup'),hangup_method:'GET',time_limit:maxSeconds,ring_timeout:25
    })
   });
+  if([401,402,403].includes(response.status))await recordProviderFault(control,'plivo',response.status,'call:'+id);
   if([400,401,403,404,422,429].includes(response.status)){
    await control.prepare("UPDATE scripted_phone_pilots SET phase='rejected' WHERE id=? AND phase='requested'").bind(id).run();
    return 'rejected';
@@ -816,6 +822,7 @@ async function applyPhoneAnswer(config,env,row,answer,now,fetcher=fetch){
   // A broken media/ASR path is not an unintelligible customer response.
   // Never loop the apology when no actual listening opportunity was provided.
   const streamMetrics=isStreaming(row)?{audioMs:Number.isSafeInteger(answer.audioMs)?Math.min(18000,Math.max(0,answer.audioMs)):0,streamStarted:answer.streamStarted===true,sttConnected:answer.sttConnected===true}:{audioMs:answer.audioMs??null,audioBytes:answer.audioBytes??null,sttConnected:answer.sttConnected??null,mediaHost:answer.mediaHost??null,recognitionMs:answer.recognitionMs??null,failureCode:answer.failureCode??null};
+  if(isSarvam(row)&&/^sarvam_http_40[123]$/.test(answer.failureCode||''))await recordProviderFault(control,'sarvam',Number(answer.failureCode.slice(-3)),'stt:'+id+':'+turn,now);
   if((isStreaming(row)&&answer.reason.startsWith('stream_'))||(isSarvam(row)&&answer.reason==='speech_service_failed')){
    const survey_json=JSON.stringify({...prior,phoneMeta:{...phoneMeta,...streamMetrics,...(isSarvam(row)&&phoneMeta.costMeterVersion===1?{sttFailedRequests:(phoneMeta.sttFailedRequests||0)+1}:{}),lastAudioOutcome:answer.reason,technicalFailure:true}});
    const changed=await control.prepare("UPDATE scripted_phone_pilots SET phase='needs_review',survey_json=? WHERE id=? AND phase='transcribing' AND turn=?").bind(survey_json,id,turn).run();
@@ -831,6 +838,7 @@ async function applyPhoneAnswer(config,env,row,answer,now,fetcher=fetch){
   const interpretationStarted=Date.now();
   const {result,interpreter,pendingQuantity=null}=(internalDirect(row)||isSarvam(row))&&answer.reason==='recognized'&&answer.text?
    await advanceInternalVoice(isSarvam(row)?adapter:env.AI,prior,args,phoneMeta.pendingQuantity):{result:advanceFixedVoicePreview(prior,args),interpreter:'direct'};
+  if(adapter&&[401,402,403].includes(adapter.failureStatus))await recordProviderFault(control,'sarvam',adapter.failureStatus,'llm:'+id+':'+turn,now);
   const aiMetrics=isSarvam(row)?{...(phoneMeta.costMeterVersion===1?{sttRoundedSeconds:(phoneMeta.sttRoundedSeconds||0)+(answer.sttConnected&&Number.isSafeInteger(answer.audioMs)?Math.ceil(answer.audioMs/1000):0)}:{}),interpretationMs:Date.now()-interpretationStarted,llmRequests:(phoneMeta.llmRequests||0)+(adapter?.requests||0),llmInputTokens:(phoneMeta.llmInputTokens||0)+(adapter?.usage?.inputTokens||0),llmOutputTokens:(phoneMeta.llmOutputTokens||0)+(adapter?.usage?.outputTokens||0),llmUsageUnknown:(phoneMeta.llmUsageUnknown||0)+(adapter?.requests&&!adapter.usage?1:0),sttAudioMs:(phoneMeta.sttAudioMs||0)+(answer.sttConnected?answer.audioMs||0:0),sttDurationUnknown:(phoneMeta.sttDurationUnknown||0)+(answer.sttConnected&&answer.audioMs==null?1:0)}:{};
 
   // No transcript, recording URL, identifiers, phone numbers or provider secrets.

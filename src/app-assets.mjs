@@ -530,6 +530,14 @@ async function adminDashboard(main,openView){
     title('Client payment records','h3'),
     div('overview-grid',overviewMetric('Recorded collections',Number.isSafeInteger(d.purchases?.collectedPaise)?'₹'+(d.purchases.collectedPaise/100).toFixed(2):'Unavailable','wallet'),overviewMetric('Purchased minutes',formatSeconds(d.purchases?.purchasedSeconds),'receipt')),
     node('p',{class:'muted',text:'Recorded external collections, not recognized revenue or profit.'}),
+    title('Provider safety review','h3'),
+    div('overview-grid',...(d.providerSafety||[]).map(p=>overviewMetric(p.provider==='plivo'?'Plivo safety':'Sarvam safety',p.blocked?'Blocked · '+p.code:'No recorded block','shield'))),
+    node('p',{class:'note',text:'A provider fault blocks new commercial calls across clients, not existing credit settlement. No recorded fault is not evidence of available funds.'}),
+    ...(d.providerSafety||[]).filter(p=>p.blocked).map(p=>btn('Review '+p.provider+' fault',async()=>{
+     const evidenceRef=prompt('After verifying provider funding and access, enter a unique receipt or support reference (10+ characters). This only clears this fault; all other gates remain.');
+     if(!evidenceRef||!confirm('Confirm provider access and funding have been independently checked?'))return;
+     try{await api('/v1/human/credits/provider-safety','POST',{provider:p.provider,expectedSequence:p.sequence,evidenceRef:evidenceRef.trim()});await load();}catch(e){asError(e);}
+    },true)),
     title('Settlement review','h3'),
     div('overview-grid',overviewMetric('Held calls',safeCount(d.settlementQueue?.heldCalls),'clock'),
      overviewMetric('Awaiting signed hangup',safeCount(d.settlementQueue?.awaitingHangup),'phone'),

@@ -225,3 +225,22 @@ test('missing independent provider funding cannot start or submit a commercial c
   }finally{f.close()}
  }
 });
+
+test('provider fault interlock stops new dispatch, preserves credits, and needs explicit review',async()=>{
+ const f=fixture();try{await setup(f);
+ const {recordProviderFault,reviewProviderFault,providerSafety}=await import('../src/provider-safety.mjs');
+ await recordProviderFault(f.env.CONTROL_DB,'sarvam',402,'test-stt-402',now);
+ assert.equal((await scriptedCampaignConfiguration(f.env)).ready,false);
+ assert.equal((await tickTenant(f.env,f.r.wrap,tid,{now,apiFetch:()=>assert.fail('must not dial')})).state,'provider_review_required');
+ const sarvam=(await providerSafety(f.env.CONTROL_DB)).find(x=>x.provider==='sarvam');
+ assert.equal(await reviewProviderFault(f.env.CONTROL_DB,{provider:'sarvam',expectedSequence:sarvam.sequence+1,evidenceRef:'Receipt verified 123',actor:'admin',now}),false);
+ assert.equal(await reviewProviderFault(f.env.CONTROL_DB,{provider:'sarvam',expectedSequence:sarvam.sequence,evidenceRef:'Receipt verified 123',actor:'admin',now}),true);
+ assert.equal((await scriptedCampaignConfiguration(f.env)).ready,true);
+ assert.equal(await recordProviderFault(f.env.CONTROL_DB,'sarvam',429,'test-rate-limit',now),false);
+ assert.equal((await tickTenant(f.env,f.r.wrap,tid,{now,apiFetch:async()=>new Response('payment required',{status:402})})).state,'unknown');
+ assert.equal((await providerSafety(f.env.CONTROL_DB)).find(x=>x.provider==='plivo').blocked,true);
+ assert.equal((await tickTenant(f.env,f.r.wrap,tid,{now:now+60000,apiFetch:()=>assert.fail('must not redial')})).state,'waiting_or_locked');
+ assert.equal(f.c.db.prepare("SELECT state FROM tenant_minute_holds").get().state,'held');
+ assert.throws(()=>f.c.db.exec('DELETE FROM provider_safety_events'),/immutable/);
+ }finally{f.close()}
+});
