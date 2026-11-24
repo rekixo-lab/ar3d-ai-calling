@@ -190,7 +190,7 @@ export async function reserveCampaignQuestionnaire(control,config,job,now){
 export async function submitScriptedPhone(control,config,id,destination,maxSeconds,fetcher){
  try{
   const response=await fetcher('https://api.plivo.com/v1/Account/'+config.authId+'/Call/',{
-   method:'POST',redirect:'error',signal:AbortSignal.timeout(8000),
+   method:'POST',redirect:'manual',signal:AbortSignal.timeout(8000),
    headers:{Authorization:config.authorization,'Content-Type':'application/json'},body:JSON.stringify({
     from:config.caller,to:destination,answer_url:callback(config,id,'answer'),answer_method:'GET',
     hangup_url:callback(config,id,'hangup'),hangup_method:'GET',time_limit:maxSeconds,hangup_on_ring:25
@@ -331,7 +331,7 @@ async function recordingAnswer(config,env,row,params,fetcher){
  const recording=params.get('RecordingID');
  // Fetch a fixed, credentialed Plivo URL. The callback's RecordUrl is never fetched.
  const response=await fetcher('https://media.plivo.com/v1/Account/'+config.authId+'/Recording/'+recording+'.mp3',{
-  headers:{Authorization:config.authorization},redirect:'error',signal:AbortSignal.timeout(5000)
+  headers:{Authorization:config.authorization},redirect:'manual',signal:AbortSignal.timeout(5000)
  });
  if(!response.ok||!supportsAnswerAudio(answerContentType(response.headers)))throw Error('recording_unavailable');
  return transcribeScriptedAnswer(env.AI,await readBoundedBytes(response,ANSWER_MAX_BYTES),row.language);
