@@ -174,11 +174,11 @@ function scriptedPhonePilotPanel(){
   },true);
   const sarvamReport=div('stack');
   const sarvamProbe=btn('Test Sarvam Hindi STT (no call)',async()=>{
-   if(!window.confirm('Confirm the internal recipient agrees to send the latest saved answer to Sarvam AI for transcription and display it privately. One AI request may incur charges. No new call or CRM update.'))return;
+   if(!window.confirm('Confirm the internal recipient agrees to send the latest saved answer to Sarvam AI for transcription and, only if needed, contextual interpretation; display the results privately. Up to two AI requests may incur charges. No new call or CRM update.'))return;
    sarvamProbe.disabled=true;sarvamReport.replaceChildren();
    try{
     const d=await api('/v1/human/scripted-phone-pilot/recording-probe','POST',{confirm:'REPLAY_ONE_CONSENTED_INTERNAL_LAST_SARVAM'});
-    sarvamReport.replaceChildren(table(['Saaras v4 diagnostic','Result'],[['Outcome',d.state],['Question',d.question??'—'],['STT',d.stt],['Recognized words',d.transcript??'—'],['Parser',d.parserAction??'—'],['Normalized answer',d.normalizedAnswer??'—'],['Recognition latency (ms)',d.recognitionMs??'—'],['Safe error code',d.failureCode??'—']]),node('p',{class:'muted',text:d.state==='sarvam_not_configured'?'Server secret SARVAM_API_KEY is required. Do not paste it into this dashboard or chat.':'Latest existing internal recording only. Verify the recognized words against actual speech; not a live-call test.'}),btn('Clear transcript',()=>sarvamReport.replaceChildren(),true));
+    sarvamReport.replaceChildren(table(['Saaras v4 diagnostic','Result'],[['Outcome',d.state],['Question',d.question??'—'],['STT',d.stt],['Recognized words',d.transcript??'—'],['Parser',d.parserAction??'—'],['Normalized answer',d.normalizedAnswer??'—'],['Recognition latency (ms)',d.recognitionMs??'—'],['Interpreter',d.interpretation?.interpreter??'—'],['Proposed action',d.interpretation?.action??'—'],['Proposed answer (not saved)',d.interpretation?.normalizedAnswer??'—'],['LLM requests',d.interpretation?.llmRequests??'—'],['LLM input tokens',d.interpretation?.usage?.inputTokens??'—'],['LLM output tokens',d.interpretation?.usage?.outputTokens??'—'],['Interpretation latency (ms)',d.interpretation?.latencyMs??'—'],['Safe error code',d.failureCode??'—']]),node('p',{class:'muted',text:d.state==='sarvam_not_configured'?'Server secret SARVAM_API_KEY is required. Do not paste it into this dashboard or chat.':'Latest existing internal recording only. Verify the recognized words against actual speech; not a live-call test.'}),btn('Clear transcript',()=>sarvamReport.replaceChildren(),true));
    }catch(e){asError(e)}finally{sarvamProbe.disabled=false}
   },true);
   const listenReport=div('stack');

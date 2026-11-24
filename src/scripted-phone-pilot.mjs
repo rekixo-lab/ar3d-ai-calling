@@ -3,6 +3,7 @@ import {resolveCrmDb,parseJsonBody} from './core.mjs';
 import {mutationOriginAllowed} from './human-auth.mjs';
 import {beginFixedVoicePreview,advanceFixedVoicePreview,advanceContextualVoice,advanceInternalVoice} from './fixed-voice-turns.mjs';
 import {normalizePropertySurvey,surveyToCrm} from './fixed-property-survey.mjs';
+import {createSarvamContextualAdapter} from './sarvam-contextual.mjs';
 import {streamToken,validStreamToken,openNovaSocket,upgradePlivoTurn} from './streaming-speech.mjs';
 import {ANSWER_MAX_BYTES,answerContentType,readBoundedBytes,supportsAnswerAudio,transcribeScriptedAnswer,transcribeNovaRecordedAnswer,speechFailureCode,transcribeSarvamRecordedAnswer} from './scripted-speech.mjs';
 
@@ -651,7 +652,18 @@ async function probeInternalRecording(env,config,fetcher,{showFirstAnswer=false,
    if(sarvam){
     const started=Date.now();
     const resultSarvam=await recognize(()=>transcribeSarvamRecordedAnswer(env.SARVAM_API_KEY,bytes,row.language,contentType,fetcher));
-    return {...result,state:'media_downloaded',question:field,...resultSarvam,recognitionMs:Date.now()-started,contentType,recordingDurationMs:Number(recording.recording_duration_ms)};
+    const recognitionMs=Date.now()-started;
+    // Evaluate the actual transcript through the existing direct-first policy.
+    // A valid deterministic answer costs no LLM tokens. Proposals are diagnostic
+    // only, not persisted or trusted to repair unintelligible audio.
+    let interpretation=null;
+    if(resultSarvam.transcript&&['next_question','completed','repeat'].includes(resultSarvam.parserAction)){
+     const adapter=createSarvamContextualAdapter(env.SARVAM_API_KEY,fetcher);
+     const t=Date.now();
+     const {result:proposal,interpreter}=await advanceInternalVoice(adapter,replayState,{transcript:resultSarvam.transcript,now});
+     interpretation={interpreter,action:proposal.action,normalizedAnswer:['next_question','completed'].includes(proposal.action)?proposal.state.answers[field]??null:null,llmRequests:adapter.requests,usage:adapter.usage,latencyMs:Date.now()-t};
+    }
+    return {...result,state:'media_downloaded',question:field,...resultSarvam,recognitionMs,interpretation,contentType,recordingDurationMs:Number(recording.recording_duration_ms)};
    }
    const whisper=async(initialPrompt)=>({text:await transcribeScriptedAnswer(env.AI,bytes,row.language,{vadFilter:false,initialPrompt})});
    const [baseline,hinted,nova]=await Promise.all([
