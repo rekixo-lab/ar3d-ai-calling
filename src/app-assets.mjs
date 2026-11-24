@@ -407,6 +407,9 @@ async function adminDashboard(main,openView){
     overviewMetric('Ended internal tests',safeCount(d.internal.ended),'phone'),
     overviewMetric('Ended campaign calls',safeCount(d.campaign.ended),'phone')),
     div('overview-actions',btn('Manage clients',()=>openView('clients',{focus:true,resetScroll:true})),btn('Credit transactions',()=>openView('wallet',{focus:true,resetScroll:true}),true),btn('Calling setup',()=>openView('calling',{focus:true,resetScroll:true}),true)),
+    title('Funding review','h3'),
+    div('overview-grid',overviewMetric('Reviewed cumulative capacity',formatSeconds(d.funding?.capSeconds),'wallet'),overviewMetric('Remaining funded capacity',formatSeconds(d.funding?.remainingFundedSeconds),'wallet'),overviewMetric('Unbacked allocations',formatSeconds(d.funding?.unbackedAllocationSeconds),'receipt')),
+    node('p',{class:'note',text:'Operator-reviewed ceiling, not a live provider balance. Unconfigured capacity blocks new campaigns.'}),
     title('Recent credit adjustments','h3'),
     table(['Date (IST)','Company','Adjustment','Minutes','Balance'],d.transactions.map(t=>[formatIst(t.createdAt),t.company,t.kind,String(t.deltaSeconds/60),formatSeconds(t.balanceSeconds)])),
     node('p',{class:'note',text:'Uncommitted credits are ledger balances, not carrier funds or authorization to dial. External payments and revenue are not recorded here.'}));
@@ -517,17 +520,16 @@ function minuteUsagePanel(main,tenantId,admin){
    body.replaceChildren(div('cards wallet-metrics',
     metric('Connected time',formatSeconds(d.connectedSeconds),d.connectedSeconds+' exact seconds · verified calls'),
     metric('Provider billed time',formatSeconds(d.billedSeconds),d.billedSeconds+' exact billed seconds'),
-    metric('Planned budget','₹'+(d.plannedPaise/100).toFixed(2),'Not a spendable wallet'),
+    ...(admin?[metric('Historical planned budget','₹'+(d.plannedPaise/100).toFixed(2),'Not a spendable wallet')]:[]),
     metric('Verified calls',String(d.verifiedCalls),'Final provider records'),
-    metric('Awaiting CDR',String(d.pendingCalls),'Not included in verified totals'),
-    metric('Available minutes','Not active','No paid credit or deductions')),
+    metric('Awaiting CDR',String(d.pendingCalls),'Not included in verified totals')),
     node('p',{class:'note',text:'Connected and billed durations are separate. A provider may bill in increments. A matched held call can settle billed seconds after verification. No online payments or calling approval from this report.'}),
     ...(admin&&d.internal?[node('p',{class:'muted',text:'Internal tests (not client charges): '+d.internal.calls+' calls · '+formatSeconds(d.internal.connectedSeconds)+' signed hangup time.'})]:[]),
     title('Call usage records','h3'),table(['Updated','Status','Connected','Provider billed','CDR'],rows),
-    title('Budget transaction history','h3'),table(['Date (IST)','Reference','Type','Change (₹)','Before (₹)','After (₹)',...(admin?['Actor','Reason']:[])],
+    ...(admin?[title('Historical budget transaction history','h3'),table(['Date (IST)','Reference','Type','Change (₹)','Before (₹)','After (₹)','Actor','Reason'],
      d.transactions.map(t=>[formatIst(t.createdAt),t.transactionId,t.type==='allocation'?'Planned allocation':t.type==='recovery'?'Planned recovery':'Unchanged',
       (t.deltaPaise>0?'+':'')+(t.deltaPaise/100).toFixed(2),(t.previousPaise/100).toFixed(2),(t.newPaise/100).toFixed(2),...(admin?[t.actor,t.reason]:[])])),
-    node('p',{class:'muted',text:'Budget adjustments are audited planning transactions, not purchases or charges.'}));
+    node('p',{class:'muted',text:'Budget adjustments are historical planning transactions, not purchases or charges.'})]:[]));
    previous.disabled=offset===0;next.disabled=!d.hasMore;
   }catch(e){if(seq===version){body.replaceChildren(node('p',{class:'err',text:'Usage unavailable. Refresh to retry.'}));throw e}}
   finally{if(seq===version)refresh.disabled=false}
@@ -584,8 +586,8 @@ function manualMinuteLedger(main,tenantId,admin){
   const id=++seq;refresh.disabled=prev.disabled=next.disabled=submit.disabled=true;
   try{const d=await api('/v1/human/credits/minute-ledger?'+new URLSearchParams({tenantId,offset:String(offset)}));if(id!==seq)return;balance=d.allocatedSeconds;uncommitted=d.uncommittedSeconds;
    const metric=(name,value)=>div('card metric',node('span',{class:'muted',text:name}),node('strong',{text:formatSeconds(value)}));
-   body.replaceChildren(div('metrics',metric('Net allocated',balance),metric('Reserved',d.heldSeconds),metric('Used',d.usedSeconds),metric('Uncommitted',d.uncommittedSeconds)),
-    node('p',{class:'note',text:'Net allocation, holds and settled usage. Calling requires independent funding and telecom approval. No online payments.'}),
+   body.replaceChildren(div('metrics',metric('Net allocated',balance),metric('Reserved',d.heldSeconds),metric('Used',d.usedSeconds),metric('Uncommitted',d.uncommittedSeconds),metric('Funding-checked minutes',d.spendableSeconds)),
+    node('p',{class:'note',text:'Funding-checked minutes are a current snapshot, not a reservation or permission for a specific customer. Independent telecom clearance and dispatch limits still apply. No online payments.'}),
     title('Credit adjustments','h3'),table(['Date (IST)','Transaction ID','Type','Change (min)','Before','After',...(admin?['Actor','Reason']:[])],d.transactions.map(t=>[formatIst(t.createdAt),t.transactionId,t.kind,(t.deltaSeconds>0?'+':'')+String(t.deltaSeconds/60),formatSeconds(t.previousSeconds),formatSeconds(t.balanceSeconds),...(admin?[t.actor,t.reason]:[])])),
     title('Call credit history','h3'),table(['Created (IST)','Call reference','Status','Reserved','Charged','Closed (IST)'],(d.callTransactions||[]).map(h=>[formatIst(h.createdAt),h.jobId,h.state,formatSeconds(h.reservedSeconds),formatSeconds(h.chargedSeconds),h.closedAt?formatIst(h.closedAt):'—'])));
    prev.disabled=offset===0;next.disabled=!d.hasMore;
@@ -1113,7 +1115,7 @@ async function renderClient(id,content){
   campaignMetric.querySelector('strong').textContent=safeCount(report.jobs?.completed);
  }).catch(()=>{if(current())campaignMetric.querySelector('strong').textContent='Unavailable'});
  if(d.role==='client_admin'){
-  const creditRows=[['Uncommitted','uncommittedSeconds','wallet'],['Net allocated','allocatedSeconds','wallet'],['Reserved','heldSeconds','clock'],['Used','usedSeconds','receipt']];
+  const creditRows=[['Funding-checked','spendableSeconds','wallet'],['Uncommitted','uncommittedSeconds','wallet'],['Net allocated','allocatedSeconds','wallet'],['Reserved','heldSeconds','clock'],['Used','usedSeconds','receipt']];
   const creditMetrics=creditRows.map(([label,key,symbol])=>({key,metric:overviewMetric(label,'Loading…',symbol)}));
   grid.append(...creditMetrics.map(x=>x.metric));
   overview.append(node('p',{class:'note',text:'Credits are manually allocated by your administrator. Uncommitted balance does not itself authorize calls.'}),

@@ -5,7 +5,8 @@ import {requireMembership,mutationOriginAllowed} from './human-auth.mjs';
 import {parseJsonBody,resolveCrmDb} from './core.mjs';
 import {estimateProductionCost} from './production-cost-plan.mjs';
 import {costObservation,readInternalPlivoCdr} from './cost-intelligence.mjs';
-import {minutePosition} from './minute-holds.mjs';
+import {minutePosition,fundingCap,fundingPosition} from './minute-holds.mjs';
+import {scriptedCampaignConfiguration} from './scripted-campaign-dispatch.mjs';
 
 const base='/v1/human/credits';
 const uuid=/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
@@ -283,12 +284,12 @@ export async function handleCreditWalletRequest(req,env,user,{fetcher=fetch}={})
     COALESCE(SUM(CASE WHEN state='held' THEN reserved_seconds ELSE 0 END),0) AS heldSeconds,
     COALESCE(SUM(CASE WHEN state='settled' THEN charged_seconds ELSE 0 END),0) AS usedSeconds
     FROM tenant_minute_holds`).first();
-   const [clients,sessions,transactions]=await Promise.all([
+   const [clients,sessions,transactions,funding]=await Promise.all([
     db.prepare("SELECT COUNT(*) AS total,COALESCE(SUM(CASE WHEN status='active' THEN 1 ELSE 0 END),0) AS active FROM tenants").first(),
     db.prepare("SELECT COALESCE(SUM(CASE WHEN job_id IS NULL THEN 1 ELSE 0 END),0) AS internalEnded,COALESCE(SUM(CASE WHEN job_id IS NOT NULL THEN 1 ELSE 0 END),0) AS campaignEnded FROM scripted_phone_pilots WHERE hangup_at IS NOT NULL").first(),
-    db.prepare("SELECT l.created_at AS createdAt,t.display_name AS company,l.kind,l.delta_seconds AS deltaSeconds,l.balance_seconds AS balanceSeconds FROM tenant_minute_ledger l JOIN tenants t ON t.id=l.tenant_id ORDER BY l.sequence DESC LIMIT 10").all()
+    db.prepare("SELECT l.created_at AS createdAt,t.display_name AS company,l.kind,l.delta_seconds AS deltaSeconds,l.balance_seconds AS balanceSeconds FROM tenant_minute_ledger l JOIN tenants t ON t.id=l.tenant_id ORDER BY l.sequence DESC LIMIT 10").all(),fundingPosition(db,fundingCap(env))
    ]);
-   return json({clients,position:{...position,uncommittedSeconds:position.allocatedSeconds-position.heldSeconds-position.usedSeconds},internal:{ended:sessions.internalEnded},campaign:{ended:sessions.campaignEnded},transactions:transactions.results,providerRequests:0,externalPaymentsRecorded:false,dispatchEnabledByDashboard:false});
+   return json({clients,funding,position:{...position,uncommittedSeconds:position.allocatedSeconds-position.heldSeconds-position.usedSeconds},internal:{ended:sessions.internalEnded},campaign:{ended:sessions.campaignEnded},transactions:transactions.results,providerRequests:0,externalPaymentsRecorded:false,dispatchEnabledByDashboard:false});
   }
   if(path==='minute-ledger'){
    const isAdmin=user?.globalRole==='super_admin';
@@ -307,8 +308,15 @@ export async function handleCreditWalletRequest(req,env,user,{fetcher=fetch}={})
     // observational; a concurrent adjustment must still pass the write CAS.
     const holds=(await db.prepare(`SELECT job_id AS jobId,state,reserved_seconds AS reservedSeconds,charged_seconds AS chargedSeconds,created_at AS createdAt,closed_at AS closedAt
      FROM tenant_minute_holds WHERE tenant_id=? ORDER BY created_at DESC,job_id DESC LIMIT 51 OFFSET ?`).bind(tid,Number(offset)).all()).results;
-    return json({tenantId:tid,...position,spendableSeconds:null,dispatchEnabled:false,offset:Number(offset),hasMore:rows.length>50||holds.length>50,
-     transactions:rows.slice(0,50).map(({currentBalance,...row})=>row),callTransactions:holds.slice(0,50),status:'allocation_only'});
+    const configuration=await scriptedCampaignConfiguration(env);
+    let dispatchEnabled=false,spendableSeconds=null;
+    if(configuration.ready&&t.status==='active'){
+     const member=isAdmin?await db.prepare('SELECT id AS tenant_id,storage_mode,dedicated_binding FROM tenants WHERE id=?').bind(tid).first():t;
+     const policy=await resolveCrmDb(env,member).prepare('SELECT max_seconds FROM calling_policies WHERE tenant_id=? AND enabled=1 AND expires_at>?').bind(tid,new Date().toISOString()).first();
+     if(policy){const f=await fundingPosition(db,fundingCap(env));spendableSeconds=Math.max(0,Math.min(position.uncommittedSeconds,f.remainingFundedSeconds));dispatchEnabled=spendableSeconds>=Math.ceil(policy.max_seconds/30)*30;}
+    }
+    return json({tenantId:tid,...position,spendableSeconds,dispatchEnabled,offset:Number(offset),hasMore:rows.length>50||holds.length>50,
+     transactions:rows.slice(0,50).map(({currentBalance,...row})=>row),callTransactions:holds.slice(0,50),status:spendableSeconds===null?'allocation_only':'funding_checked'});
    }
    if(!isAdmin||!mutationOriginAllowed(req))return fail('current MFA Super Admin and same origin required',403);
    if(url.search)return fail('unsupported query',400);
