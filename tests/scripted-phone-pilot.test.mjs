@@ -895,3 +895,35 @@ test('Internal live callback asks for missing unit and remembers only normalized
   assert.equal(state.phoneMeta.pendingQuantity,null);assert.equal(spoken.length,0);
  }finally{f.close()}
 });
+
+test('consented Sarvam internal call uses one STT per turn, direct parser and no campaign authorization',async()=>{
+ const f=fixture();try{
+  const env={...f.env,PLIVO_AUTH_ID:'syntheticAuth',PLIVO_AUTH_TOKEN:token,
+   AR3D_SCRIPTED_PILOT_ENABLED:'enabled',AR3D_PLIVO_RECORDING_AUTH:'confirmed',
+   AR3D_SCRIPTED_PILOT_ORIGIN:origin,AR3D_PLIVO_CALLER_NUMBER:'+918000000000',
+   AR3D_SCRIPTED_PILOT_VERIFIED_NUMBER:internalNumber,AR3D_SCRIPTED_PILOT_TENANT_ID:tid,AR3D_SCRIPTED_PILOT_LEAD_ID:lead,
+   RECORDINGS:{head:async()=>({size:4}),get:async()=>({size:4,body:new Uint8Array(4)})},
+   AI:{async run(){throw Error('legacy AI must not be called')}}};
+  let hook,dials=0,stt=0;
+  const phrases=['प्लॉट','रायपुर','अमलीडीह','1000 वर्ग फुट','20 लाख।'];
+  const fetcher=async(url,opts)=>{
+   if(url.startsWith('https://api.plivo.com/')){dials++;hook=JSON.parse(opts.body).answer_url.replace(/\/answer$/,'');return Response.json({request_uuid:requestId},{status:202})}
+   if(url==='https://api.sarvam.ai/speech-to-text'){
+    assert.equal(opts.headers['api-subscription-key'],'synthetic-key');assert.equal(opts.body.get('language_code'),'hi-IN');assert.equal(opts.body.get('model'),'saaras:v4');
+    assert.equal(await opts.body.get('file').text(),'RIFF');return Response.json({transcript:phrases[stt++]});
+   }
+   assert.match(url,/^https:\/\/media\.plivo\.com\//);return new Response('RIFF',{headers:{'Content-Type':'audio/wav'}});
+  };
+  const start=confirm=>handleScriptedPhoneAdmin(new Request(origin+'/v1/human/scripted-phone-pilot',{method:'POST',headers:{Origin:origin},body:JSON.stringify({language:'hi',engine:'sarvam',confirm})}),env,admin,{now,fetcher});
+  assert.equal((await start('CALL_ONE_PRECONSENTED_INTERNAL_SARVAM_NUMBER')).status,409);assert.equal(dials,0);
+  env.SARVAM_API_KEY='synthetic-key';
+  assert.equal((await start('CALL_ONE_PRECONSENTED_INTERNAL_NUMBER')).status,400);assert.equal(dials,0);
+  assert.equal((await start('CALL_ONE_PRECONSENTED_INTERNAL_SARVAM_NUMBER')).status,202);assert.equal(dials,1);
+  const cb=(step,params)=>handleScriptedPhoneCallback(signed(hook+'/'+step,{CallUUID:callId,...params}),env,{now,fetcher});
+  assert.match(await (await cb('answer',{ALegRequestUUID:requestId,From:'918000000000',To:'919000000001',Direction:'outbound'})).text(),/maxLength="12".*timeout="3"/);
+  for(let i=0;i<5;i++)assert.equal((await cb('turn/'+i,{RecordingID:'record-id-0'+i,RecordingDurationMs:'2500'})).status,200);
+  const row=f.c.db.prepare('SELECT survey_json FROM scripted_phone_pilots').get(),s=JSON.parse(row.survey_json);
+  assert.equal(s.answers.budgetInr,2000000);assert.equal(s.phoneMeta.engine,'sarvam');assert.equal(s.phoneMeta.llmRequests,0);assert.equal(s.phoneMeta.sttAudioMs,12500);assert.equal(stt,5);
+  await cb('turn/4',{RecordingID:'record-id-04',RecordingDurationMs:'2500'});assert.equal(stt,5);assert.equal(dials,1);
+ }finally{f.close()}
+});

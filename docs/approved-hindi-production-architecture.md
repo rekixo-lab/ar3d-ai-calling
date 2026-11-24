@@ -24,3 +24,5 @@ Current implementation is staged, not proof of accuracy or production readiness.
 The saved-audio Sarvam diagnostic also exercises the direct-first interpreter with a bounded Sarvam 105B adapter when needed. Report proposed results, token counts and latency only; never write them into CRM during replay. Provider activation and full multi-field extraction remain gated.
 
 The Super Admin Minutes & Wallet production cost planner uses integer micro-INR assumptions, separate from actual provider observations and client credits. It does not restrict calling volume or change a wallet.
+
+After the real saved-audio test on 2026-11-24 recognized 20 लाख -> 2000000 in 710 ms with zero LLM calls, enable explicitly consented internal Sarvam recorded-answer pilot. No production campaigns activated; keep previous campaign gate unchanged. Track last recognition/interpretation latency and cumulative known STT duration/token usage; missing usage is unknown, not a verified invoice. Retain legacy diagnostics under Advanced until full live pilot passes.
