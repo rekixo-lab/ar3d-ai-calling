@@ -35,3 +35,8 @@ Each item remains open until its specific evidence exists. Green CI and deploy a
 - Internal pre-consented tests: direct question after short AI/recording notice, no keypad. The operator must have actual recipient consent before dialing. Legacy and customer campaign consent gates remain unchanged.
 - Improve short-answer capture and bounded media availability retry; show reason and accepted question count. Verify on actual Hindi and English calls; do not assume synthetic tests prove recognition or enable live campaigns.
 - Natural recorded direct opening may replace synthesized notice only after reviewing that it preserves notice. Evaluate streaming/ASR separately if batch recording still fails; verify provider charges and language before enabling.
+
+## Streaming V2 pilot
+- Optional Deepgram Nova-3 through existing Workers AI binding. Each prerecorded prompt is followed by a bounded inbound mu-law stream, finalized by the STT service; signed Redirect resumes the same questionnaire. No MP3 download or raw audio retention for streamed answers. Not continuous duplex/barge-in. No automatic fallback/redial or campaign routing change.
+- Current-MFA enrolled, explicitly preconsented internal tests only. Per-call/turn HMAC, signed continuation/hangup, atomic claim, confidence check, no raw speech in logs. Actual provider websocket transport and real Hindi/Hinglish acceptance remain open.
+- Sarvam is not yet integrated or configured; disabled selector until separate approved setup and privacy/billing verification. Do not claim the streaming model is free.
