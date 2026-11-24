@@ -10,6 +10,8 @@ import {sha256hex} from '../src/core.mjs';
 import {fixture,tid,lead} from '../tests/helpers/calling-fixture.mjs';
 await mkdir('artifacts',{recursive:true});
 const f=fixture();
+// Explicit test allocation without enabling any calling or provider credentials.
+f.c.db.prepare("INSERT INTO tenant_minute_ledger(id,tenant_id,kind,delta_seconds,previous_seconds,balance_seconds,actor,reason,created_at) VALUES('browser-wallet-test',?,'allocation',6000,0,6000,'admin','Synthetic browser credit allocation',?)").run(tid,new Date().toISOString());
 f.env.LOGIN_RATE_LIMIT_SECRET='synthetic-browser-test-rate-limit-secret';
 const token=await newSession(f.env.CONTROL_DB,'client');
 let origin;
