@@ -314,7 +314,7 @@ export async function handleCreditWalletRequest(req,env,user,{fetcher=fetch}={})
     crm.prepare(`SELECT COUNT(*) AS pendingCalls FROM calling_jobs j
      WHERE j.tenant_id=? AND j.state IN('completed','failed') AND j.provider_call_sid IS NOT NULL
      AND NOT EXISTS(SELECT 1 FROM verified_provider_call_costs v WHERE v.tenant_id=j.tenant_id AND v.job_id=j.id)`).bind(tid).first(),
-    db.prepare('SELECT previous_paise AS previousPaise,new_paise AS newPaise,created_at AS createdAt FROM tenant_credit_audit WHERE tenant_id=? ORDER BY created_at DESC,id DESC LIMIT 51 OFFSET ?').bind(tid,offset).all(),
+    db.prepare('SELECT id AS transactionId,previous_paise AS previousPaise,new_paise AS newPaise,created_at AS createdAt'+(admin?',actor,reason':'')+' FROM tenant_credit_audit WHERE tenant_id=? ORDER BY created_at DESC,id DESC LIMIT 51 OFFSET ?').bind(tid,offset).all(),
     crm.prepare(`SELECT j.id AS jobId,j.updated_at AS updatedAt,j.state,v.call_seconds AS connectedSeconds,
       v.billed_seconds AS billedSeconds,v.verified_at AS verifiedAt
       FROM calling_jobs j LEFT JOIN verified_provider_call_costs v ON v.tenant_id=j.tenant_id AND v.job_id=j.id
@@ -328,7 +328,7 @@ export async function handleCreditWalletRequest(req,env,user,{fetcher=fetch}={})
     billedSeconds:Number(usage.billedSeconds),pendingCalls:Number(pending.pendingCalls),
     internal:internal?{calls:Number(internal.calls),connectedSeconds:Number(internal.connectedSeconds)}:null,
     transactions:history.results.slice(0,50).map(x=>({...x,deltaPaise:x.newPaise-x.previousPaise,
-     type:x.newPaise>x.previousPaise?'allocation':'recovery'})),
+     type:x.newPaise>x.previousPaise?'allocation':x.newPaise<x.previousPaise?'recovery':'unchanged'})),
     records:records.results.slice(0,50),offset,hasMore:history.results.length>50||records.results.length>50,
     status:'observation_only',notice:'Verified provider seconds and provisional budget history only. No paid minutes, automatic deductions or payments.'});
   }

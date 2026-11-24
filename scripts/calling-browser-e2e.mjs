@@ -220,7 +220,8 @@ try{
  await adminPage.getByRole('link',{name:'Calling Setup'}).click();
  await adminPage.getByRole('heading',{name:'Client calling approval',exact:true}).waitFor();
  assert.ok(await adminPage.getByRole('button',{name:'Call the verified internal number once'}).isDisabled());
- assert.equal(await adminPage.getByRole('combobox',{name:'Recorded prompt language'}).inputValue(),'en');
+ assert.equal(await adminPage.getByRole('combobox',{name:'Recorded prompt language'}).inputValue(),'hi');
+ await adminPage.getByRole('combobox',{name:'Recorded prompt language'}).selectOption('en');
  await adminPage.getByRole('link',{name:'Company details'}).click();
  await adminPage.getByRole('heading',{name:'Company profile',exact:true}).waitFor();
  await adminPage.locator('[name=company-companyName]').fill('Fictional Builder');
@@ -231,6 +232,7 @@ try{
  await adminPage.getByRole('heading',{name:'Client Change Requests',exact:true}).waitFor();
  await adminPage.getByText('Please update our fictional Raipur plot price from 12 lakh to 14 lakh.').waitFor();
  await adminPage.getByRole('link',{name:'Calling Setup'}).click();
+ assert.equal(await adminPage.getByRole('combobox',{name:'Recorded prompt language'}).inputValue(),'en');
 
  await adminPage.getByLabel('Provider approval reference',{exact:true}).fill('browser-reviewed-provider-reference');
  await adminPage.getByRole('button',{name:'Save company calling approval',exact:true}).click();

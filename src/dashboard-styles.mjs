@@ -74,6 +74,9 @@ h2 > .icon, h3 > .icon { color: #3963a6; }
 .wallet-metrics { grid-template-columns: repeat(auto-fit,minmax(156px,1fr)); }
 .wallet-metrics .metric strong { font-variant-numeric: tabular-nums; font-size: 23px; overflow-wrap:anywhere; }
 .wallet-metrics .metric p { font-size: 12px; margin-top: 5px; }
+.wallet-metrics .metric-symbol { background: #e7effd; color: #2658bc; }
+.minute-wallet td { overflow-wrap: anywhere; }
+.minute-wallet .tablewrap { margin-bottom: 8px; }
 .minute-wallet { margin-top: 18px; }
 .minute-wallet h3 { margin-top: 12px; }
 .client-summary .row { min-width: 0; }
@@ -205,3 +208,5 @@ pre { white-space: pre-wrap; overflow-wrap: anywhere; }
   .import-card .formrow:first-of-type > label { flex-basis: 100%; }
 }
 `;
+
+/* Shared navy/blue dashboard visual language for both admin roles. */

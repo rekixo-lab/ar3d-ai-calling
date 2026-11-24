@@ -5,6 +5,8 @@ import {mutationOriginAllowed} from './human-auth.mjs';
 import {resolveCrmDb} from './core.mjs';
 const PATH='/v1/human/plivo-cost-reconcile';
 const UUID=/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
+const JOB_ID=/^[a-f0-9]{32}$/i;
+const validJobId=value=>UUID.test(value||'')||JOB_ID.test(value||'');
 const HEADERS={'Cache-Control':'no-store','X-Content-Type-Options':'nosniff','Referrer-Policy':'no-referrer'};
 const json=(data,status=200)=>Response.json(data,{status,headers:HEADERS});
 const fail=(error,status=400)=>json({error},status);
@@ -52,7 +54,7 @@ export async function handlePlivoCostReconcile(req,env,user,{fetcher=fetch}={}){
   if(!data||Array.isArray(data)||typeof data!=='object'||
      Object.keys(data).length!==2||!Object.hasOwn(data,'tenantId')||
      !Object.hasOwn(data,'jobId')||
-     !UUID.test(data.tenantId||'')||!UUID.test(data.jobId||''))
+     !UUID.test(data.tenantId||'')||!validJobId(data.jobId))
    return fail('invalid call selection');
   const tid=data.tenantId,jid=data.jobId;
   const tenant=await env.CONTROL_DB.prepare(

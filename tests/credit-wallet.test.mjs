@@ -382,11 +382,13 @@ test('minute usage separates connected and billed seconds, pending CDRs and plan
   assert.equal(d.pendingCalls,1);assert.equal(d.verifiedCalls,1);assert.equal(d.plannedPaise,30000);
   assert.equal(d.spendableSeconds,null);assert.equal(d.debitedSeconds,null);assert.equal(d.internal,null);
   assert.deepEqual(d.transactions.map(x=>x.deltaPaise).sort((a,b)=>a-b),[-20000,50000]);
+  assert.ok(d.transactions.every(x=>typeof x.transactionId==='string'&&!Object.hasOwn(x,'actor')&&!Object.hasOwn(x,'reason')));
   assert.equal(d.records.length,2);assert.ok(!JSON.stringify(d).includes('919000000001'));
   assert.equal((await route(f,path,{id:'viewer',globalRole:'user'})).status,403);
   assert.equal((await route(f,'minute-usage?tenantId=99999999-9999-4999-8999-999999999999',client)).status,403);
   assert.equal((await route(f,path+'&offset=bad',client)).status,400);
   assert.equal((await route(f,path,admin,'POST',{})).status,405);
-  assert.equal((await route(f,path,admin)).status,200);
+  const operator=await route(f,path,admin);assert.equal(operator.status,200);
+  const audit=await operator.json();assert.ok(audit.transactions.every(x=>x.actor&&x.reason&&x.transactionId));
  }finally{f.close()}
 });
