@@ -24,3 +24,26 @@ test('provider journals are MFA-only, immutable, currency-scoped, and retry safe
  assert.equal(f.c.db.prepare('SELECT COUNT(*) AS n FROM tenant_minute_ledger').get().n,0);
  }finally{f.close()}
 });
+
+test('Sarvam dashboard sync sets the recorded INR balance exactly to Credits Left',async()=>{
+ const f=fixture();try{
+ const now=Date.now();f.c.db.prepare("UPDATE human_sessions SET created_at=?,expires_at=? WHERE user_id='admin'").run(new Date(now).toISOString(),now+3600000);
+ const req=(user,body)=>handleCreditWalletRequest(new Request('https://app.example.invalid/v1/human/credits/sarvam-balance',{method:body?'POST':'GET',headers:{origin:'https://app.example.invalid','content-type':'application/json'},...(body?{body:JSON.stringify(body)}:{})}),f.env,user);
+ const id=n=>'00000000-0000-4000-8000-'+String(n).padStart(12,'0');
+ assert.equal((await req(client)).status,403);
+ assert.equal((await req(client,{id:id(1),creditsLeftMicros:1})).status,403);
+ let s=await (await req(admin)).json();assert.equal(s.available,false);assert.equal(s.balanceMicros,null);
+ assert.equal((await req(admin,{id:id(1),creditsLeftMicros:0})).status,400);
+ assert.equal((await req(admin,{id:id(1),creditsLeftMicros:-5})).status,400);
+ let r=await req(admin,{id:id(2),creditsLeftMicros:950500000});assert.equal(r.status,201);
+ s=await r.json();assert.equal(s.balanceMicros,950500000);assert.ok(s.lastSyncAt);assert.equal(s.dispatchEnabledByJournal,false);
+ // Usage lowers the dashboard value: an expense entry for the exact difference.
+ s=await (await req(admin,{id:id(3),creditsLeftMicros:900000000})).json();assert.equal(s.balanceMicros,900000000);
+ // A recharge raises it: a top-up for the exact difference.
+ s=await (await req(admin,{id:id(4),creditsLeftMicros:1900000000})).json();assert.equal(s.balanceMicros,1900000000);
+ const same=await req(admin,{id:id(5),creditsLeftMicros:1900000000});assert.equal(same.status,200);assert.equal((await same.json()).changed,false);
+ const kinds=f.c.db.prepare("SELECT kind,amount_micros AS a FROM provider_financial_journal WHERE provider='sarvam' ORDER BY sequence").all().map(x=>x.kind+':'+x.a);
+ assert.deepEqual(kinds,['opening:950500000','expense:50500000','topup:1000000000']);
+ assert.equal(f.c.db.prepare('SELECT COUNT(*) AS n FROM tenant_minute_ledger').get().n,0);
+ }finally{f.close()}
+});

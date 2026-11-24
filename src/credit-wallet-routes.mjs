@@ -334,6 +334,37 @@ export async function handleCreditWalletRequest(req,env,user,{fetcher=fetch}={})
    const result=await reconcileProviderCost(db,d,user.id);
    return result.ok?json({...result,clientDebits:0,dispatchEnabledByReconciliation:false},result.replayed?200:201):fail('settled matching reservation and unused expense evidence required',409);
   }
+  // Sarvam exposes no balance API. The operator copies "Credits Left" from
+  // the Sarvam dashboard; one journal entry moves the recorded INR net to
+  // exactly that value. Never a dispatch grant or live provider reading.
+  if(path==='sarvam-balance'){
+   if(!await currentMfa(env,user))return fail('current MFA Super Admin required',403);
+   const netExpr=`COALESCE(SUM(CASE kind WHEN 'expense' THEN -amount_micros ELSE amount_micros END),0)`,account=`FROM provider_financial_journal WHERE provider='sarvam' AND currency='INR'`;
+   const netSql=`SELECT ${netExpr} AS net,COUNT(*) AS n ${account}`;
+   const status=async()=>{
+    const [sum,last]=await Promise.all([db.prepare(netSql).first(),
+     db.prepare(`SELECT created_at AS at,reason FROM provider_financial_journal WHERE provider='sarvam' AND currency='INR' AND evidence_ref LIKE 'sarvam-dashboard-sync-%' ORDER BY sequence DESC LIMIT 1`).first()]);
+    return {available:sum.n>0,balanceMicros:sum.n>0?sum.net:null,currency:'INR',lastSyncAt:last?.at??null,
+     source:'sarvam_dashboard_sync_plus_recorded_entries',liveBalanceVerified:false,dispatchEnabledByJournal:false};
+   };
+   if(req.method==='GET'){if(url.search)return fail('invalid query');return json(await status())}
+   if(!mutationOriginAllowed(req)||url.search)return fail('same origin required',403);
+   const d=await boundedBody(req);
+   if(!d||Object.keys(d).sort().join(',')!=='creditsLeftMicros,id'||!uuid.test(d.id||'')||
+      !Number.isSafeInteger(d.creditsLeftMicros)||d.creditsLeftMicros<0||d.creditsLeftMicros>1000000000000)return fail('invalid Sarvam balance');
+   const sum=await db.prepare(netSql).first();
+   const diff=d.creditsLeftMicros-sum.net;
+   if(sum.n===0&&d.creditsLeftMicros<1)return fail('enter the current Credits Left above zero for the first sync');
+   if(diff===0)return json({...await status(),changed:false});
+   const kind=sum.n===0?'opening':diff>0?'topup':'expense';
+   const at=new Date().toISOString();
+   const rupees=(d.creditsLeftMicros/1000000).toFixed(2);
+   const result=await db.prepare(`INSERT OR IGNORE INTO provider_financial_journal(id,provider,currency,kind,amount_micros,evidence_ref,reason,actor,created_at)
+    SELECT ?,'sarvam','INR',?,?,?,?,?,? WHERE (SELECT ${netExpr} ${account})=?`)
+    .bind(d.id,kind,Math.abs(diff),'sarvam-dashboard-sync-'+d.id,'Sarvam dashboard sync: Credits Left INR '+rupees,user.id,at,sum.net).run();
+   if(result.meta.changes!==1)return fail('balance changed meanwhile; retry',409);
+   return json({...await status(),changed:true},201);
+  }
   if(path==='provider-journal'){
    if(!await currentMfa(env,user))return fail('current MFA Super Admin required',403);
    if(req.method==='GET'){
