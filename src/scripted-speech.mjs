@@ -25,13 +25,13 @@ export async function readBoundedBytes(message,max){
 
 export function supportsAnswerAudio(type){return AUDIO_TYPES.has(type)}
 
-export async function transcribeScriptedAnswer(ai,bytes,language){
+export async function transcribeScriptedAnswer(ai,bytes,language,{vadFilter=true}={}){
  if(!ai?.run)throw Error('speech_not_configured');
  if(!bytes.length||bytes.length>ANSWER_MAX_BYTES||!['hi','en'].includes(language))
   throw Error('invalid_audio');
  let binary='';
  for(let i=0;i<bytes.length;i+=8192)binary+=String.fromCharCode(...bytes.subarray(i,i+8192));
- const result=await ai.run(MODEL,{audio:btoa(binary),task:'transcribe',language,vad_filter:true});
+ const result=await ai.run(MODEL,{audio:btoa(binary),task:'transcribe',language,vad_filter:vadFilter});
  const text=typeof result?.text==='string'?result.text.trim().replace(/\s+/g,' '):'';
  return text&&text.length<=220?text:null;
 }
