@@ -46,7 +46,7 @@ test('MFA Super Admin sees nonsecret configuration checks and honest launch bloc
    AR3D_SCRIPTED_PILOT_LEAD_ID:'33333333-3333-4333-8333-333333333333',
    AR3D_SCRIPTED_CAMPAIGNS_ENABLED:'enabled',
    SARVAM_API_KEY:'synthetic-sarvam-credential-123',
-   AR3D_FUNDED_CAMPAIGN_DISPATCH:'approved',AR3D_FUNDED_CUMULATIVE_SECONDS:'123456789',
+   AR3D_FUNDED_CAMPAIGN_DISPATCH:'approved',AR3D_FUNDED_CUMULATIVE_SECONDS:'123456789',AR3D_PLIVO_FUNDED_CUMULATIVE_SECONDS:'123456789',AR3D_SARVAM_FUNDED_CUMULATIVE_SECONDS:'123456789',
    AI:{run:async()=>assert.fail('Never call transcription from readiness')},
    RECORDINGS:{get:async()=>assert.fail('Never read audio bytes'),head:async key=>{
     assert.match(key,/^scripted-phone-pilot\/(?:hi|en)\/[A-Za-z-]+\.mp3$/);

@@ -140,7 +140,7 @@ test('provider POST is preceded by held minutes; definite rejection releases and
 });
 
 test('dispatch blocks when shared funding cap is exhausted, despite allocated client minutes',async()=>{
- const f=fixture();try{await setup(f);f.env.AR3D_FUNDED_CUMULATIVE_SECONDS='60';
+ const f=fixture();try{await setup(f);f.env.AR3D_FUNDED_CUMULATIVE_SECONDS='0';
  const result=await tickTenant(f.env,f.r.wrap,tid,{now,apiFetch:()=>assert.fail('must not dial')});
  assert.equal(result.state,'provider_funding_exhausted');assert.equal(f.r.db.prepare('SELECT state FROM calling_jobs').get().state,'queued');
  assert.equal(f.c.db.prepare('SELECT COUNT(*) AS n FROM tenant_minute_holds').get().n,0);
@@ -152,9 +152,9 @@ test('dispatch blocks when shared funding cap is exhausted, despite allocated cl
 test('campaign start checks credits before creating a new run',async()=>{
  const f=fixture();try{await setup(f);
   const before=f.r.db.prepare('SELECT COUNT(*) AS n FROM calling_runs').get().n;
-  f.env.AR3D_FUNDED_CUMULATIVE_SECONDS='60';
+  f.env.AR3D_FUNDED_CUMULATIVE_SECONDS='0';
   const state=await (await route(f,'state',{tenantId:tid},client,'GET')).json();
-  assert.equal(state.credits.ready,false);assert.equal(state.credits.requiredSeconds,180);assert.equal(state.credits.reason,'funding_review_required');
+  assert.equal(state.credits.ready,false);assert.equal(state.credits.requiredSeconds,30);assert.equal(state.credits.reason,'funding_review_required');
   assert.equal(Object.hasOwn(state.credits,'capSeconds'),false);
   assert.equal((await route(f,'runs',{tenantId:tid,campaignId:cid,action:'start'})).status,409);
   assert.equal(f.r.db.prepare('SELECT COUNT(*) AS n FROM calling_runs').get().n,before);
@@ -196,4 +196,32 @@ test('partial review is tenant scoped, fills blanks only, rejects stale profile 
   assert.equal(JSON.parse(f.r.db.prepare('SELECT answers_json FROM scripted_call_results WHERE job_id=?').get(job).answers_json).__partial,true);
   const results=await (await route(f,'results',{tenantId:tid},client,'GET')).json();assert.equal(results.results[0].partialReviewed,true);
  }finally{f.close()}
+});
+
+test('last 30 to 150 seconds of client or provider capacity set the exact Plivo hard limit',async()=>{
+ for(const [clientSeconds,providerSeconds,expected] of [[30,600,30],[90,600,90],[150,60,60],[150,29,0],[29,600,0]]){
+  const f=fixture();try{
+   await setup(f);
+   f.c.db.prepare("INSERT INTO tenant_minute_ledger(id,tenant_id,kind,delta_seconds,previous_seconds,balance_seconds,actor,reason,created_at) VALUES('tail',?,'recovery',?,6000,?,'admin','Synthetic tail balance',?)").run(tid,clientSeconds-6000,clientSeconds,at);
+   f.env.AR3D_SARVAM_FUNDED_CUMULATIVE_SECONDS=String(providerSeconds);
+   let posted=0;
+   const out=await tickTenant(f.env,f.r.wrap,tid,{now,apiFetch:async(_url,options)=>{
+    posted++;const body=JSON.parse(options.body);
+    assert.equal(body.time_limit,expected);
+    assert.equal(f.c.db.prepare('SELECT reserved_seconds FROM tenant_minute_holds').get().reserved_seconds,expected);
+    return accepted();
+   }});
+   assert.equal(posted,expected?1:0);
+   assert.equal(out.state,expected?'submitted':clientSeconds<30?'insufficient_credits':'provider_funding_exhausted');
+  }finally{f.close()}
+ }
+});
+test('missing independent provider funding cannot start or submit a commercial call',async()=>{
+ for(const key of ['AR3D_PLIVO_FUNDED_CUMULATIVE_SECONDS','AR3D_SARVAM_FUNDED_CUMULATIVE_SECONDS']){
+  const f=fixture();try{await setup(f);delete f.env[key];
+   assert.equal((await scriptedCampaignConfiguration(f.env)).ready,false);
+   assert.equal((await tickTenant(f.env,f.r.wrap,tid,{now,apiFetch:()=>assert.fail('must not dial')})).state,'funding_approval_required');
+   assert.equal((await route(f,'runs',{tenantId:tid,campaignId:cid,action:'start'})).status,503);
+  }finally{f.close()}
+ }
 });

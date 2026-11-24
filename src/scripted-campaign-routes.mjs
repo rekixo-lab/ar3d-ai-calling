@@ -1,7 +1,7 @@
 import {requireMembership,mutationOriginAllowed} from './human-auth.mjs';
 import {resolveCrmDb,parseJsonBody} from './core.mjs';
 import {scriptedCampaignConfiguration} from './scripted-campaign-dispatch.mjs';
-import {minutePosition,fundingCap,fundingPosition} from './minute-holds.mjs';
+import {minutePosition,fundingCap,fundingPosition,affordableCallSeconds,BILLING_PULSE_SECONDS} from './minute-holds.mjs';
 import {SCRIPTED_CALLING_POLICY,scriptedPromptsReady} from './scripted-phone-pilot.mjs';
 const BASE='/v1/human/calling';
 const UUID=/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
@@ -28,12 +28,13 @@ async function audit(db,tid,user,action,target,at){
 }
 async function creditPreflight(env,tid,policy,configuration){
  const position=await minutePosition(env.CONTROL_DB,tid);
- const requiredSeconds=policy?Math.ceil(policy.maxSeconds/30)*30:null;
+ const requiredSeconds=policy?BILLING_PULSE_SECONDS:null;
  if(!configuration.ready||!policy?.enabled||requiredSeconds===null)return {availableSeconds:position.uncommittedSeconds,requiredSeconds,ready:false,reason:'approval_required'};
  if(position.uncommittedSeconds<requiredSeconds)return {availableSeconds:position.uncommittedSeconds,requiredSeconds,ready:false,reason:'insufficient_credits'};
  const funding=await fundingPosition(env.CONTROL_DB,fundingCap(env));
- const ready=funding.remainingFundedSeconds!==null&&funding.remainingFundedSeconds>=requiredSeconds;
- return {availableSeconds:position.uncommittedSeconds,requiredSeconds,ready,reason:ready?null:'funding_review_required'};
+ const maxCallSeconds=affordableCallSeconds(policy.maxSeconds,position.uncommittedSeconds,funding.remainingFundedSeconds);
+ const ready=maxCallSeconds>=requiredSeconds;
+ return {availableSeconds:position.uncommittedSeconds,requiredSeconds,maxCallSeconds,ready,reason:ready?null:'funding_review_required'};
 }
 export async function handleScriptedCallingRequest(req,env,user,{now=Date.now()}={}){
  const url=new URL(req.url),path=url.pathname;

@@ -5,7 +5,7 @@ import {requireMembership,mutationOriginAllowed} from './human-auth.mjs';
 import {parseJsonBody,resolveCrmDb} from './core.mjs';
 import {estimateProductionCost} from './production-cost-plan.mjs';
 import {costObservation,readInternalPlivoCdr} from './cost-intelligence.mjs';
-import {minutePosition,fundingCap,fundingPosition} from './minute-holds.mjs';
+import {minutePosition,fundingCap,fundingPosition,affordableCallSeconds,providerFundingCaps} from './minute-holds.mjs';
 import {scriptedCampaignConfiguration} from './scripted-campaign-dispatch.mjs';
 
 const base='/v1/human/credits';
@@ -310,7 +310,7 @@ export async function handleCreditWalletRequest(req,env,user,{fetcher=fetch}={})
     db.prepare("SELECT COALESCE(SUM(CASE WHEN job_id IS NULL THEN 1 ELSE 0 END),0) AS internalEnded,COALESCE(SUM(CASE WHEN job_id IS NOT NULL THEN 1 ELSE 0 END),0) AS campaignEnded FROM scripted_phone_pilots WHERE hangup_at IS NOT NULL").first(),
     db.prepare("SELECT l.created_at AS createdAt,t.display_name AS company,CASE WHEN l.id LIKE 'call-reversal:%' THEN 'call_reversal' ELSE l.kind END AS kind,l.delta_seconds AS deltaSeconds,l.balance_seconds AS balanceSeconds FROM tenant_minute_ledger l JOIN tenants t ON t.id=l.tenant_id ORDER BY l.sequence DESC LIMIT 10").all(),fundingPosition(db,fundingCap(env))
    ]);
-   return json({clients,funding,position:{...position,uncommittedSeconds:position.allocatedSeconds-position.heldSeconds-position.usedSeconds},internal:{ended:sessions.internalEnded},campaign:{ended:sessions.campaignEnded},transactions:transactions.results,providerRequests:0,externalPaymentsRecorded:false,dispatchEnabledByDashboard:false});
+   return json({clients,funding:{...funding,reviewedProviderCeilings:providerFundingCaps(env)},position:{...position,uncommittedSeconds:position.allocatedSeconds-position.heldSeconds-position.usedSeconds},internal:{ended:sessions.internalEnded},campaign:{ended:sessions.campaignEnded},transactions:transactions.results,providerRequests:0,externalPaymentsRecorded:false,dispatchEnabledByDashboard:false});
   }
   if(path==='reverse-call-charge'){
    if(req.method!=='POST')return fail('method not allowed',405);
@@ -365,7 +365,7 @@ export async function handleCreditWalletRequest(req,env,user,{fetcher=fetch}={})
     if(configuration.ready&&t.status==='active'){
      const member=isAdmin?await db.prepare('SELECT id AS tenant_id,storage_mode,dedicated_binding FROM tenants WHERE id=?').bind(tid).first():t;
      const policy=await resolveCrmDb(env,member).prepare('SELECT max_seconds FROM calling_policies WHERE tenant_id=? AND enabled=1 AND expires_at>?').bind(tid,new Date().toISOString()).first();
-     if(policy){const f=await fundingPosition(db,fundingCap(env));spendableSeconds=Math.max(0,Math.min(position.uncommittedSeconds,f.remainingFundedSeconds));dispatchEnabled=spendableSeconds>=Math.ceil(policy.max_seconds/30)*30;}
+     if(policy){const f=await fundingPosition(db,fundingCap(env));spendableSeconds=Math.max(0,Math.min(position.uncommittedSeconds,f.remainingFundedSeconds));dispatchEnabled=affordableCallSeconds(policy.max_seconds,position.uncommittedSeconds,f.remainingFundedSeconds)>0;}
     }
     return json({tenantId:tid,...position,spendableSeconds,dispatchEnabled,offset:Number(offset),hasMore:rows.length>50||holds.length>50,
      transactions:rows.slice(0,50).map(({currentBalance,...row})=>row),callTransactions:holds.slice(0,50),status:spendableSeconds===null?'allocation_only':'funding_checked'});

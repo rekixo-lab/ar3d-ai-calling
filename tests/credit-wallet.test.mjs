@@ -487,7 +487,7 @@ test('admin dashboard reports actual balances, is MFA-only and never queries car
 });
 
 
-test('admin funding overview is private and missing funding is not zero',async()=>{const f=fixture();try{freshMfa(f);let d=await (await route(f,'admin-dashboard')).json();assert.equal(d.funding.capSeconds,null);assert.equal(d.funding.remainingFundedSeconds,null);f.env.AR3D_FUNDED_CUMULATIVE_SECONDS='120';d=await (await route(f,'admin-dashboard')).json();assert.equal(d.funding.capSeconds,120);assert.equal(d.funding.remainingFundedSeconds,120);const clientView=await (await route(f,'minute-ledger?tenantId='+tid,client)).json();assert.equal(clientView.spendableSeconds,null);assert.equal(clientView.dispatchEnabled,false);assert.equal(Object.hasOwn(clientView,'funding'),false);}finally{f.close()}});
+test('admin funding overview is private and missing funding is not zero',async()=>{const f=fixture();try{freshMfa(f);let d=await (await route(f,'admin-dashboard')).json();assert.equal(d.funding.capSeconds,null);assert.equal(d.funding.remainingFundedSeconds,null);Object.assign(f.env,{AR3D_FUNDED_CUMULATIVE_SECONDS:'120',AR3D_PLIVO_FUNDED_CUMULATIVE_SECONDS:'120',AR3D_SARVAM_FUNDED_CUMULATIVE_SECONDS:'120'});d=await (await route(f,'admin-dashboard')).json();assert.equal(d.funding.capSeconds,120);assert.equal(d.funding.remainingFundedSeconds,120);const clientView=await (await route(f,'minute-ledger?tenantId='+tid,client)).json();assert.equal(clientView.spendableSeconds,null);assert.equal(clientView.dispatchEnabled,false);assert.equal(Object.hasOwn(clientView,'funding'),false);}finally{f.close()}});
 
 
 test('one full compensating call reversal is MFA protected, tenant scoped and immutable',async()=>{const f=fixture();try{

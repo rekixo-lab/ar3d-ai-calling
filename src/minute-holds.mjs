@@ -13,10 +13,26 @@ export async function minutePosition(db,tenantId){
 }
 // Operator-reviewed cumulative funded capacity (including already settled
 // seconds), not an inferred provider balance. Unset/invalid => no live dispatch.
-export function fundingCap(env){
- const raw=env?.AR3D_FUNDED_CUMULATIVE_SECONDS;
+export const BILLING_PULSE_SECONDS=30;
+function readCap(raw){
  if(typeof raw!=='string'||!/^\d{1,12}$/.test(raw))return null;
  const n=Number(raw);return integer(n,0,999999999999)?n:null;
+}
+// Separate operator-reviewed lifetime capacity ceilings; neither is a live
+// monetary balance. All three must be configured before commercial dispatch.
+export function providerFundingCaps(env){
+ return {combined:readCap(env?.AR3D_FUNDED_CUMULATIVE_SECONDS),
+  plivo:readCap(env?.AR3D_PLIVO_FUNDED_CUMULATIVE_SECONDS),
+  sarvam:readCap(env?.AR3D_SARVAM_FUNDED_CUMULATIVE_SECONDS)};
+}
+export function fundingCap(env){
+ const caps=Object.values(providerFundingCaps(env));
+ return caps.some(v=>v===null)?null:Math.min(...caps);
+}
+// Floor the duration to a full billing pulse, never above any ceiling.
+export function affordableCallSeconds(maxSeconds,clientSeconds,providerSeconds){
+ if(!integer(maxSeconds,1,86400)||!integer(clientSeconds,0,1000000000)||!integer(providerSeconds,0,999999999999))return 0;
+ return Math.floor(Math.min(maxSeconds,clientSeconds,providerSeconds)/BILLING_PULSE_SECONDS)*BILLING_PULSE_SECONDS;
 }
 export async function fundingPosition(db,cap){
  const r=await db.prepare(`SELECT COALESCE(SUM(CASE WHEN state='held' THEN reserved_seconds ELSE 0 END),0) AS held,
