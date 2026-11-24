@@ -141,7 +141,7 @@ const speak=(language,text)=>'<Speak voice="'+(language==='hi'?'Polly.Aditi':'WO
 function directOpening(row){
  // Only the explicitly pre-informed internal streaming test uses the short greeting.
  if(isStreaming(row))return speak(row.language,row.language==='hi'?'नमस्कार, मैं ए आर थ्री डी की ए आई असिस्टेंट हूँ।':'Hello, I am the AR3D AI assistant.');
- return speak(row.language,row.language==='hi'?'नमस्कार, मैं ए आर थ्री डी की ए आई सहायक हूँ। आपके जवाब रिकॉर्ड किए जाएंगे। अगर आप बात नहीं करना चाहते, तो मना कर सकते हैं।':'Hello, I am the AR3D AI assistant. Your answers will be recorded. You can decline at any time.');
+ return speak(row.language,row.language==='hi'?'नमस्कार, मैं ए आर थ्री डी की ए आई असिस्टेंट हूँ। यह बातचीत रिकॉर्ड होती है।':'Hello, I am the AR3D AI assistant. This conversation is recorded.');
 }
 
 function responseFor(config,row,{repeatCue=false,directOpeningCue=false,liveToken=null}={}){
@@ -428,6 +428,8 @@ export async function handleScriptedPhoneAdmin(req,env,user,{now=Date.now(),fetc
     CASE WHEN json_valid(survey_json) THEN json_extract(survey_json,'$.phoneMeta.lastAudioOutcome') END AS last_audio_outcome,
     CASE WHEN json_valid(survey_json) THEN json_extract(survey_json,'$.phoneMeta.audioMs') END AS audio_ms,
     CASE WHEN json_valid(survey_json) THEN json_extract(survey_json,'$.phoneMeta.sttConnected') END AS stt_connected,
+    CASE WHEN json_valid(survey_json) THEN json_extract(survey_json,'$.phoneMeta.audioBytes') END AS audio_bytes,
+    CASE WHEN json_valid(survey_json) THEN json_extract(survey_json,'$.phoneMeta.mediaHost') END AS media_host,
     hangup_at IS NOT NULL AS signed_hangup,
     provider_call_id IS NOT NULL AS provider_call_reference FROM scripted_phone_pilots
     WHERE tenant_id=? AND job_id IS NULL ORDER BY created_at DESC LIMIT 5`).bind(config.tenant).all();
@@ -623,17 +625,26 @@ async function resolveRecordedAnswerUrl(config,row,recording,fetcher){
  const one=await providerMetadata(config,'Recording/'+recording+'/',fetcher);
  return verifiedRecordingUrl(config,row,recording,one.body);
 }
+function recordingDurationMs(params){
+ const raw=params.get('RecordingDurationMs');
+ if(raw&&/^\d{1,6}$/.test(raw)&&Number(raw)<=180000)return Number(raw);
+ return null;
+}
 async function recordingAnswer(config,env,row,params,fetcher){
  if(!ID.test(params.get('RecordingID')||''))return {text:null,reason:'recording_id_missing'};
  const recording=params.get('RecordingID');
- // Fetch only the fixed credentialed URL, never a callback-supplied URL.
- let response,bytes,reason='recording_fetch_failed';
+ // The signed callback has already been verified and bound to this call.
+ // Accept only an exact account/recording path on our two approved Plivo
+ // media hosts; never follow a redirect or send auth to arbitrary URLs.
+ const callbackUrl=verifiedRecordingUrl(config,row,recording,{recording_id:recording,call_uuid:row.provider_call_id,recording_format:'mp3',recording_url:params.get('RecordUrl')});
+ const legacyUrl='https://media.plivo.com/v1/Account/'+config.authId+'/Recording/'+recording+'.mp3';
+ let mediaUrl=callbackUrl||legacyUrl,response,bytes,reason='recording_fetch_failed';
  // The action callback can precede media availability. Retry the identical
  // authenticated GET once on a transient status, within a bounded fetch budget.
  // Never follow redirects or forward credentials to callback-provided URLs.
  for(let attempt=0;attempt<2;attempt++){
   try{
-   response=await fetcher('https://media.plivo.com/v1/Account/'+config.authId+'/Recording/'+recording+'.mp3',{
+   response=await fetcher(mediaUrl,{
     headers:{Authorization:config.authorization},redirect:'manual',signal:AbortSignal.timeout(2500)
    });
    if(response.ok)break;
@@ -641,9 +652,10 @@ async function recordingAnswer(config,env,row,params,fetcher){
    const transient=[404,409,425,429,500,502,503,504].includes(response.status);
    if(response.status===403&&attempt===0){
     const verified=await resolveRecordedAnswerUrl(config,row,recording,fetcher);
-    if(!verified||verified==='https://media.plivo.com/v1/Account/'+config.authId+'/Recording/'+recording+'.mp3')return {text:null,reason:'recording_http_403'};
+    if(!verified||verified===mediaUrl)return {text:null,reason:'recording_http_403'};
     try{await response.body?.cancel()}catch{}
-    response=await fetcher(verified,{headers:{Authorization:config.authorization},redirect:'manual',signal:AbortSignal.timeout(2500)});
+    mediaUrl=verified;
+    response=await fetcher(mediaUrl,{headers:{Authorization:config.authorization},redirect:'manual',signal:AbortSignal.timeout(2500)});
     if(response.ok)break;
     return {text:null,reason:'recording_http_'+response.status};
    }
@@ -658,8 +670,8 @@ async function recordingAnswer(config,env,row,params,fetcher){
  catch{return {text:null,reason:'recording_body_invalid'}}
  try{
   const text=await transcribeScriptedAnswer(env.AI,bytes,row.language,{vadFilter:false});
-  return {text,reason:text?'recognized':'speech_empty'};
- }catch{return {text:null,reason:'speech_service_failed'}}
+  return {text,reason:text?'recognized':'speech_empty',audioMs:recordingDurationMs(params),audioBytes:bytes.length,sttConnected:true,mediaHost:new URL(mediaUrl).hostname};
+ }catch{return {text:null,reason:'speech_service_failed',audioMs:recordingDurationMs(params),audioBytes:bytes.length,sttConnected:false,mediaHost:new URL(mediaUrl).hostname}}
 }
 
 async function applyPhoneAnswer(config,env,row,answer,now){
@@ -667,7 +679,7 @@ async function applyPhoneAnswer(config,env,row,answer,now){
   const {phoneMeta={},...prior}=JSON.parse(row.survey_json);
   // A broken media/ASR path is not an unintelligible customer response.
   // Never loop the apology when no actual listening opportunity was provided.
-  const streamMetrics=isStreaming(row)?{audioMs:Number.isSafeInteger(answer.audioMs)?Math.min(18000,Math.max(0,answer.audioMs)):0,streamStarted:answer.streamStarted===true,sttConnected:answer.sttConnected===true}:{};
+  const streamMetrics=isStreaming(row)?{audioMs:Number.isSafeInteger(answer.audioMs)?Math.min(18000,Math.max(0,answer.audioMs)):0,streamStarted:answer.streamStarted===true,sttConnected:answer.sttConnected===true}:{audioMs:answer.audioMs??null,audioBytes:answer.audioBytes??null,sttConnected:answer.sttConnected??null,mediaHost:answer.mediaHost??null};
   if(isStreaming(row)&&answer.reason.startsWith('stream_')){
    const survey_json=JSON.stringify({...prior,phoneMeta:{...phoneMeta,...streamMetrics,lastAudioOutcome:answer.reason,technicalFailure:true}});
    const changed=await control.prepare("UPDATE scripted_phone_pilots SET phase='needs_review',survey_json=? WHERE id=? AND phase='transcribing' AND turn=?").bind(survey_json,id,turn).run();
