@@ -134,6 +134,17 @@ function scriptedPhonePilotPanel(){
   language.value='en';
   const status=node('p',{class:'note',role:'status',text:'Checking pilot configuration…'});
   const results=div('stack'),prepared=div('stack');
+  const device=node('select',{class:'field','aria-label':'Internal test number'});
+  const mobile=input('internalTestMobile','tel','10-digit Indian mobile');mobile.maxLength=13;
+  const enroll=btn('Add test number',async()=>{
+    const raw=mobile.value.trim().replace(/\s/g,'');
+    const number=/^[6-9][0-9]{9}$/.test(raw)?'+91'+raw:raw;
+    if(!/^[+]91[6-9][0-9]{9}$/.test(number)){notice('Enter a valid Indian mobile number.',true);return}
+    if(!confirm('Confirm this is an owned or authorized internal test device, the recipient explicitly agrees to the test and recording notice, and your provider permits the test. Adding it will not place a call.'))return;
+    enroll.disabled=true;
+    try{const d=await api('/v1/human/scripted-phone-pilot/devices','POST',{mobile:number,confirm:'VERIFIED_CONSENTED_INTERNAL_DEVICE_NO_CALL'});mobile.value='';await refresh();device.value=d.leadId;updateAvailability();notice('Internal test number added. No call placed.')}catch(e){asError(e)}finally{updateAvailability()}
+  },true);
+  const enrollment=node('details',{class:'card'},[node('summary',{text:'Manage internal test numbers (up to 5)'}),node('p',{class:'muted',text:'Only authorized, consenting internal recipients. The primary number counts toward the five-device limit. No call is made when adding a device.'}),div('formrow',lab('Additional mobile',mobile),enroll)]);
   const prepare=btn('Prepare internal test customer (no call)',async()=>{
     if(!window.confirm('Create or reuse the AR3D Internal test customer for the mobile configured in Worker Secrets? Confirm you own and have verified that number. No call, consent clearance or payment is made.'))return;
     prepare.disabled=true;
@@ -150,7 +161,8 @@ function scriptedPhonePilotPanel(){
   function updateAvailability(){
     const available=config?.availability;
     const seconds=Math.max(0,Math.ceil((deadline-Date.now())/1000));
-    call.disabled=busy||refreshing||!config?.configured||available?.ready!==true;
+    call.disabled=busy||refreshing||!config?.configured||available?.ready!==true||!device.value;
+    enroll.disabled=busy||refreshing||!config?.enrollmentEnabled||(config?.devices?.length||0)>=5;
     cooldown.textContent=!config?.configured?'':available?.reason==='awaiting_signed_hangup'?
       'Waiting for signed hangup from Plivo. Do not redial an unconfirmed call.':
       available?.reason==='cooldown'?'Next internal test in '+Math.floor(seconds/60)+':'+String(seconds%60).padStart(2,'0'):
@@ -169,10 +181,11 @@ function scriptedPhonePilotPanel(){
     },1000);
   }
   const call=btn('Call the verified internal number once',async()=>{
-    if(busy||refreshing||config?.availability?.ready!==true||!window.confirm('Place one internal pilot call to the verified number ending '+config.destinationLast4+'? This uses phone credits and records short answers only after the recipient presses 1.'))return;
+    const selected=config?.devices?.find(x=>x.leadId===device.value);
+    if(busy||refreshing||!selected||config?.availability?.ready!==true||!window.confirm('Place one internal pilot call to the selected test number ending '+selected.destinationLast4+'? This uses phone credits and records short answers only after the recipient presses 1.'))return;
     busy=true;updateAvailability();
     try{
-      await api('/v1/human/scripted-phone-pilot','POST',{language:language.value,confirm:'CALL_ONE_VERIFIED_INTERNAL_NUMBER'});
+      await api('/v1/human/scripted-phone-pilot','POST',{language:language.value,leadId:selected.leadId,confirm:'CALL_ONE_VERIFIED_INTERNAL_NUMBER'});
       notice('Pilot submitted. Waiting for signed hangup.');
     }catch(err){asError(err)}
     finally{try{await refresh()}catch(err){asError(err)}busy=false;updateAvailability()}
@@ -184,15 +197,20 @@ function scriptedPhonePilotPanel(){
     try{
     config=await api('/v1/human/scripted-phone-pilot');
     deadline=Date.now()+1000*(config.availability?.retryAfterSeconds||0);
-    status.textContent=config.configured?'One internal verified number ending '+config.destinationLast4+
-      '. Complete answers update its configured test lead.':'Waiting for Plivo: approve a caller number and configure the internal test.';
+    status.textContent=config.configured?'Choose one authorized internal device. Complete answers update only its test lead.':'Waiting for Plivo: approve a caller number and configure the internal test.';
+    const previous=device.value;
+    device.replaceChildren(...(config.devices||[]).map(x=>node('option',{value:x.leadId,text:(x.primary?'Primary':'Test device')+' · ••••'+x.destinationLast4})));
+    if(config.devices?.some(x=>x.leadId===previous))device.value=previous;
+    enrollment.hidden=!config.configured;
+    prepare.hidden=!!config.configured;
 
-    results.replaceChildren(...(config.recent?.length?[table(['Started','Language','Status','Provider call reference','Turns processed','Signed hangup','Seconds'],
-      config.recent.map(x=>[x.created_at,x.language,x.phase,x.provider_call_reference?'Received':'Not received',x.turn??'—',x.signed_hangup?'Received':'Not received',x.duration_seconds??'—']))]:[]));
+    results.replaceChildren(...(config.recent?.length?[table(['Started','Test number','Language','Status','Provider call reference','Turns processed','Signed hangup','Seconds'],
+      config.recent.map(x=>[x.created_at,x.destinationLast4?'••••'+x.destinationLast4:'—',x.language,x.phase,x.provider_call_reference?'Received':'Not received',x.turn??'—',x.signed_hangup?'Received':'Not received',x.duration_seconds??'—']))]:[]));
     }catch(err){config=null;status.textContent='Could not verify internal call availability. Refresh status to retry.';throw err}
     finally{refreshing=false;updateAvailability();scheduleCheck()}
   }
-  card.append(status,prepare,prepared,div('formrow',lab('Recorded prompt language',language),call,
+  enrollment.hidden=true;device.addEventListener('change',updateAvailability);
+  card.append(status,prepare,prepared,enrollment,div('formrow',lab('Internal test number',device),lab('Recorded prompt language',language),call,
     btn('Refresh fixed-question pilot status',()=>refresh().catch(asError),true)),cooldown,results);
   refresh().catch(()=>{status.textContent='Pilot status requires a current MFA Super Admin session.'});
   return card;
