@@ -27,12 +27,28 @@ test('FIFO prepaid value, outstanding holds, currency-separated costs and conser
  f.c.db.prepare("INSERT INTO tenant_minute_ledger(id,tenant_id,kind,delta_seconds,previous_seconds,balance_seconds,actor,reason,created_at) VALUES(?,?,'allocation',90,180,270,'admin','Synthetic reversal',?)").run('call-reversal:'+tid+':'+job,tid,at);
  r=(await clientFinancialReport(f.env.CONTROL_DB)).rows[0];assert.equal(r.netUsedSeconds,0);assert.equal(r.outstandingSeconds,180);assert.equal(r.remainingPrepaidValuePaise,null);assert.equal(r.contributionMicros,null);
  f.c.db.prepare("INSERT INTO tenants(id,slug,display_name,plan_code,storage_mode,status,created_at,updated_at) VALUES(?,'other','Other','starter','shared','active',?,?)").run(other,at,at);
- f.c.db.prepare("UPDATE tenants SET status='suspended' WHERE id=?").run(tid);
+ f.c.db.prepare("UPDATE tenants SET status='suspended',suspended_from_status='active' WHERE id=?").run(tid);
  const all=await clientFinancialReport(f.env.CONTROL_DB);assert.equal(all.rows.length,2);assert.equal(all.rows.find(x=>x.tenantId===tid).outstandingSeconds,180);
  assert.equal((await clientFinancialReport(f.env.CONTROL_DB,{tenantId:other})).rows[0].paidPaise,0);
  const req=user=>handleCreditWalletRequest(new Request('https://app.example.invalid/v1/human/credits/client-financial-report'),f.env,user);
  assert.equal((await req(client)).status,403);
  const report=await (await req(admin)).json();assert.equal(report.profitVerified,false);assert.equal(report.recognizedRevenuePaise,null);
  assert.equal(f.c.db.prepare('SELECT COUNT(*) AS n FROM tenant_credit_purchases').get().n,2);
+ }finally{f.close()}
+});
+
+test('foreign-currency expense cannot become INR contribution and manual allocations preserve service obligations',async()=>{
+ const f=fixture();try{
+ f.c.db.prepare("INSERT INTO tenant_credit_purchases(id,tenant_id,receipt_ref,paid_paise,purchased_seconds,previous_seconds,actor,created_at) VALUES('usd-purchase',?,'usd-receipt',500,120,0,'admin',?)").run(tid,at);
+ const config={plivo:{currency:'USD',capMicros:10000000,pulseMicros:10000},sarvam:{currency:'INR',capMicros:10000000,pulseMicros:10000}};
+ assert.equal((await reserveBudgetedMinutes(f.env.CONTROL_DB,{tenantId:tid,job,maxSeconds:60,globalCap:120,config})).ok,true);
+ assert.equal((await closeMinuteHold(f.env.CONTROL_DB,{tenantId:tid,job,billedSeconds:60,kind:'verified_cdr',evidenceRef:'usd-cdr'})).ok,true);
+ f.c.db.prepare("INSERT INTO provider_financial_journal(id,provider,currency,kind,amount_micros,evidence_ref,reason,actor,created_at) VALUES('usd-line','plivo','USD','expense',12345,'usd-expense','Synthetic USD evidence','admin',?)").run(at);
+ assert.equal((await reconcileProviderCost(f.env.CONTROL_DB,{tenantId:tid,jobId:job,provider:'plivo',evidenceRef:'usd-expense',zeroCost:false},'admin')).ok,true);
+ assert.equal((await reconcileProviderCost(f.env.CONTROL_DB,{tenantId:tid,jobId:job,provider:'sarvam',evidenceRef:'zero-ai-evidence',zeroCost:true},'admin')).ok,true);
+ let r=(await clientFinancialReport(f.env.CONTROL_DB)).rows[0];
+ assert.equal(r.providerCostsComplete,true);assert.equal(r.plivoUsdMicros,12345);assert.equal(r.contributionStatus,'verified_fx_required');assert.equal(r.contributionMicros,null);
+ f.c.db.prepare("INSERT INTO tenant_minute_ledger(id,tenant_id,kind,delta_seconds,previous_seconds,balance_seconds,actor,reason,created_at) VALUES('gift',?,'allocation',60,120,180,'admin','Synthetic free credits',?)").run(tid,at);
+ r=(await clientFinancialReport(f.env.CONTROL_DB)).rows[0];assert.equal(r.outstandingSeconds,120);assert.equal(r.remainingPrepaidValuePaise,null);
  }finally{f.close()}
 });

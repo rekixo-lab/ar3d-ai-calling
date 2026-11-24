@@ -291,6 +291,10 @@ try{
  await adminPage.getByRole('heading',{name:'Provider financial journal',exact:true}).waitFor();
  await adminPage.getByRole('heading',{name:'Client financial position',exact:true}).waitFor();
  await adminPage.getByRole('button',{name:'Export financial page (CSV)',exact:true}).waitFor();
+ const financialCard=adminPage.locator('.card').filter({has:adminPage.getByRole('heading',{name:'Client financial position',exact:true})});
+ const reportTable=financialCard.getByRole('table');
+ assert.equal(await reportTable.getByRole('columnheader').count(),16);
+ assert.equal(await reportTable.getByRole('row').nth(1).getByRole('cell').count(),16);
  await adminPage.route('**/v1/human/credits/provider-usage-summary?days=7',r=>r.fulfill({json:{available:true,currency:'INR',totalSpend:123.456,fromDate:'2026-11-17',toDate:'2026-11-24',checkedAt:new Date().toISOString()}}));
  await adminPage.getByRole('button',{name:'Check Plivo spend',exact:true}).click();
  await adminPage.getByText('INR 123.456',{exact:true}).waitFor();

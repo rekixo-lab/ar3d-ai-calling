@@ -812,7 +812,7 @@ function clientFinancialOverview(main){
  const fmtPaise=n=>Number.isSafeInteger(n)?'INR '+(n/100).toFixed(2):'Review required';
  const fmtMicros=n=>Number.isSafeInteger(n)?(n/1000000).toFixed(6):'Unavailable';
  const headers=['Company','Status','Collections','Purchased','Net charged','Outstanding','Reserved','Uncommitted','Remaining prepaid value','Plivo INR','Plivo USD','Sarvam INR','Sarvam USD','Calls missing cost evidence','Indicative contribution INR','Review status'];
- const dataRow=r=>[r.company,r.status,fmtPaise(r.paidPaise),formatSeconds(r.purchasedSeconds),formatSeconds(r.netUsedSeconds),formatSeconds(r.outstandingSeconds),formatSeconds(r.heldSeconds),formatSeconds(r.uncommittedSeconds),fmtPaise(r.remainingPrepaidValuePaise),fmtMicros(r.plivoInrMicros),fmtMicros(r.plivoUsdMicros),fmtMicros(r.sarvamInrMicros),String(r.incompleteCostCalls),fmtMicros(r.contributionMicros),r.contributionStatus];
+ const dataRow=r=>[r.company,r.status,fmtPaise(r.paidPaise),formatSeconds(r.purchasedSeconds),formatSeconds(r.netUsedSeconds),formatSeconds(r.outstandingSeconds),formatSeconds(r.heldSeconds),formatSeconds(r.uncommittedSeconds),fmtPaise(r.remainingPrepaidValuePaise),fmtMicros(r.plivoInrMicros),fmtMicros(r.plivoUsdMicros),fmtMicros(r.sarvamInrMicros),fmtMicros(r.sarvamUsdMicros),String(r.incompleteCostCalls),fmtMicros(r.contributionMicros),r.contributionStatus];
  const refresh=btn('Refresh financial report',load,true),prev=btn('Previous companies',()=>{offset=Math.max(0,offset-50);load()},true),next=btn('Next companies',()=>{offset+=50;load()},true);
  async function load(){
   if(refresh.disabled)return;
