@@ -1833,7 +1833,7 @@ async function crmWorkflow(tenantId,content,role,refreshContent=content){
   const workflow=div('card',title('Customer list'));workflow.id='customer-workflow';
   if(editable){
     const upload=div('card import-card',title('Upload customer file'),
-      node('p',{class:'muted',text:'CSV or Excel (.xlsx) · up to 100 customers per file · Name and Mobile columns'}));
+      node('p',{class:'muted',text:'CSV or Excel (.xlsx) · up to 1,000 customers per file · Name and Mobile columns'}));
     content.prepend(upload);
     const template=btn('Download customer Excel template (CSV)',()=>{const href=URL.createObjectURL(new Blob(['Name,Mobile\r\n'],{type:'text/csv;charset=utf-8'}));const a=node('a',{href,download:'ar3d-customer-template.csv'});document.body.append(a);a.click();a.remove();URL.revokeObjectURL(href)},true);upload.append(template);
     const picker=node('input',{class:'field',type:'file',accept:'.csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}),previewBox=div(''),csvBox=div('formrow',lab('Excel .xlsx or CSV file',picker));
@@ -1844,15 +1844,17 @@ async function crmWorkflow(tenantId,content,role,refreshContent=content){
     async function makeImportPayload(file){
       const lower=file.name.toLowerCase();
       if(lower.endsWith('.csv')){
-        if(file.size>160000)throw Error('Choose a CSV file under 160 KB');
+        if(file.size>512000)throw Error('Choose a CSV file under 512 KB');
         return {tenantId,csv:await file.text(),format:'csv'};
       }
-      if(!lower.endsWith('.xlsx')||file.size>1048576)throw Error('Choose an .xlsx under 1 MB or .csv under 160 KB');
+      if(!lower.endsWith('.xlsx')||file.size>1048576)throw Error('Choose an .xlsx under 1 MB or .csv under 512 KB');
       const bytes=new Uint8Array(await file.arrayBuffer());
       let raw='';for(let i=0;i<bytes.length;i+=16384)raw+=String.fromCharCode(...bytes.subarray(i,i+16384));
       return {tenantId,format:'xlsx',xlsxBase64:btoa(raw)};
     }
     const previewBtn=btn('Validate & Preview',async()=>{
+      if(previewBtn.disabled)return;
+      previewBtn.disabled=true;picker.disabled=true;commitBtn.disabled=true;campaignBtn.disabled=true;importActions.hidden=true;
       try{
         const file=picker.files?.[0];if(!file)throw Error('Choose an Excel or CSV file');
         importData=await makeImportPayload(file);
@@ -1862,6 +1864,7 @@ async function crmWorkflow(tenantId,content,role,refreshContent=content){
             [r.name,r.mobile,r.customerSegment,r.plotSizePreference||'—',r.visitDatePreference||'—'])));
         requestId=crypto.randomUUID();importActions.hidden=false;commitBtn.disabled=false;campaignBtn.disabled=false;
       }catch(e){importData=null;importActions.hidden=true;commitBtn.disabled=true;campaignBtn.disabled=true;previewBox.replaceChildren();asError(e)}
+      finally{previewBtn.disabled=false;picker.disabled=false}
     });
     async function commit(makeCampaign){
       if(importData===null)return;

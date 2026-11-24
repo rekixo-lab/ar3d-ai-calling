@@ -2,8 +2,8 @@
 // It intentionally does NOT treat an Excel spreadsheet as proof of call consent.
 import {normalizeIndianPhone} from './core.mjs';
 
-export const MAX_CSV_BYTES=160000;
-export const MAX_CSV_ROWS=100;
+export const MAX_CSV_BYTES=512000;
+export const MAX_CSV_ROWS=1000;
 const HEADERS=Object.freeze({
   name:['name','customer name','client name','full name','customer'],
   mobile:['mobile','mobile number','phone','phone number','contact','contact number','number','whatsapp number'],
@@ -18,7 +18,7 @@ const HEADERS=Object.freeze({
 function normalizeHeader(s){return String(s).trim().toLowerCase().replace(/[\s_-]+/g,' ')}
 function csvCells(text){
   if(typeof text!=='string'||new TextEncoder().encode(text).length>MAX_CSV_BYTES)
-    throw Error('CSV file too large (maximum 160 KB)');
+    throw Error('CSV file too large (maximum 512 KB)');
   const source=text.replace(/^\uFEFF/,'');
   if(!source.trim())throw Error('CSV file is empty');
   const rows=[];let row=[],cell='',quoted=false,closed=false;
@@ -43,13 +43,13 @@ function csvCells(text){
       if(!closed)cell+=ch;
     }
     if(cell.length>3000)throw Error('CSV cell too long');
-    if(rows.length>MAX_CSV_ROWS+1)throw Error('Too many CSV rows (maximum 100)');
+    if(rows.length>MAX_CSV_ROWS+1)throw Error('Too many CSV rows (maximum 1000)');
   }
   if(quoted)throw Error('Malformed CSV: unclosed quote');
   row.push(cell.trim());
   if(row.some(v=>v!==''))rows.push(row);
   if(rows.length<2)throw Error('CSV must have a header and at least one customer');
-  if(rows.length>MAX_CSV_ROWS+1)throw Error('Too many CSV rows (maximum 100)');
+  if(rows.length>MAX_CSV_ROWS+1)throw Error('Too many CSV rows (maximum 1000)');
   if(rows[0].length>24)throw Error('Too many columns');
   return rows;
 }

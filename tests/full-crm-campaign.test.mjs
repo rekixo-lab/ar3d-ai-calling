@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {fixture,tid,cid,lead,at,client,admin,route,configureScriptedCampaign,until} from './helpers/calling-fixture.mjs';
 import {handleCampaignRequest} from '../src/campaign-routes.mjs';
+import {handleCrmRequest} from '../src/crm-routes.mjs';
 
 function fromCrm(f,body={tenantId:tid},user=client){
  return handleCampaignRequest(new Request('https://app.example.invalid/v1/human/campaigns/'+cid+'/candidates/from-crm',{
@@ -66,5 +67,18 @@ test('Rejects foreign tenant access, invalid filters and oversized selection wit
   assert.equal((await fromCrm(f,{tenantId:tid,customerSegment:'arbitrary'})).status,400);
   assert.equal((await fromCrm(f,{tenantId:'99999999-9999-4999-8999-999999999999'})).status,403);
   assert.equal((await fromCrm(f,{tenantId:tid},{id:'viewer',globalRole:'user'})).status,403);
+ }finally{f.close()}
+});
+
+test('large import chunks commit atomically and campaign replay is duplicate-safe',async()=>{
+ const f=fixture();try{
+  const rows=Array.from({length:250},(_,i)=>'Buyer '+i+','+String(9100000000+i));
+  const csv='Name,Mobile\n'+rows.join('\n'),payload={tenantId:tid,csv,campaign:{name:'Bulk import',language:'hi',requestId:crypto.randomUUID()}};
+  const req=()=>new Request('https://app.example.invalid/v1/human/import/commit',{method:'POST',headers:{Origin:'https://app.example.invalid','Content-Type':'application/json'},body:JSON.stringify(payload)});
+  const first=await handleCrmRequest(req(),f.env,client);assert.equal(first.status,201,await first.clone().text());const a=await first.json();
+  assert.equal(a.inserted,250);assert.equal(a.campaignCustomers,250);
+  const replay=await (await handleCrmRequest(req(),f.env,client)).json();assert.equal(replay.inserted,0);assert.equal(replay.campaignId,a.campaignId);assert.equal(replay.campaignCustomers,250);
+  assert.equal(f.r.db.prepare("SELECT COUNT(*) AS n FROM leads WHERE consent_status='unknown' AND dnd_status='unknown'").get().n,251);
+  assert.equal(f.r.db.prepare('SELECT COUNT(*) AS n FROM calling_jobs').get().n,0);
  }finally{f.close()}
 });

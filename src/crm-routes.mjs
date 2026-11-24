@@ -98,7 +98,8 @@ export async function handleCrmRequest(req,env,user){
       }
       const stamp=now(),leadRows=rows.map(row=>({...row,id:crypto.randomUUID(),
         requirementsJson:JSON.stringify(row.requirement?{raw:row.requirement}:{})}));
-      const statements=[db.prepare(`INSERT INTO leads
+      const chunks=[];for(let i=0;i<leadRows.length;i+=100)chunks.push(leadRows.slice(i,i+100));
+      const statements=chunks.map(chunk=>db.prepare(`INSERT INTO leads
         (tenant_id,id,name,mobile_e164,source_type,consent_status,dnd_status,
          preferred_location,budget_min_inr,budget_max_inr,requirements_json,created_at,updated_at,
          customer_segment,plot_size_preference,visit_date_preference)
@@ -107,7 +108,7 @@ export async function handleCrmRequest(req,env,user){
          row.value->>'$.requirementsJson',?,?,row.value->>'$.customerSegment',row.value->>'$.plotSizePreference',
          row.value->>'$.visitDatePreference'
         FROM json_each(?) row WHERE 1
-        ON CONFLICT(tenant_id,mobile_e164) DO NOTHING`).bind(tid,stamp,stamp,JSON.stringify(leadRows))];
+        ON CONFLICT(tenant_id,mobile_e164) DO NOTHING`).bind(tid,stamp,stamp,JSON.stringify(chunk)));
       // D1.batch is transactional: either the entire file succeeds or none is committed.
       statements.push(db.prepare(`INSERT INTO crm_audit_events(tenant_id,id,actor,action,target_id,created_at)
         VALUES(?,?,'human:'||?,?,?,?)`).bind(tid,crypto.randomUUID(),user.id,isXlsx?'leads.xlsx_import':'leads.csv_import',String(rows.length),stamp));
@@ -130,7 +131,7 @@ export async function handleCrmRequest(req,env,user){
       const result=await db.batch(statements);
       const selected=campaignId?await db.prepare('SELECT COUNT(*) AS total FROM call_campaign_candidates WHERE tenant_id=? AND campaign_id=?')
         .bind(tid,campaignId).first():null;
-      const inserted=Number(result[0].meta?.changes||0);
+      const inserted=result.slice(0,chunks.length).reduce((sum,row)=>sum+Number(row.meta?.changes||0),0);
       return json({processed:rows.length,inserted,skipped:rows.length-inserted,
         ...(campaignId?{campaignId,campaignCustomers:selected.total}:{}),
         notice:'Imported records have unknown consent and DND status. No calls were placed.'},201);
