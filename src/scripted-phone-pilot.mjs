@@ -1,7 +1,7 @@
 // Shared phone questionnaire with a separately approved internal pilot and customer campaigns.
 import {resolveCrmDb,parseJsonBody} from './core.mjs';
 import {mutationOriginAllowed} from './human-auth.mjs';
-import {beginFixedVoicePreview,advanceFixedVoicePreview} from './fixed-voice-turns.mjs';
+import {beginFixedVoicePreview,advanceFixedVoicePreview,advanceContextualVoice} from './fixed-voice-turns.mjs';
 import {normalizePropertySurvey,surveyToCrm} from './fixed-property-survey.mjs';
 import {streamToken,validStreamToken,openNovaSocket,upgradePlivoTurn} from './streaming-speech.mjs';
 import {ANSWER_MAX_BYTES,answerContentType,readBoundedBytes,supportsAnswerAudio,transcribeScriptedAnswer} from './scripted-speech.mjs';
@@ -430,6 +430,7 @@ export async function handleScriptedPhoneAdmin(req,env,user,{now=Date.now(),fetc
     CASE WHEN json_valid(survey_json) THEN json_extract(survey_json,'$.phoneMeta.sttConnected') END AS stt_connected,
     CASE WHEN json_valid(survey_json) THEN json_extract(survey_json,'$.phoneMeta.audioBytes') END AS audio_bytes,
     CASE WHEN json_valid(survey_json) THEN json_extract(survey_json,'$.phoneMeta.mediaHost') END AS media_host,
+    CASE WHEN json_valid(survey_json) THEN json_extract(survey_json,'$.phoneMeta.interpreter') END AS interpreter,
     hangup_at IS NOT NULL AS signed_hangup,
     provider_call_id IS NOT NULL AS provider_call_reference FROM scripted_phone_pilots
     WHERE tenant_id=? AND job_id IS NULL ORDER BY created_at DESC LIMIT 5`).bind(config.tenant).all();
@@ -695,10 +696,12 @@ async function applyPhoneAnswer(config,env,row,answer,now){
   }
   // Transport, empty audio and STT errors use the SAME bounded retry budget
   // as unclear speech. Never invent an answer or repeat a paid outbound call.
-  const result=advanceFixedVoicePreview(prior,{transcript:answer.text||'repeat',confidence:answer.confidence??1,now});
+  const args={transcript:answer.text||'repeat',confidence:answer.confidence??1,now};
+  const {result,interpreter}=internalDirect(row)&&answer.reason==='recognized'&&answer.text?
+   await advanceContextualVoice(env.AI,prior,args):{result:advanceFixedVoicePreview(prior,args),interpreter:'direct'};
   // No transcript, recording URL, identifiers, phone numbers or provider secrets.
   console.info('AR3D scripted answer outcome',JSON.stringify({
-   reason:answer.reason,action:result.action,questionIndex:prior.index,
+   reason:answer.reason,action:result.action,interpreter,questionIndex:prior.index,
    attempt:prior.attempts+1,scope:row.job_id?'campaign':'internal'
   }));
   if(row.job_id&&result.state.status==='opted_out'){
@@ -706,7 +709,7 @@ async function applyPhoneAnswer(config,env,row,answer,now){
    return await finishCampaignOptOut(env,row,now);
   }
   const phase={active:'question',completed:'finishing',opted_out:'declined',needs_review:'needs_review'}[result.state.status];
-  const survey_json=JSON.stringify({...result.state,phoneMeta:{...phoneMeta,...streamMetrics,lastAudioOutcome:answer.reason==='recognized'&&result.action==='repeat'?'speech_unrecognized':answer.reason==='recognized'&&result.action==='human_review'?'speech_unrecognized':answer.reason}});
+  const survey_json=JSON.stringify({...result.state,phoneMeta:{...phoneMeta,...streamMetrics,interpreter,lastAudioOutcome:answer.reason==='recognized'&&result.action==='repeat'?'speech_unrecognized':answer.reason==='recognized'&&result.action==='human_review'?'speech_unrecognized':answer.reason}});
   const changed=await control.prepare(`UPDATE scripted_phone_pilots SET phase=CASE WHEN ?='question' AND hangup_at IS NOT NULL THEN 'ended' ELSE ? END,
    survey_json=?,turn=turn+1 WHERE id=? AND phase='transcribing' AND turn=?`)
    .bind(phase,phase,survey_json,id,turn).run();
