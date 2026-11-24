@@ -162,7 +162,7 @@ function responseFor(config,row,{repeatCue=false,directOpeningCue=false,liveToke
   const retry=state.attempts>0?(repeatCue?audio('repeat'):speak(row.language,row.language==='hi'?'माफ कीजिए, कृपया दोबारा बताइए।':'Sorry, please say that again.')):'';
   const prefix=(directOpeningCue?directOpening(row):'')+retry+audio(prompt);
   if(liveToken){
-   const ws=callback(config,row.id,'stream/'+row.turn).replace(/^https:/,'wss:')+'?token='+liveToken;
+   const ws=callback(config,row.id,'stream/'+row.turn+'/'+liveToken).replace(/^https:/,'wss:');
    return xml(prefix+'<Stream audioTrack="inbound" keepCallAlive="true" bidirectional="false" contentType="audio/x-mulaw;rate=8000" streamTimeout="30">'+escapeXml(ws)+'</Stream><Redirect method="GET">'+escapeXml(callback(config,row.id,'stream-next/'+row.turn))+'</Redirect>');
   }
   return xml(prefix+'<Record action="'+escapeXml(callback(config,row.id,'turn/'+row.turn))+
@@ -393,7 +393,7 @@ async function prepareInternalTestLead(req,env,user,now){
 
 export async function handleScriptedPhoneAdmin(req,env,user,{now=Date.now(),fetcher=fetch}={}){
  const path=new URL(req.url).pathname;
- if(path!==ADMIN&&path!==ADMIN+'/prepare-lead'&&path!==ADMIN+'/devices')return null;
+ if(path!==ADMIN&&path!==ADMIN+'/prepare-lead'&&path!==ADMIN+'/devices'&&path!==ADMIN+'/media-diagnostics')return null;
  if(user?.globalRole!=='super_admin'||!await currentMfa(env.CONTROL_DB,user,now))return error('current_super_admin_mfa_required',403);
  if(path===ADMIN+'/prepare-lead'){
   try{return await prepareInternalTestLead(req,env,user,now)}
@@ -401,6 +401,11 @@ export async function handleScriptedPhoneAdmin(req,env,user,{now=Date.now(),fetc
  }
  if(!['GET','POST'].includes(req.method))return error('method_not_allowed',405);
  const config=configuration(env);
+ if(path===ADMIN+'/media-diagnostics'){
+  if(req.method!=='GET'||new URL(req.url).search)return error('invalid_diagnostic_request',400);
+  if(!config)return error('pilot_configuration_missing',503);
+  try{return json(await inspectLastMedia(env,config,fetcher))}catch{return error('media_diagnostic_unavailable',503)}
+ }
  if(path===ADMIN+'/devices'){
   try{return await enrollDevice(req,env,user,config,now)}catch{return error('device_enrollment_unavailable',503)}
  }
@@ -522,6 +527,49 @@ async function completePilot(env,row,now){
  return {...row,phase};
 }
 
+// Use provider metadata for existing signed internal calls only. No call,
+// recording download, transcription, provider mutation or PII in responses.
+async function providerMetadata(config,path,fetcher){
+ try{
+  const response=await fetcher('https://api.plivo.com/v1/Account/'+config.authId+'/'+path,{
+   method:'GET',headers:{Authorization:config.authorization},redirect:'manual',signal:AbortSignal.timeout(5000)
+  });
+  if(!response.ok)return {httpStatus:response.status,body:null};
+  const body=JSON.parse(new TextDecoder().decode(await readBoundedBytes(response,65536)));
+  return {httpStatus:response.status,body};
+ }catch{return {httpStatus:null,body:null}}
+}
+async function inspectLastMedia(env,config,fetcher){
+ const read=engine=>env.CONTROL_DB.prepare(
+  "SELECT provider_call_id FROM scripted_phone_pilots WHERE tenant_id=? AND job_id IS NULL AND provider_account_id=? AND caller=? AND hangup_at IS NOT NULL AND provider_call_id IS NOT NULL AND CASE WHEN json_valid(survey_json) THEN COALESCE(json_extract(survey_json,'$.phoneMeta.engine'),'whisper')=? ELSE 0 END ORDER BY created_at DESC LIMIT 1")
+  .bind(config.tenant,config.authId,config.caller,engine).first();
+ const [stream,recording]=await Promise.all([read('deepgram_stream'),read('whisper')]);
+ async function inspect(row,type){
+  const id=row?.provider_call_id;
+  if(!ID.test(id||''))return {state:'no_matching_call',httpStatus:null,count:null};
+  const path=type==='stream'?'Call/'+id+'/Stream/':'Recording/?call_uuid='+encodeURIComponent(id)+'&limit=20';
+  const {httpStatus,body}=await providerMetadata(config,path,fetcher);
+  if(!Array.isArray(body?.objects))return {state:'provider_unavailable',httpStatus,count:null};
+  const records=body.objects.filter(x=>x?.call_uuid===id);
+  return {state:records.length?'records_found':'no_matching_records',httpStatus,count:records.length,
+   ...(type==='stream'?{endedCount:records.filter(x=>typeof x.end_time==='string'&&x.end_time.length>0).length}:
+    {durationMs:records.reduce((sum,x)=>{const n=Number(x.recording_duration_ms);return sum+(Number.isFinite(n)&&n>=0&&n<=180000?n:0)},0)})};
+ }
+ const [streams,recordings]=await Promise.all([inspect(stream,'stream'),inspect(recording,'recording')]);
+ return {streams,recordings,phoneCallsStarted:0,mediaDownloaded:false};
+}
+// Only an authenticated provider metadata response for this exact call and
+// recording may supply an alternate URL. Never send credentials off Plivo.
+function verifiedRecordingUrl(config,row,recording,body){
+ if(body?.recording_id!==recording||body.call_uuid!==row.provider_call_id||!['mp3','wav'].includes(body.recording_format)||typeof body.recording_url!=='string'||body.recording_url.length>4096)return null;
+ try{
+  const url=new URL(body.recording_url);
+  const expected='/v1/Account/'+config.authId+'/Recording/'+recording+'.'+body.recording_format;
+  if(url.origin!=='https://media.plivo.com'||url.username||url.password||url.hash||url.pathname!==expected)return null;
+  return url.href;
+ }catch{return null}
+}
+
 async function recordingAnswer(config,env,row,params,fetcher){
  if(!ID.test(params.get('RecordingID')||''))return {text:null,reason:'recording_id_missing'};
  const recording=params.get('RecordingID');
@@ -538,6 +586,15 @@ async function recordingAnswer(config,env,row,params,fetcher){
    if(response.ok)break;
    reason='recording_http_'+(Number.isInteger(response.status)?response.status:'unknown');
    const transient=[404,409,425,429,500,502,503,504].includes(response.status);
+   if(response.status===403&&attempt===0){
+    const metadata=await providerMetadata(config,'Recording/'+recording+'/',fetcher);
+    const verified=verifiedRecordingUrl(config,row,recording,metadata.body);
+    if(!verified||verified==='https://media.plivo.com/v1/Account/'+config.authId+'/Recording/'+recording+'.mp3')return {text:null,reason:'recording_http_403'};
+    try{await response.body?.cancel()}catch{}
+    response=await fetcher(verified,{headers:{Authorization:config.authorization},redirect:'manual',signal:AbortSignal.timeout(2500)});
+    if(response.ok)break;
+    return {text:null,reason:'recording_http_'+response.status};
+   }
    if(!transient||attempt===1)return {text:null,reason};
    try{await response.body?.cancel()}catch{}
   }catch{response=null;reason='recording_fetch_failed';if(attempt===1)return {text:null,reason}}
@@ -591,10 +648,10 @@ export async function handleScriptedPhoneCallback(req,env,{now=Date.now(),fetche
  const url=new URL(req.url);
  if(!url.pathname.startsWith(HOOK+'/'))return null;
  const config=phoneConfiguration(env);
- if(req.method!=='GET'||!config||url.origin!==config.origin||url.href.length>8192)
+ if(req.method!=='GET'||!config||url.origin.replace(/^wss:/,'https:')!==config.origin||url.href.length>8192)
   return error('pilot_callback_unavailable',404);
  const [id,step,arg,...rest]=url.pathname.slice(HOOK.length+1).split('/');
- if(!UUID.test(id)||rest.length)return error('not_found',404);
+ if(!UUID.test(id)||(step==='stream'?rest.length>1:rest.length))return error('not_found',404);
  const control=env.CONTROL_DB;
  try{
   if(step==='audio'){
@@ -607,9 +664,10 @@ export async function handleScriptedPhoneCallback(req,env,{now=Date.now(),fetche
    return new Response(audio.body,{headers:{...headers,'Content-Type':'audio/mpeg','Content-Length':String(audio.size)}});
   }
   if(step==='stream'){
-   if(req.headers.get('Upgrade')?.toLowerCase()!=='websocket'||!/^\d{1,2}$/.test(arg||'')||[...url.searchParams.keys()].join(',')!=='token')return error('stream_upgrade_required',426);
+   const token=rest.length===1&&!url.search?rest[0]:rest.length===0&&[...url.searchParams.keys()].join(',')==='token'?url.searchParams.get('token'):null;
+   if(req.headers.get('Upgrade')?.toLowerCase()!=='websocket'||!/^\d{1,2}$/.test(arg||'')||!token)return error('stream_upgrade_required',426);
    const row=await control.prepare('SELECT * FROM scripted_phone_pilots WHERE id=? AND expires_at>?').bind(id,now).first();
-   if(!row||row.provider_account_id!==config.authId||row.caller!==config.caller||!row.provider_call_id||row.hangup_at!==null||row.phase!=='question'||row.turn!==Number(arg)||!isStreaming(row)||!await validStreamToken(config.token,row,url.searchParams.get('token')))return error('stream_not_authorized',403);
+   if(!row||row.provider_account_id!==config.authId||row.caller!==config.caller||!row.provider_call_id||row.hangup_at!==null||row.phase!=='question'||row.turn!==Number(arg)||!isStreaming(row)||!await validStreamToken(config.token,row,token))return error('stream_not_authorized',403);
    const operator=configuration(env),target=operator&&row.tenant_id===operator.tenant?await selectDevice(env,operator,row.lead_id):null;
    if(!target||target.destination!==row.destination)return error('stream_not_authorized',403);
    const crm=await pilotCrm(env,row.tenant_id);
