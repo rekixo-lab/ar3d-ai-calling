@@ -50,7 +50,7 @@ async function providerPreview(env,fetcher){
   return json({available:false,reason:'plivo_credentials_not_configured',verifiedInr:false});
  try{
   const res=await fetcher('https://api.plivo.com/v1/Account/'+encodeURIComponent(auth)+'/',{
-   method:'GET',redirect:'error',signal:AbortSignal.timeout(5000),
+   method:'GET',redirect:'manual',signal:AbortSignal.timeout(5000),
    headers:{Authorization:'Basic '+btoa(auth+':'+token),Accept:'application/json'}
   });
   if(!res.ok)return json({available:false,reason:'provider_balance_unavailable',verifiedInr:false});
@@ -72,6 +72,9 @@ async function providerPreview(env,fetcher){
   return json({available:false,reason:'provider_balance_unavailable',verifiedInr:false});
  }
 }
+// Cloudflare Workers does not implement redirect:'error' in RequestInit.
+// Use redirect:'manual' and reject non-2xx statuses to prevent credential
+// forwarding across provider redirects. Do not replace with 'follow'.
 // A diagnostics-only Plivo read. A valid Account API response verifies only
 // credentials, not India KYC, approved number status or permission to dial.
 async function checkPlivoConnection(env,fetcher){
@@ -109,7 +112,7 @@ async function checkPlivoConnection(env,fetcher){
   let response;
   try{
    response=await fetcher(url+path,{
-    method:'GET',redirect:'error',signal:AbortSignal.timeout(5000),
+    method:'GET',redirect:'manual',signal:AbortSignal.timeout(5000),
     headers:requestHeaders
    });
   }catch(e){
@@ -217,7 +220,7 @@ async function providerSevenDayUsage(env,fetcher,now=Date.now()){
  try{
   const res=await fetcher('https://api.plivo.com/v1/Account/'+encodeURIComponent(auth)+
    '/UsageSummary/?'+params,{
-    method:'GET',redirect:'error',signal:AbortSignal.timeout(5000),
+    method:'GET',redirect:'manual',signal:AbortSignal.timeout(5000),
     headers:{Authorization:'Basic '+btoa(auth+':'+token),Accept:'application/json'}
    });
   if(!res.ok||!res.headers.get('content-type')?.toLowerCase().includes('json')||
