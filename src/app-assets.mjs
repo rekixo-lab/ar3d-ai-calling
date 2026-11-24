@@ -172,6 +172,15 @@ function scriptedPhonePilotPanel(){
     lastAnswerReport.replaceChildren(table(['Diagnostic','Result'],[['Outcome',d.state.replaceAll('_',' ')],['Question',d.question??'—'],['Media HTTP',d.mediaHttp??'—'],['Downloaded bytes',d.bytes],['Media type',d.contentType??'—'],['Recording duration (ms)',d.recordingDurationMs??'—']]),table(['Same recording','Whisper','Whisper + hint','Nova-3 recorded'],[['STT',d.stt.replaceAll('_',' '),d.hinted?.stt?.replaceAll('_',' ')??'—',d.nova?.stt?.replaceAll('_',' ')??'—'],['Recognized words',d.transcript??'—',d.hinted?.transcript??'—',d.nova?.transcript??'—'],['Deterministic parser',d.parserAction??'—',d.hinted?.parserAction??'—',d.nova?.parserAction??'—'],['Normalized answer',d.normalizedAnswer??'—',d.hinted?.normalizedAnswer??'—',d.nova?.normalizedAnswer??'—'],['Reported confidence','—','—',d.nova?.confidence??'—'],['Safe error code',d.failureCode??'—',d.hinted?.failureCode??'—',d.nova?.failureCode??'—']]),node('p',{class:'muted',text:'Three fresh recognition runs on the latest recording by provider time, not the original callback transcript. Question inferred from saved state; contextual interpretation and split-answer memory are not replayed. Check the words against what you actually said. Do not share private speech.'}),btn('Clear transcript',()=>lastAnswerReport.replaceChildren(),true));
    }catch(e){asError(e)}finally{lastAnswerProbe.disabled=false}
   },true);
+  const sarvamReport=div('stack');
+  const sarvamProbe=btn('Test Sarvam Hindi STT (no call)',async()=>{
+   if(!window.confirm('Confirm the internal recipient agrees to send the latest saved answer to Sarvam AI for transcription and, only if needed, contextual interpretation; display the results privately. Up to two AI requests may incur charges. No new call or CRM update.'))return;
+   sarvamProbe.disabled=true;sarvamReport.replaceChildren();
+   try{
+    const d=await api('/v1/human/scripted-phone-pilot/recording-probe','POST',{confirm:'REPLAY_ONE_CONSENTED_INTERNAL_LAST_SARVAM'});
+    sarvamReport.replaceChildren(table(['Saaras v4 diagnostic','Result'],[['Outcome',d.state],['Question',d.question??'—'],['STT',d.stt],['Recognized words',d.transcript??'—'],['Parser',d.parserAction??'—'],['Normalized answer',d.normalizedAnswer??'—'],['Recognition latency (ms)',d.recognitionMs??'—'],['Interpreter',d.interpretation?.interpreter??'—'],['Proposed action',d.interpretation?.action??'—'],['Proposed answer (not saved)',d.interpretation?.normalizedAnswer??'—'],['LLM requests',d.interpretation?.llmRequests??'—'],['LLM input tokens',d.interpretation?.usage?.inputTokens??'—'],['LLM output tokens',d.interpretation?.usage?.outputTokens??'—'],['Interpretation latency (ms)',d.interpretation?.latencyMs??'—'],['Safe error code',d.failureCode??'—']]),node('p',{class:'muted',text:d.state==='sarvam_not_configured'?'Server secret SARVAM_API_KEY is required. Do not paste it into this dashboard or chat.':'Latest existing internal recording only. Verify the recognized words against actual speech; not a live-call test.'}),btn('Clear transcript',()=>sarvamReport.replaceChildren(),true));
+   }catch(e){asError(e)}finally{sarvamProbe.disabled=false}
+  },true);
   const listenReport=div('stack');
   let revokeListening=null;
   const listen=btn('Listen to last saved answer (no call, no AI)',async()=>{
@@ -274,7 +283,7 @@ function scriptedPhonePilotPanel(){
   }
   enrollment.hidden=true;device.addEventListener('change',updateAvailability);
   card.append(status,prepare,prepared,enrollment,div('formrow',lab('Internal test number',device),lab('Recorded prompt language',language),lab('Speech recognition engine',engine),call,
-    btn('Refresh fixed-question pilot status',()=>refresh().catch(asError),true)),cooldown,results,mediaCheck,mediaReport,probe,probeReport,answerProbe,answerReport,lastAnswerProbe,lastAnswerReport,listen,listenReport);
+    btn('Refresh fixed-question pilot status',()=>refresh().catch(asError),true)),cooldown,results,mediaCheck,mediaReport,probe,probeReport,answerProbe,answerReport,lastAnswerProbe,lastAnswerReport,listen,listenReport,sarvamProbe,sarvamReport);
   refresh().catch(()=>{status.textContent='Pilot status requires a current MFA Super Admin session.'});
   return card;
 }

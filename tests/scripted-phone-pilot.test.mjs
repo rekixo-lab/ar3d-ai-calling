@@ -627,7 +627,7 @@ test('preconsented internal test skips keypad, announces recording and retries t
   const details={ALegRequestUUID:requestId,From:'918000000000',To:'919000000001',Direction:'outbound'};
   const opening=await (await cb('answer',details)).text();
   assert.match(opening,/यह बातचीत रिकॉर्ड होती है/);assert.doesNotMatch(opening,/आपके जवाब रिकॉर्ड किए जाएंगे|अगर आप बात नहीं करना चाहते/);assert.doesNotMatch(opening,/GetDigits|opening\.mp3/);
-  assert.match(opening,/propertyType\.mp3.*Record.*maxLength="16".*timeout="6"/);
+  assert.match(opening,/propertyType\.mp3.*Record.*maxLength="12".*timeout="3"/);
   assert.match(await (await cb('turn/0',{RecordingID:'record-id-00'})).text(),/location\.mp3/);
   assert.equal(reads,2);
   const state=JSON.parse(f.c.db.prepare('SELECT survey_json FROM scripted_phone_pilots').get().survey_json);
@@ -808,6 +808,21 @@ test('saved recording probe is no-dial, current-MFA and explicit-consent only; r
   env.AI.run=async(model)=>{if(model==='@cf/deepgram/nova-3')throw Error('5006: private provider error');return {text:'तीस लाख'}};
   const failed=await (await handleScriptedPhoneAdmin(req('SHOW_ONE_CONSENTED_INTERNAL_LAST_ANSWER'),env,admin,{now,fetcher})).json();
   assert.equal(failed.nova.failureCode,'workers_ai_5006');assert.equal(failed.nova.stt,'service_failed');assert.doesNotMatch(JSON.stringify(failed),/private provider error/);
+  const beforeMissing=calls;
+  const notConfigured=await (await handleScriptedPhoneAdmin(req('REPLAY_ONE_CONSENTED_INTERNAL_LAST_SARVAM'),env,admin,{now,fetcher})).json();
+  assert.equal(notConfigured.state,'sarvam_not_configured');assert.equal(calls,beforeMissing);
+  env.SARVAM_API_KEY='synthetic-test-key';
+  let sarvamRequests=0;
+  const sarvamFetcher=async(url,opts)=>{
+   if(url!=='https://api.sarvam.ai/speech-to-text')return fetcher(url,opts);
+   sarvamRequests++;assert.equal(opts.method,'POST');assert.equal(opts.redirect,'manual');
+   assert.equal(opts.headers['api-subscription-key'],'synthetic-test-key');assert.equal(opts.body.get('model'),'saaras:v4');assert.equal(opts.body.get('language_code'),'hi-IN');assert.equal(opts.body.get('mode'),'transcribe');assert.equal(await opts.body.get('file').text(),'RIFF');
+   return Response.json({transcript:'बीस लाख'});
+  };
+  assert.equal((await handleScriptedPhoneAdmin(req('REPLAY_ONE_CONSENTED_INTERNAL_LAST_SARVAM'),env,client,{now,fetcher:sarvamFetcher})).status,403);
+  assert.equal(sarvamRequests,0);
+  const sarvam=await (await handleScriptedPhoneAdmin(req('REPLAY_ONE_CONSENTED_INTERNAL_LAST_SARVAM'),env,admin,{now,fetcher:sarvamFetcher})).json();
+  assert.equal(sarvamRequests,1);assert.equal(sarvam.transcript,'बीस लाख');assert.equal(sarvam.normalizedAnswer,2000000);assert.equal(sarvam.phoneCallsStarted,0);assert.equal(sarvam.crmChanged,false);assert.doesNotMatch(JSON.stringify(sarvam),/synthetic-test-key/);
   assert.deepEqual(f.c.db.prepare('SELECT * FROM scripted_phone_pilots').get(),controlBefore);
   assert.deepEqual(f.r.db.prepare('SELECT * FROM leads WHERE id=?').get(lead),before);
  }finally{f.close()}
