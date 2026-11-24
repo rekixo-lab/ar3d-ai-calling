@@ -10,7 +10,7 @@ export function costObservation(row,cdr=null){
  const providerSeconds=cdr?count(cdr.billedSeconds,86400):null;
  const plannedSeconds=providerSeconds??(connected===null?null:Math.ceil(connected/30)*30);
  const audio=engine==='sarvam'?count(m.sttAudioMs):null;
- const knownAudio=audio!==null&&m.sttDurationUnknown===0;
+ const knownAudio=audio!==null&&m.sttDurationUnknown===0&&!(m.sttFailedRequests>0)&&m.technicalFailure!==true;
  const rounded=knownAudio&&m.costMeterVersion===1&&m.sttFailedRequests===0?count(m.sttRoundedSeconds,86400):null;
  const stt=engine==='sarvam'&&knownAudio?cost(rounded??audio, p.sarvamPerBilledAudioMinute,rounded===null?60000:60):null;
  const llmRequests=engine==='sarvam'?count(m.llmRequests):null;
