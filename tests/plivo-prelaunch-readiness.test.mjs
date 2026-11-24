@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import worker from '../src/index.mjs';
 import {buildPlivoReadinessSnapshot} from '../src/launch-readiness-routes.mjs';
-import {inspectScriptedPromptPack} from '../src/scripted-phone-pilot.mjs';
+import {inspectScriptedPromptPack,inspectInternalPilotLead} from '../src/scripted-phone-pilot.mjs';
 import {fixture} from './helpers/calling-fixture.mjs';
 import {newSession,COOKIE} from '../src/human-auth.mjs';
 
@@ -65,6 +65,8 @@ test('MFA Super Admin sees nonsecret configuration checks and honest launch bloc
   assert.equal(data.liveCallAttempted,false);
   assert.equal(data.realTimeConversationImplemented,false);
   assert.equal(data.scriptedCallingImplemented,true);
+  assert.deepEqual(data.internalLead,{state:'lead_unavailable',ready:false});
+  assert.equal(data.setupActions.find(x=>x.id==='recipient_match').ready,false);
   assert.equal(data.environment.length,12);
   assert.ok(data.environment.every(x=>x.configured));
   assert.equal(audioHeads.length,24,'11 essential clips plus optional retry per language');
@@ -147,4 +149,22 @@ test('Read-only pack check distinguishes complete, missing, invalid and R2-outag
  assert.equal(unavailable.unavailable.length,11);
  assert.equal(unavailable.optionalRepeat,'unavailable');
  assert.ok(!JSON.stringify(unavailable).includes('sensitive error'));
+});
+
+test('internal target preflight is read-only, safe with pilot disabled, and rejects wrong or blocked targets',async()=>{
+ const f=fixture();
+ try{
+  const tenant=f.c.db.prepare('SELECT id FROM tenants LIMIT 1').get().id;
+  const lead=f.r.db.prepare('SELECT id,mobile_e164 FROM leads WHERE tenant_id=?').get(tenant);
+  const env={...f.env,AR3D_SCRIPTED_PILOT_TENANT_ID:tenant,
+   AR3D_SCRIPTED_PILOT_LEAD_ID:lead.id,AR3D_SCRIPTED_PILOT_VERIFIED_NUMBER:lead.mobile_e164};
+  const before=f.r.db.prepare('SELECT total_changes() AS n').get().n;
+  assert.deepEqual(await inspectInternalPilotLead(env),{state:'matched',ready:true});
+  assert.deepEqual(await inspectInternalPilotLead({...env,AR3D_SCRIPTED_PILOT_VERIFIED_NUMBER:'+915000000001'}),{state:'configuration_missing',ready:false});
+  assert.deepEqual(await inspectInternalPilotLead({...env,AR3D_SCRIPTED_PILOT_VERIFIED_NUMBER:'+919000000009'}),{state:'lead_unavailable',ready:false});
+  assert.deepEqual(await inspectInternalPilotLead({...env,AR3D_SCRIPTED_PILOT_TENANT_ID:'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'}),{state:'tenant_unavailable',ready:false});
+  assert.equal(f.r.db.prepare('SELECT total_changes() AS n').get().n,before);
+  f.r.db.prepare("UPDATE leads SET consent_status='denied' WHERE tenant_id=? AND id=?").run(tenant,lead.id);
+  assert.deepEqual(await inspectInternalPilotLead(env),{state:'lead_unavailable',ready:false});
+ }finally{f.close()}
 });

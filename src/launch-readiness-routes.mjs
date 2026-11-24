@@ -1,4 +1,4 @@
-import {inspectScriptedPromptPack} from './scripted-phone-pilot.mjs';
+import {inspectScriptedPromptPack,inspectInternalPilotLead} from './scripted-phone-pilot.mjs';
 // Super Admin, current-MFA only. This endpoint is strictly read-only:
 // it never calls Plivo, creates secrets, changes CRM consent, or enables dialing.
 // Public descriptions are intentionally code-backed/explicitly unverified.
@@ -10,6 +10,7 @@ const valid=(s,re)=>typeof s==='string'&&re.test(s);
 const authId=s=>valid(s,/^[A-Za-z0-9]{8,64}$/);
 const authToken=s=>valid(s,/^[A-Za-z0-9]{16,128}$/);
 const indiaNumber=s=>valid(s,/^\+91[1-9]\d{9}$/);
+const indiaMobile=s=>valid(s,/^\+91[6-9]\d{9}$/);
 const secureOrigin=s=>valid(s,/^https:\/\/[a-z0-9.-]+\.[a-z]{2,}$/i);
 const uuid=s=>valid(s,/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i);
 
@@ -21,7 +22,7 @@ export function buildPlivoReadinessSnapshot(env){
   ['recordingAuthorizationMarked',env?.AR3D_PLIVO_RECORDING_AUTH==='confirmed','Recording authorization is operator-marked confirmed'],
   ['pilotOrigin',secureOrigin(env?.AR3D_SCRIPTED_PILOT_ORIGIN),'Secure callback origin is configured'],
   ['pilotEnabled',env?.AR3D_SCRIPTED_PILOT_ENABLED==='enabled','Internal pilot switch is enabled'],
-  ['pilotDestination',indiaNumber(env?.AR3D_SCRIPTED_PILOT_VERIFIED_NUMBER),'Internal pilot destination is configured'],
+  ['pilotDestination',indiaMobile(env?.AR3D_SCRIPTED_PILOT_VERIFIED_NUMBER),'Internal pilot destination is configured'],
   ['pilotTenantId',uuid(env?.AR3D_SCRIPTED_PILOT_TENANT_ID),'Internal pilot tenant ID is configured'],
   ['pilotLeadId',uuid(env?.AR3D_SCRIPTED_PILOT_LEAD_ID),'Internal pilot CRM lead ID is configured'],
   ['workersAi',typeof env?.AI?.run==='function','Workers AI transcription binding exists'],
@@ -65,7 +66,7 @@ export function buildPlivoReadinessSnapshot(env){
 // This concise operator checklist is derived only from Worker binding shape
 // and R2 metadata. It does not prove telecom authorization, deployment or
 // actual provider calls; no secrets or customer records are exposed.
-export function productionSetupActions(snapshot,audioPacks){
+export function productionSetupActions(snapshot,audioPacks,internalLead){
  const flags=Object.fromEntries((snapshot?.environment||[]).map(x=>[x.id,!!x.configured]));
  const hindi=Array.isArray(audioPacks)?audioPacks.find(x=>x?.language==='hi'):null;
  const step=(id,owner,label,ready,note)=>({id,owner,label,ready:Boolean(ready),note});
@@ -90,6 +91,13 @@ export function productionSetupActions(snapshot,audioPacks){
   step('recipient','Operator','Enter owned verified internal mobile and CRM identifiers',
    flags.pilotDestination&&flags.pilotTenantId&&flags.pilotLeadId,
    'Configure AR3D_SCRIPTED_PILOT_VERIFIED_NUMBER, AR3D_SCRIPTED_PILOT_TENANT_ID and AR3D_SCRIPTED_PILOT_LEAD_ID for an internal consenting recipient.'),
+  step('recipient_match','Operator','Check internal CRM tenant and mobile match (no call)',
+   internalLead?.ready===true,
+   ({matched:'Configured lead matches the mobile in an available tenant and is not locally blocked. This is not proof of consent or external DND clearance.',
+     configuration_missing:'Set a valid Indian mobile, tenant UUID and lead UUID first.',
+     tenant_unavailable:'Configured tenant is unavailable or its CRM binding cannot be resolved.',
+     lead_unavailable:'Lead is missing, mobile does not match, or local opt-out/consent/DND prevents the pilot.',
+     check_unavailable:'CRM readiness read failed; retry the read-only check.'})[internalLead?.state]||'Internal CRM match has not been checked.'),
   step('traffic','Plivo/provider','Verify permitted service/transactional calling purpose',false,
    'India Business KYC and 080 caller ownership do not authorize promotional builder lead calls or unrelated client traffic.'),
   step('internal_call','Operator','Complete one signed Production acceptance call',false,
@@ -114,7 +122,8 @@ export async function handleLaunchReadiness(req,env,user){
  // R2 HEAD metadata only, after fresh MFA verification. No audio-body reads.
  const audioPacks=await Promise.all(['hi','en'].map(language=>
   inspectScriptedPromptPack(env,language)));
+ const internalLead=await inspectInternalPilotLead(env);
  const snapshot=buildPlivoReadinessSnapshot(env);
- return json({...snapshot,audioPacks,
-  setupActions:productionSetupActions(snapshot,audioPacks)});
+ return json({...snapshot,audioPacks,internalLead,
+  setupActions:productionSetupActions(snapshot,audioPacks,internalLead)});
 }
