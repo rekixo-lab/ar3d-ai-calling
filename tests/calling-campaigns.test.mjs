@@ -138,3 +138,13 @@ test('provider POST is preceded by held minutes; definite rejection releases and
   }finally{f.close()}
  }
 });
+
+test('dispatch blocks when shared funding cap is exhausted, despite allocated client minutes',async()=>{
+ const f=fixture();try{await setup(f);f.env.AR3D_FUNDED_CUMULATIVE_SECONDS='60';
+ const result=await tickTenant(f.env,f.r.wrap,tid,{now,apiFetch:()=>assert.fail('must not dial')});
+ assert.equal(result.state,'provider_funding_exhausted');assert.equal(f.r.db.prepare('SELECT state FROM calling_jobs').get().state,'queued');
+ assert.equal(f.c.db.prepare('SELECT COUNT(*) AS n FROM tenant_minute_holds').get().n,0);
+ delete f.env.AR3D_FUNDED_CUMULATIVE_SECONDS;
+ assert.equal((await scriptedCampaignConfiguration(f.env)).ready,false);
+ }finally{f.close()}
+});
