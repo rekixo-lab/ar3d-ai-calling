@@ -26,7 +26,7 @@ function signed(url,params={},secret=token){
 test('verified internal pilot only: consent, fixed prompts, AI answers, and one tenant-scoped CRM save',async()=>{
  const f=fixture();
  try{
-  const answers=['प्लॉट','रायपुर','अमलीडीह','1200 वर्ग फुट','45 लाख','बाद में'];
+  const answers=['प्लॉट','रायपुर','अमलीडीह','बारह सौ वर्ग फीट','45 लाख','बाद में'];
   const env={...f.env,PLIVO_AUTH_ID:'syntheticAuth',PLIVO_AUTH_TOKEN:token,
    AR3D_SCRIPTED_PILOT_ENABLED:'enabled',AR3D_PLIVO_RECORDING_AUTH:'confirmed',
    AR3D_SCRIPTED_PILOT_ORIGIN:origin,AR3D_PLIVO_CALLER_NUMBER:'+918000000000',
