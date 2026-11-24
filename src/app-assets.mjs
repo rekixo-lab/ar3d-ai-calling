@@ -1561,7 +1561,7 @@ async function customerCallingPanel(tenantId,content,role,openView){
   const run=snapshot?.data.runs.find(r=>r.campaignId===campaign?.id);
   const policy=snapshot?.data.policy;
   const policyReady=policy?.enabled&&Date.parse(policy.expiresAt)>Date.now();
-  const ready=snapshot?.data.configuration.ready&&policyReady;
+  const ready=snapshot?.data.configuration.ready&&policyReady&&snapshot?.data.credits?.ready===true;
   const languageOK=campaign&&['hi','en'].includes(campaign.languageMode);
   pick.disabled=busy||!snapshot?.campaigns.length;
   refreshBtn.disabled=busy;
@@ -1574,13 +1574,15 @@ async function customerCallingPanel(tenantId,content,role,openView){
   status.textContent=!snapshot.data.configuration.ready?
    'AI calling is being prepared by AR3D. You can import your customer list now.':
    !policyReady?'AI calling for this company is waiting for AR3D activation.':
-   'Call your approved customers · up to '+policy.dailyLimit+' calls per day · 09:00–20:00 India time';
+   !snapshot.data.credits?.ready?(snapshot.data.credits?.reason==='insufficient_credits'?'Not enough calling credits. Ask AR3D to allocate more minutes.':'Waiting for AR3D funding or calling approval.'):
+   (snapshot.data.configuration.creditOnly?'Credit-based calling · provider safety limits apply':'Call your approved customers · up to '+policy.dailyLimit+' calls per day')+' · 09:00–20:00 India time';
   status.className='note '+(ready?'ready-note':'');
   summary.replaceChildren(campaign?div('between row',
    node('strong',{text:campaign.name}),
    node('span',{class:'badge '+(run?.state==='completed'||run?.state==='running'?'positive':'pending'),text:run?.state||'draft'}),
    node('span',{class:'muted',text:languageOK?(campaign.languageMode==='hi'?'Hindi':'English'):'Use a Hindi or English campaign for the phone flow.'})
   ):node('p',{class:'muted',text:'Import a customer file to prepare your first campaign.'}));
+  if(snapshot.data.credits)summary.append(node('p',{class:'muted',text:'Available allocated credits: '+formatSeconds(snapshot.data.credits.availableSeconds)+' · minimum reserve for one call: '+formatSeconds(snapshot.data.credits.requiredSeconds)}));
  }
  async function refresh(){
   refreshBtn.disabled=true;
@@ -1680,7 +1682,7 @@ async function callingAdminPanel(main){
  const limit=input('dailyLimit','number');limit.value='10';limit.min='1';limit.max='100';
  const seconds=input('maxSeconds','number');seconds.value='180';seconds.min='180';seconds.max='300';
  const enabled=node('input',{type:'checkbox','aria-label':'Enable company calling'});
- const policyForm=node('form',{class:'stack'},[title('Company approval','h3'),lab('Provider approval reference',approval),div('formrow',lab('Approval days (1–30)',days),lab('Daily calls (1–100)',limit),lab('Maximum call seconds (180–300)',seconds)),lab('Enable company calling',enabled),node('button',{class:'btn',type:'submit',text:'Save company calling approval'})]);
+ const policyForm=node('form',{class:'stack'},[title('Company approval','h3'),lab('Provider approval reference',approval),div('formrow',lab('Approval days (1–30)',days),lab('Fallback daily safety cap (1–100)',limit),lab('Maximum call seconds (180–300)',seconds)),lab('Enable company calling',enabled),node('button',{class:'btn',type:'submit',text:'Save company calling approval'})]);
  const consent=input('consent','text','Purpose-specific opt-in evidence reference'),dnd=input('dnd','text','Provider DND check reference');
  const choices=div('stack approval-list');
  const draft=node('select',{class:'field','aria-label':'Uploaded campaign'});
