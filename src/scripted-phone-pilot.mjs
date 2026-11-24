@@ -16,6 +16,7 @@ const AUDIO_PROMPTS=new Set([...PROMPTS,'repeat']);
 const terminal=new Set(['completed','declined','needs_review','ended','rejected']);
 const duration=180;
 const ttl=10*60000;
+const pilotCooldownMs=60000;
 const encoder=new TextEncoder();
 const headers={'Cache-Control':'no-store','X-Content-Type-Options':'nosniff','Referrer-Policy':'no-referrer'};
 const json=(result,status=200)=>Response.json(result,{status,headers});
@@ -170,6 +171,20 @@ async function responseForPhoneQuestion(config,env,row){
  return responseFor(config,row,{repeatCue});
 }
 
+// All internal attempts share one gate, including after a configuration change.
+ // An expired reservation or an apparently terminal questionnaire does NOT prove
+ // that the provider call ended. Only a signed hangup or explicit API rejection does.
+const pilotUnconfirmed="hangup_at IS NULL AND phase!='rejected'";
+const pilotLastEnd="COALESCE(hangup_at,expires_at-"+ttl+")";
+async function pilotAvailability(control,now){
+ const row=await control.prepare(`SELECT
+  COALESCE(MAX(CASE WHEN ${pilotUnconfirmed} THEN 1 ELSE 0 END),0) AS unconfirmed,
+  MAX(${pilotLastEnd}) AS last_end
+  FROM scripted_phone_pilots WHERE job_id IS NULL`).first();
+ if(row?.unconfirmed===1)return {ready:false,reason:'awaiting_signed_hangup',retryAfterSeconds:null};
+ const wait=Math.max(0,Math.ceil(((row?.last_end??(now-pilotCooldownMs))+pilotCooldownMs-now)/1000));
+ return {ready:wait===0,reason:wait?'cooldown':'ready',retryAfterSeconds:wait};
+}
 async function startPilot(req,env,user,config,now,fetcher){
  if(!config)return error('scripted_phone_pilot_not_configured',503);
  if(!mutationOriginAllowed(req)||new URL(req.url).origin!==config.origin)return error('pilot_origin_mismatch',403);
@@ -184,14 +199,20 @@ async function startPilot(req,env,user,config,now,fetcher){
  if(!lead)return error('verified_internal_lead_unavailable',409);
  if(!await scriptedPromptsReady(env,data.language))
   return error('pilot_prompt_recordings_incomplete',409);
- const id=crypto.randomUUID(),slot=Math.floor(now/900000),survey=beginFixedVoicePreview({language:data.language,now}).state;
+ const id=crypto.randomUUID(),slot=Math.floor(now/pilotCooldownMs),survey=beginFixedVoicePreview({language:data.language,now}).state;
  const reservation=await control.prepare(`INSERT INTO scripted_phone_pilots
   (id,tenant_id,lead_id,lead_updated_at,actor_id,language,destination,caller,rate_slot,expires_at,phase,survey_json,created_at,provider_account_id)
   SELECT ?,?,?,?,?,?,?,?,?,?,'requested',?,?,? WHERE NOT EXISTS(
-   SELECT 1 FROM scripted_phone_pilots WHERE job_id IS NULL AND expires_at>? AND phase IN('requested','consent','question','transcribing','finishing','unknown'))
+   SELECT 1 FROM scripted_phone_pilots WHERE job_id IS NULL
+    AND ((${pilotUnconfirmed}) OR ${pilotLastEnd}>?))
   ON CONFLICT(rate_slot) DO NOTHING`).bind(id,config.tenant,config.lead,lead.updated_at,user.id,
-  data.language,config.destination,config.caller,slot,now+ttl,JSON.stringify(survey),iso(now),config.authId,now).run();
- if(reservation.meta.changes!==1)return error('pilot_already_requested_or_rate_limited',409);
+  data.language,config.destination,config.caller,slot,now+ttl,JSON.stringify(survey),iso(now),config.authId,now-pilotCooldownMs).run();
+ if(reservation.meta.changes!==1){
+  const availability=await pilotAvailability(control,now);
+  return json({error:availability.reason==='awaiting_signed_hangup'?
+   'Previous internal call has not received a signed hangup. Check Plivo before retrying.':
+   'Internal test cooldown is active. Refresh status before retrying.',availability},409);
+ }
  const outcome=await submitScriptedPhone(control,config,id,config.destination,duration,fetcher);
  if(outcome==='rejected')return error('plivo_rejected_pilot',502);
  if(outcome==='unknown')return error('pilot_outcome_unconfirmed_check_status',502);
@@ -298,7 +319,8 @@ export async function handleScriptedPhoneAdmin(req,env,user,{now=Date.now(),fetc
     language,created_at,turn,duration_seconds,hangup_at IS NOT NULL AS signed_hangup,
     provider_call_id IS NOT NULL AS provider_call_reference FROM scripted_phone_pilots
     WHERE tenant_id=? AND lead_id=? AND job_id IS NULL ORDER BY created_at DESC LIMIT 5`).bind(config.tenant,config.lead).all();
-  return json({configured:true,destinationLast4:config.destination.slice(-4),recent:recent.results});
+  return json({configured:true,destinationLast4:config.destination.slice(-4),recent:recent.results,
+   availability:await pilotAvailability(env.CONTROL_DB,now)});
  }catch{return error('scripted_phone_pilot_unavailable',503)}
 }
 

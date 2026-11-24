@@ -145,28 +145,55 @@ function scriptedPhonePilotPanel(){
         copy,btn('Copy internal lead ID',async()=>{try{await navigator.clipboard.writeText(d.leadId);notice('Lead ID copied.')}catch{copy.select()}},true));
     }catch(err){asError(err)}finally{prepare.disabled=false}
   },true);
-  let config;
+  let config,busy=false,refreshing=false,deadline=0,timer=null;
+  const cooldown=node('p',{class:'muted',role:'status'});
+  function updateAvailability(){
+    const available=config?.availability;
+    const seconds=Math.max(0,Math.ceil((deadline-Date.now())/1000));
+    call.disabled=busy||refreshing||!config?.configured||available?.ready!==true;
+    cooldown.textContent=!config?.configured?'':available?.reason==='awaiting_signed_hangup'?
+      'Waiting for signed hangup from Plivo. Do not redial an unconfirmed call.':
+      available?.reason==='cooldown'?'Next internal test in '+Math.floor(seconds/60)+':'+String(seconds%60).padStart(2,'0'):
+      available?.ready===true?'Ready for one internal test call.':'Refresh status to verify call availability.';
+  }
+  function scheduleCheck(){
+    if(timer!==null){clearInterval(timer);timer=null}
+    if(!config?.configured||config?.availability?.ready===true)return;
+    let ticks=0;
+    timer=setInterval(()=>{
+      if(!card.isConnected){clearInterval(timer);timer=null;return}
+      if(card.closest('[hidden]'))return;
+      updateAvailability();ticks++;
+      if(!busy&&!refreshing&&(ticks%5===0||(config.availability?.reason==='cooldown'&&Date.now()>=deadline)))
+        refresh().catch(()=>{});
+    },1000);
+  }
   const call=btn('Call the verified internal number once',async()=>{
-    if(!config?.configured||!window.confirm('Place one internal pilot call to the verified number ending '+config.destinationLast4+'? This uses phone credits and records short answers only after the recipient presses 1.'))return;
-    call.disabled=true;
+    if(busy||refreshing||config?.availability?.ready!==true||!window.confirm('Place one internal pilot call to the verified number ending '+config.destinationLast4+'? This uses phone credits and records short answers only after the recipient presses 1.'))return;
+    busy=true;updateAvailability();
     try{
       await api('/v1/human/scripted-phone-pilot','POST',{language:language.value,confirm:'CALL_ONE_VERIFIED_INTERNAL_NUMBER'});
-      notice('Pilot submitted. Refresh status after the call.');
-      await refresh();
-    }catch(err){asError(err);await refresh().catch(asError)}
+      notice('Pilot submitted. Waiting for signed hangup.');
+    }catch(err){asError(err)}
+    finally{try{await refresh()}catch(err){asError(err)}busy=false;updateAvailability()}
   });
   call.disabled=true;
   async function refresh(){
+    if(refreshing)return;
+    refreshing=true;updateAvailability();
+    try{
     config=await api('/v1/human/scripted-phone-pilot');
+    deadline=Date.now()+1000*(config.availability?.retryAfterSeconds||0);
     status.textContent=config.configured?'One internal verified number ending '+config.destinationLast4+
       '. Complete answers update its configured test lead.':'Waiting for Plivo: approve a caller number and configure the internal test.';
 
-    call.disabled=!config.configured;
     results.replaceChildren(...(config.recent?.length?[table(['Started','Language','Status','Provider call reference','Turns processed','Signed hangup','Seconds'],
       config.recent.map(x=>[x.created_at,x.language,x.phase,x.provider_call_reference?'Received':'Not received',x.turn??'—',x.signed_hangup?'Received':'Not received',x.duration_seconds??'—']))]:[]));
+    }catch(err){config=null;status.textContent='Could not verify internal call availability. Refresh status to retry.';throw err}
+    finally{refreshing=false;updateAvailability();scheduleCheck()}
   }
   card.append(status,prepare,prepared,div('formrow',lab('Recorded prompt language',language),call,
-    btn('Refresh fixed-question pilot status',()=>refresh().catch(asError),true)),results);
+    btn('Refresh fixed-question pilot status',()=>refresh().catch(asError),true)),cooldown,results);
   refresh().catch(()=>{status.textContent='Pilot status requires a current MFA Super Admin session.'});
   return card;
 }

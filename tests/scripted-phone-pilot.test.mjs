@@ -472,3 +472,41 @@ test('recording and STT failures play repeat cue, bounded at three attempts, wit
   }finally{f.close()}
  }
 });
+
+test('internal pilot cooldown starts at signed hangup, blocks unsigned terminal attempts and concurrent starts',async()=>{
+ const f=fixture();
+ try{
+  const env={...f.env,PLIVO_AUTH_ID:'syntheticAuth',PLIVO_AUTH_TOKEN:token,
+   AR3D_SCRIPTED_PILOT_ENABLED:'enabled',AR3D_PLIVO_RECORDING_AUTH:'confirmed',
+   AR3D_SCRIPTED_PILOT_ORIGIN:origin,AR3D_PLIVO_CALLER_NUMBER:'+918000000000',
+   AR3D_SCRIPTED_PILOT_VERIFIED_NUMBER:internalNumber,AR3D_SCRIPTED_PILOT_TENANT_ID:tid,
+   AR3D_SCRIPTED_PILOT_LEAD_ID:lead,RECORDINGS:{head:async()=>({size:4}),get:async()=>({size:4,body:new Uint8Array(4)})},AI:{run:async()=>({text:''})}};
+  let dials=0,hook;
+  const fetcher=async(url,options)=>{
+   dials++;hook=JSON.parse(options.body).answer_url.replace(/\/answer$/,'');
+   return Response.json({request_uuid:dials===1?requestId:'24111111-2222-3333-4444-555555555556'},{status:202});
+  };
+  const start=at=>handleScriptedPhoneAdmin(new Request(origin+'/v1/human/scripted-phone-pilot',{
+   method:'POST',headers:{Origin:origin},body:JSON.stringify({language:'hi',confirm:'CALL_ONE_VERIFIED_INTERNAL_NUMBER'})
+  }),env,admin,{now:at,fetcher});
+  const status=async at=>(await (await handleScriptedPhoneAdmin(new Request(origin+'/v1/human/scripted-phone-pilot'),env,admin,{now:at,fetcher})).json()).availability;
+  assert.equal((await status(now)).ready,true);
+  assert.equal((await start(now)).status,202);
+  assert.equal((await status(now+61000)).reason,'awaiting_signed_hangup');
+  const details={ALegRequestUUID:requestId,From:'918000000000',To:'919000000001',Direction:'outbound',CallUUID:callId};
+  await handleScriptedPhoneCallback(signed(hook+'/answer',details),env,{now:now+1000,fetcher});
+  f.c.db.prepare("UPDATE scripted_phone_pilots SET phase='needs_review'").run();
+  assert.equal((await start(now+61000)).status,409);
+  assert.equal((await start(now+700000)).status,409,'expiry cannot prove hangup');
+  assert.equal(dials,1);
+  const endAt=now+100000;
+  assert.equal((await handleScriptedPhoneCallback(signed(hook+'/hangup',{CallUUID:callId,Duration:'99'}),env,{now:endAt,fetcher})).status,204);
+  assert.deepEqual(await status(endAt),{ready:false,reason:'cooldown',retryAfterSeconds:60});
+  assert.equal((await start(endAt+59999)).status,409);
+  assert.equal((await status(endAt+59999)).retryAfterSeconds,1);
+  assert.equal((await status(endAt+60000)).ready,true);
+  const outcomes=await Promise.all([start(endAt+60000),start(endAt+60000)]);
+  assert.deepEqual(outcomes.map(x=>x.status).sort(),[202,409]);
+  assert.equal(dials,2);
+ }finally{f.close()}
+});
