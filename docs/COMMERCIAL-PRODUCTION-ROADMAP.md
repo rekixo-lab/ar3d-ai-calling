@@ -3,9 +3,9 @@ Owner-approved implementation sequence (2026-11-24). Scope only this repository,
 ## Design contract
 Both workspaces: navy #14243c sidebar, selected #294b77, blue #2658bc accents, white cards, #f2f5f9 canvas, consistent outlined icons, readable tables, responsive desktop/tablet/mobile, accessible controls, honest empty/error/loading states. Preserve existing routes and tenant boundaries. Keep advanced diagnostics separate from daily workflow. Use INR only when independently verified; display seconds and IST.
 ## Phase 1 — reliability and CRM
-- [ ] Verify compact campaign job IDs for Check charge / Verify CDR (first PR).
+- [x] Verify compact campaign job IDs for Check charge / Verify CDR (PR #156, CI 45323227387, production 45323433020; synthetic provider evidence only).
 - [ ] Real recording transport/STT diagnosis and complete Hindi/English acceptance, signed hangup and CRM save.
-- [ ] Persist tenant-scoped partial accepted answers; manual review; no invented profile updates.
+- [ ] Persist tenant-scoped partial accepted answers; manual review; no invented profile updates. Implementation in this change saves accepted prefix on terminal signed hangup via campaign reconciliation; live acceptance still pending.
 - [ ] Customer details property type/area/budget/size/visit preference; export CSV/XLSX.
 - [ ] Device deactivate/replace with audit, consent and no lost active hangup; safe uncertain-call reconciliation.
 - [ ] Update stale release readiness from verified evidence; IST timestamps and language preference.
