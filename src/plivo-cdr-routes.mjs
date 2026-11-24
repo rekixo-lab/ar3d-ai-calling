@@ -5,6 +5,8 @@ import {resolveCrmDb} from './core.mjs';
 
 const PATH='/v1/human/plivo-cdr';
 const UUID=/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
+const JOB_ID=/^[a-f0-9]{32}$/i;
+const validJobId=value=>UUID.test(value||'')||JOB_ID.test(value||'');
 const HEADERS={'Cache-Control':'no-store','X-Content-Type-Options':'nosniff','Referrer-Policy':'no-referrer'};
 const json=(data,status=200)=>Response.json(data,{status,headers:HEADERS});
 const fail=(error,status=400)=>json({error},status);
@@ -19,7 +21,7 @@ export async function handlePlivoCdrRequest(req,env,user,{fetcher=fetch}={}){
  if([...url.searchParams.keys()].some(k=>!['tenantId','jobId'].includes(k)||
     url.searchParams.getAll(k).length!==1)||
     !UUID.test(url.searchParams.get('tenantId')||'')||
-    !UUID.test(url.searchParams.get('jobId')||''))
+    !validJobId(url.searchParams.get('jobId')))
   return fail('invalid CDR request');
  const tid=url.searchParams.get('tenantId'),jid=url.searchParams.get('jobId');
  try{
