@@ -439,7 +439,16 @@ function providerBalancePanel(openView){
  const sarvam=overviewMetric('Sarvam AI credits','Not available via API','spark');
  sarvam.append(node('p',{class:'muted',text:'Check your organisation’s Credits Left in Sarvam Settings → Billing. No estimated balance is displayed.'}),
   node('a',{class:'provider-link',href:'https://dashboard.sarvam.ai/',target:'_blank',rel:'noopener noreferrer',text:'Open Sarvam dashboard'}));
+ const clients=overviewMetric('Client allocated minutes','Loading…','users');
+ const clientRemaining=node('p',{class:'muted',text:'Uncommitted: Loading…'});
+ clients.append(clientRemaining,btn('Manage client credits',()=>openView('wallet',{focus:true,resetScroll:true}),true));
+ function setClients(position){
+  const fmt=v=>Number.isSafeInteger(v)&&v>=0?formatSeconds(v):'Unavailable';
+  clients.querySelector('strong').textContent=fmt(position?.allocatedSeconds);
+  clientRemaining.textContent='Uncommitted: '+fmt(position?.uncommittedSeconds);
+ }
  async function load(){
+  if(refresh.disabled)return;
   refresh.disabled=true;value.textContent='Checking…';status.textContent='Reading provider account only.';
   try{
    const d=await api('/v1/human/credits/provider');
@@ -452,11 +461,10 @@ function providerBalancePanel(openView){
   finally{refresh.disabled=false}
  }
  const panel=node('section',{class:'card provider-balances','aria-label':'Provider balances'},[
-  title('Provider balances','h3'),div('provider-grid',plivo,sarvam),
-  node('p',{class:'muted',text:'Provider credits are separate from client calling minutes. No payment or calling action is performed.'}),
-  btn('Manage client credits',()=>openView('wallet',{focus:true,resetScroll:true}),true)
+  title('Provider balances','h3'),div('provider-grid',plivo,sarvam,clients),
+  node('p',{class:'muted',text:'Provider credits are separate from client calling minutes. No payment or calling action is performed.'})
  ]);
- return {panel,load};
+ return {panel,load,setClients};
 }
 async function adminDashboard(main,openView){
  const panel=div('card',title('Business overview')),body=div('stack');
@@ -471,6 +479,7 @@ async function adminDashboard(main,openView){
   try{
    const d=await api('/v1/human/credits/admin-dashboard');
    const p=d.position;
+   providers.setClients(p);
    body.replaceChildren(div('overview-grid',
     overviewMetric('Client companies',safeCount(d.clients.total),'users'),
     overviewMetric('Active companies',safeCount(d.clients.active),'users'),
@@ -490,7 +499,7 @@ async function adminDashboard(main,openView){
     title('Recent credit adjustments','h3'),
     table(['Date (IST)','Company','Adjustment','Minutes','Balance'],d.transactions.map(t=>[formatIst(t.createdAt),t.company,t.kind,String(t.deltaSeconds/60),formatSeconds(t.balanceSeconds)])),
     node('p',{class:'note',text:'Uncommitted credits are ledger balances, not carrier funds or authorization to dial. External payments and revenue are not recorded here.'}));
-  }catch(e){body.replaceChildren(node('p',{class:'err',text:'Dashboard unavailable. Refresh after signing in with current MFA.'}));}
+  }catch(e){providers.setClients(null);body.replaceChildren(node('p',{class:'err',text:'Dashboard unavailable. Refresh after signing in with current MFA.'}));}
   finally{refresh.disabled=false}
  }
  await load();

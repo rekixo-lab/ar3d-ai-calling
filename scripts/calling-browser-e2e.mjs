@@ -261,6 +261,8 @@ try{
  const providers=adminPage.getByRole('region',{name:'Provider balances'});
  await providers.getByText('12.34',{exact:true}).waitFor();
  await providers.getByText('Not available via API',{exact:true}).waitFor();
+ await providers.getByText('Client allocated minutes',{exact:true}).waitFor();
+ await providers.getByText('100m 00s',{exact:true}).waitFor();
  await providers.getByText(/Trial account/).waitFor();
  assert.equal(await adminPage.locator('#client-sidebar-wallet').count(),0);
  await adminPage.unroute('**/v1/human/credits/provider');
