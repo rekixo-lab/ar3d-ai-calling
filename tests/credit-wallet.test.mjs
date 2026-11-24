@@ -370,7 +370,9 @@ test('minute usage separates connected and billed seconds, pending CDRs and plan
   const run='bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',job='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',pending='cccccccc-cccc-4ccc-8ccc-cccccccccccc';
   const at=new Date().toISOString(),call='dddddddd-dddd-4ddd-8ddd-dddddddddddd';
   f.r.db.prepare("INSERT INTO calling_runs(tenant_id,id,campaign_id,state,created_by,created_at,updated_at) VALUES(?,?,?,'completed','client',?,?)").run(tid,run,'22222222-2222-4222-8222-222222222222',at,at);
-  for(const [id,ref] of [[job,call],[pending,pending]])f.r.db.prepare("INSERT INTO calling_jobs(tenant_id,id,run_id,lead_id,state,account_sid,caller_id,destination,provider_call_sid,created_at,updated_at) VALUES(?,?,?,?,'completed','TESTACCOUNT123','+918000000000','+919000000001',?,?,?)").run(tid,id,run,'33333333-3333-4333-8333-333333333333',ref,at,at);
+  const secondLead='eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee';
+  f.r.db.prepare("INSERT INTO leads(tenant_id,id,name,mobile_e164,source_type,created_at,updated_at) VALUES(?,?,'Synthetic pending lead','+919000000008','other',?,?)").run(tid,secondLead,at,at);
+  for(const [id,ref] of [[job,call],[pending,pending]])f.r.db.prepare("INSERT INTO calling_jobs(tenant_id,id,run_id,lead_id,state,account_sid,caller_id,destination,provider_call_sid,created_at,updated_at) VALUES(?,?,?,?,'completed','TESTACCOUNT123','+918000000000','+919000000001',?,?,?)").run(tid,id,run,id===job?'33333333-3333-4333-8333-333333333333':secondLead,ref,at,at);
   f.r.db.prepare("INSERT INTO verified_provider_call_costs(tenant_id,job_id,provider_call_uuid,reported_amount,billed_seconds,call_seconds,verified_by,verified_at) VALUES(?,?,?,'0.01',30,16,'admin',?)").run(tid,job,call,at);
   await route(f,'tenant',admin,'POST',{tenantId:tid,totalInr:500,expectedCurrentInr:0,reason:'Initial test planning allocation'});
   await route(f,'tenant',admin,'POST',{tenantId:tid,totalInr:300,expectedCurrentInr:500,reason:'Test planning recovery transaction'});
