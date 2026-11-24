@@ -162,8 +162,8 @@ function scriptedPhonePilotPanel(){
       '. Complete answers update its configured test lead.':'Waiting for Plivo: approve a caller number and configure the internal test.';
 
     call.disabled=!config.configured;
-    results.replaceChildren(...(config.recent?.length?[table(['Started','Language','Status'],
-      config.recent.map(x=>[x.created_at,x.language,x.phase]))]:[]));
+    results.replaceChildren(...(config.recent?.length?[table(['Started','Language','Status','Provider call reference','Turns processed','Signed hangup','Seconds'],
+      config.recent.map(x=>[x.created_at,x.language,x.phase,x.provider_call_reference?'Received':'Not received',x.turn??'—',x.signed_hangup?'Received':'Not received',x.duration_seconds??'—']))]:[]));
   }
   card.append(status,prepare,prepared,div('formrow',lab('Recorded prompt language',language),call,
     btn('Refresh fixed-question pilot status',()=>refresh().catch(asError),true)),results);
