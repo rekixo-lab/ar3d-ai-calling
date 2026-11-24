@@ -90,3 +90,16 @@ test('CDR rejects mismatched Plivo identity, untrusted amount or cross-account d
   assert.equal((await handlePlivoCdrRequest(req(),f.env,client,{fetcher:gateway()})).status,503);
  }finally{f.close()}
 });
+
+test('CDR accepts actual compact campaign job IDs but keeps provider UUID validation',async()=>{
+ const f=fixture();try{
+  configured(f);
+  const compact='a'.repeat(32);
+  f.r.db.prepare('UPDATE calling_jobs SET id=? WHERE tenant_id=? AND id=?').run(compact,tid,job);
+  const r=await handlePlivoCdrRequest(req(tid,compact),f.env,client,{fetcher:gateway()});
+  assert.equal(r.status,200,await r.clone().text());assert.equal((await r.json()).jobId,compact);
+  assert.equal((await handlePlivoCdrRequest(req(tid,'z'.repeat(32)),f.env,client,{fetcher:gateway()})).status,400);
+  f.r.db.prepare('UPDATE calling_jobs SET provider_call_sid=? WHERE id=?').run(compact,compact);
+  assert.equal((await handlePlivoCdrRequest(req(tid,compact),f.env,client,{fetcher:gateway()})).status,409);
+ }finally{f.close()}
+});
