@@ -213,6 +213,18 @@ pre { white-space: pre-wrap; overflow-wrap: anywhere; }
 .overview-actions {display:flex;flex-wrap:wrap;gap:10px;margin:16px 0;}
 .btn,.navitem,.field {transition:background-color 150ms ease,border-color 150ms ease,color 150ms ease;}
 @media(max-width:650px){.cards,.client-metrics{grid-template-columns:repeat(2,minmax(0,1fr));}.overview-grid,.metrics{grid-template-columns:repeat(2,minmax(0,1fr));}.overview-grid .metric strong{font-size:20px;}}
+.chart-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,260px),1fr));gap:12px;margin:6px 0;}
+.chart-panel{border:1px solid var(--line);border-radius:12px;padding:14px;min-width:0;}
+.chart-panel h3{font-size:15px;margin-bottom:12px;}
+.chart-row{display:grid;gap:5px;margin-bottom:12px;}
+.chart-row:last-child{margin-bottom:0;}
+.chart-label{display:flex;justify-content:space-between;gap:10px;align-items:baseline;font-size:13px;}
+.chart-label strong{font-variant-numeric:tabular-nums;text-align:right;overflow-wrap:anywhere;}
+.chart-row meter{width:100%;height:12px;display:block;accent-color:#70a5ff;}
+.chart-row meter::-webkit-meter-bar{background:#333;border:0;border-radius:8px;}
+.chart-row meter::-webkit-meter-optimum-value{background:#70a5ff;border-radius:8px;}
+.chart-row meter::-moz-meter-bar{background:#70a5ff;border-radius:8px;}
+.chart-panel p+p{margin-top:8px;}
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{transition:none!important;animation:none!important;scroll-behavior:auto!important;}}
 `;
 

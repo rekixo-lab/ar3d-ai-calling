@@ -386,6 +386,21 @@ function overviewMetric(label,value,symbol){
  return div('card metric',div('metric-symbol',icon(symbol)),node('span',{class:'muted',text:label}),node('strong',{text:value}));
 }
 function safeCount(value){return Number.isSafeInteger(value)&&value>=0?String(value):'Unavailable'}
+// Accessible charts of verified counts. Missing values are not shown as zero.
+function countChart(label,rows,format=safeCount){
+ const valid=v=>Number.isSafeInteger(v)&&v>=0;
+ const max=Math.max(1,...rows.map(r=>valid(r[1])?r[1]:0));
+ return node('section',{class:'chart-panel','aria-label':label},[
+  title(label,'h3'),
+  ...rows.map(([name,value])=>div('chart-row',
+   div('chart-label',node('span',{text:name}),node('strong',{text:valid(value)?format(value):'Unavailable'})),
+   valid(value)?node('meter',{min:'0',max:String(max),value:String(value),'aria-label':name}):node('span',{class:'muted',text:'No verified value'})))
+ ]);
+}
+function actionNotice(label,count){
+ if(!Number.isSafeInteger(count)||count<0)return node('p',{class:'note',text:label+': unavailable'});
+ return node('p',{class:count?'banner err':'note',role:'status',text:label+': '+count});
+}
 async function adminDashboard(main,openView){
  const panel=div('card',title('Business overview')),body=div('stack');
  const refresh=btn('Refresh dashboard',load,true);
@@ -407,6 +422,9 @@ async function adminDashboard(main,openView){
     overviewMetric('Ended internal tests',safeCount(d.internal.ended),'phone'),
     overviewMetric('Ended campaign calls',safeCount(d.campaign.ended),'phone')),
     div('overview-actions',btn('Manage clients',()=>openView('clients',{focus:true,resetScroll:true})),btn('Credit transactions',()=>openView('wallet',{focus:true,resetScroll:true}),true),btn('Calling setup',()=>openView('calling',{focus:true,resetScroll:true}),true)),
+    div('chart-grid',
+     countChart('Credit position · recorded seconds',[['Used',p.usedSeconds],['Reserved',p.heldSeconds],['Uncommitted',p.uncommittedSeconds]],formatSeconds),
+     countChart('Ended calls · recorded counts',[['Internal tests',d.internal.ended],['Campaign calls',d.campaign.ended]])),
     title('Funding review','h3'),
     div('overview-grid',overviewMetric('Reviewed cumulative capacity',formatSeconds(d.funding?.capSeconds),'wallet'),overviewMetric('Remaining funded capacity',formatSeconds(d.funding?.remainingFundedSeconds),'wallet'),overviewMetric('Unbacked allocations',formatSeconds(d.funding?.unbackedAllocationSeconds),'receipt')),
     node('p',{class:'note',text:'Operator-reviewed ceiling, not a live provider balance. Unconfigured capacity blocks new campaigns.'}),
@@ -1466,6 +1484,14 @@ function operationsReportPanel(tenantId,content){
    view.replaceChildren(
     node('p',{class:'muted',text:'Updated '+new Date(data.asOf).toLocaleString()+
       ' · last 7 days for activity counts · not billable provider usage'}),
+    div('chart-grid',
+     countChart('Lead pipeline · CRM counts',[['Interested',data.leadPipeline.interested],['Follow-up',data.leadPipeline.followup],['Not interested',data.leadPipeline.not_interested]]),
+     countChart('Call job outcomes · recorded counts',[['Completed',jobs.completed],['Failed',jobs.failed],['Unknown',jobs.unknown],['Queued',jobs.queued],['In flight',jobs.reserved+jobs.submitted]])),
+    node('section',{class:'chart-panel','aria-label':'Action required'},[
+     title('Action required','h3'),
+     actionNotice('Follow-ups already due',data.leadPipeline.dueFollowups),
+     actionNotice('Unknown provider outcomes requiring manual review',jobs.unknown)
+    ]),
     table(['Measure','Count'],lines.map(([name,count])=>[name,String(count)])),
     node('p',{class:data.providerReview.needsManualReconciliation?'banner err':'note',
      role:'status',text:data.providerReview.notice}),
