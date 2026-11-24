@@ -142,6 +142,11 @@ try{
  await page.getByRole('link',{name:'Results / CRM',exact:true}).click();
  await page.getByRole('heading',{name:'Operations & Security Report'}).waitFor();
  await page.getByRole('row',{name:/Unknown provider outcomes 0/}).waitFor();
+ const outcomes=page.getByRole('region',{name:'Call job outcomes · recorded counts'});
+ await outcomes.waitFor();
+ assert.equal(await outcomes.locator('meter[aria-label="Completed"]').getAttribute('value'),'1');
+ const required=page.getByRole('region',{name:'Action required'});
+ await required.getByText('Unknown provider outcomes requiring manual review: 0',{exact:true}).waitFor();
  await page.getByRole('button',{name:'Refresh operations report'}).click();
  await page.getByRole('heading',{name:'Campaign results & customer answers'}).waitFor();
  await page.getByRole('button',{name:'Refresh customer answers'}).waitFor();
