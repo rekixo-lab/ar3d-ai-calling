@@ -66,12 +66,13 @@ async function providerPreview(env,fetcher){
   const data=JSON.parse(raw),credits=data?.cash_credits;
   if(typeof credits!=='string'||!/^\d{1,10}(?:\.\d{1,8})?$/.test(credits))
    return json({available:false,reason:'provider_balance_unavailable',verifiedInr:false});
+  if(data.auth_id!==undefined&&data.auth_id!==auth)return json({available:false,reason:'provider_account_identity_mismatch',verifiedInr:false});
   return json({available:true,provider:'Plivo',cashCredits:credits,
-   cashCreditsCurrency:'unverified_for_India_account',verifiedInr:false,
+   cashCreditsCurrency:'USD',verifiedInr:false,
    accountType:['developer','standard'].includes(data.account_type)?data.account_type:'unverified',
    billingMode:['prepaid','postpaid'].includes(data.billing_mode)?data.billing_mode:'unverified',
    checkedAt:new Date().toISOString(),
-   notice:'Plivo cash_credits is provider-reported, NOT allocated INR, and trial credits may be restricted. Check account currency and approved live funds before activation.'});
+   notice:'Plivo Account API documents cash_credits in USD. India console conversion is not verified by this endpoint. Trial credits may be restricted; this is not approved live funding.'});
  }catch{
   return json({available:false,reason:'provider_balance_unavailable',verifiedInr:false});
  }
