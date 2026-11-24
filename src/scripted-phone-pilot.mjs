@@ -565,7 +565,7 @@ function verifiedRecordingUrl(config,row,recording,body){
  try{
   const url=new URL(body.recording_url);
   const expected='/v1/Account/'+config.authId+'/Recording/'+recording+'.'+body.recording_format;
-  if(url.origin!=='https://media.plivo.com'||url.username||url.password||url.hash||url.pathname!==expected)return null;
+  if(!['https://media.plivo.com','https://aps1.media.plivo.com'].includes(url.origin)||url.username||url.password||url.hash||url.pathname!==expected)return null;
   return url.href;
  }catch{return null}
 }
