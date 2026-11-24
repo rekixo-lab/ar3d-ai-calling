@@ -617,14 +617,29 @@ async function probeInternalRecording(env,config,fetcher,{showFirstAnswer=false,
   bytes=await readBoundedBytes(response,ANSWER_MAX_BYTES);result.bytes=bytes.length;
  }catch{return {...result,state:'media_read_failed'}}
  try{
+  if(showLastAnswer){
+   const {phoneMeta,...previous}=JSON.parse(row.survey_json);
+   const field=FIELDS[row.question_index];
+   const replayState={...previous,status:'active',attempts:0,turns:0,startedAt:now};
+   // Same bytes, language and VAD settings; only the topic hint differs.
+   // These are fresh recognition runs, not the original callback transcript.
+   // Deterministic parser only: historical contextual/memory state is not recoverable.
+   const recognize=async(initialPrompt)=>{
+    let transcript;
+    try{transcript=await transcribeScriptedAnswer(env.AI,bytes,row.language,{vadFilter:false,initialPrompt})}
+    catch{return {stt:'service_failed',transcript:null,parserAction:null,normalizedAnswer:null}}
+    if(!transcript)return {stt:'empty_text',transcript:null,parserAction:null,normalizedAnswer:null};
+    try{
+     const replay=advanceFixedVoicePreview(replayState,{transcript,now});
+     return {stt:'text_received',transcript,parserAction:replay.action,normalizedAnswer:['next_question','completed'].includes(replay.action)?replay.state.answers[field]??null:null};
+    }catch{return {stt:'text_received',transcript,parserAction:'replay_state_invalid',normalizedAnswer:null}}
+   };
+   const baseline=await recognize(null);
+   const hinted=await recognize(answerSpeechContext(row));
+   return {...result,state:'media_downloaded',question:field,...baseline,hinted};
+  }
   const text=await transcribeScriptedAnswer(env.AI,bytes,row.language,{vadFilter:false});
   const output={...result,state:'media_downloaded',stt:text?'text_received':'empty_text'};
-  if(showLastAnswer&&text){
-   const {phoneMeta,...previous}=JSON.parse(row.survey_json);
-   const replayState={...previous,status:'active',attempts:0,turns:0,startedAt:now};
-   const replay=advanceFixedVoicePreview(replayState,{transcript:text,now});
-   return {...output,transcript:text,question:FIELDS[row.question_index],parserAction:replay.action,normalizedAnswer:replay.state.answers[FIELDS[row.question_index]]??null};
-  }
   if(showFirstAnswer&&text){
    const replay=advanceFixedVoicePreview(beginFixedVoicePreview({language:row.language,now}).state,{transcript:text,now});
    return {...output,transcript:text,parserAction:replay.action,propertyType:replay.state.answers.propertyType??null};
