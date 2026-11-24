@@ -160,7 +160,7 @@ test('internal target preflight is read-only, safe with pilot disabled, and reje
    AR3D_SCRIPTED_PILOT_LEAD_ID:lead.id,AR3D_SCRIPTED_PILOT_VERIFIED_NUMBER:lead.mobile_e164};
   const before=f.r.db.prepare('SELECT total_changes() AS n').get().n;
   assert.deepEqual(await inspectInternalPilotLead(env),{state:'matched',ready:true});
-  assert.deepEqual(await inspectInternalPilotLead({...env,AR3D_SCRIPTED_PILOT_VERIFIED_NUMBER:'+918065491333'}),{state:'configuration_missing',ready:false});
+  assert.deepEqual(await inspectInternalPilotLead({...env,AR3D_SCRIPTED_PILOT_VERIFIED_NUMBER:'+915000000001'}),{state:'configuration_missing',ready:false});
   assert.deepEqual(await inspectInternalPilotLead({...env,AR3D_SCRIPTED_PILOT_VERIFIED_NUMBER:'+919000000009'}),{state:'lead_unavailable',ready:false});
   assert.deepEqual(await inspectInternalPilotLead({...env,AR3D_SCRIPTED_PILOT_TENANT_ID:'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'}),{state:'tenant_unavailable',ready:false});
   assert.equal(f.r.db.prepare('SELECT total_changes() AS n').get().n,before);
