@@ -741,3 +741,32 @@ test('recording 403 may recover only through matching authenticated regional met
   }finally{f.close()}
  }
 });
+
+test('saved recording probe is no-dial, current-MFA and explicit-consent only; returns no speech or IDs',async()=>{
+ const f=fixture();try{
+  const env={...f.env,PLIVO_AUTH_ID:'syntheticAuth',PLIVO_AUTH_TOKEN:token,
+   AR3D_SCRIPTED_PILOT_ENABLED:'enabled',AR3D_PLIVO_RECORDING_AUTH:'confirmed',
+   AR3D_SCRIPTED_PILOT_ORIGIN:origin,AR3D_PLIVO_CALLER_NUMBER:'+918000000000',
+   AR3D_SCRIPTED_PILOT_VERIFIED_NUMBER:internalNumber,AR3D_SCRIPTED_PILOT_TENANT_ID:tid,
+   AR3D_SCRIPTED_PILOT_LEAD_ID:lead,RECORDINGS:{head:async()=>({size:4}),get:async()=>null},
+   AI:{async run(){return {text:'private transcript'}}}};
+  f.c.db.prepare("INSERT INTO scripted_phone_pilots(id,tenant_id,lead_id,lead_updated_at,actor_id,language,destination,caller,rate_slot,expires_at,phase,turn,provider_call_id,survey_json,created_at,provider_account_id,hangup_at) VALUES(?,?,?,?,?,?,?,?,?,?,'ended',1,?,?,?,?,?)")
+   .run(crypto.randomUUID(),tid,lead,new Date(now).toISOString(),admin.id,'hi',internalNumber,env.AR3D_PLIVO_CALLER_NUMBER,1,now+600000,callId,JSON.stringify({phoneMeta:{engine:'whisper'}}),new Date(now).toISOString(),env.PLIVO_AUTH_ID,now);
+  let calls=0,media=0;
+  const req=(confirm='REPROCESS_ONE_CONSENTED_INTERNAL_RECORDING')=>new Request(origin+'/v1/human/scripted-phone-pilot/recording-probe',{method:'POST',headers:{Origin:origin},body:JSON.stringify({confirm})});
+  const fetcher=async(url,opts)=>{
+   calls++;assert.equal(opts.method,'GET');assert.equal(opts.redirect,'manual');
+   if(url.includes('/Recording/?'))return Response.json({objects:[{call_uuid:callId,recording_id:'record-id-00',recording_format:'mp3',recording_duration_ms:6000,recording_url:'https://aps1.media.plivo.com/v1/Account/syntheticAuth/Recording/record-id-00.mp3'}]});
+   assert.match(url,/^https:\/\/aps1\.media\.plivo\.com\//);media++;
+   return new Response('RIFF',{headers:{'Content-Type':'audio/wav'}});
+  };
+  assert.equal((await handleScriptedPhoneAdmin(req(),env,client,{now,fetcher})).status,403);
+  assert.equal((await handleScriptedPhoneAdmin(req('wrong'),env,admin,{now,fetcher})).status,400);
+  assert.equal(calls,0);
+  const before=f.r.db.prepare('SELECT * FROM leads WHERE id=?').get(lead);
+  const r=await handleScriptedPhoneAdmin(req(),env,admin,{now,fetcher});assert.equal(r.status,200,await r.clone().text());
+  const d=await r.json();assert.equal(d.mediaHttp,200);assert.equal(d.stt,'text_received');assert.equal(d.bytes,4);assert.equal(media,1);assert.equal(calls,2);
+  assert.doesNotMatch(JSON.stringify(d),/private transcript|record-id|syntheticAuth/);
+  assert.deepEqual(f.r.db.prepare('SELECT * FROM leads WHERE id=?').get(lead),before);
+ }finally{f.close()}
+});
