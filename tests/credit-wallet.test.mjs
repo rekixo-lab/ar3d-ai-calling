@@ -392,3 +392,26 @@ test('minute usage separates connected and billed seconds, pending CDRs and plan
   const audit=await operator.json();assert.ok(audit.transactions.every(x=>x.actor&&x.reason&&x.transactionId));
  }finally{f.close()}
 });
+
+
+test('production cost plan is admin-only, exact and does not change credits or contact providers',async()=>{
+ const f=fixture();try{
+  const q='production-cost-plan?minutes=1000&audioPercent=50&numbers=1';
+  assert.equal((await route(f,q,client)).status,403);
+  assert.equal((await route(f,q,admin)).status,403);
+  freshMfa(f);
+  const options={fetcher:async()=>{throw Error('no provider call allowed')}};
+  const res=await route(f,q,admin,'GET',undefined,options);
+  assert.equal(res.status,200);
+  const d=await res.json();
+  assert.equal(d.variablePerMinute,655000);assert.equal(d.conservativePerMinute,900000);
+  assert.equal(d.fixedTotal,675000000);assert.equal(d.variableTotal,655000000);assert.equal(d.total,1330000000);
+  assert.equal(d.actualProviderBillingVerified,false);assert.equal(d.clientCreditsDebited,false);
+  assert.equal((await route(f,q+'&minutes=1')).status,400);
+  assert.equal((await route(f,q.replace('audioPercent=50','audioPercent=101'))).status,400);
+  assert.equal((await route(f,q.replace('minutes=1000','minutes=0'))).status,400);
+  assert.equal((await route(f,q,admin,'POST',{})).status,405);
+  assert.equal(f.c.db.prepare('SELECT COUNT(*) AS n FROM tenant_credit_budgets').get().n,0);
+  assert.equal(f.c.db.prepare('SELECT COUNT(*) AS n FROM tenant_credit_audit').get().n,0);
+ }finally{f.close()}
+});

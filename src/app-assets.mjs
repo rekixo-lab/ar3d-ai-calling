@@ -504,8 +504,33 @@ async function adminMinuteWallet(main){
  company.addEventListener('change',()=>select().catch(asError));
  card.append(div('formrow',lab('Search clients',search),btn('Find company',()=>find().catch(asError),true)),
   lab('Client company',company),detail);main.append(card);
+ productionCostPlanner(main);
  creditWalletOperator(main);
  await find();
+}
+function productionCostPlanner(main){
+ const panel=div('card',title('Production cost planner'));
+ const minutes=input('estimateMinutes','number'),audio=input('estimateAudio','number'),numbers=input('estimateNumbers','number'),result=div('stack');
+ for(const [el,min,max,val] of [[minutes,1,1000000,1000],[audio,0,100,50],[numbers,1,1000,1]]){
+  el.min=String(min);el.max=String(max);el.step='1';el.value=String(val);
+ }
+ let seq=0;
+ const refresh=btn('Calculate production cost',()=>calculate().catch(asError),true);
+ async function calculate(){
+  const id=++seq;refresh.disabled=true;
+  try{
+   if(![minutes,audio,numbers].every(x=>x.checkValidity()))throw Error('Enter valid whole-number cost assumptions');
+   const d=await api('/v1/human/credits/production-cost-plan?'+new URLSearchParams({minutes:minutes.value,audioPercent:audio.value,numbers:numbers.value}));
+   if(id!==seq)return;
+   const money=n=>'₹'+(n/d.plan.scale).toFixed(3);
+   result.replaceChildren(table(['Variable component','Estimated per minute'],[['Plivo',money(d.perMinute.plivo)],['Sarvam STT',money(d.perMinute.stt)],['Contextual LLM budget',money(d.perMinute.llm)],['Variable total',money(d.variablePerMinute)],['Full-minute STT budget',money(d.conservativePerMinute)]]),
+    table(['Monthly cost','Estimated INR'],[['Calling numbers',money(d.fixed.numbers)],['Cloudflare Workers Paid',money(d.fixed.cloudflare)],['Fixed subtotal',money(d.fixedTotal)],['Variable subtotal',money(d.variableTotal)],['Total before tax',money(d.total)]]),
+    node('p',{class:'note',text:'Planning only · not verified provider charges or a client credit balance. Assumes billed phone minutes equal entered minutes and the entered percentage is billable STT audio. Excludes taxes, FX changes, rounding, retries and Cloudflare overages. No call limits or wallet changes.'}));
+  }catch(e){if(id===seq)result.replaceChildren();throw e}
+  finally{if(id===seq)refresh.disabled=false}
+ }
+ panel.append(node('p',{class:'muted',text:'Approved architecture: Plivo + Saaras v4 + direct-first AR3D interpreter / Sarvam contextual LLM. Internal cost assumptions only.'}),div('formrow',lab('Monthly calling minutes (estimate)',minutes),lab('Billable STT audio %',audio),lab('Rented numbers',numbers),refresh),result);
+ main.append(panel);calculate().catch(asError);
 }
 function creditWalletOperator(main){
  const panel=node('details',{class:'card'},node('summary',{text:'Provider balance & provisional budget adjustments'}));
