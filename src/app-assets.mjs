@@ -204,7 +204,7 @@ function dashboard(){
   const item=items.find(x=>x[0]===key);
   if(!item)return;
   if(admin)state.adminTab=key;else state.clientTab=key;
-  if(location.hash!=='#'+key&&!location.hash.startsWith('#invite='))history.replaceState(null,'','#'+key);
+  if(focus&&location.hash!=='#'+key&&!location.hash.startsWith('#invite='))history.replaceState(null,'','#'+key);
   for(const [id,link] of links){
    if(id===key)link.setAttribute('aria-current','page');else link.removeAttribute('aria-current');
   }
