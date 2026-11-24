@@ -62,11 +62,12 @@ function fixture({role='client_admin',status='new',updatedAt=originalAt,consent=
           if(old!==leadRecord.updatedAt)return {meta:{changes:0}};
           leadRecord.preferredLocation=params[0];
           leadRecord.plotSizePreference=params[1];
-          leadRecord.budgetMaxInr=params[2];
-          leadRecord.interestStatus=params[3];
-          leadRecord.visitDatePreference=params[4];
-          leadRecord.requirements_json=params[5];
-          leadRecord.updatedAt=params[6];
+          leadRecord.budgetMinInr=params[2];
+          leadRecord.budgetMaxInr=params[3];
+          leadRecord.interestStatus=params[4];
+          leadRecord.visitDatePreference=params[5];
+          leadRecord.requirements_json=params[6];
+          leadRecord.updatedAt=params[7];
           return {meta:{changes:1}};
         }
         if(sql.includes('INSERT INTO site_visits')){
@@ -230,4 +231,12 @@ test('UI: name/mobile prefilled from Excel, 7 fixed questions, BHK conditional a
   assert.match(js,/visitRequested/);
   assert.match(js,/No phone call/);
   assert.ok(!js.includes('/v1/human/calls/start'));
+});
+
+test('staff-reviewed range persists both budget endpoints and rejects reversed bounds',async()=>{
+ const f=fixture();const payload={tenantId:tenant,expectedUpdatedAt:originalAt,...survey,budgetMinInr:2000000};
+ const response=await worker.fetch(request('POST',payload),f.env);assert.equal(response.status,200);
+ assert.equal(f.leadRecord.budgetMinInr,2000000);assert.equal(f.leadRecord.budgetMaxInr,3500000);
+ assert.equal(JSON.parse(f.leadRecord.requirements_json).propertySurvey.budgetMinInr,2000000);
+ const rejected=await worker.fetch(request('POST',{...payload,expectedUpdatedAt:f.leadRecord.updatedAt,budgetMinInr:4000000}),f.env);assert.equal(rejected.status,400);
 });
