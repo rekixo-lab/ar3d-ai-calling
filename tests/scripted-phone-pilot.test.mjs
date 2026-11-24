@@ -815,7 +815,7 @@ test('saved recording probe is no-dial, current-MFA and explicit-consent only; r
   let sarvamRequests=0;
   const sarvamFetcher=async(url,opts)=>{
    if(url!=='https://api.sarvam.ai/speech-to-text')return fetcher(url,opts);
-   sarvamRequests++;assert.equal(opts.method,'POST');assert.equal(opts.redirect,'error');
+   sarvamRequests++;assert.equal(opts.method,'POST');assert.equal(opts.redirect,'manual');
    assert.equal(opts.headers['api-subscription-key'],'synthetic-test-key');assert.equal(opts.body.get('model'),'saaras:v4');assert.equal(opts.body.get('language_code'),'hi-IN');assert.equal(opts.body.get('mode'),'transcribe');assert.equal(await opts.body.get('file').text(),'RIFF');
    return Response.json({transcript:'बीस लाख'});
   };

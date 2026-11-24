@@ -56,7 +56,7 @@ export function speechFailureCode(error){
  if(error?.message==='invalid_nova_response')return 'invalid_response_shape';
  if(error?.message==='invalid_audio')return 'invalid_audio';
  if(['sarvam_not_configured','sarvam_invalid_response'].includes(error?.message))return error.message;
- if(typeof error?.message==='string'&&/^sarvam_http_[45]\d{2}$/.test(error.message))return error.message;
+ if(typeof error?.message==='string'&&/^sarvam_http_[345]\d{2}$/.test(error.message))return error.message;
  if(['TimeoutError','AbortError'].includes(error?.name))return 'timeout';
  const match=typeof error?.message==='string'?error.message.match(/^(?:AiError:\s*)?(\d{4}):/):null;
  const code=Number.isInteger(error?.code)?error.code:match?Number(match[1]):null;
@@ -71,7 +71,7 @@ export async function transcribeSarvamRecordedAnswer(key,bytes,language,contentT
  const form=new FormData();
  form.append('file',new Blob([bytes],{type:contentType}),contentType==='audio/mpeg'?'answer.mp3':'answer.wav');
  form.append('model','saaras:v4');form.append('language_code',language==='hi'?'hi-IN':'en-IN');form.append('mode','transcribe');
- const response=await fetcher('https://api.sarvam.ai/speech-to-text',{method:'POST',headers:{'api-subscription-key':key},body:form,redirect:'error',signal:AbortSignal.timeout(10000)});
+ const response=await fetcher('https://api.sarvam.ai/speech-to-text',{method:'POST',headers:{'api-subscription-key':key},body:form,redirect:'manual',signal:AbortSignal.timeout(10000)});
  if(!response.ok){try{await response.body?.cancel()}catch{}throw Error('sarvam_http_'+response.status)}
  const raw=JSON.parse(new TextDecoder().decode(await readBoundedBytes(response,65536)));
  if(typeof raw?.transcript!=='string')throw Error('sarvam_invalid_response');
