@@ -355,3 +355,25 @@ test('Split numeric answers retain one scoped quantity, then accept an explicit 
  const low=await advanceInternalVoice(ai,part.result.state,{transcript:'वर्ग फीट',confidence:.4,now:stamp},part.pendingQuantity);
  assert.equal(low.result.action,'repeat');assert.equal(low.pendingQuantity,null);
 });
+
+test('explicit labelled multi-answer utterance skips answered questions in one actual turn',async()=>{
+ const now=Date.parse('2026-11-24T08:00:00Z'),start=beginFixedVoicePreview({language:'hi',now}).state;
+ const ai={run:()=>assert.fail('deterministic labelled answers need no model')};
+ const result=await advanceInternalVoice(ai,start,{transcript:'घर चाहिए; शहर कोरबा; एरिया बस स्टैंड; साइज 6BHK; बजट पचपन लाख',now});
+ assert.equal(result.interpreter,'labelled_multi_answer');assert.equal(result.result.state.turns,1);assert.equal(result.result.currentField,'interest');
+ assert.deepEqual(result.result.state.answers,{propertyType:'house',location:'कोरबा',area:'बस स्टैंड',size:'6BHK',budgetInr:5500000});
+ const invalid=await advanceInternalVoice(ai,start,{transcript:'घर; शहर कोरबा; बजट 55 लाख',now});
+ assert.equal(invalid.result.action,'repeat');assert.deepEqual(invalid.result.state.answers,{});
+ const stop=await advanceInternalVoice(ai,start,{transcript:'घर; शहर कोरबा; कॉल मत करना',now});
+ assert.equal(stop.result.action,'opt_out_requested');
+});
+test('single BHK count preserves larger values; competing counts are not silently accepted',async()=>{
+ const now=Date.parse('2026-11-24T08:00:00Z');
+ let state=beginFixedVoicePreview({language:'hi',now}).state;
+ for(const transcript of ['घर','कोरबा','बस स्टैंड'])state=advanceFixedVoicePreview(state,{transcript,now}).state;
+ assert.equal(advanceFixedVoicePreview(state,{transcript:'15BHK',now}).state.answers.size,'15BHK');
+ assert.equal(advanceFixedVoicePreview(state,{transcript:'3 या 4 BHK',now}).action,'repeat');
+ const sized=advanceFixedVoicePreview(state,{transcript:'तीन बीएचके का घर चाहिए',now}).state;
+ assert.equal(sized.answers.size,'3BHK');
+ assert.equal(advanceFixedVoicePreview(sized,{transcript:'मेरा बजट लगभग पचपन लाख है',now}).state.answers.budgetInr,5500000);
+});

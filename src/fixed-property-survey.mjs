@@ -66,7 +66,7 @@ export function normalizePropertySurvey(raw,{now=Date.now()}={}){
   const location=stringOrNull(raw.location,'location',120,{required:true});
   const area=stringOrNull(raw.area,'area',120);
   let size=stringOrNull(raw.size,'property size',80,{required:true});
-  if(propertyType!=='plot'&&!BHK_OPTIONS.includes(size))
+  if(propertyType!=='plot'&&!BHK_OPTIONS.includes(size)&&!/^(?:[6-9]|1[0-9]|20)BHK$/.test(size))
     throw Error('invalid BHK selection');
   const budgetInr=raw.budgetInr===null||raw.budgetInr===undefined||raw.budgetInr===''?
     null:raw.budgetInr;
