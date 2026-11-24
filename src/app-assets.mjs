@@ -159,6 +159,7 @@ function scriptedPhonePilotPanel(){
   ]);
   language.value=state.internalPilotLanguage||'hi';
   language.addEventListener('change',()=>{state.internalPilotLanguage=language.value});
+  const timing=node('select',{class:'field','aria-label':'Internal answer timing'},[node('option',{value:'standard',text:'Standard (3 sec silence)'}),node('option',{value:'fast',text:'Fast internal test (2 sec on short answers)'})]);
   const status=node('p',{class:'note',role:'status',text:'Checking pilot configuration…'});
   const results=div('stack'),prepared=div('stack');
   const sarvamReport=div('stack');
@@ -176,7 +177,7 @@ function scriptedPhonePilotPanel(){
    try{
     const d=await api('/v1/human/scripted-phone-pilot/verify-result');
     if(d.state!=='verified_read_only'){verifiedReport.append(node('p',{class:'note',text:d.state}));return}
-    verifiedReport.replaceChildren(table(['Call verification','Result'],[['Started',formatIst(d.startedAt)],['Test device','••••'+d.destinationLast4],['Status',d.phase],['Signed hangup',d.signedHangup?'Received':'Missing'],['CRM save verified',d.crmVerified?'Yes':'No'],['Same call saved in CRM',d.crmSameSession?'Yes':'No'],['Answers match',d.answersMatch?'Yes':'No'],['CRM columns match',d.crmColumnsMatch?'Yes':'No'],['Connected seconds',d.connectedSeconds],['Attempts',d.attempts],['Questions accepted',d.questionsAccepted]]),
+    verifiedReport.replaceChildren(table(['Call verification','Result'],[['Started',formatIst(d.startedAt)],['Test device','••••'+d.destinationLast4],['Status',d.phase],['Signed hangup',d.signedHangup?'Received':'Missing'],['CRM save verified',d.crmVerified?'Yes':'No'],['Same call saved in CRM',d.crmSameSession?'Yes':'No'],['Answers match',d.answersMatch?'Yes':'No'],['CRM columns match',d.crmColumnsMatch?'Yes':'No'],['Connected seconds',d.connectedSeconds],['Attempts',d.attempts],['Questions accepted',d.questionsAccepted],['Internal timing mode',d.fastTiming?'Fast test':'Standard']]),
      table(['Field','Call answer','Saved CRM answer'],Object.entries(d.answers).map(([k,v])=>[k,v??'—',d.storedAnswers?.[k]??'—'])),
      table(['Recorded usage (not invoice)','Value'],Object.entries(d.usage).map(([k,v])=>[k,v??'Unknown'])),
      ...(d.voiceTiming?[table(['Answer processing (ms; not end-to-end)','Samples / timing'],[['Samples',d.voiceTiming.samples],['Media download p95',d.voiceTiming.mediaP95Ms??'Unknown'],['Recognition p95',d.voiceTiming.recognitionP95Ms??'Unknown'],['Interpretation p95',d.voiceTiming.interpretationP95Ms??'Unknown'],['Total processing p50',d.voiceTiming.totalP50Ms??'Unknown'],['Total processing p95',d.voiceTiming.totalP95Ms??'Unknown']])]:[]),
@@ -253,7 +254,7 @@ function scriptedPhonePilotPanel(){
     if(busy||refreshing||!selected||config?.availability?.ready!==true||!window.confirm('Place one internal pilot call to the selected test number ending '+selected.destinationLast4+'? Confirm the actual recipient has been informed BEFORE this call about AI processing, text retention and their right to decline, and has explicitly agreed to the selected provider processing their speech and text. Sarvam uses recorded answers and Sarvam AI speech recognition and optional contextual interpretation. Explicitly confirm the recipient has already received and accepted the recording notice before placing this call; it will not be repeated in the greeting. No keypad required. Telephony and AI usage may be charged.'))return;
     busy=true;updateAvailability();
     try{
-      await api('/v1/human/scripted-phone-pilot','POST',{language:language.value,leadId:selected.leadId,engine:'sarvam',confirm:'CALL_ONE_INTERNAL_SARVAM_WITH_PRIOR_RECORDING_NOTICE'});
+      await api('/v1/human/scripted-phone-pilot','POST',{language:language.value,leadId:selected.leadId,engine:'sarvam',confirm:'CALL_ONE_INTERNAL_SARVAM_WITH_PRIOR_RECORDING_NOTICE',fastTiming:timing.value==='fast'});
       notice('Pilot submitted. Waiting for signed hangup.');
     }catch(err){asError(err)}
     finally{try{await refresh()}catch(err){asError(err)}busy=false;updateAvailability()}
@@ -278,7 +279,7 @@ function scriptedPhonePilotPanel(){
     finally{refreshing=false;updateAvailability();scheduleCheck()}
   }
   enrollment.hidden=true;device.addEventListener('change',updateAvailability);
-  card.append(status,prepare,prepared,enrollment,div('formrow',lab('Internal test number',device),lab('Recorded prompt language',language),lab('Speech recognition engine',engine),call,
+  card.append(status,prepare,prepared,enrollment,div('formrow',lab('Internal test number',device),lab('Recorded prompt language',language),lab('Speech recognition engine',engine),lab('Internal answer timing',timing),call,
     btn('Refresh fixed-question pilot status',()=>refresh().catch(asError),true)),cooldown,results,verifyResult,verifiedReport,sarvamProbe,sarvamReport,listen,listenReport);
   refresh().catch(()=>{status.textContent='Pilot status requires a current MFA Super Admin session.'});
   return card;

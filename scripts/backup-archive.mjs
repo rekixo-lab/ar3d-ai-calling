@@ -1,7 +1,7 @@
 // Offline operator utility for two explicitly exported D1 SQL dumps.
 // No Cloudflare API, restoration, provider traffic, or GitHub upload.
 import {createCipheriv,createDecipheriv,createHash,randomBytes} from 'node:crypto';
-import {readFileSync,writeFileSync,statSync,lstatSync,mkdirSync,realpathSync,rmSync} from 'node:fs';
+import {readFileSync,writeFileSync,statSync,mkdirSync,realpathSync,rmSync} from 'node:fs';
 import {resolve,dirname,join,sep} from 'node:path';
 import {fileURLToPath} from 'node:url';
 const MAGIC=Buffer.from('AR3DBAK1');
