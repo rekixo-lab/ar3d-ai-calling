@@ -448,6 +448,14 @@ function foregroundRefresh(element,ms,task,active=()=>true){
  schedule();
  return stop;
 }
+// The console/API pair supplied by the operator implies 80 INR/USD.
+// A comparison only, not a verified INR account balance or market FX rate.
+function plivoConsoleComparison(credits){
+ return 'Approx. ₹'+(Number(credits)*80).toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2})+' · observed console rate ₹80/USD; not verified INR.';
+}
+function validPlivoUsd(d){
+ return d?.available===true&&d.cashCreditsCurrency==='USD'&&typeof d.cashCredits==='string'&&/^\d{1,10}(?:\.\d{1,8})?$/.test(d.cashCredits);
+}
 // Provider cash and client minute ledger are deliberately independent.
 function providerBalancePanel(openView){
  const plivo=overviewMetric('Plivo cash credits','Not checked','phone');
@@ -474,12 +482,11 @@ function providerBalancePanel(openView){
   try{
    const d=await api('/v1/human/credits/provider');
    if(!plivo.isConnected)return;
-   if(d.available===true&&typeof d.cashCredits==='string'&&/^\d{1,10}(?:\.\d{1,8})?$/.test(d.cashCredits)){
-    if(d.cashCreditsCurrency!=='USD'){value.textContent='Unavailable';equivalent.textContent='Currency not verified.';status.textContent='Refresh after the API is updated.';return;}
+   if(validPlivoUsd(d)){
     value.textContent='$'+d.cashCredits;
     // The supplied India console/API pair implies 80 INR/USD. This is
     // a comparison estimate, not a carrier-confirmed conversion or funds.
-    equivalent.textContent='Approx. ₹'+(Number(d.cashCredits)*80).toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2})+' · observed console rate ₹80/USD; not verified INR.';
+    equivalent.textContent=plivoConsoleComparison(d.cashCredits);
     status.textContent=(d.accountType==='developer'?'Trial account · not verified live funds. ':'Provider-reported USD · ')+(d.checkedAt?'Checked '+formatIst(d.checkedAt):'');
    }else{value.textContent='Unavailable';equivalent.textContent='INR unavailable';status.textContent='Provider balance could not be verified. Refresh to retry.';}
   }catch{if(plivo.isConnected){value.textContent='Unavailable';equivalent.textContent='INR unavailable';status.textContent='Check current MFA and provider access.';}}
@@ -818,10 +825,10 @@ function creditWalletOperator(main){
  let current=0,opened=false;
  const loadProvider=async()=>{
   const d=await api('/v1/human/credits/provider');
-  provider.replaceChildren(node('p',{class:'note',text:d.available?
-   'Plivo API cash_credits: '+d.cashCredits+' (currency not independently verified). '+
-   (d.accountType==='developer'?'Trial account — not spendable client funding.':'Not yet a verified INR funding pool.'):
-   'Plivo balance unavailable until API credentials and carrier access are set.'}));
+  provider.replaceChildren(node('p',{class:'note',text:validPlivoUsd(d)?
+   'Plivo API cash_credits: $'+d.cashCredits+' USD. '+plivoConsoleComparison(d.cashCredits)+' '+
+   (d.accountType==='developer'?'Trial account — not spendable client funding.':'Not yet a verified INR funding pool.')+' '+(d.checkedAt?'Checked '+formatIst(d.checkedAt):''):
+   'Plivo balance unavailable. Check MFA and carrier access, then refresh.'}));
  };
  const loadConnection=async()=>{
   const d=await api('/v1/human/credits/provider-check');
