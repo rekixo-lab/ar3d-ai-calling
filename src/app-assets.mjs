@@ -176,7 +176,8 @@ function dashboard(){
  state.clientSetTab=null;
  const items=admin?[
   ['clients','Clients','users','Client companies and sign-in invitations.'],
-  ['calling','Calling Setup','phone','Check Plivo, test the internal number and approve customer calls.'],
+  ['calling','Calling Setup','phone','Internal testing and client calling approval.'],
+  ['wallet','Minutes & Wallet','file','Review exact call seconds, reconciliation and credit transactions.'],
   ['company','Company details','file','Manage company information and client requests.'],
   ['security','Security','shield','Manage two-factor authentication and recovery codes.']
  ]:[
@@ -184,6 +185,7 @@ function dashboard(){
   ['ai-test','AI Testing','spark','Practice the seven fixed questions without a phone call or CRM update.'],
   ['calling','Calling','phone','Review your campaign and start or pause approved calls.'],
   ['results','Results / CRM','grid','See call outcomes and answers saved to your CRM.'],
+  ['wallet','Minutes & Wallet','file','View verified call usage and credit history.'],
   ['company','Company details','file','Review your company information and request changes.']
  ];
  const heading=title(admin?'Clients':items[0][1],'h1');
@@ -202,6 +204,7 @@ function dashboard(){
   const item=items.find(x=>x[0]===key);
   if(!item)return;
   if(admin)state.adminTab=key;else state.clientTab=key;
+  if(location.hash!=='#'+key&&!location.hash.startsWith('#invite='))history.replaceState(null,'','#'+key);
   for(const [id,link] of links){
    if(id===key)link.setAttribute('aria-current','page');else link.removeAttribute('aria-current');
   }
@@ -215,6 +218,7 @@ function dashboard(){
     const renderers={
      clients:()=>superAdmin(area),
      calling:async()=>{area.append(scriptedPhonePilotPanel());await callingAdminPanel(area)},
+     wallet:()=>adminMinuteWallet(area),
      company:async()=>{await companyAdminPanel(area);await adminCompanyChangesPanel(area)},
      security:()=>mfaPanel(area)
     };
@@ -238,7 +242,7 @@ function dashboard(){
    areas.set(key,area);main.append(area);
   }
  }
- if(admin)openView(state.adminTab||'clients');
+ if(admin)openView(items.some(x=>x[0]===location.hash.slice(1))?location.hash.slice(1):state.adminTab||'clients');
  else{
   openView(state.clientTab||'customers');
   if(state.me.tenants.length)clientPanel(main,openView);
@@ -312,8 +316,79 @@ async function mfaPanel(main){
   }catch(err){asError(err)}
 }
 // Operator credit controls are optional; no client-facing setup friction.
+function formatSeconds(value){
+ if(!Number.isSafeInteger(value)||value<0)return '—';
+ return Math.floor(value/60)+'m '+String(value%60).padStart(2,'0')+'s';
+}
+function minuteUsagePanel(main,tenantId,admin){
+ const card=div('card minute-wallet',title('Minute usage & transactions')),
+  body=div('stack'),actions=div('formrow');
+ let offset=0,version=0;
+ const previous=btn('Previous',()=>{offset=Math.max(0,offset-50);load().catch(asError)},true),
+  next=btn('Next',()=>{offset+=50;load().catch(asError)},true),
+  refresh=btn('Refresh usage',()=>load().catch(asError),true);
+ previous.disabled=true;next.disabled=true;actions.append(previous,next,refresh);
+ card.append(body,actions);main.append(card);
+ const metric=(label,value,description)=>div('card metric',node('span',{class:'muted',text:label}),
+  node('strong',{text:value}),node('p',{class:'muted',text:description}));
+ async function load(){
+  const seq=++version;refresh.disabled=true;
+  body.replaceChildren(node('p',{class:'muted',text:'Loading verified usage…'}));
+  try{
+   const d=await api('/v1/human/credits/minute-usage?'+new URLSearchParams({tenantId,offset:String(offset)}));
+   if(seq!==version||!card.isConnected)return;
+   const rows=d.records.map(r=>{
+    const observed=r.verifiedAt!==null;
+    const action=admin&&!observed?btn('Verify CDR',async()=>{
+     if(!confirm('Read this final call record from Plivo and record its exact seconds? No debit or new call.'))return;
+     try{await api('/v1/human/plivo-cost-reconcile','POST',{tenantId,jobId:r.jobId});notice('Provider CDR verified; no debit applied.');await load()}catch(e){asError(e)}
+    },true):observed?'Verified':'Pending verification';
+    return [new Date(r.updatedAt).toLocaleString(),r.state,formatSeconds(r.connectedSeconds),formatSeconds(r.billedSeconds),action];
+   });
+   body.replaceChildren(div('cards wallet-metrics',
+    metric('Connected time',formatSeconds(d.connectedSeconds),d.connectedSeconds+' exact seconds · verified calls'),
+    metric('Provider billed time',formatSeconds(d.billedSeconds),d.billedSeconds+' exact billed seconds'),
+    metric('Planned budget','₹'+(d.plannedPaise/100).toFixed(2),'Not a spendable wallet'),
+    metric('Verified calls',String(d.verifiedCalls),'Final provider records'),
+    metric('Awaiting CDR',String(d.pendingCalls),'Not included in verified totals'),
+    metric('Available minutes','Not active','No paid credit or deductions')),
+    node('p',{class:'note',text:'Connected and billed durations are separate. A provider may bill in increments. No automatic wallet debits, payment or calling approval is active.'}),
+    ...(admin&&d.internal?[node('p',{class:'muted',text:'Internal tests (not client charges): '+d.internal.calls+' calls · '+formatSeconds(d.internal.connectedSeconds)+' signed hangup time.'})]:[]),
+    title('Call usage records','h3'),table(['Updated','Status','Connected','Provider billed','CDR'],rows),
+    title('Budget transaction history','h3'),table(['Date','Type','Change (₹)','Before (₹)','After (₹)'],
+     d.transactions.map(t=>[new Date(t.createdAt).toLocaleString(),t.type==='allocation'?'Planned allocation':'Planned recovery',
+      (t.deltaPaise>0?'+':'')+(t.deltaPaise/100).toFixed(2),(t.previousPaise/100).toFixed(2),(t.newPaise/100).toFixed(2)])),
+    node('p',{class:'muted',text:'Budget adjustments are audited planning transactions, not purchases or charges.'}));
+   previous.disabled=offset===0;next.disabled=!d.hasMore;
+  }catch(e){if(seq===version){body.replaceChildren(node('p',{class:'err',text:'Usage unavailable. Refresh to retry.'}));throw e}}
+  finally{if(seq===version)refresh.disabled=false}
+ }
+ return load();
+}
+async function adminMinuteWallet(main){
+ const card=div('card',title('Client minute management')),company=node('select',{class:'field','aria-label':'Minute wallet company'}),
+  search=input('walletSearch','search','Find company by name or email'),detail=div('stack');
+ search.required=false;search.maxLength=80;
+ let generation=0;
+ const find=async()=>{
+  const seq=++generation;
+  const d=await api('/v1/human/tenants?'+new URLSearchParams({limit:'100',q:search.value.trim()}));
+  if(seq!==generation)return;
+  const previous=company.value;
+  company.replaceChildren(node('option',{value:'',text:'Select client company'}),
+   ...d.tenants.map(t=>node('option',{value:t.id,text:t.display_name+' — '+t.status})));
+  if(d.tenants.some(t=>t.id===previous))company.value=previous;
+  await select();
+ };
+ async function select(){detail.replaceChildren();if(company.value)await minuteUsagePanel(detail,company.value,true)}
+ company.addEventListener('change',()=>select().catch(asError));
+ card.append(div('formrow',lab('Search clients',search),btn('Find company',()=>find().catch(asError),true)),
+  lab('Client company',company),detail);main.append(card);
+ creditWalletOperator(main);
+ await find();
+}
 function creditWalletOperator(main){
- const panel=node('details',{class:'card'},node('summary',{text:'Plivo balance & client credit budgets (operator)'}));
+ const panel=node('details',{class:'card'},node('summary',{text:'Provider balance & provisional budget adjustments'}));
  const area=div('stack'),provider=div(''),connection=div(''),usage=div(''),total=div(''),clientStatus=div('');
  const company=node('select',{class:'field','aria-label':'Client credit company'});
  const packages=[0,100,200,300,400,500];
@@ -437,7 +512,7 @@ function creditWalletOperator(main){
 }
 
 async function superAdmin(main){
- const panel=div('card client-directory',title('Client directory'));panel.id='clients-panel';main.append(panel);creditWalletOperator(main);
+ const panel=div('card client-directory',title('Client directory'));panel.id='clients-panel';main.append(panel);
  const list=div(''),directorySearch=input('clientDirectorySearch','search','Search company name, slug or email');
  const prev=btn('← Previous companies',async()=>{pageOffset=Math.max(0,pageOffset-100);await refresh();await refreshAccess();populateMemberCompanies()},true);
  const next=btn('Next companies →',async()=>{pageOffset+=100;await refresh();await refreshAccess();populateMemberCompanies()},true);
@@ -481,7 +556,7 @@ async function superAdmin(main){
  const mobile=input('mobile','tel','10-digit Indian mobile');
  const initialCredit=node('select',{class:'field','aria-label':'Starting client credit package'},
    [0,100,200,300,400,500].map(n=>node('option',{value:String(n),text:n?String(n)+' credits (₹'+n+' planned)':'No credits (₹0)'})));
- initialCredit.value='100';
+ initialCredit.value='0';
  existing=node('select',{class:'field'},[node('option',{value:'',text:'New company or automatically match by name'}),
   ...tenantRowsAll.filter(t=>t.status==='trial'||t.status==='active').map(t=>node('option',{value:t.id,text:t.display_name}))]);
  existing.addEventListener('change',()=>{const t=tenantRowsAll.find(t=>t.id===existing.value);if(t)name.value=t.display_name});
@@ -800,7 +875,7 @@ async function renderClient(id,content){
    if(content.renderVersion===version)metric.querySelector('strong').textContent='Not configured';
   });
  }
- const sections=Object.fromEntries(['customers','ai-test','calling','results','company'].map(key=>[
+ const sections=Object.fromEntries(['customers','ai-test','calling','results','wallet','company'].map(key=>[
   key,node('section',{class:'workspace-section',id:key,hidden:true})
  ]));
  const loaded=new Set();
@@ -825,6 +900,7 @@ async function renderClient(id,content){
     });
    }
   },
+  wallet:section=>d.role==='client_admin'?minuteUsagePanel(section,id,false):section.append(node('p',{class:'note',text:'Wallet and transaction details require Client Admin access.'})),
   company:section=>clientCompanySummary(id,section,d.role,d.tenant.name)
  };
  content.replaceChildren(overview,...Object.values(sections));
@@ -1320,7 +1396,9 @@ function launchReadinessPanel(main){
 }
 
 async function callingAdminPanel(main){
- launchReadinessPanel(main);
+ const diagnostics=node('details',{class:'card'},node('summary',{text:'Advanced diagnostics · Plivo go-live readiness'}));
+ const details=div('stack');diagnostics.append(details);main.append(diagnostics);
+ diagnostics.addEventListener('toggle',()=>{if(diagnostics.open&&!diagnostics.dataset.loaded){diagnostics.dataset.loaded='true';launchReadinessPanel(details)}});
  const card=div('card calling-settings',title('Client calling approval')),area=div('approval-grid');card.id='calling-setup';main.append(card);
  const company=node('select',{class:'field','aria-label':'Calling setup company'});
  const companySearch=input('callingSetupCompanySearch','search','Search company name or email');
