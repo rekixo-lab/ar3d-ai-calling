@@ -55,8 +55,26 @@ export async function transcribeNovaRecordedAnswer(ai,bytes,language,contentType
 export function speechFailureCode(error){
  if(error?.message==='invalid_nova_response')return 'invalid_response_shape';
  if(error?.message==='invalid_audio')return 'invalid_audio';
+ if(['sarvam_not_configured','sarvam_invalid_response'].includes(error?.message))return error.message;
+ if(typeof error?.message==='string'&&/^sarvam_http_[45]\d{2}$/.test(error.message))return error.message;
  if(['TimeoutError','AbortError'].includes(error?.name))return 'timeout';
  const match=typeof error?.message==='string'?error.message.match(/^(?:AiError:\s*)?(\d{4}):/):null;
  const code=Number.isInteger(error?.code)?error.code:match?Number(match[1]):null;
  return code>=1000&&code<=9999?'workers_ai_'+code:'provider_error_unclassified';
+}
+
+// Explicitly consented internal replay to a separate provider only. This is
+// not an automatic live-call fallback. The credential is a Worker secret.
+export async function transcribeSarvamRecordedAnswer(key,bytes,language,contentType,fetcher=fetch){
+ if(typeof key!=='string'||!key.trim()||key.length>512)throw Error('sarvam_not_configured');
+ if(!bytes.length||bytes.length>ANSWER_MAX_BYTES||!['hi','en'].includes(language)||!['audio/mpeg','audio/wav','audio/x-wav'].includes(contentType))throw Error('invalid_audio');
+ const form=new FormData();
+ form.append('file',new Blob([bytes],{type:contentType}),contentType==='audio/mpeg'?'answer.mp3':'answer.wav');
+ form.append('model','saaras:v4');form.append('language_code',language==='hi'?'hi-IN':'en-IN');form.append('mode','transcribe');
+ const response=await fetcher('https://api.sarvam.ai/speech-to-text',{method:'POST',headers:{'api-subscription-key':key},body:form,redirect:'error',signal:AbortSignal.timeout(10000)});
+ if(!response.ok){try{await response.body?.cancel()}catch{}throw Error('sarvam_http_'+response.status)}
+ const raw=JSON.parse(new TextDecoder().decode(await readBoundedBytes(response,65536)));
+ if(typeof raw?.transcript!=='string')throw Error('sarvam_invalid_response');
+ const text=raw.transcript.trim().replace(/\s+/g,' ');
+ return {text:text&&text.length<=220?text:null,confidence:null};
 }
