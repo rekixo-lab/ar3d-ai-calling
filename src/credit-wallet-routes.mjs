@@ -274,6 +274,41 @@ export async function handleCreditWalletRequest(req,env,user,{fetcher=fetch}={})
  if(!env.CONTROL_DB)return fail('database unavailable',503);
  const db=env.CONTROL_DB,path=url.pathname.slice(base.length+1);
  try{
+  if(path==='provider-journal'){
+   if(!await currentMfa(env,user))return fail('current MFA Super Admin required',403);
+   if(req.method==='GET'){
+    const keys=[...url.searchParams.keys()],offset=url.searchParams.get('offset')||'0';
+    if(keys.some(k=>k!=='offset'||url.searchParams.getAll(k).length!==1)||!/^\d{1,6}$/.test(offset))return fail('invalid journal query');
+    const [sums,rows]=await Promise.all([
+     db.prepare(`SELECT provider,currency,SUM(CASE WHEN kind='opening' THEN amount_micros ELSE 0 END) AS openingMicros,
+      SUM(CASE WHEN kind='topup' THEN amount_micros ELSE 0 END) AS topupMicros,
+      SUM(CASE WHEN kind='expense' THEN amount_micros ELSE 0 END) AS expenseMicros,
+      SUM(CASE WHEN kind='refund' THEN amount_micros ELSE 0 END) AS refundMicros,COUNT(*) AS entries
+      FROM provider_financial_journal GROUP BY provider,currency`).all(),
+     db.prepare('SELECT id,provider,currency,kind,amount_micros AS amountMicros,evidence_ref AS evidenceRef,reason,actor,created_at AS createdAt FROM provider_financial_journal ORDER BY sequence DESC LIMIT 51 OFFSET ?').bind(Number(offset)).all()
+    ]);
+    const accounts=sums.results.map(x=>({...x,recordedNetMicros:x.openingMicros+x.topupMicros+x.refundMicros-x.expenseMicros}));
+    if(accounts.some(x=>Object.values(x).some(v=>typeof v==='number'&&!Number.isSafeInteger(v))))return fail('journal totals require review',409);
+    return json({accounts,entries:rows.results.slice(0,50),hasMore:rows.results.length>50,offset:Number(offset),status:'manual_evidence_only',liveBalanceVerified:false,dispatchEnabledByJournal:false});
+   }
+   if(!mutationOriginAllowed(req)||url.search)return fail('same origin required',403);
+   const d=await boundedBody(req);
+   if(!d||Object.keys(d).sort().join(',')!=='amountMicros,currency,evidenceRef,id,kind,provider,reason'||
+      !uuid.test(d.id||'')||!['plivo','sarvam'].includes(d.provider)||!['INR','USD'].includes(d.currency)||
+      !['opening','topup','expense','refund'].includes(d.kind)||!Number.isSafeInteger(d.amountMicros)||d.amountMicros<1||d.amountMicros>1000000000000||
+      typeof d.evidenceRef!=='string'||!/^[A-Za-z0-9][A-Za-z0-9 ._:/-]{3,119}$/.test(d.evidenceRef)||
+      typeof d.reason!=='string'||d.reason.trim().length<10||d.reason.trim().length>200||/[\u0000-\u001f]/u.test(d.reason))return fail('invalid journal entry');
+   const reason=d.reason.trim();
+   const lookup=()=>db.prepare('SELECT * FROM provider_financial_journal WHERE id=? OR (provider=? AND evidence_ref=?) LIMIT 2').bind(d.id,d.provider,d.evidenceRef).all();
+   const replay=rows=>rows.length===1&&rows[0].id===d.id&&rows[0].provider===d.provider&&rows[0].currency===d.currency&&rows[0].kind===d.kind&&rows[0].amount_micros===d.amountMicros&&rows[0].evidence_ref===d.evidenceRef&&rows[0].reason===reason&&rows[0].actor===user.id;
+   const old=(await lookup()).results;
+   if(old.length)return replay(old)?json({id:d.id,replayed:true}):fail('duplicate evidence or conflicting entry',409);
+   const result=await db.prepare(`INSERT OR IGNORE INTO provider_financial_journal(id,provider,currency,kind,amount_micros,evidence_ref,reason,actor,created_at)
+    SELECT ?,?,?,?,?,?,?,?,? WHERE (?<>'opening' OR NOT EXISTS(SELECT 1 FROM provider_financial_journal WHERE provider=? AND currency=?))`)
+    .bind(d.id,d.provider,d.currency,d.kind,d.amountMicros,d.evidenceRef,reason,user.id,new Date().toISOString(),d.kind,d.provider,d.currency).run();
+   if(result.meta.changes!==1){const rows=(await lookup()).results;return replay(rows)?json({id:d.id,replayed:true}):fail('duplicate evidence or opening already established',409);}
+   return json({id:d.id,replayed:false,dispatchEnabledByJournal:false},201);
+  }
   if(path==='admin-transactions'){
    if(req.method!=='GET')return fail('method not allowed',405);
    if(!await currentMfa(env,user))return fail('current MFA Super Admin required',403);
