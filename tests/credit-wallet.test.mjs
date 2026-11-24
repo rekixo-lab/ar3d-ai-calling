@@ -438,3 +438,26 @@ test('cost intelligence is MFA-only, scoped and never charges credits; raw CDR r
   assert.equal(f.c.db.prepare('SELECT COUNT(*) AS n FROM tenant_credit_audit').get().n,0);
  }finally{f.close()}
 });
+
+test('manual minute ledger is append-only, idempotent, nonnegative and tenant scoped',async()=>{
+ const f=fixture();try{
+  const q='minute-ledger?tenantId='+tid;
+  const d={tenantId:tid,transactionId:'77777777-7777-4777-8777-777777777777',deltaSeconds:6000,expectedBalanceSeconds:0,reason:'External allocation reference'};
+  assert.equal((await route(f,'minute-ledger',admin,'POST',d)).status,403);
+  freshMfa(f);
+  assert.equal((await route(f,'minute-ledger',client,'POST',d)).status,403);
+  const first=await route(f,'minute-ledger',admin,'POST',d);assert.equal(first.status,201,await first.clone().text());
+  const replay=await route(f,'minute-ledger',admin,'POST',d);assert.equal(replay.status,200);assert.equal((await replay.json()).replayed,true);
+  assert.equal((await route(f,'minute-ledger',admin,'POST',{...d,deltaSeconds:12000})).status,409);
+  const second={...d,transactionId:'88888888-8888-4888-8888-888888888888',deltaSeconds:-1200,expectedBalanceSeconds:6000};
+  assert.equal((await route(f,'minute-ledger',admin,'POST',{...second,expectedBalanceSeconds:0})).status,409);
+  assert.equal((await route(f,'minute-ledger',admin,'POST',second)).status,201);
+  assert.equal((await route(f,'minute-ledger',admin,'POST',{...second,transactionId:'99999999-9999-4999-8999-999999999999',deltaSeconds:-5000,expectedBalanceSeconds:4800})).status,409);
+  const data=await (await route(f,q,client)).json();
+  assert.equal(data.allocatedSeconds,4800);assert.equal(data.spendableSeconds,null);assert.equal(data.dispatchEnabled,false);assert.equal(data.transactions.length,2);assert.equal(data.transactions[0].reason,undefined);
+  assert.equal((await route(f,'minute-ledger?tenantId=99999999-9999-4999-8999-999999999999',client)).status,403);
+  assert.throws(()=>f.c.db.prepare('UPDATE tenant_minute_ledger SET reason=? WHERE id=?').run('Changed reason',d.transactionId),/immutable/);
+  assert.throws(()=>f.c.db.prepare('DELETE FROM tenant_minute_ledger WHERE id=?').run(d.transactionId),/immutable/);
+  assert.equal(f.c.db.prepare('SELECT COUNT(*) AS n FROM tenant_credit_audit').get().n,0);
+ }finally{f.close()}
+});

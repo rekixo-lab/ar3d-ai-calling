@@ -1,7 +1,7 @@
 // AR3D-owned PROVISIONAL INR client credit budgets and protected Plivo
 // account balance preview. These budgets DO NOT transfer Plivo funds, debit
 // live calls, bypass carrier approval or represent spendable billing credits.
-import {requireMembership} from './human-auth.mjs';
+import {requireMembership,mutationOriginAllowed} from './human-auth.mjs';
 import {parseJsonBody,resolveCrmDb} from './core.mjs';
 import {estimateProductionCost} from './production-cost-plan.mjs';
 import {costObservation,readInternalPlivoCdr} from './cost-intelligence.mjs';
@@ -271,6 +271,47 @@ export async function handleCreditWalletRequest(req,env,user,{fetcher=fetch}={})
  if(!env.CONTROL_DB)return fail('database unavailable',503);
  const db=env.CONTROL_DB,path=url.pathname.slice(base.length+1);
  try{
+  if(path==='minute-ledger'){
+   const isAdmin=user?.globalRole==='super_admin';
+   if(isAdmin&&!await currentMfa(env,user))return fail('current MFA Super Admin required',403);
+   if(req.method==='GET'){
+    const keys=[...url.searchParams.keys()],tid=url.searchParams.get('tenantId'),offset=url.searchParams.get('offset')||'0';
+    if(keys.some(k=>!['tenantId','offset'].includes(k)||url.searchParams.getAll(k).length!==1)||!uuid.test(tid||'')||!/^\d{1,6}$/.test(offset))return fail('invalid ledger query',400);
+    const t=isAdmin?await tenant(env,tid):await requireMembership(db,user,tid,true);
+    if(!t)return fail(isAdmin?'tenant not found':'forbidden',isAdmin?404:403);
+    // Single SELECT gives a consistent balance and history snapshot.
+    const rows=(await db.prepare(`SELECT id AS transactionId,kind,delta_seconds AS deltaSeconds,previous_seconds AS previousSeconds,balance_seconds AS balanceSeconds,created_at AS createdAt${isAdmin?',actor,reason':''},
+     (SELECT balance_seconds FROM tenant_minute_ledger WHERE tenant_id=? ORDER BY sequence DESC LIMIT 1) AS currentBalance
+     FROM tenant_minute_ledger WHERE tenant_id=? ORDER BY sequence DESC LIMIT 51 OFFSET ?`).bind(tid,tid,Number(offset)).all()).results;
+    const current=rows.length?rows[0].currentBalance:(await db.prepare('SELECT balance_seconds AS balance FROM tenant_minute_ledger WHERE tenant_id=? ORDER BY sequence DESC LIMIT 1').bind(tid).first())?.balance??0;
+    return json({tenantId:tid,allocatedSeconds:current,spendableSeconds:null,dispatchEnabled:false,offset:Number(offset),hasMore:rows.length>50,
+     transactions:rows.slice(0,50).map(({currentBalance,...row})=>row),status:'allocation_only'});
+   }
+   if(!isAdmin||!mutationOriginAllowed(req))return fail('current MFA Super Admin and same origin required',403);
+   if(url.search)return fail('unsupported query',400);
+   const d=await boundedBody(req);
+   if(!d||typeof d!=='object'||Array.isArray(d)||Object.keys(d).length!==5||
+      Object.keys(d).some(k=>!['tenantId','transactionId','deltaSeconds','expectedBalanceSeconds','reason'].includes(k))||
+      !uuid.test(d.tenantId||'')||!uuid.test(d.transactionId||'')||!Number.isSafeInteger(d.deltaSeconds)||d.deltaSeconds===0||Math.abs(d.deltaSeconds)>1000000000||
+      !Number.isSafeInteger(d.expectedBalanceSeconds)||d.expectedBalanceSeconds<0||d.expectedBalanceSeconds>1000000000||
+      typeof d.reason!=='string'||d.reason.trim().length<10||d.reason.trim().length>200||/[\u0000-\u001f]/u.test(d.reason))return fail('invalid ledger adjustment',400);
+   const tid=d.tenantId,kind=d.deltaSeconds>0?'allocation':'recovery',reason=d.reason.trim();
+   const lookup=()=>db.prepare('SELECT tenant_id AS tenantId,actor,kind,delta_seconds AS deltaSeconds,previous_seconds AS previousSeconds,balance_seconds AS balanceSeconds,reason,created_at AS createdAt FROM tenant_minute_ledger WHERE id=?').bind(d.transactionId).first();
+   function replay(old){
+    if(!old||old.tenantId!==tid||old.actor!==user.id||old.deltaSeconds!==d.deltaSeconds||old.previousSeconds!==d.expectedBalanceSeconds||old.reason!==reason)return fail('transaction conflict; refresh ledger',409);
+    return json({transactionId:d.transactionId,allocatedSeconds:old.balanceSeconds,replayed:true,dispatchEnabled:false,status:'allocation_only'});
+   }
+   const prior=await lookup();if(prior)return replay(prior);
+   const next=d.expectedBalanceSeconds+d.deltaSeconds;
+   if(next<0||next>1000000000)return fail('insufficient allocated minutes or balance out of range',409);
+   const result=await db.prepare(`INSERT INTO tenant_minute_ledger(id,tenant_id,kind,delta_seconds,previous_seconds,balance_seconds,actor,reason,created_at)
+    SELECT ?,id,?,?,?,?,?,?,? FROM tenants WHERE id=? AND status IN ('trial','active')
+    AND COALESCE((SELECT balance_seconds FROM tenant_minute_ledger WHERE tenant_id=tenants.id ORDER BY sequence DESC LIMIT 1),0)=?
+    AND NOT EXISTS(SELECT 1 FROM tenant_minute_ledger WHERE id=?)`)
+    .bind(d.transactionId,kind,d.deltaSeconds,d.expectedBalanceSeconds,next,user.id,reason,new Date().toISOString(),tid,d.expectedBalanceSeconds,d.transactionId).run();
+   if(Number(result.meta.changes)!==1){const old=await lookup();return old?replay(old):fail('balance changed or client unavailable; refresh',409)}
+   return json({transactionId:d.transactionId,allocatedSeconds:next,replayed:false,dispatchEnabled:false,status:'allocation_only'},201);
+  }
   if(path==='call-costs'||path==='internal-call-cdr'){
    if(req.method!=='GET')return fail('method not allowed',405);
    if(!await currentMfa(env,user))return fail('current MFA Super Admin required',403);

@@ -15,7 +15,7 @@ export const REQUIRED_TABLES = Object.freeze({
   CONTROL_DB: Object.freeze([
     'tenants','tenant_keys','project_links','tenant_numbers','tenant_audit_events',
     'human_users','tenant_memberships','human_sessions','human_invitations',
-    'human_login_limits','human_bootstrap_claim','human_ip_login_limits','human_mfa_settings','human_mfa_challenges','human_mfa_recovery_codes','provider_event_inbox','calling_script_bindings','calling_script_versions','company_profile_versions','calling_agent_publications','shared_voice_gateway','voice_call_routes','client_account_contacts','company_change_requests','scripted_phone_pilots','tenant_credit_budgets','tenant_credit_audit',
+    'human_login_limits','human_bootstrap_claim','human_ip_login_limits','human_mfa_settings','human_mfa_challenges','human_mfa_recovery_codes','provider_event_inbox','calling_script_bindings','calling_script_versions','company_profile_versions','calling_agent_publications','shared_voice_gateway','voice_call_routes','client_account_contacts','company_change_requests','scripted_phone_pilots','tenant_credit_budgets','tenant_credit_audit','tenant_minute_ledger',
   ]),
   CRM_DB: Object.freeze([
     'leads','agents','calls','site_visits','crm_audit_events',
@@ -39,6 +39,7 @@ export const REQUIRED_COLUMNS = Object.freeze({
     company_change_requests: Object.freeze(['tenant_id','id','message','status','created_by','created_at','handled_by','handled_at','resolution_note']),
     tenant_credit_budgets: Object.freeze(['tenant_id','planned_paise','updated_by','updated_at']),
     tenant_credit_audit: Object.freeze(['id','tenant_id','actor','previous_paise','new_paise','reason','created_at']),
+    tenant_minute_ledger: Object.freeze(['sequence','id','tenant_id','kind','delta_seconds','previous_seconds','balance_seconds','actor','reason','created_at']),
     calling_script_bindings: Object.freeze(['tenant_id','bot_id','assistant_id','source_version']),
     calling_script_versions: Object.freeze(['tenant_id','id','revision','config_json','prompt','provider_state','provider_version']),
     human_ip_login_limits: Object.freeze(['ip_hash','attempt_count','blocked_until']),
@@ -141,6 +142,18 @@ export const REQUIRED_SAFETY_TRIGGERS = Object.freeze({
   trg_call_intent_proposal_immutable: ['before update on call_intent_proposals','raise(abort'],
   trg_call_intent_proposal_no_provider: ['before insert on call_intent_proposals','raise(abort'],
 });
+export const REQUIRED_MINUTE_LEDGER_TRIGGERS=Object.freeze({
+ trg_minute_ledger_no_update:['before update on tenant_minute_ledger','raise(abort'],
+ trg_minute_ledger_no_delete:['before delete on tenant_minute_ledger','raise(abort'],
+ trg_minute_ledger_chain:['before insert on tenant_minute_ledger','new.previous_seconds','new.tenant_id','order by sequence desc','raise(abort']
+});
+export function checkMinuteLedgerTriggers(records){
+ if(!Array.isArray(records))throw Error('Invalid minute ledger trigger inspection');
+ const rows=new Map(records.map(r=>[r?.name,String(r?.sql||'').toLowerCase().replace(/\s+/g,' ')]));
+ for(const [name,parts] of Object.entries(REQUIRED_MINUTE_LEDGER_TRIGGERS)){
+  if(parts.some(p=>!rows.get(name)?.includes(p)))throw Error('Minute ledger safety trigger missing or invalid: '+name);
+ }
+}
 export function checkSafetyTriggers(records,{allowCallIntentUpgrade=false}={}) {
   if (!Array.isArray(records)) throw Error('Invalid CRM trigger inspection result.');
   const triggers = new Map(records.map(row => [row?.name, String(row?.sql || '')
@@ -153,6 +166,7 @@ export function checkSafetyTriggers(records,{allowCallIntentUpgrade=false}={}) {
   }
 }
 
+const presentMinuteLedger=names=>names.includes('tenant_minute_ledger');
 export function checkTables(tables, binding, mode) {
   const expected = REQUIRED_TABLES[binding];
   if (!expected || !Array.isArray(tables)) throw Error('Invalid schema inspection input.');
@@ -162,6 +176,7 @@ export function checkTables(tables, binding, mode) {
     return 'fresh';
   }
   const missing = expected.filter(name => !present.has(name));
+  if(mode==='preflight'&&binding==='CONTROL_DB'&&missing.length===1&&missing[0]==='tenant_minute_ledger')return 'control_minute_ledger_upgrade';
   // Exact additive credit/staff tables are safe for the isolated Calling D1.
   // Any missing unrelated table still fails closed rather than deploying.
   if(mode==='preflight'&&binding==='CONTROL_DB'&&missing.length===2&&
@@ -234,14 +249,19 @@ export async function inspectCloudflare({ credentials, mode, apiFetch = fetch, t
     if (['control_client_accounts_upgrade','control_publication_upgrade','control_profile_upgrade',
          'control_script_upgrade','crm_dispatch_upgrade','ready','crm_call_intent_upgrade',
          'crm_scripted_results_upgrade','control_company_change_upgrade',
-         'control_scripted_pilot_upgrade','control_credit_upgrade','crm_staff_upgrade','crm_cdr_upgrade','crm_staff_cdr_upgrade'].includes(state)) {
+         'control_scripted_pilot_upgrade','control_credit_upgrade','control_minute_ledger_upgrade','crm_staff_upgrade','crm_cdr_upgrade','crm_staff_cdr_upgrade'].includes(state)) {
       if (binding === 'CRM_DB') {
         const triggers = await query(id, "SELECT name,sql FROM sqlite_master WHERE type='trigger' AND name LIKE 'trg_%'");
         checkSafetyTriggers(triggers,{allowCallIntentUpgrade:state === 'crm_call_intent_upgrade'});
       }
+      if(binding==='CONTROL_DB'&&presentMinuteLedger(names)){
+        const triggers=await query(id,"SELECT name,sql FROM sqlite_master WHERE type='trigger' AND name LIKE 'trg_minute_ledger_%'");
+        checkMinuteLedgerTriggers(triggers);
+      }
       for (const table of Object.keys(REQUIRED_COLUMNS[binding])) {
         if(state==='control_client_accounts_upgrade'&&table==='client_account_contacts')continue;
         if(state==='control_credit_upgrade'&&['tenant_credit_budgets','tenant_credit_audit'].includes(table))continue;
+        if(state==='control_minute_ledger_upgrade'&&table==='tenant_minute_ledger')continue;
         if(['crm_staff_upgrade','crm_staff_cdr_upgrade'].includes(state)&&table==='lead_staff_assignments')continue;
         if(['crm_cdr_upgrade','crm_staff_cdr_upgrade'].includes(state)&&table==='verified_provider_call_costs')continue;
         if(state==='control_company_change_upgrade'&&table==='company_change_requests')continue;
@@ -277,6 +297,7 @@ export function verifiedSchemaState(modes) {
   if(modes?.CONTROL_DB==='ready'&&modes?.CRM_DB==='crm_cdr_upgrade')return 'crm_cdr_upgrade';
   if(modes?.CONTROL_DB==='control_credit_upgrade'&&modes?.CRM_DB==='crm_staff_upgrade')return 'credit_staff_upgrade';
   if(modes?.CONTROL_DB==='control_credit_upgrade'&&modes?.CRM_DB==='ready')return 'control_credit_upgrade';
+  if(modes?.CONTROL_DB==='control_minute_ledger_upgrade'&&modes?.CRM_DB==='ready')return 'control_minute_ledger_upgrade';
   if(modes?.CONTROL_DB==='ready'&&modes?.CRM_DB==='crm_staff_upgrade')return 'crm_staff_upgrade';
   if(modes?.CONTROL_DB==='control_scripted_pilot_upgrade'&&modes?.CRM_DB==='ready')return 'control_scripted_pilot_upgrade';
   if(modes?.CONTROL_DB==='control_company_change_upgrade'&&modes?.CRM_DB==='ready')return 'control_company_change_upgrade';
