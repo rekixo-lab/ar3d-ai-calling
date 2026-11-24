@@ -130,8 +130,13 @@ export async function inspectInternalPilotLead(env){
 
 function callback(config,id,step){return config.origin+HOOK+'/'+id+'/'+step}
 const play=url=>'<Play>'+escapeXml(url)+'</Play>';
+const directConfirm='CALL_ONE_PRECONSENTED_INTERNAL_NUMBER';
+const legacyConfirm='CALL_ONE_VERIFIED_INTERNAL_NUMBER';
+function internalDirect(row){return !row.job_id&&JSON.parse(row.survey_json).phoneMeta?.mode==='direct_preconsented'}
+const speak=(language,text)=>'<Speak voice="'+(language==='hi'?'Polly.Aditi':'WOMAN')+'" language="'+(language==='hi'?'hi-IN':'en-US')+'">'+escapeXml(text)+'</Speak>';
+function directOpening(row){return speak(row.language,row.language==='hi'?'नमस्कार, मैं ए आर थ्री डी की ए आई सहायक हूँ। आपके जवाब रिकॉर्ड किए जाएंगे। अगर आप बात नहीं करना चाहते, तो मना कर सकते हैं।':'Hello, I am the AR3D AI assistant. Your answers will be recorded. You can decline at any time.');}
 
-function responseFor(config,row,{repeatCue=false}={}){
+function responseFor(config,row,{repeatCue=false,directOpeningCue=false}={}){
  const audio=name=>play(callback(config,row.id,'audio/'+name+'.mp3'));
  if(row.phase==='consent'){
   const action=escapeXml(callback(config,row.id,'consent'));
@@ -146,8 +151,9 @@ function responseFor(config,row,{repeatCue=false}={}){
   const prompt=field==='size'?(state.answers.propertyType==='plot'?'size-plot':'size-home'):field;
   if(!PROMPTS.includes(prompt))return end();
   // A distinct URL per attempt makes a retried callback safe to recognize.
-  return xml((repeatCue&&state.attempts>0?audio('repeat'):'')+audio(prompt)+'<Record action="'+escapeXml(callback(config,row.id,'turn/'+row.turn))+
-   '" method="GET" fileFormat="mp3" maxLength="12" timeout="4" finishOnKey="#" playBeep="true"/><Hangup/>');
+  const retry=state.attempts>0?(repeatCue?audio('repeat'):speak(row.language,row.language==='hi'?'माफ कीजिए, कृपया दोबारा बताइए।':'Sorry, please say that again.')):'';
+  return xml((directOpeningCue?directOpening(row):'')+retry+audio(prompt)+'<Record action="'+escapeXml(callback(config,row.id,'turn/'+row.turn))+
+   '" method="GET" fileFormat="mp3" maxLength="16" timeout="6" finishOnKey="#" playBeep="true"/><Hangup/>');
  }
  if(row.phase==='completed'||row.phase==='needs_review')
   return xml(audio(row.phase==='completed'?'closing':'review')+'<Hangup/>');
@@ -253,7 +259,7 @@ async function startPilot(req,env,user,config,now,fetcher){
  try{data=parseJsonBody(new TextDecoder('utf-8',{fatal:true}).decode(await readBoundedBytes(req,1024)),1024)}
  catch{return error('invalid_pilot_request',400)}
  if(!['confirm,language','confirm,language,leadId'].includes(Object.keys(data).sort().join(','))||
-    data.confirm!=='CALL_ONE_VERIFIED_INTERNAL_NUMBER'||!['hi','en'].includes(data.language)||
+    ![legacyConfirm,directConfirm].includes(data.confirm)||!['hi','en'].includes(data.language)||
     (Object.hasOwn(data,'leadId')&&(typeof data.leadId!=='string'||!UUID.test(data.leadId))))return error('explicit_pilot_confirmation_required',400);
  config=await selectDevice(env,config,data.leadId);
  if(!config)return error('internal_test_device_not_enrolled_or_blocked',403);
@@ -264,6 +270,9 @@ async function startPilot(req,env,user,config,now,fetcher){
  if(!await scriptedPromptsReady(env,data.language))
   return error('pilot_prompt_recordings_incomplete',409);
  const id=crypto.randomUUID(),slot=Math.floor(now/pilotCooldownMs),survey=beginFixedVoicePreview({language:data.language,now}).state;
+ // Separate explicit attestation; old callers continue to require keypad consent.
+ // This is limited to enrolled internal devices and never used for a campaign.
+ if(data.confirm===directConfirm)survey.phoneMeta={mode:'direct_preconsented'};
  const reservation=await control.prepare(`INSERT INTO scripted_phone_pilots
   (id,tenant_id,lead_id,lead_updated_at,actor_id,language,destination,caller,rate_slot,expires_at,phase,survey_json,created_at,provider_account_id)
   SELECT ?,?,?,?,?,?,?,?,?,?,'requested',?,?,? WHERE NOT EXISTS(
@@ -383,7 +392,10 @@ export async function handleScriptedPhoneAdmin(req,env,user,{now=Date.now(),fetc
   if(!config)return json({configured:false});
   const recent=await env.CONTROL_DB.prepare(`SELECT id,
     CASE WHEN phase='requested' AND provider_request_id IS NOT NULL THEN 'submitted' ELSE phase END AS phase,
-    language,created_at,turn,duration_seconds,substr(destination,-4) AS destinationLast4,hangup_at IS NOT NULL AS signed_hangup,
+    language,created_at,turn,duration_seconds,substr(destination,-4) AS destinationLast4,
+    CASE WHEN json_valid(survey_json) THEN json_extract(survey_json,'$.index') END AS question_index,
+    CASE WHEN json_valid(survey_json) THEN json_extract(survey_json,'$.phoneMeta.lastAudioOutcome') END AS last_audio_outcome,
+    hangup_at IS NOT NULL AS signed_hangup,
     provider_call_id IS NOT NULL AS provider_call_reference FROM scripted_phone_pilots
     WHERE tenant_id=? AND job_id IS NULL ORDER BY created_at DESC LIMIT 5`).bind(config.tenant).all();
   const devices=[config,...await enrolledDevices(env,config)];
@@ -494,18 +506,29 @@ async function recordingAnswer(config,env,row,params,fetcher){
  if(!ID.test(params.get('RecordingID')||''))return {text:null,reason:'recording_id_missing'};
  const recording=params.get('RecordingID');
  // Fetch only the fixed credentialed URL, never a callback-supplied URL.
- let response,bytes;
- try{
-  response=await fetcher('https://media.plivo.com/v1/Account/'+config.authId+'/Recording/'+recording+'.mp3',{
-   headers:{Authorization:config.authorization},redirect:'manual',signal:AbortSignal.timeout(5000)
-  });
- }catch{return {text:null,reason:'recording_fetch_failed'}}
- if(!response.ok)return {text:null,reason:'recording_http_'+(Number.isInteger(response.status)?response.status:'unknown')};
+ let response,bytes,reason='recording_fetch_failed';
+ // The action callback can precede media availability. Retry the identical
+ // authenticated GET once on a transient status, within a bounded fetch budget.
+ // Never follow redirects or forward credentials to callback-provided URLs.
+ for(let attempt=0;attempt<2;attempt++){
+  try{
+   response=await fetcher('https://media.plivo.com/v1/Account/'+config.authId+'/Recording/'+recording+'.mp3',{
+    headers:{Authorization:config.authorization},redirect:'manual',signal:AbortSignal.timeout(2500)
+   });
+   if(response.ok)break;
+   reason='recording_http_'+(Number.isInteger(response.status)?response.status:'unknown');
+   const transient=[404,409,425,429,500,502,503,504].includes(response.status);
+   if(!transient||attempt===1)return {text:null,reason};
+   try{await response.body?.cancel()}catch{}
+  }catch{response=null;reason='recording_fetch_failed';if(attempt===1)return {text:null,reason}}
+  await new Promise(resolve=>setTimeout(resolve,250));
+ }
+ if(!response?.ok)return {text:null,reason};
  if(!supportsAnswerAudio(answerContentType(response.headers)))return {text:null,reason:'recording_type_invalid'};
  try{bytes=await readBoundedBytes(response,ANSWER_MAX_BYTES)}
  catch{return {text:null,reason:'recording_body_invalid'}}
  try{
-  const text=await transcribeScriptedAnswer(env.AI,bytes,row.language);
+  const text=await transcribeScriptedAnswer(env.AI,bytes,row.language,{vadFilter:false});
   return {text,reason:text?'recognized':'speech_empty'};
  }catch{return {text:null,reason:'speech_service_failed'}}
 }
@@ -549,11 +572,13 @@ export async function handleScriptedPhoneCallback(req,env,{now=Date.now(),fetche
       normalizePhone(params.get('To'))!==normalizePhone(row.destination)||
       normalizePhone(params.get('From'))!==normalizePhone(row.caller)||
       (row.provider_request_id&&row.provider_request_id!==requestId))return error('call_identity_mismatch',403);
-   if(row.provider_call_id)return row.provider_call_id===call&&row.phase==='consent'?responseFor(config,row):end();
-   const claim=await control.prepare(`UPDATE scripted_phone_pilots SET provider_call_id=?,provider_request_id=?,phase='consent'
+   const direct=internalDirect(row),phase=direct?'question':'consent';
+   if(row.provider_call_id)return row.provider_call_id===call&&row.phase===phase&&row.turn===0?
+    responseFor(config,row,{directOpeningCue:direct}):end();
+   const claim=await control.prepare(`UPDATE scripted_phone_pilots SET provider_call_id=?,provider_request_id=?,phase=?
     WHERE id=? AND phase IN('requested','unknown') AND provider_call_id IS NULL
-    AND (provider_request_id IS NULL OR provider_request_id=?)`).bind(call,requestId,id,requestId).run();
-   return claim.meta.changes===1?responseFor(config,{...row,phase:'consent'}):end();
+    AND (provider_request_id IS NULL OR provider_request_id=?)`).bind(call,requestId,phase,id,requestId).run();
+   return claim.meta.changes===1?responseFor(config,{...row,phase},{directOpeningCue:direct}):end();
   }
   if(step==='hangup'&&!arg){
    const matchedRequest=row.provider_request_id&&row.provider_request_id===requestId;
@@ -590,7 +615,7 @@ export async function handleScriptedPhoneCallback(req,env,{now=Date.now(),fetche
   const lock=await control.prepare("UPDATE scripted_phone_pilots SET phase='transcribing' WHERE id=? AND phase='question' AND turn=?")
    .bind(id,turn).run();
   if(lock.meta.changes!==1)return error('answer_processing',503);
-  const prior=JSON.parse(row.survey_json);
+  const {phoneMeta={},...prior}=JSON.parse(row.survey_json);
   const answer=await recordingAnswer(config,env,row,params,fetcher);
   // Transport, empty audio and STT errors use the SAME bounded retry budget
   // as unclear speech. Never invent an answer or repeat a paid outbound call.
@@ -605,7 +630,7 @@ export async function handleScriptedPhoneCallback(req,env,{now=Date.now(),fetche
    return await finishCampaignOptOut(env,row,now);
   }
   const phase={active:'question',completed:'finishing',opted_out:'declined',needs_review:'needs_review'}[result.state.status];
-  const survey_json=JSON.stringify(result.state);
+  const survey_json=JSON.stringify({...result.state,phoneMeta:{...phoneMeta,lastAudioOutcome:answer.reason==='recognized'&&result.action==='repeat'?'speech_unrecognized':answer.reason==='recognized'&&result.action==='human_review'?'speech_unrecognized':answer.reason}});
   const changed=await control.prepare(`UPDATE scripted_phone_pilots SET phase=CASE WHEN ?='question' AND hangup_at IS NOT NULL THEN 'ended' ELSE ? END,
    survey_json=?,turn=turn+1 WHERE id=? AND phase='transcribing' AND turn=?`)
    .bind(phase,phase,survey_json,id,turn).run();
