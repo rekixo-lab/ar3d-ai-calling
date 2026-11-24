@@ -527,13 +527,14 @@ function manualMinuteLedger(main,tenantId,admin){
  const minutes=input('manualMinutes','number','Minutes'),reason=input('manualReason','text','Reason / external reference');
  minutes.min='1';minutes.max='16666666';minutes.step='1';reason.maxLength=200;
  const mode=node('select',{class:'field'},[node('option',{value:'1',text:'Allocate minutes'}),node('option',{value:'-1',text:'Recover unused allocation'})]);
- let balance=null,offset=0,seq=0,pending=null,busy=false;
+ let balance=null,uncommitted=null,offset=0,seq=0,pending=null,busy=false;
  const refresh=btn('Refresh credits',()=>load().catch(asError),true),prev=btn('Previous',()=>{offset=Math.max(0,offset-50);load().catch(asError)},true),next=btn('Next',()=>{offset+=50;load().catch(asError)},true);
  const submit=btn('Save credit adjustment',async()=>{
   if(busy||balance===null)return;
   if(!pending){
    if(!minutes.checkValidity()||!reason.checkValidity()||reason.value.trim().length<10){notice('Enter whole minutes and a reason of at least 10 characters.',true);return}
    const delta=Number(minutes.value)*60*Number(mode.value);
+   if(delta<0&&(uncommitted===null||-delta>uncommitted)){notice('Cannot recover minutes already reserved or used.',true);return}
    if(!confirm('Confirm '+(delta>0?'allocation':'recovery')+' of '+Math.abs(delta/60)+' minutes for this client? No payment collected and no calls enabled.'))return;
    pending={tenantId,transactionId:crypto.randomUUID(),deltaSeconds:delta,expectedBalanceSeconds:balance,reason:reason.value.trim()};
   }
@@ -546,11 +547,14 @@ function manualMinuteLedger(main,tenantId,admin){
  if(admin)form.append(div('formrow',lab('Adjustment',mode),lab('Whole calling minutes',minutes),lab('Audit reason',reason)),div('formrow',submit,reset));
  async function load(){
   const id=++seq;refresh.disabled=prev.disabled=next.disabled=submit.disabled=true;
-  try{const d=await api('/v1/human/credits/minute-ledger?'+new URLSearchParams({tenantId,offset:String(offset)}));if(id!==seq)return;balance=d.allocatedSeconds;
-   body.replaceChildren(div('card metric',node('span',{class:'muted',text:'Allocated calling credits'}),node('strong',{text:formatSeconds(balance)}),node('p',{class:'note',text:'Allocation only — not yet spendable. No online payments.'})),
-    table(['Date (IST)','Transaction ID','Type','Change (min)','Before','After',...(admin?['Actor','Reason']:[])],d.transactions.map(t=>[formatIst(t.createdAt),t.transactionId,t.kind,(t.deltaSeconds>0?'+':'')+String(t.deltaSeconds/60),formatSeconds(t.previousSeconds),formatSeconds(t.balanceSeconds),...(admin?[t.actor,t.reason]:[])])));
+  try{const d=await api('/v1/human/credits/minute-ledger?'+new URLSearchParams({tenantId,offset:String(offset)}));if(id!==seq)return;balance=d.allocatedSeconds;uncommitted=d.uncommittedSeconds;
+   const metric=(name,value)=>div('card metric',node('span',{class:'muted',text:name}),node('strong',{text:formatSeconds(value)}));
+   body.replaceChildren(div('metrics',metric('Net allocated',balance),metric('Reserved',d.heldSeconds),metric('Used',d.usedSeconds),metric('Uncommitted',d.uncommittedSeconds)),
+    node('p',{class:'note',text:'Allocation only — not yet spendable. No online payments.'}),
+    title('Credit adjustments','h3'),table(['Date (IST)','Transaction ID','Type','Change (min)','Before','After',...(admin?['Actor','Reason']:[])],d.transactions.map(t=>[formatIst(t.createdAt),t.transactionId,t.kind,(t.deltaSeconds>0?'+':'')+String(t.deltaSeconds/60),formatSeconds(t.previousSeconds),formatSeconds(t.balanceSeconds),...(admin?[t.actor,t.reason]:[])])),
+    title('Call credit history','h3'),table(['Created (IST)','Call reference','Status','Reserved','Charged','Closed (IST)'],(d.callTransactions||[]).map(h=>[formatIst(h.createdAt),h.jobId,h.state,formatSeconds(h.reservedSeconds),formatSeconds(h.chargedSeconds),h.closedAt?formatIst(h.closedAt):'—'])));
    prev.disabled=offset===0;next.disabled=!d.hasMore;
-  }catch(e){if(id===seq){balance=null;body.replaceChildren(node('p',{class:'err',text:'Credit ledger unavailable. Refresh to retry.'}))}throw e}
+  }catch(e){if(id===seq){balance=null;uncommitted=null;body.replaceChildren(node('p',{class:'err',text:'Credit ledger unavailable. Refresh to retry.'}))}throw e}
   finally{if(id===seq){refresh.disabled=false;submit.disabled=busy||balance===null}}
  }
  panel.append(body,form,div('formrow',refresh,prev,next));main.append(panel);return load().catch(asError);

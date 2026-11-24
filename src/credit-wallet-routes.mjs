@@ -5,6 +5,7 @@ import {requireMembership,mutationOriginAllowed} from './human-auth.mjs';
 import {parseJsonBody,resolveCrmDb} from './core.mjs';
 import {estimateProductionCost} from './production-cost-plan.mjs';
 import {costObservation,readInternalPlivoCdr} from './cost-intelligence.mjs';
+import {minutePosition} from './minute-holds.mjs';
 
 const base='/v1/human/credits';
 const uuid=/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
@@ -283,9 +284,13 @@ export async function handleCreditWalletRequest(req,env,user,{fetcher=fetch}={})
     const rows=(await db.prepare(`SELECT id AS transactionId,kind,delta_seconds AS deltaSeconds,previous_seconds AS previousSeconds,balance_seconds AS balanceSeconds,created_at AS createdAt${isAdmin?',actor,reason':''},
      (SELECT balance_seconds FROM tenant_minute_ledger WHERE tenant_id=? ORDER BY sequence DESC LIMIT 1) AS currentBalance
      FROM tenant_minute_ledger WHERE tenant_id=? ORDER BY sequence DESC LIMIT 51 OFFSET ?`).bind(tid,tid,Number(offset)).all()).results;
-    const current=rows.length?rows[0].currentBalance:(await db.prepare('SELECT balance_seconds AS balance FROM tenant_minute_ledger WHERE tenant_id=? ORDER BY sequence DESC LIMIT 1').bind(tid).first())?.balance??0;
-    return json({tenantId:tid,allocatedSeconds:current,spendableSeconds:null,dispatchEnabled:false,offset:Number(offset),hasMore:rows.length>50,
-     transactions:rows.slice(0,50).map(({currentBalance,...row})=>row),status:'allocation_only'});
+    const position=await minutePosition(db,tid);
+    // Financial position is a single SQL snapshot. Transaction pages are
+    // observational; a concurrent adjustment must still pass the write CAS.
+    const holds=(await db.prepare(`SELECT job_id AS jobId,state,reserved_seconds AS reservedSeconds,charged_seconds AS chargedSeconds,created_at AS createdAt,closed_at AS closedAt
+     FROM tenant_minute_holds WHERE tenant_id=? ORDER BY created_at DESC,job_id DESC LIMIT 51 OFFSET ?`).bind(tid,Number(offset)).all()).results;
+    return json({tenantId:tid,...position,spendableSeconds:null,dispatchEnabled:false,offset:Number(offset),hasMore:rows.length>50||holds.length>50,
+     transactions:rows.slice(0,50).map(({currentBalance,...row})=>row),callTransactions:holds.slice(0,50),status:'allocation_only'});
    }
    if(!isAdmin||!mutationOriginAllowed(req))return fail('current MFA Super Admin and same origin required',403);
    if(url.search)return fail('unsupported query',400);
@@ -307,9 +312,10 @@ export async function handleCreditWalletRequest(req,env,user,{fetcher=fetch}={})
    const result=await db.prepare(`INSERT INTO tenant_minute_ledger(id,tenant_id,kind,delta_seconds,previous_seconds,balance_seconds,actor,reason,created_at)
     SELECT ?,id,?,?,?,?,?,?,? FROM tenants WHERE id=? AND status IN ('trial','active')
     AND COALESCE((SELECT balance_seconds FROM tenant_minute_ledger WHERE tenant_id=tenants.id ORDER BY sequence DESC LIMIT 1),0)=?
-    AND NOT EXISTS(SELECT 1 FROM tenant_minute_ledger WHERE id=?)`)
-    .bind(d.transactionId,kind,d.deltaSeconds,d.expectedBalanceSeconds,next,user.id,reason,new Date().toISOString(),tid,d.expectedBalanceSeconds,d.transactionId).run();
-   if(Number(result.meta.changes)!==1){const old=await lookup();return old?replay(old):fail('balance changed or client unavailable; refresh',409)}
+    AND NOT EXISTS(SELECT 1 FROM tenant_minute_ledger WHERE id=?)
+    AND ?>=COALESCE((SELECT SUM(CASE WHEN state='held' THEN reserved_seconds ELSE charged_seconds END) FROM tenant_minute_holds WHERE tenant_id=tenants.id),0)`)
+    .bind(d.transactionId,kind,d.deltaSeconds,d.expectedBalanceSeconds,next,user.id,reason,new Date().toISOString(),tid,d.expectedBalanceSeconds,d.transactionId,next).run();
+   if(Number(result.meta.changes)!==1){const old=await lookup();return old?replay(old):fail('balance changed, minutes committed or client unavailable; refresh',409)}
    return json({transactionId:d.transactionId,allocatedSeconds:next,replayed:false,dispatchEnabled:false,status:'allocation_only'},201);
   }
   if(path==='call-costs'||path==='internal-call-cdr'){
