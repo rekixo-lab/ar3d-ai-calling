@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {fixture,tid,cid,lead,at,admin,client} from './helpers/calling-fixture.mjs';
-import {handlePlivoCostReconcile} from '../src/plivo-cost-reconcile-routes.mjs';
+import {handlePlivoCostReconcile,runAutomaticMinuteSettlement} from '../src/plivo-cost-reconcile-routes.mjs';
 import {reserveMinutes,minutePosition} from '../src/minute-holds.mjs';
 
 const job='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
@@ -165,4 +165,20 @@ test('matched signed-ended held call settles exactly once, mismatch and overrese
    assert.equal(position.usedSeconds,mode==='matched'?60:0);assert.equal(position.heldSeconds,mode==='matched'?0:60);
   }finally{f.close()}
  }
+});
+
+test('approved settlement worker reads one signed-ended CDR and never dials or double charges',async()=>{
+ const f=fixture();try{seed(f);
+  const now=Date.now();
+  f.c.db.prepare("INSERT INTO tenant_minute_ledger(id,tenant_id,kind,delta_seconds,previous_seconds,balance_seconds,actor,reason,created_at) VALUES('auto-funding',?,'allocation',180,0,180,'admin','Synthetic test allocation',?)").run(tid,at);
+  assert.equal((await reserveMinutes(f.env.CONTROL_DB,{tenantId:tid,job,maxSeconds:120})).ok,true);
+  f.c.db.prepare(`INSERT INTO scripted_phone_pilots(id,tenant_id,lead_id,lead_updated_at,actor_id,language,destination,caller,expires_at,phase,survey_json,created_at,provider_account_id,job_id,provider_call_id,hangup_at)
+  VALUES('auto-session',?,?,?,'admin','hi','+919000000001','+918000000000',9999999999999,'completed','{}',?,'TESTACCOUNT123',?,?,?)`).run(tid,lead,at,at,job,call,now-120000);
+  let reads=0;const fetcher=async(...args)=>{reads++;return gateway(good)(...args)};
+  assert.deepEqual(await runAutomaticMinuteSettlement(f.env,{now,fetcher}),{attempted:0});assert.equal(reads,0);
+  f.env.AR3D_AUTO_CDR_SETTLEMENT='approved';
+  assert.deepEqual(await runAutomaticMinuteSettlement(f.env,{now,fetcher}),{attempted:1,settled:1});
+  assert.deepEqual(await runAutomaticMinuteSettlement(f.env,{now:now+60000,fetcher}),{attempted:0});
+  assert.equal(reads,1);assert.equal((await minutePosition(f.env.CONTROL_DB,tid)).usedSeconds,60);
+ }finally{f.close()}
 });

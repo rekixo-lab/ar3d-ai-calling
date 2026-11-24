@@ -70,9 +70,18 @@ export async function handlePlivoCostReconcile(req,env,user,{fetcher=fetch}={}){
      !Object.hasOwn(data,'jobId')||
      !UUID.test(data.tenantId||'')||!validJobId(data.jobId))
    return fail('invalid call selection');
-  const tid=data.tenantId,jid=data.jobId;
+  return await observeCampaignCdr(env,data.tenantId,data.jobId,user.id,'human:'+user.id,fetcher);
+ }catch(e){
+  if(/JSON|invalid/i.test(String(e?.message||'')))return fail('invalid request');
+  console.error('AR3D Plivo CDR observation unavailable');
+  return fail('cost reconciliation unavailable',503);
+ }
+}
+
+// Shared internal path. No route accepts actor identity or provider URL from clients.
+async function observeCampaignCdr(env,tid,jid,actor,auditActor,fetcher){
   const tenant=await env.CONTROL_DB.prepare(
-   "SELECT id AS tenant_id,storage_mode,dedicated_binding FROM tenants WHERE id=? AND status IN('trial','active')"
+   "SELECT id AS tenant_id,storage_mode,dedicated_binding FROM tenants WHERE id=? AND status IN('trial','active','suspended')"
   ).bind(tid).first();
   if(!tenant)return fail('tenant not found',404);
   const db=resolveCrmDb(env,tenant);
@@ -106,7 +115,7 @@ export async function handlePlivoCostReconcile(req,env,user,{fetcher=fetch}={}){
   if(cdr?.call_uuid!==job.callUuid||cdr?.call_direction!=='outbound'||
      phone(cdr.from_number)!==phone(job.caller)||
      phone(cdr.to_number)!==phone(job.destination)||
-     !seconds(cdr.billed_duration)||!seconds(cdr.call_duration)||
+     !seconds(cdr.billed_duration)||!seconds(cdr.call_duration)||cdr.billed_duration<cdr.call_duration||
      !money(cdr.total_amount))
    return fail('provider call identity or amount did not match',503);
   const at=new Date().toISOString();
@@ -117,11 +126,11 @@ export async function handlePlivoCostReconcile(req,env,user,{fetcher=fetch}={}){
     'call_seconds,currency_status,verified_by,verified_at) '+
     "VALUES(?,?,?,?,?,?,'unverified',?,?)"
    ).bind(tid,jid,job.callUuid,cdr.total_amount,
-    cdr.billed_duration,cdr.call_duration,user.id,at),
+    cdr.billed_duration,cdr.call_duration,actor,at),
    db.prepare(
     "INSERT INTO crm_audit_events(tenant_id,id,actor,action,target_id,created_at) "+
-    "SELECT ?,?,'human:'||?,'plivo.cdr_observed',?,? WHERE changes()=1"
-   ).bind(tid,crypto.randomUUID(),user.id,jid,at)
+    "SELECT ?,?,?,'plivo.cdr_observed',?,? WHERE changes()=1"
+   ).bind(tid,crypto.randomUUID(),auditActor,jid,at)
   ]);
   const newlyRecorded=Number(recorded[0]?.meta?.changes)===1&&Number(recorded[1]?.meta?.changes)===1;
   if(newlyRecorded){
@@ -144,9 +153,26 @@ export async function handlePlivoCostReconcile(req,env,user,{fetcher=fetch}={}){
    currency:'unverified',providerReportedAmount:old.amount,
    billedSeconds:old.billedSeconds,clientCreditsDebited:settlement.clientCreditsDebited,settlement,
    notice:'Identical provider CDR; settlement is idempotent.'});
- }catch(e){
-  if(/JSON|invalid/i.test(String(e?.message||'')))return fail('invalid request');
-  console.error('AR3D Plivo CDR observation unavailable');
-  return fail('cost reconciliation unavailable',503);
- }
+
+}
+
+// Product-side settlement, not an assistant automation. Enabled only after
+// operator verifies actual provider billing and explicitly approves the job.
+// At most one bounded CDR GET per Worker tick. Uncertain calls never qualify;
+// a stuck item cannot starve newer ones because selection rotates.
+export async function runAutomaticMinuteSettlement(env,{now=Date.now(),fetcher=fetch}={}){
+ if(env.AR3D_AUTO_CDR_SETTLEMENT!=='approved')return {attempted:0};
+ if(!Number.isSafeInteger(now)||now<0)throw Error('invalid settlement time');
+ const eligible=" FROM tenant_minute_holds h JOIN scripted_phone_pilots p ON p.tenant_id=h.tenant_id AND p.job_id=h.job_id WHERE h.state='held' AND p.hangup_at IS NOT NULL AND p.hangup_at<=? AND p.provider_call_id IS NOT NULL AND p.phase IN ('completed','declined','ended','needs_review')";
+ const cutoff=now-60000;
+ const count=(await env.CONTROL_DB.prepare('SELECT COUNT(*) AS total'+eligible).bind(cutoff).first())?.total;
+ if(!Number.isSafeInteger(count)||count<0)throw Error('invalid settlement queue');
+ if(count===0)return {attempted:0};
+ const row=await env.CONTROL_DB.prepare('SELECT h.tenant_id AS tenantId,h.job_id AS jobId'+eligible+' ORDER BY h.created_at,h.tenant_id,h.job_id LIMIT 1 OFFSET ?').bind(cutoff,Math.floor(now/60000)%count).first();
+ if(!row||!UUID.test(row.tenantId)||!validJobId(row.jobId))return {attempted:0};
+ try{
+  const response=await observeCampaignCdr(env,row.tenantId,row.jobId,'system:plivo-cdr','system:plivo-cdr',fetcher);
+  const result=await response.json();
+  return {attempted:1,settled:response.ok&&result.settlement?.state==='settled'?1:0};
+ }catch{return {attempted:1,settled:0}}
 }
