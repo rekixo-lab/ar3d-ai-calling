@@ -455,6 +455,7 @@ export async function handleCreditWalletRequest(req,env,user,{fetcher=fetch}={})
    currency:'INR',status:'provisional_only',spendableInr:null,
    notice:'Planned budget saved, but no Plivo money transferred and no live calls enabled.'});
  }catch(e){
+  if(/minutes already committed/i.test(String(e?.message||'')))return fail('minutes already committed; recovery would reduce reserved or used credits',409);
   if(/invalid|too large|JSON/i.test(String(e?.message||'')))return fail('invalid credit request',400);
   console.error('AR3D credit planning not available');
   return fail('credit planning unavailable; check Control D1 migration',503);
