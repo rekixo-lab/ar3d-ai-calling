@@ -185,14 +185,78 @@ async function pilotAvailability(control,now){
  const wait=Math.max(0,Math.ceil(((row?.last_end??(now-pilotCooldownMs))+pilotCooldownMs-now)/1000));
  return {ready:wait===0,reason:wait?'cooldown':'ready',retryAfterSeconds:wait};
 }
+// Enrollment is an append-only CRM audit event bound to BOTH lead and mobile.
+// No general customer editing or import can create the enrollment marker.
+const deviceAction='lead.internal_test_device_enrolled',deviceName='AR3D Internal Device Test';
+async function deviceBinding(lead,mobile){
+ const bytes=await crypto.subtle.digest('SHA-256',encoder.encode('ar3d-internal-device-v1:'+lead+':'+mobile));
+ return Array.from(new Uint8Array(bytes),b=>b.toString(16).padStart(2,'0')).join('');
+}
+async function deviceCrm(env,config){
+ const tenant=await env.CONTROL_DB.prepare(`SELECT id,storage_mode,dedicated_binding FROM tenants
+  WHERE id=? AND display_name='AR3D Internal' AND status IN('trial','active')`).bind(config.tenant).first();
+ return tenant?resolveCrmDb(env,tenant):null;
+}
+async function enrolledDevices(env,config){
+ const db=await deviceCrm(env,config);
+ if(!db)return [];
+ const rows=await db.prepare(`SELECT l.id,l.mobile_e164,a.id AS binding FROM leads l
+  JOIN crm_audit_events a ON a.tenant_id=l.tenant_id AND a.target_id=l.id AND a.action=?
+  WHERE l.tenant_id=? AND l.name=? AND l.source_type='other'
+  ORDER BY a.created_at,a.id LIMIT 4`).bind(deviceAction,config.tenant,deviceName).all();
+ const out=[];
+ for(const row of rows.results){
+  if(!UUID.test(row.id)||!MOBILE.test(row.mobile_e164)||row.id===config.lead||row.mobile_e164===config.destination||
+   row.binding!==await deviceBinding(row.id,row.mobile_e164))continue;
+  const target={...config,lead:row.id,destination:row.mobile_e164};
+  if(await eligiblePilotLead(db,target))out.push(target);
+ }
+ return out;
+}
+async function selectDevice(env,config,leadId){
+ if(!leadId||leadId===config.lead)return config;
+ return (await enrolledDevices(env,config)).find(x=>x.lead===leadId)||null;
+}
+async function enrollDevice(req,env,user,config,now){
+ if(req.method!=='POST')return error('method_not_allowed',405);
+ const url=new URL(req.url);
+ if(!config||url.search||!mutationOriginAllowed(req)||url.origin!==config.origin)return error('pilot_origin_or_configuration_invalid',403);
+ if(env.AR3D_SCRIPTED_CAMPAIGNS_ENABLED==='enabled')return error('disable_campaigns_before_enrolling_test_devices',409);
+ let data;
+ try{data=parseJsonBody(new TextDecoder('utf-8',{fatal:true}).decode(await readBoundedBytes(req,1024)),1024)}
+ catch{return error('invalid_device_request',400)}
+ if(Object.keys(data).sort().join(',')!=='confirm,mobile'||data.confirm!=='VERIFIED_CONSENTED_INTERNAL_DEVICE_NO_CALL'||
+  typeof data.mobile!=='string'||!MOBILE.test(data.mobile))return error('valid_indian_mobile_and_explicit_internal_consent_required',400);
+ if(data.mobile===config.destination)return error('number_already_registered',409);
+ const db=await deviceCrm(env,config);
+ if(!db)return error('internal_tenant_unavailable',409);
+ const id=crypto.randomUUID(),at=iso(now),binding=await deviceBinding(id,data.mobile);
+ // D1 batch serializes cap check, insert and binding. Count all enrolled
+ // devices, even if a lead was subsequently deleted or made ineligible.
+ const steps=await db.batch([
+  db.prepare(`INSERT INTO leads(tenant_id,id,name,mobile_e164,source_type,consent_status,dnd_status,created_at,updated_at)
+   SELECT ?,?,?,?,'other','unknown','unknown',?,?
+   WHERE (SELECT COUNT(*) FROM crm_audit_events WHERE tenant_id=? AND action=?)<4
+   ON CONFLICT(tenant_id,mobile_e164) DO NOTHING`).bind(config.tenant,id,deviceName,data.mobile,at,at,config.tenant,deviceAction),
+  db.prepare(`INSERT INTO crm_audit_events(tenant_id,id,actor,action,target_id,created_at)
+   SELECT tenant_id,?,'human:'||?, ?,id,? FROM leads WHERE tenant_id=? AND id=? AND changes()=1`)
+   .bind(binding,user.id,deviceAction,at,config.tenant,id)
+ ]);
+ if(steps[0].meta.changes!==1)return error('number_exists_or_five_device_limit_reached',409);
+ if(steps[1].meta.changes!==1)throw Error('device_enrollment_audit_unconfirmed');
+ return json({leadId:id,destinationLast4:data.mobile.slice(-4),created:true,callPlaced:false},201);
+}
 async function startPilot(req,env,user,config,now,fetcher){
  if(!config)return error('scripted_phone_pilot_not_configured',503);
  if(!mutationOriginAllowed(req)||new URL(req.url).origin!==config.origin)return error('pilot_origin_mismatch',403);
  let data;
  try{data=parseJsonBody(new TextDecoder('utf-8',{fatal:true}).decode(await readBoundedBytes(req,1024)),1024)}
  catch{return error('invalid_pilot_request',400)}
- if(Object.keys(data).sort().join(',')!=='confirm,language'||data.confirm!=='CALL_ONE_VERIFIED_INTERNAL_NUMBER'||
-    !['hi','en'].includes(data.language))return error('explicit_pilot_confirmation_required',400);
+ if(!['confirm,language','confirm,language,leadId'].includes(Object.keys(data).sort().join(','))||
+    data.confirm!=='CALL_ONE_VERIFIED_INTERNAL_NUMBER'||!['hi','en'].includes(data.language)||
+    (Object.hasOwn(data,'leadId')&&(typeof data.leadId!=='string'||!UUID.test(data.leadId))))return error('explicit_pilot_confirmation_required',400);
+ config=await selectDevice(env,config,data.leadId);
+ if(!config)return error('internal_test_device_not_enrolled_or_blocked',403);
  const control=env.CONTROL_DB,crm=await pilotCrm(env,config.tenant);
  if(!crm)return error('pilot_client_unavailable',409);
  const lead=await eligiblePilotLead(crm,config);
@@ -303,7 +367,7 @@ async function prepareInternalTestLead(req,env,user,now){
 
 export async function handleScriptedPhoneAdmin(req,env,user,{now=Date.now(),fetcher=fetch}={}){
  const path=new URL(req.url).pathname;
- if(path!==ADMIN&&path!==ADMIN+'/prepare-lead')return null;
+ if(path!==ADMIN&&path!==ADMIN+'/prepare-lead'&&path!==ADMIN+'/devices')return null;
  if(user?.globalRole!=='super_admin'||!await currentMfa(env.CONTROL_DB,user,now))return error('current_super_admin_mfa_required',403);
  if(path===ADMIN+'/prepare-lead'){
   try{return await prepareInternalTestLead(req,env,user,now)}
@@ -311,15 +375,21 @@ export async function handleScriptedPhoneAdmin(req,env,user,{now=Date.now(),fetc
  }
  if(!['GET','POST'].includes(req.method))return error('method_not_allowed',405);
  const config=configuration(env);
+ if(path===ADMIN+'/devices'){
+  try{return await enrollDevice(req,env,user,config,now)}catch{return error('device_enrollment_unavailable',503)}
+ }
  try{
   if(req.method==='POST')return await startPilot(req,env,user,config,now,fetcher);
   if(!config)return json({configured:false});
   const recent=await env.CONTROL_DB.prepare(`SELECT id,
     CASE WHEN phase='requested' AND provider_request_id IS NOT NULL THEN 'submitted' ELSE phase END AS phase,
-    language,created_at,turn,duration_seconds,hangup_at IS NOT NULL AS signed_hangup,
+    language,created_at,turn,duration_seconds,substr(destination,-4) AS destinationLast4,hangup_at IS NOT NULL AS signed_hangup,
     provider_call_id IS NOT NULL AS provider_call_reference FROM scripted_phone_pilots
-    WHERE tenant_id=? AND lead_id=? AND job_id IS NULL ORDER BY created_at DESC LIMIT 5`).bind(config.tenant,config.lead).all();
+    WHERE tenant_id=? AND job_id IS NULL ORDER BY created_at DESC LIMIT 5`).bind(config.tenant).all();
+  const devices=[config,...await enrolledDevices(env,config)];
   return json({configured:true,destinationLast4:config.destination.slice(-4),recent:recent.results,
+   devices:devices.map((x,i)=>({leadId:x.lead,destinationLast4:x.destination.slice(-4),primary:i===0})),
+   enrollmentEnabled:env.AR3D_SCRIPTED_CAMPAIGNS_ENABLED!=='enabled'&&!!await deviceCrm(env,config),
    availability:await pilotAvailability(env.CONTROL_DB,now)});
  }catch{return error('scripted_phone_pilot_unavailable',503)}
 }
@@ -464,9 +534,15 @@ export async function handleScriptedPhoneCallback(req,env,{now=Date.now(),fetche
   if(!ID.test(call||''))return error('invalid_call_reference',400);
   const row=await control.prepare('SELECT * FROM scripted_phone_pilots WHERE id=? AND expires_at>?').bind(id,now).first();
   if(!row||row.provider_account_id!==config.authId||row.caller!==config.caller)return end();
-  const operator=configuration(env);
-  if(!row.job_id&&(!operator||row.tenant_id!==operator.tenant||row.lead_id!==operator.lead||
-     row.destination!==operator.destination))return end();
+  // A previously reserved call must still be able to report its signed hangup
+  // after enrollment/lead eligibility changes. The immutable call identity is
+  // checked below. Other internal steps recheck the enrolled destination.
+  if(!row.job_id&&step!=='hangup'){
+   const operator=configuration(env);
+   if(!operator||row.tenant_id!==operator.tenant)return end();
+   const target=await selectDevice(env,operator,row.lead_id);
+   if(!target||row.destination!==target.destination)return end();
+  }
   if(row.job_id&&step==='answer'&&env.AR3D_SCRIPTED_CAMPAIGNS_ENABLED!=='enabled')return end();
   if(step==='answer'&&!arg){
    if(!ID.test(requestId||'')||params.get('Direction')!=='outbound'||
