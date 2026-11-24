@@ -820,8 +820,9 @@ function clientFinancialOverview(main){
   try{
    const d=await api('/v1/human/credits/client-financial-report?offset='+offset);
    if(id!==seq||!card.isConnected)return;
+   const reportTable=table(headers,d.rows.map(dataRow));reportTable.querySelector('table').setAttribute('aria-label','Client financial position records');
    body.replaceChildren(node('p',{class:'muted',text:'Cumulative position · updated '+formatIst(d.asOf)}),
-    table(headers,d.rows.map(dataRow)),btn('Export financial page (CSV)',()=>downloadReportCsv('ar3d-client-financial-'+offset+'.csv',headers,d.rows.map(dataRow)),true));
+    reportTable,btn('Export financial page (CSV)',()=>downloadReportCsv('ar3d-client-financial-'+offset+'.csv',headers,d.rows.map(dataRow)),true));
    prev.disabled=offset===0;next.disabled=!d.hasMore;
   }catch(e){if(id===seq)body.replaceChildren(node('p',{class:'err',text:'Financial report unavailable; no values inferred.'}));}
   finally{if(id===seq)refresh.disabled=false;}
