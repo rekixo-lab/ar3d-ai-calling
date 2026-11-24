@@ -42,7 +42,7 @@ export async function handleScriptedCallingRequest(req,env,user,{now=Date.now()}
  if(!['GET','POST'].includes(req.method))return fail('method_not_allowed',405);
  if(req.method==='POST'&&!mutationOriginAllowed(req))return fail('same_origin_required',403);
  const admin=['policy','clearances','reconcile'].includes(action);
- if(!['policy','clearances','runs','state','results','reconcile'].includes(action))return fail('not_found',404);
+ if(!['policy','clearances','runs','state','results','reconcile','review-partial'].includes(action))return fail('not_found',404);
  try{
   const d=req.method==='POST'?await body(req):Object.fromEntries(url.searchParams);
   if(!UUID.test(d.tenantId||''))return fail('invalid_tenant');
@@ -132,6 +132,46 @@ export async function handleScriptedCallingRequest(req,env,user,{now=Date.now()}
    ]);
    return result[0].meta.changes===1?json({closed:true}):fail('pause_campaign_and_verify_carrier_status_before_closing',409);
   }
+  if(action==='review-partial'){
+   if(req.method!=='POST')return fail('method_not_allowed',405);
+   if(Object.keys(d).length!==3||Object.keys(d).some(k=>!['tenantId','jobId','expectedUpdatedAt'].includes(k))||
+      !(UUID.test(d.jobId||'')||/^[a-f0-9]{32}$/i.test(d.jobId||''))||typeof d.expectedUpdatedAt!=='string'||d.expectedUpdatedAt.length>40||!Number.isFinite(Date.parse(d.expectedUpdatedAt)))return fail('invalid_partial_review');
+   const row=await db.prepare(`SELECT j.lead_id AS leadId,a.answers_json AS answersJson,a.captured_at AS capturedAt,
+    l.updated_at AS leadUpdatedAt,l.requirements_json AS requirements,l.consent_status AS consent,l.dnd_status AS dnd,l.interest_status AS interest,
+    l.preferred_location AS location,l.plot_size_preference AS size,l.budget_min_inr AS min,l.budget_max_inr AS max
+    FROM scripted_call_results a JOIN calling_jobs j ON j.tenant_id=a.tenant_id AND j.id=a.job_id
+    JOIN leads l ON l.tenant_id=j.tenant_id AND l.id=j.lead_id
+    WHERE a.tenant_id=? AND a.job_id=? AND j.state IN ('completed','failed') AND a.saved_to_lead=0`).bind(tid,d.jobId).first();
+   if(!row)return fail('partial_result_unavailable',404);
+   const reviewed=await db.prepare("SELECT 1 AS done FROM crm_audit_events WHERE tenant_id=? AND action='calling.partial_reviewed' AND target_id=? LIMIT 1").bind(tid,d.jobId).first();
+   if(reviewed)return json({reviewed:true,replayed:true});
+   if(row.leadUpdatedAt!==d.expectedUpdatedAt||row.interest==='converted'||row.consent==='denied'||row.dnd==='blocked')return fail('customer_changed_or_suppressed',409);
+   const snapshot=JSON.parse(row.answersJson),prior=JSON.parse(row.requirements||'{}');
+   if(snapshot?.__partial!==true||!prior||typeof prior!=='object'||Array.isArray(prior))return fail('partial_result_unavailable',409);
+   delete snapshot.__partial;
+   const text=(s,max)=>typeof s==='string'&&s.trim().length>=2&&s.length<=max&&!/[\u0000-\u001f\u007f]/u.test(s)?s:null;
+   const money=n=>Number.isSafeInteger(n)&&n>=10000&&n<=1000000000000?n:null;
+   const budget=money(snapshot.budgetInr),min=money(snapshot.budgetMinInr);
+   // Fill only blank fields. Existing budget endpoints are an indivisible
+   // pair; never combine older values and a new partial answer.
+   const fillBudget=row.min===null&&row.max===null&&budget!==null&&(min===null||min<=budget);
+   const serialized=JSON.stringify({...prior,reviewedPartialCall:{jobId:d.jobId,capturedAt:row.capturedAt,answers:snapshot}});
+   if(serialized.length>8000)return fail('customer_notes_require_manual_review',409);
+   const updated=new Date(Math.max(now,Date.parse(row.leadUpdatedAt)+1)).toISOString();
+   const changes=await db.batch([
+    db.prepare(`UPDATE leads SET preferred_location=COALESCE(preferred_location,?),plot_size_preference=COALESCE(plot_size_preference,?),
+     budget_min_inr=CASE WHEN budget_min_inr IS NULL AND budget_max_inr IS NULL THEN ? ELSE budget_min_inr END,
+     budget_max_inr=CASE WHEN budget_min_inr IS NULL AND budget_max_inr IS NULL THEN ? ELSE budget_max_inr END,
+     requirements_json=?,updated_at=? WHERE tenant_id=? AND id=? AND updated_at=? AND interest_status!='converted'
+     AND consent_status!='denied' AND dnd_status!='blocked' AND NOT EXISTS(SELECT 1 FROM lead_opt_out_events o WHERE o.tenant_id=leads.tenant_id AND o.lead_id=leads.id)
+     AND NOT EXISTS(SELECT 1 FROM crm_audit_events e WHERE e.tenant_id=leads.tenant_id AND e.action='calling.partial_reviewed' AND e.target_id=?)`)
+     .bind(text(snapshot.location,120),text(snapshot.size,80),fillBudget?min:null,fillBudget?budget:null,serialized,updated,tid,row.leadId,row.leadUpdatedAt,d.jobId),
+    db.prepare("INSERT INTO crm_audit_events(tenant_id,id,actor,action,target_id,created_at) SELECT ?,?,'human:'||?,'calling.partial_reviewed',?,? WHERE changes()=1")
+     .bind(tid,crypto.randomUUID(),user.id,d.jobId,updated)
+   ]);
+   if(changes[0].meta.changes!==1)return fail('customer_changed_or_suppressed',409);
+   return json({reviewed:true,replayed:false,updatedAt:updated,notice:'Only blank CRM fields were filled. Existing values, consent, call history and visit bookings remain unchanged.'});
+  }
   if(action==='results'){
    if(req.method!=='GET')return fail('method_not_allowed',405);
    const offset=Number(d.offset??0),limit=50;
@@ -143,7 +183,8 @@ export async function handleScriptedCallingRequest(req,env,user,{now=Date.now()}
    const [rows,count]=await Promise.all([
     db.prepare(`SELECT j.id,j.lead_id AS leadId,l.name,c.name AS campaign,j.state,j.provider_status AS outcome,
      j.duration_seconds AS durationSeconds,j.error_code AS errorCode,j.updated_at AS updatedAt,
-     a.answers_json AS answersJson,a.saved_to_lead AS savedToLead,a.captured_at AS capturedAt
+     a.answers_json AS answersJson,a.saved_to_lead AS savedToLead,a.captured_at AS capturedAt,l.updated_at AS leadUpdatedAt,
+     EXISTS(SELECT 1 FROM crm_audit_events e WHERE e.tenant_id=j.tenant_id AND e.action='calling.partial_reviewed' AND e.target_id=j.id) AS partialReviewed
      FROM calling_jobs j JOIN calling_runs r ON r.tenant_id=j.tenant_id AND r.id=j.run_id
      JOIN call_campaign_drafts c ON c.tenant_id=r.tenant_id AND c.id=r.campaign_id
      JOIN leads l ON l.tenant_id=j.tenant_id AND l.id=j.lead_id
@@ -156,7 +197,7 @@ export async function handleScriptedCallingRequest(req,env,user,{now=Date.now()}
     const stored=answersJson?JSON.parse(answersJson):null;
     const partial=stored?.__partial===true;
     if(partial)delete stored.__partial;
-    return {...row,answers:stored,partial,savedToLead:savedToLead===1&&!partial};
+    return {...row,partialReviewed:row.partialReviewed===1,answers:stored,partial,savedToLead:savedToLead===1&&!partial};
    });
    return json({results,total:count.total,limit,offset});
   }

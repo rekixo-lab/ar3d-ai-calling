@@ -1488,7 +1488,7 @@ function campaignResultsPanel(tenantId,content,role){
     node('p',{class:'muted',text:total?(offset+1)+'–'+(offset+results.length)+' of '+total+' customers':'Campaign call attempts will appear here.'}),
     table(['Customer','Campaign','Outcome','CRM','Answers','Calling credits'],results.map(r=>[
      r.name,r.campaign,outcomes[r.outcome]||outcomes[r.state]||r.state,
-     r.answers?(r.partial?'Partial · review needed':r.savedToLead?'Saved to lead':'Lead needs review'):'—',
+     r.answers?(r.partial?(r.partialReviewed?'Partial · reviewed':'Partial · review needed'):r.savedToLead?'Saved to lead':'Lead needs review'):'—',
      r.answers?btn(r.partial?'View partial answers':'View answers',()=>showAnswers(r),true):'—',
      role==='client_admin'&&['completed','failed'].includes(r.state)?
       btn('Check credits',()=>checkCharge(r),true):'—'
@@ -1518,7 +1518,7 @@ function campaignResultsPanel(tenantId,content,role){
   ];
   answer.replaceChildren(div('row between',title(result.name+(result.partial?' — partial call answers':' — call answers'),'h3'),
    btn('Close answers',()=>{answer.hidden=true;trigger?.focus()},true)),
-   ...(result.partial?[node('p',{class:'note',text:'Incomplete conversation. Only accepted answers are shown; the main customer profile was not changed. Review before following up.'})]:[]),
+   ...(result.partial?[node('p',{class:'note',text:result.partialReviewed?'Partial answers reviewed. Existing customer data was preserved.':'Incomplete conversation. Review accepted answers before filling blank CRM fields.'}),...(role==='client_admin'&&!result.partialReviewed? [btn('Review & fill blank CRM fields',async()=>{if(!confirm('Save this partial result to the customer notes and fill only blank location, size and budget fields? Existing values, consent and visits will not change.'))return;try{await api('/v1/human/calling/review-partial','POST',{tenantId,jobId:result.id,expectedUpdatedAt:result.leadUpdatedAt});notice('Partial result reviewed.');await refresh()}catch(e){asError(e)}},true)]:[])]:[]),
    node('dl',{class:'answer-fields'},
    fields.map(([label,value])=>div('',node('dt',{text:label}),node('dd',{text:value||'—'})))));
   answer.hidden=false;

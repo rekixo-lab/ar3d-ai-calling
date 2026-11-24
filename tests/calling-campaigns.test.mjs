@@ -175,3 +175,25 @@ test('explicitly approved credit-only mode bypasses business daily cap, not fund
   assert.equal(result.state,'submitted');assert.equal(posted,1);
  }finally{f.close()}
 });
+
+test('partial review is tenant scoped, fills blanks only, rejects stale profile and is idempotent',async()=>{
+ const f=fixture();try{await setup(f);
+  const job=f.r.db.prepare('SELECT id FROM calling_jobs').get().id;
+  f.r.db.prepare("UPDATE calling_jobs SET state='failed' WHERE id=?").run(job);
+  f.r.db.prepare("UPDATE leads SET preferred_location='Existing city',budget_max_inr=9000000 WHERE id=?").run(lead);
+  const snapshot={__partial:true,propertyType:'house',location:'कोरबा',area:'बस स्टैंड',size:'3BHK',budgetMinInr:2000000,budgetInr:3000000};
+  f.r.db.prepare("INSERT INTO scripted_call_results VALUES(?,?, 'partial-synthetic',?,0,?)").run(tid,job,JSON.stringify(snapshot),at);
+  const request={tenantId:tid,jobId:job,expectedUpdatedAt:at};
+  assert.equal((await route(f,'review-partial',request,{id:'viewer',globalRole:'user'})).status,403);
+  assert.equal((await route(f,'review-partial',{...request,expectedUpdatedAt:'2020-01-01T00:00:00Z'})).status,409);
+  const response=await route(f,'review-partial',request);assert.equal(response.status,200,await response.clone().text());
+  const row=f.r.db.prepare("SELECT * FROM leads WHERE id=?").get(lead);
+  assert.equal(row.preferred_location,'Existing city');assert.equal(row.plot_size_preference,'3BHK');assert.equal(row.budget_max_inr,9000000);assert.equal(row.budget_min_inr,null);
+  assert.equal(JSON.parse(row.requirements_json).reviewedPartialCall.answers.area,'बस स्टैंड');
+  assert.equal(row.consent_status,'unknown');assert.equal(f.r.db.prepare('SELECT COUNT(*) AS n FROM site_visits').get().n,0);
+  assert.equal((await (await route(f,'review-partial',request)).json()).replayed,true);
+  assert.equal(f.r.db.prepare("SELECT COUNT(*) AS n FROM crm_audit_events WHERE action='calling.partial_reviewed'").get().n,1);
+  assert.equal(JSON.parse(f.r.db.prepare('SELECT answers_json FROM scripted_call_results WHERE job_id=?').get(job).answers_json).__partial,true);
+  const results=await (await route(f,'results',{tenantId:tid},client,'GET')).json();assert.equal(results.results[0].partialReviewed,true);
+ }finally{f.close()}
+});
