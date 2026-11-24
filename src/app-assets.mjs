@@ -514,13 +514,46 @@ async function adminMinuteWallet(main){
   if(d.tenants.some(t=>t.id===previous))company.value=previous;
   await select();
  };
- async function select(){detail.replaceChildren();if(company.value){const selected=company.value;const costs=div('stack'),minutes=div('stack');detail.append(costs,minutes);callCostIntelligence(costs,selected);await minuteUsagePanel(minutes,selected,true)}}
+ async function select(){detail.replaceChildren();if(company.value){const selected=company.value;const credits=div('stack'),costs=div('stack'),minutes=div('stack');detail.append(credits,costs,minutes);manualMinuteLedger(credits,selected,true);callCostIntelligence(costs,selected);await minuteUsagePanel(minutes,selected,true)}}
  company.addEventListener('change',()=>select().catch(asError));
  card.append(div('formrow',lab('Search clients',search),btn('Find company',()=>find().catch(asError),true)),
   lab('Client company',company),detail);main.append(card);
  productionCostPlanner(main);
  creditWalletOperator(main);
  await find();
+}
+function manualMinuteLedger(main,tenantId,admin){
+ const panel=div('card minute-wallet',title('Calling credit ledger')),body=div('stack'),form=div('stack');
+ const minutes=input('manualMinutes','number','Minutes'),reason=input('manualReason','text','Reason / external reference');
+ minutes.min='1';minutes.max='16666666';minutes.step='1';reason.maxLength=200;
+ const mode=node('select',{class:'field'},[node('option',{value:'1',text:'Allocate minutes'}),node('option',{value:'-1',text:'Recover unused allocation'})]);
+ let balance=null,offset=0,seq=0,pending=null,busy=false;
+ const refresh=btn('Refresh credits',()=>load().catch(asError),true),prev=btn('Previous',()=>{offset=Math.max(0,offset-50);load().catch(asError)},true),next=btn('Next',()=>{offset+=50;load().catch(asError)},true);
+ const submit=btn('Save credit adjustment',async()=>{
+  if(busy||balance===null)return;
+  if(!pending){
+   if(!minutes.checkValidity()||!reason.checkValidity()||reason.value.trim().length<10){notice('Enter whole minutes and a reason of at least 10 characters.',true);return}
+   const delta=Number(minutes.value)*60*Number(mode.value);
+   if(!confirm('Confirm '+(delta>0?'allocation':'recovery')+' of '+Math.abs(delta/60)+' minutes for this client? No payment collected and no calls enabled.'))return;
+   pending={tenantId,transactionId:crypto.randomUUID(),deltaSeconds:delta,expectedBalanceSeconds:balance,reason:reason.value.trim()};
+  }
+  busy=true;submit.disabled=true;
+  try{await api('/v1/human/credits/minute-ledger','POST',pending);pending=null;minutes.value='';reason.value='';offset=0;await load();notice('Credit adjustment recorded. Calling remains disabled by this ledger.')}
+  catch(e){asError(e);notice('Adjustment not confirmed. Retry the same transaction or refresh after checking history.',true)}
+  finally{busy=false;submit.disabled=balance===null}
+ });
+ const reset=btn('Clear pending adjustment & refresh',()=>{if(busy)return;if(pending&&!confirm('Check transaction history before creating another adjustment. Clear this pending request?'))return;pending=null;offset=0;load().catch(asError)},true);
+ if(admin)form.append(div('formrow',lab('Adjustment',mode),lab('Whole calling minutes',minutes),lab('Audit reason',reason)),div('formrow',submit,reset));
+ async function load(){
+  const id=++seq;refresh.disabled=prev.disabled=next.disabled=submit.disabled=true;
+  try{const d=await api('/v1/human/credits/minute-ledger?'+new URLSearchParams({tenantId,offset:String(offset)}));if(id!==seq)return;balance=d.allocatedSeconds;
+   body.replaceChildren(div('card metric',node('span',{class:'muted',text:'Allocated calling credits'}),node('strong',{text:formatSeconds(balance)}),node('p',{class:'note',text:'Allocation only — not yet spendable. No online payments.'})),
+    table(['Date (IST)','Transaction ID','Type','Change (min)','Before','After',...(admin?['Actor','Reason']:[])],d.transactions.map(t=>[formatIst(t.createdAt),t.transactionId,t.kind,(t.deltaSeconds>0?'+':'')+String(t.deltaSeconds/60),formatSeconds(t.previousSeconds),formatSeconds(t.balanceSeconds),...(admin?[t.actor,t.reason]:[])])));
+   prev.disabled=offset===0;next.disabled=!d.hasMore;
+  }catch(e){if(id===seq){balance=null;body.replaceChildren(node('p',{class:'err',text:'Credit ledger unavailable. Refresh to retry.'}))}throw e}
+  finally{if(id===seq){refresh.disabled=false;submit.disabled=busy||balance===null}}
+ }
+ panel.append(body,form,div('formrow',refresh,prev,next));main.append(panel);return load().catch(asError);
 }
 function callCostIntelligence(main,tenantId){
  const panel=div('card',title('Call Cost Intelligence')),result=div('stack');let offset=0,seq=0,records=[];
@@ -1087,7 +1120,7 @@ async function renderClient(id,content){
     });
    }
   },
-  wallet:section=>d.role==='client_admin'?minuteUsagePanel(section,id,false):section.append(node('p',{class:'note',text:'Wallet and transaction details require Client Admin access.'})),
+  wallet:section=>{if(d.role==='client_admin'){manualMinuteLedger(section,id,false);return minuteUsagePanel(section,id,false)}section.append(node('p',{class:'note',text:'Wallet and transaction details require Client Admin access.'}))},
   company:section=>clientCompanySummary(id,section,d.role,d.tenant.name)
  };
  content.replaceChildren(overview,...Object.values(sections));

@@ -176,6 +176,7 @@ function cloudflareMock({ controlTables=[],crmTables=[],controlName='ar3d-callin
         else if(sql.includes('scripted_call_results')) rows=REQUIRED_COLUMNS.CRM_DB.scripted_call_results.map(name=>({name}));
         else if(sql.includes('tenant_credit_budgets')) rows=REQUIRED_COLUMNS.CONTROL_DB.tenant_credit_budgets.map(name=>({name}));
         else if(sql.includes('tenant_credit_audit')) rows=REQUIRED_COLUMNS.CONTROL_DB.tenant_credit_audit.map(name=>({name}));
+        else if(sql.includes('tenant_minute_ledger')) rows=REQUIRED_COLUMNS.CONTROL_DB.tenant_minute_ledger.map(name=>({name}));
         else if(sql.includes('lead_staff_assignments')) rows=REQUIRED_COLUMNS.CRM_DB.lead_staff_assignments.map(name=>({name}));
         else if(sql.includes('verified_provider_call_costs')) rows=REQUIRED_COLUMNS.CRM_DB.verified_provider_call_costs.map(name=>({name}));
         else if(sql.includes('call_intent_proposals')) rows=['tenant_id','id','campaign_id','lead_id','purpose','state','created_by','created_at'].map(name=>({name}));
@@ -333,3 +334,5 @@ test('production preflight accepts the exact scripted results CRM upgrade', asyn
   assert.equal(verifiedSchemaState(modes),'crm_scripted_results_upgrade');
   assert.throws(()=>checkTables(crmTables,'CRM_DB','ready'),/scripted_call_results/);
 });
+
+test('minute ledger upgrade requires exact prior schema and ready CRM',()=>{const old=REQUIRED_TABLES.CONTROL_DB.filter(t=>t!=='tenant_minute_ledger');assert.equal(checkTables(old,'CONTROL_DB','preflight'),'control_minute_ledger_upgrade');assert.equal(verifiedSchemaState({CONTROL_DB:'control_minute_ledger_upgrade',CRM_DB:'ready'}),'control_minute_ledger_upgrade');assert.throws(()=>checkTables(old,'CONTROL_DB','ready'),/tenant_minute_ledger/);assert.throws(()=>checkTables(old.filter(t=>t!=='human_sessions'),'CONTROL_DB','preflight'),/partial schema/)});

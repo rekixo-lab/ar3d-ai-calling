@@ -103,6 +103,9 @@ jobs:
       - name: Create isolated Calling Control provisional credit tables
         if: github.event_name == 'push' && contains(fromJSON('["control_credit_upgrade","credit_staff_upgrade","credit_cdr_upgrade","credit_staff_cdr_upgrade"]'), steps.schema.outputs.schema_state)
         run: npx --yes wrangler@4 d1 execute ar3d-calling-control --remote --yes --config wrangler.jsonc --file migrations/control/0020_client_credit_planning.sql
+      - name: Create isolated Calling Control immutable minute ledger
+        if: github.event_name == 'push' && steps.schema.outputs.schema_state == 'control_minute_ledger_upgrade'
+        run: npx --yes wrangler@4 d1 execute ar3d-calling-control --remote --yes --config wrangler.jsonc --file migrations/control/0021_tenant_minute_ledger.sql
       - name: Create isolated Calling CRM staff assignment table
         if: github.event_name == 'push' && contains(fromJSON('["crm_staff_upgrade","credit_staff_upgrade","crm_staff_cdr_upgrade","credit_staff_cdr_upgrade"]'), steps.schema.outputs.schema_state)
         run: npx --yes wrangler@4 d1 execute ar3d-calling-shared-crm --remote --yes --config wrangler.jsonc --file migrations/crm/0020_lead_staff_assignments.sql
@@ -131,6 +134,7 @@ jobs:
           npx --yes wrangler@4 d1 execute ar3d-calling-control --remote --yes --config wrangler.jsonc --file migrations/control/0015_company_change_requests.sql
           npx --yes wrangler@4 d1 execute ar3d-calling-control --remote --yes --config wrangler.jsonc --file migrations/control/0016_scripted_phone_pilots.sql
           npx --yes wrangler@4 d1 execute ar3d-calling-control --remote --yes --config wrangler.jsonc --file migrations/control/0020_client_credit_planning.sql
+          npx --yes wrangler@4 d1 execute ar3d-calling-control --remote --yes --config wrangler.jsonc --file migrations/control/0021_tenant_minute_ledger.sql
       - name: Initialize NEW AR3D Calling Shared CRM D1 database
         if: (github.event_name == 'push' && steps.schema.outputs.schema_state == 'fresh') || (github.event_name == 'workflow_dispatch' && inputs.operation == 'initialize')
         run: |
