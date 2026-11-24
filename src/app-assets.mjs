@@ -154,6 +154,15 @@ function scriptedPhonePilotPanel(){
     probeReport.replaceChildren(table(['Diagnostic','Result'],[['Outcome',d.state.replaceAll('_',' ')],['Metadata HTTP',d.metadataHttp??'—'],['Verified media host',d.mediaHost??'—'],['Media HTTP',d.mediaHttp??'—'],['Downloaded bytes',d.bytes],['Whisper STT',d.stt.replaceAll('_',' ')]]),node('p',{class:'muted',text:'No new call or CRM change. Audio and transcript are not retained by this diagnostic.'}));
    }catch(e){asError(e)}finally{probe.disabled=false}
   },true);
+  const answerReport=div('stack');
+  const answerProbe=btn('Inspect first answer recognition (no call)',async()=>{
+   if(!window.confirm('Confirm the recipient of the latest recorded internal test explicitly agrees to reprocess and display ONE existing answer transcript to you. AI usage may be charged. No new call, no CRM changes. Do not share private speech.'))return;
+   answerProbe.disabled=true;answerReport.replaceChildren();
+   try{
+    const d=await api('/v1/human/scripted-phone-pilot/recording-probe','POST',{confirm:'SHOW_ONE_CONSENTED_INTERNAL_FIRST_ANSWER'});
+    answerReport.replaceChildren(table(['Diagnostic','Result'],[['Outcome',d.state.replaceAll('_',' ')],['Media HTTP',d.mediaHttp??'—'],['Downloaded bytes',d.bytes],['Whisper STT',d.stt.replaceAll('_',' ')],['Recognized words',d.transcript??'—'],['First question parser',d.parserAction??'—'],['Property type',d.propertyType??'—']]),node('p',{class:'muted',text:'Diagnostic only. One existing answer; nothing is saved to CRM. Clear before sharing the screen.'}),btn('Clear transcript',()=>answerReport.replaceChildren(),true));
+   }catch(e){asError(e)}finally{answerProbe.disabled=false}
+  },true);
   const device=node('select',{class:'field','aria-label':'Internal test number'});
   const engine=node('select',{class:'field','aria-label':'Speech recognition engine'},[
     node('option',{value:'deepgram_stream',text:'Deepgram Nova-3 · experimental (connection unverified)'}),
@@ -238,7 +247,7 @@ function scriptedPhonePilotPanel(){
   }
   enrollment.hidden=true;device.addEventListener('change',updateAvailability);
   card.append(status,prepare,prepared,enrollment,div('formrow',lab('Internal test number',device),lab('Recorded prompt language',language),lab('Speech recognition engine',engine),call,
-    btn('Refresh fixed-question pilot status',()=>refresh().catch(asError),true)),cooldown,results,mediaCheck,mediaReport,probe,probeReport);
+    btn('Refresh fixed-question pilot status',()=>refresh().catch(asError),true)),cooldown,results,mediaCheck,mediaReport,probe,probeReport,answerProbe,answerReport);
   refresh().catch(()=>{status.textContent='Pilot status requires a current MFA Super Admin session.'});
   return card;
 }
