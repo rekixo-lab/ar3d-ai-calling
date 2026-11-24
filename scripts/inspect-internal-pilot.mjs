@@ -19,6 +19,8 @@ async function run(){
  }
  const rows=await select(c.control,`SELECT p.id,p.tenant_id,p.lead_id,p.destination,p.phase,p.turn,
   p.language,p.duration_seconds,p.hangup_at IS NOT NULL AS signed_hangup,
+  CASE WHEN json_valid(p.survey_json) THEN json_extract(p.survey_json,'$.attempts') END AS attempts,
+  CASE WHEN json_valid(p.survey_json) THEN json_extract(p.survey_json,'$.index') END AS question_index,
   p.provider_call_id IS NOT NULL AS signed_call_reference,
   p.provider_request_id IS NOT NULL AS request_reference
   FROM scripted_phone_pilots p JOIN tenants t ON t.id=p.tenant_id
@@ -37,6 +39,8 @@ async function run(){
   phase:phases.includes(p.phase)?p.phase:'unknown',
   language:['hi','en'].includes(p.language)?p.language:'unknown',
   processedTurns:Number.isSafeInteger(p.turn)?p.turn:null,
+  attempts:Number.isSafeInteger(p.attempts)?p.attempts:null,
+  questionIndex:Number.isSafeInteger(p.question_index)?p.question_index:null,
   durationSeconds:Number.isSafeInteger(p.duration_seconds)?p.duration_seconds:null,
   signedHangup:p.signed_hangup===1,providerCallReference:p.signed_call_reference===1,
   providerRequestReference:p.request_reference===1,crmLeadMatched:crm?.matched===1,
