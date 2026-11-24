@@ -405,7 +405,7 @@ export async function handleCreditWalletRequest(req,env,user,{fetcher=fetch}={})
    }else t=await requireMembership(db,user,tid,true);
    if(!t)return fail(admin?'tenant not found':'forbidden',admin?404:403);
    const crm=resolveCrmDb(env,t),offset=Number(offsetText);
-   const [plan,usage,pending,history,records,internal,holds]=await Promise.all([
+   const [plan,usage,pending,history,records,internal]=await Promise.all([
     budget(db,tid),
     crm.prepare('SELECT COUNT(*) AS verifiedCalls,COALESCE(SUM(call_seconds),0) AS connectedSeconds,COALESCE(SUM(billed_seconds),0) AS billedSeconds FROM verified_provider_call_costs WHERE tenant_id=?').bind(tid).first(),
     crm.prepare(`SELECT COUNT(*) AS pendingCalls FROM calling_jobs j
@@ -418,16 +418,18 @@ export async function handleCreditWalletRequest(req,env,user,{fetcher=fetch}={})
       WHERE j.tenant_id=? AND j.state IN('completed','failed') AND j.provider_call_sid IS NOT NULL
       ORDER BY j.updated_at DESC,j.id DESC LIMIT 51 OFFSET ?`).bind(tid,offset).all(),
     admin?db.prepare(`SELECT COUNT(*) AS calls,COALESCE(SUM(duration_seconds),0) AS connectedSeconds
-     FROM scripted_phone_pilots WHERE tenant_id=? AND job_id IS NULL AND hangup_at IS NOT NULL`).bind(tid).first():Promise.resolve(null),
-    db.prepare('SELECT job_id AS jobId,state FROM tenant_minute_holds WHERE tenant_id=? AND state=\'held\' ORDER BY created_at DESC LIMIT 100').bind(tid).all()
+     FROM scripted_phone_pilots WHERE tenant_id=? AND job_id IS NULL AND hangup_at IS NOT NULL`).bind(tid).first():Promise.resolve(null)
    ]);
+   const page=records.results.slice(0,50),jobIds=page.map(x=>x.jobId);
+   const holds=jobIds.length?(await db.prepare("SELECT job_id AS jobId FROM tenant_minute_holds WHERE tenant_id=? AND state='held' AND job_id IN (SELECT value FROM json_each(?))").bind(tid,JSON.stringify(jobIds)).all()).results:[];
+   const heldIds=new Set(holds.map(h=>h.jobId));
    return json({tenantId:tid,plannedPaise:Number(plan?.plannedPaise||0),spendableSeconds:null,
     debitedSeconds:null,verifiedCalls:Number(usage.verifiedCalls),connectedSeconds:Number(usage.connectedSeconds),
     billedSeconds:Number(usage.billedSeconds),pendingCalls:Number(pending.pendingCalls),
     internal:internal?{calls:Number(internal.calls),connectedSeconds:Number(internal.connectedSeconds)}:null,
     transactions:history.results.slice(0,50).map(x=>({...x,deltaPaise:x.newPaise-x.previousPaise,
      type:x.newPaise>x.previousPaise?'allocation':x.newPaise<x.previousPaise?'recovery':'unchanged'})),
-    records:records.results.slice(0,50).map(x=>({...x,settlementPending:holds.results.some(h=>h.jobId===x.jobId)})),offset,hasMore:history.results.length>50||records.results.length>50,
+    records:page.map(x=>({...x,settlementPending:heldIds.has(x.jobId)})),offset,hasMore:history.results.length>50||records.results.length>50,
     status:'observation_only',notice:'Verified provider seconds and provisional budget history only. No paid minutes, automatic deductions or payments.'});
   }
   if(path!=='tenant')return null;

@@ -47,3 +47,12 @@ test('Operations & Security Report is tenant scoped, aggregate-only and cannot r
   assert.match(panel,/must be reviewed manually/);
   assert.doesNotMatch(panel,/\/v1\/human\/calling\/runs|action:'start'|\.startCall\(/);
 });
+
+
+test('both admin and client use charcoal theme, scoped ledger and reduced motion',()=>{
+ assert.match(css,/color-scheme: dark/);assert.match(css,/background: #212121/);assert.match(css,/prefers-reduced-motion:reduce/);
+ assert.match(js,/function adminDashboard\(main,openView\)/);assert.match(js,/\/v1\/human\/credits\/admin-dashboard/);
+ const overview=js.slice(js.indexOf('async function renderClient('),js.indexOf('function aiTestingPanel('));
+ assert.match(overview,/\/v1\/human\/credits\/minute-ledger\?tenantId=/);assert.doesNotMatch(overview,/\/v1\/human\/credits\/admin-dashboard/);
+ assert.match(overview,/uncommittedSeconds/);assert.match(overview,/content\.renderVersion===version/);
+});
