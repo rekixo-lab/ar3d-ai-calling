@@ -346,7 +346,12 @@ export async function handleCreditWalletRequest(req,env,user,{fetcher=fetch}={})
     db.prepare("SELECT l.created_at AS createdAt,t.display_name AS company,CASE WHEN l.id LIKE 'call-reversal:%' THEN 'call_reversal' WHEN l.id LIKE 'purchase:%' THEN 'purchase' ELSE l.kind END AS kind,l.delta_seconds AS deltaSeconds,l.balance_seconds AS balanceSeconds FROM tenant_minute_ledger l JOIN tenants t ON t.id=l.tenant_id ORDER BY l.sequence DESC LIMIT 10").all(),fundingPosition(db,fundingCap(env))
    ]);
    const purchases=await db.prepare('SELECT COUNT(*) AS count,COALESCE(SUM(paid_paise),0) AS collectedPaise,COALESCE(SUM(purchased_seconds),0) AS purchasedSeconds FROM tenant_credit_purchases').first();
-   return json({clients,purchases,funding:{...funding,reviewedProviderCeilings:providerFundingCaps(env)},position:{...position,uncommittedSeconds:position.allocatedSeconds-position.heldSeconds-position.usedSeconds},internal:{ended:sessions.internalEnded},campaign:{ended:sessions.campaignEnded},transactions:transactions.results,providerRequests:0,externalPaymentsRecorded:purchases.count>0,dispatchEnabledByDashboard:false});
+   const settlementQueue=await db.prepare(`SELECT COUNT(*) AS heldCalls,
+    COALESCE(SUM(CASE WHEN p.id IS NULL THEN 1 ELSE 0 END),0) AS missingSession,
+    COALESCE(SUM(CASE WHEN p.id IS NOT NULL AND p.hangup_at IS NULL THEN 1 ELSE 0 END),0) AS awaitingHangup,
+    COALESCE(SUM(CASE WHEN p.hangup_at IS NOT NULL THEN 1 ELSE 0 END),0) AS endedAwaitingReview,
+    MIN(h.created_at) AS oldestHeldAt FROM tenant_minute_holds h LEFT JOIN scripted_phone_pilots p ON p.tenant_id=h.tenant_id AND p.job_id=h.job_id WHERE h.state='held'`).first();
+   return json({clients,purchases,settlementQueue:{...settlementQueue,automaticApproved:env.AR3D_AUTO_CDR_SETTLEMENT==='approved'},funding:{...funding,reviewedProviderCeilings:providerFundingCaps(env)},position:{...position,uncommittedSeconds:position.allocatedSeconds-position.heldSeconds-position.usedSeconds},internal:{ended:sessions.internalEnded},campaign:{ended:sessions.campaignEnded},transactions:transactions.results,providerRequests:0,externalPaymentsRecorded:purchases.count>0,dispatchEnabledByDashboard:false});
   }
   if(path==='reverse-call-charge'){
    if(req.method!=='POST')return fail('method not allowed',405);

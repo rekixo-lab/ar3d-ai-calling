@@ -158,8 +158,9 @@ async function observeCampaignCdr(env,tid,jid,actor,auditActor,fetcher){
 
 // Product-side settlement, not an assistant automation. Enabled only after
 // operator verifies actual provider billing and explicitly approves the job.
-// At most one bounded CDR GET per Worker tick. Uncertain calls never qualify;
-// a stuck item cannot starve newer ones because selection rotates.
+// At most three sequential CDR GETs per existing Worker tick (5 seconds each).
+// Select a rotating, distinct snapshot before processing; failure of one row
+// must not block other eligible calls. Uncertain calls never qualify.
 export async function runAutomaticMinuteSettlement(env,{now=Date.now(),fetcher=fetch}={}){
  if(env.AR3D_AUTO_CDR_SETTLEMENT!=='approved')return {attempted:0};
  if(!Number.isSafeInteger(now)||now<0)throw Error('invalid settlement time');
@@ -168,11 +169,20 @@ export async function runAutomaticMinuteSettlement(env,{now=Date.now(),fetcher=f
  const count=(await env.CONTROL_DB.prepare('SELECT COUNT(*) AS total'+eligible).bind(cutoff).first())?.total;
  if(!Number.isSafeInteger(count)||count<0)throw Error('invalid settlement queue');
  if(count===0)return {attempted:0};
- const row=await env.CONTROL_DB.prepare('SELECT h.tenant_id AS tenantId,h.job_id AS jobId'+eligible+' ORDER BY h.created_at,h.tenant_id,h.job_id LIMIT 1 OFFSET ?').bind(cutoff,Math.floor(now/60000)%count).first();
- if(!row||!UUID.test(row.tenantId)||!validJobId(row.jobId))return {attempted:0};
- try{
-  const response=await observeCampaignCdr(env,row.tenantId,row.jobId,'system:plivo-cdr','system:plivo-cdr',fetcher);
-  const result=await response.json();
-  return {attempted:1,settled:response.ok&&result.settlement?.state==='settled'?1:0};
- }catch{return {attempted:1,settled:0}}
+ const limit=Math.min(3,count),offset=(Math.floor(now/60000)*3)%count;
+ const select=async(n,skip)=>(await env.CONTROL_DB.prepare('SELECT h.tenant_id AS tenantId,h.job_id AS jobId'+eligible+' ORDER BY h.created_at,h.tenant_id,h.job_id LIMIT ? OFFSET ?').bind(cutoff,n,skip).all()).results;
+ const rows=await select(limit,offset);
+ if(rows.length<limit)rows.push(...await select(limit-rows.length,0));
+ const seen=new Set();let attempted=0,settled=0;
+ for(const row of rows){
+  if(!UUID.test(row.tenantId)||!validJobId(row.jobId))continue;
+  const key=row.tenantId+':'+row.jobId;
+  if(seen.has(key))continue;seen.add(key);attempted++;
+  try{
+   const response=await observeCampaignCdr(env,row.tenantId,row.jobId,'system:plivo-cdr','system:plivo-cdr',fetcher);
+   const result=await response.json();
+   if(response.ok&&result.settlement?.state==='settled')settled++;
+  }catch{/* Preserve the hold and continue the bounded batch. */}
+ }
+ return attempted?{attempted,settled}:{attempted:0};
 }
