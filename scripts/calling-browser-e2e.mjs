@@ -277,9 +277,14 @@ try{
  await adminPage.route('**/v1/human/credits/provider',r=>r.fulfill({json:{available:true,cashCredits:'12.34',cashCreditsCurrency:'USD',accountType:'developer',checkedAt:new Date().toISOString()}}));
  await adminPage.getByRole('link',{name:'Dashboard',exact:true}).click();
  const providers=adminPage.getByRole('region',{name:'Provider balances'});
- await providers.getByText('$12.34',{exact:true}).waitFor();
- await providers.getByText(/Approx. ₹987.20/).waitFor();
- await providers.getByText('Not available via API',{exact:true}).waitFor();
+ await providers.getByText('₹987.20',{exact:true}).waitFor();
+ await providers.getByText(/Plivo API reports \$12.34/).waitFor();
+ await providers.getByText('Not synced',{exact:true}).waitFor();
+ adminPage.once('dialog',d=>d.accept('₹1,250.75'));
+ await providers.getByRole('button',{name:'Sync with Sarvam dashboard'}).click();
+ await providers.getByText('₹1,250.75',{exact:true}).waitFor();
+ await providers.getByText(/Synced with Sarvam dashboard/).waitFor();
+ assert.equal(f.c.db.prepare("SELECT amount_micros FROM provider_financial_journal WHERE provider='sarvam' AND kind='opening'").get().amount_micros,1250750000);
  await providers.getByText('Client allocated minutes',{exact:true}).waitFor();
  await providers.getByText('100m 00s',{exact:true}).waitFor();
  await providers.getByText(/Trial account/).waitFor();
@@ -304,7 +309,7 @@ try{
  await adminPage.getByRole('button',{name:'Check Plivo spend',exact:true}).click();
  await adminPage.getByText('INR 123.456',{exact:true}).waitFor();
  await adminPage.unroute('**/v1/human/credits/provider-usage-summary?days=7');
- await adminPage.getByText('No provider transactions recorded. Actual balance unknown.',{exact:true}).waitFor();
+ await adminPage.getByRole('row',{name:/Sarvam dashboard sync: Credits Left INR 1250.75/}).waitFor();
  await adminPage.locator('[name="providerJournalAmount"],#providerJournalAmount').first().fill('12.50');
  await adminPage.locator('[name="providerJournalReference"],#providerJournalReference').first().fill('browser-receipt-1');
  await adminPage.locator('[name="providerJournalReason"],#providerJournalReason').first().fill('Synthetic browser receipt evidence');

@@ -412,22 +412,44 @@ function foregroundRefresh(element,ms,task,active=()=>true){
 }
 // The console/API pair supplied by the operator implies 80 INR/USD.
 // A comparison only, not a verified INR account balance or market FX rate.
+const inr=n=>'₹'+Number(n).toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2});
+function plivoInr(credits){return inr(Number(credits)*80)}
 function plivoConsoleComparison(credits){
- return 'Approx. ₹'+(Number(credits)*80).toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2})+' · observed console rate ₹80/USD; not verified INR.';
+ return 'Plivo API reports $'+credits+' · shown at the Plivo console rate ₹80/USD.';
 }
 function validPlivoUsd(d){
  return d?.available===true&&d.cashCreditsCurrency==='USD'&&typeof d.cashCredits==='string'&&/^\d{1,10}(?:\.\d{1,8})?$/.test(d.cashCredits);
 }
 // Provider cash and client minute ledger are deliberately independent.
 function providerBalancePanel(openView){
- const plivo=overviewMetric('Plivo cash credits','Not checked','phone');
+ const plivo=overviewMetric('Plivo balance','Not checked','phone');
  const value=plivo.querySelector('strong');
  const status=node('p',{class:'muted',role:'status',text:'Provider Account API · USD.'});
  const equivalent=node('p',{class:'muted',text:'India console INR balance not available via this API.'});
  const refresh=btn('Refresh Plivo balance',load,true);
  plivo.append(equivalent,status,refresh,node('a',{class:'provider-link',href:'https://cx.plivo.com/home',target:'_blank',rel:'noopener noreferrer',text:'Open Plivo console'}));
- const sarvam=overviewMetric('Sarvam AI credits','Not available via API','spark');
- sarvam.append(node('p',{class:'muted',text:'Check your organisation’s Credits Left in Sarvam Settings → Billing. No estimated balance is displayed.'}),
+ const sarvam=overviewMetric('Sarvam balance','Loading…','spark');
+ const sarvamValue=sarvam.querySelector('strong');
+ const sarvamStatus=node('p',{class:'muted',role:'status',text:'Sarvam has no balance API. Copy “Credits Left” from Sarvam Settings → Billing and sync.'});
+ const sarvamSync=btn('Sync with Sarvam dashboard',async()=>{
+  const raw=prompt('Enter the exact “Credits Left” (₹) shown in Sarvam dashboard → Settings → Billing:');
+  if(raw===null)return;
+  const t=raw.replace(/[₹,\s]/g,'');
+  if(!/^\d{1,9}(?:\.\d{1,6})?$/.test(t)){notice('Enter a rupee amount like 950.50',true);return}
+  const [whole,frac='']=t.split('.');
+  const micros=Number(whole)*1000000+Number(frac.padEnd(6,'0'));
+  sarvamSync.disabled=true;
+  try{showSarvam(await api('/v1/human/credits/sarvam-balance','POST',{id:crypto.randomUUID(),creditsLeftMicros:micros}));notice('Sarvam balance synced.')}
+  catch(e){asError(e)}finally{sarvamSync.disabled=false}
+ },true);
+ function showSarvam(d){
+  if(d?.available&&Number.isSafeInteger(d.balanceMicros)){
+   sarvamValue.textContent=inr(d.balanceMicros/1000000);
+   sarvamStatus.textContent=d.lastSyncAt?'Synced with Sarvam dashboard '+formatIst(d.lastSyncAt)+'. Recorded Sarvam expenses after that are deducted.':'From recorded Sarvam journal entries. Sync to match the dashboard.';
+  }else{sarvamValue.textContent='Not synced';sarvamStatus.textContent='Sarvam has no balance API. Copy “Credits Left” from Sarvam Settings → Billing and sync.';}
+ }
+ async function loadSarvam(){try{showSarvam(await api('/v1/human/credits/sarvam-balance'))}catch{sarvamValue.textContent='Unavailable';sarvamStatus.textContent='Check current MFA.'}}
+ sarvam.append(sarvamStatus,sarvamSync,
   node('a',{class:'provider-link',href:'https://dashboard.sarvam.ai/',target:'_blank',rel:'noopener noreferrer',text:'Open Sarvam dashboard'}));
  const clients=overviewMetric('Client allocated minutes','Loading…','users');
  const clientRemaining=node('p',{class:'muted',text:'Left with clients: Loading…'});
@@ -440,23 +462,24 @@ function providerBalancePanel(openView){
  async function load(){
   if(refresh.disabled)return;
   refresh.disabled=true;
+  loadSarvam();
   if(value.textContent==='Not checked')value.textContent='Checking…';
   try{
    const d=await api('/v1/human/credits/provider');
    if(!plivo.isConnected)return;
    if(validPlivoUsd(d)){
-    value.textContent='$'+d.cashCredits;
+    value.textContent=plivoInr(d.cashCredits);
     // The supplied India console/API pair implies 80 INR/USD. This is
     // a comparison estimate, not a carrier-confirmed conversion or funds.
     equivalent.textContent=plivoConsoleComparison(d.cashCredits);
-    status.textContent=(d.accountType==='developer'?'Trial account · not verified live funds. ':'Provider-reported USD · ')+(d.checkedAt?'Checked '+formatIst(d.checkedAt):'');
+    status.textContent=(d.accountType==='developer'?'Trial account · not verified live funds. ':'')+(d.checkedAt?'Checked '+formatIst(d.checkedAt):'');
    }else{value.textContent='Unavailable';equivalent.textContent='INR unavailable';status.textContent='Provider balance could not be verified. Refresh to retry.';}
   }catch{if(plivo.isConnected){value.textContent='Unavailable';equivalent.textContent='INR unavailable';status.textContent='Check current MFA and provider access.';}}
   finally{refresh.disabled=false}
  }
  const panel=node('section',{class:'card provider-balances','aria-label':'Provider balances'},[
   title('Provider balances','h3'),div('provider-grid',plivo,sarvam,clients),
-  node('p',{class:'muted',text:'Plivo refreshes every 60 seconds while open; client totals every 15 seconds. Provider credits are separate from client calling minutes.'})
+  node('p',{class:'muted',text:'Refreshes every 60 seconds while open. Provider balances are separate from client calling minutes.'})
  ]);
  return {panel,load,setClients};
 }
