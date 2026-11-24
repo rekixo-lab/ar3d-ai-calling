@@ -183,10 +183,10 @@ function scriptedPhonePilotPanel(){
   }
   const call=btn('Call the verified internal number once',async()=>{
     const selected=config?.devices?.find(x=>x.leadId===device.value);
-    if(busy||refreshing||!selected||config?.availability?.ready!==true||!window.confirm('Place one internal pilot call to the selected test number ending '+selected.destinationLast4+'? This uses phone credits and records short answers only after the recipient presses 1.'))return;
+    if(busy||refreshing||!selected||config?.availability?.ready!==true||!window.confirm('Place one internal pilot call to the selected test number ending '+selected.destinationLast4+'? Confirm the actual recipient has already explicitly agreed to this AI test and recording of their answers. A brief recording notice is played, then the first question starts without pressing 1. This uses phone credits.'))return;
     busy=true;updateAvailability();
     try{
-      await api('/v1/human/scripted-phone-pilot','POST',{language:language.value,leadId:selected.leadId,confirm:'CALL_ONE_VERIFIED_INTERNAL_NUMBER'});
+      await api('/v1/human/scripted-phone-pilot','POST',{language:language.value,leadId:selected.leadId,confirm:'CALL_ONE_PRECONSENTED_INTERNAL_NUMBER'});
       notice('Pilot submitted. Waiting for signed hangup.');
     }catch(err){asError(err)}
     finally{try{await refresh()}catch(err){asError(err)}busy=false;updateAvailability()}
@@ -198,15 +198,15 @@ function scriptedPhonePilotPanel(){
     try{
     config=await api('/v1/human/scripted-phone-pilot');
     deadline=Date.now()+1000*(config.availability?.retryAfterSeconds||0);
-    status.textContent=config.configured?'Choose one authorized internal device. Complete answers update only its test lead.':'Waiting for Plivo: approve a caller number and configure the internal test.';
+    status.textContent=config.configured?'Choose one pre-consented internal device. No keypad required. Complete answers update only its test lead.':'Waiting for Plivo: approve a caller number and configure the internal test.';
     const previous=device.value;
     device.replaceChildren(...(config.devices||[]).map(x=>node('option',{value:x.leadId,text:(x.primary?'Primary':'Test device')+' · ••••'+x.destinationLast4})));
     if(config.devices?.some(x=>x.leadId===previous))device.value=previous;
     enrollment.hidden=!config.configured;
     prepare.hidden=!!config.configured;
 
-    results.replaceChildren(...(config.recent?.length?[table(['Started','Test number','Language','Status','Provider call reference','Turns processed','Signed hangup','Seconds'],
-      config.recent.map(x=>[formatIst(x.created_at),x.destinationLast4?'••••'+x.destinationLast4:'—',x.language,x.phase,x.provider_call_reference?'Received':'Not received',x.turn??'—',x.signed_hangup?'Received':'Not received',x.duration_seconds??'—']))]:[]));
+    results.replaceChildren(...(config.recent?.length?[table(['Started','Test number','Language','Status','Provider call reference','Attempts processed','Questions accepted','Audio result','Signed hangup','Seconds'],
+      config.recent.map(x=>[formatIst(x.created_at),x.destinationLast4?'••••'+x.destinationLast4:'—',x.language,x.phase,x.provider_call_reference?'Received':'Not received',x.turn??'—',x.question_index??'—',x.last_audio_outcome?x.last_audio_outcome.replaceAll('_',' '):'—',x.signed_hangup?'Received':'Not received',x.duration_seconds??'—']))]:[]));
     }catch(err){config=null;status.textContent='Could not verify internal call availability. Refresh status to retry.';throw err}
     finally{refreshing=false;updateAvailability();scheduleCheck()}
   }
