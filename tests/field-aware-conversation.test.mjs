@@ -1,0 +1,43 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {beginFixedVoicePreview,advanceFixedVoicePreview,advanceInternalVoice} from '../src/fixed-voice-turns.mjs';
+const now=Date.parse('2026-11-24T09:00:00Z');
+const ai={run(){assert.fail('field-aware corrections require no LLM')}};
+const start=()=>beginFixedVoicePreview({now}).state;
+const turn=(s,transcript,confidence=1)=>advanceInternalVoice(ai,s,{transcript,confidence,now});
+const ready=()=>['घर','कोरबा','बस स्टैंड','3BHK','30 लाख'].reduce((s,transcript)=>advanceFixedVoicePreview(s,{transcript,now}).state,start());
+test('labelled current answer and future answer never contaminate a geographic field',async()=>{
+ const property=(await turn(start(),'property house')).result.state;
+ const early=await turn(property,'बजट 30 लाख');
+ assert.equal(early.result.action,'repeat');
+ assert.equal(early.result.state.answers.location,undefined);
+ const city=await turn(early.result.state,'शहर कोरबा');
+ assert.equal(city.result.state.answers.location,'कोरबा');
+ const update=await turn(city.result.state,'शहर रायपुर');
+ assert.equal(update.result.state.answers.location,'रायपुर');
+ assert.equal(update.result.currentField,'area');
+});
+test('explicit earlier field answers preserve other validated values and current question',async()=>{
+ const s=ready();
+ const budget=await turn(s,'बजट 20 लाख');
+ assert.equal(budget.result.state.answers.budgetInr,2000000);
+ assert.equal(budget.result.currentField,'interest');
+ const area=await turn(budget.result.state,'नहीं एरिया टीपी नगर');
+ assert.equal(area.result.state.answers.area,'टीपी नगर');
+ assert.equal(area.result.state.answers.size,'3BHK');
+ assert.equal(area.result.state.turns,s.turns+2);
+ const low=await turn(area.result.state,'बजट 10 लाख',.4);
+ assert.equal(low.result.state.answers.budgetInr,2000000);
+ const stop=await turn(area.result.state,'बजट 10 लाख कॉल मत करना');
+ assert.equal(stop.result.action,'opt_out_requested');
+});
+test('changed city after an area is collected requires review, not a mixed location',async()=>{
+ const s=ready();
+ const r=await turn(s,'सुधार शहर रायपुर');
+ assert.equal(r.result.action,'human_review');
+ assert.equal(r.interpreter,'location_dependency_review');
+ assert.deepEqual(r.result.state.answers,s.answers);
+ assert.equal(r.result.crmWrites,0);
+ const same=await turn(s,'शहर कोरबा');
+ assert.equal(same.result.currentField,'interest');
+});
