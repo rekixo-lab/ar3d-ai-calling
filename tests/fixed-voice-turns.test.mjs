@@ -387,3 +387,30 @@ test('explicit budget range preserves both endpoints and rejects alternatives',(
  }
  for(const transcript of ['30 से 20 लाख','20 या 30 लाख'])assert.equal(advanceFixedVoicePreview(state,{transcript,now}).action,'repeat');
 });
+
+test('explicit prior budget and size correction keeps current question and counts one turn',async()=>{
+ let state=beginFixedVoicePreview({now:stamp}).state;
+ for(const text of ['घर','कोरबा','बस स्टैंड','3BHK','20 से 30 लाख'])state=turn(state,text).state;
+ const noAi={run:()=>assert.fail('explicit corrections need no LLM')};
+ let r=await advanceInternalVoice(noAi,state,{transcript:'सुधार बजट 35 लाख',now:stamp});
+ assert.equal(r.interpreter,'explicit_correction');assert.equal(r.result.currentField,'interest');
+ assert.equal(r.result.state.answers.budgetInr,3500000);assert.equal(Object.hasOwn(r.result.state.answers,'budgetMinInr'),false);
+ assert.equal(r.result.state.turns,state.turns+1);
+ r=await advanceInternalVoice(noAi,r.result.state,{transcript:'correction size 6BHK',now:stamp});
+ assert.equal(r.result.state.answers.size,'6BHK');assert.equal(r.result.currentField,'interest');
+ const bad=await advanceInternalVoice(noAi,state,{transcript:'सुधार बजट 40 से 20 लाख',now:stamp});
+ assert.equal(bad.result.action,'repeat');assert.equal(bad.result.state.answers.budgetInr,3000000);
+ const stop=await advanceInternalVoice(noAi,state,{transcript:'सुधार बजट 25 लाख, कॉल मत करना',now:stamp});
+ assert.equal(stop.result.action,'opt_out_requested');
+});
+test('customer contextual interpretation cannot infer unparseable evidence or an indirect stop',async()=>{
+ const s=beginFixedVoicePreview({now:stamp}).state;
+ const model=response=>({run:async()=>({response})});
+ let r=await advanceContextualVoice(model({action:'answer',value:'flat',evidence:'बहुमंजिला इमारत में एक यूनिट'}),s,{transcript:'बहुमंजिला इमारत में एक यूनिट',now:stamp,strictGrounding:true});
+ assert.equal(r.result.action,'repeat');assert.equal(r.result.state.index,0);
+ r=await advanceContextualVoice(model({action:'stop',value:'',evidence:'कुछ अच्छा'}),s,{transcript:'कुछ अच्छा',now:stamp,strictGrounding:true});
+ assert.equal(r.result.action,'repeat');assert.equal(r.result.state.status,'active');
+ let city=turn(s,'घर').state;
+ r=await advanceContextualVoice(model({action:'answer',value:'कोरबा',evidence:'कोरबा'}),city,{transcript:'मुझे शहर कोरबा में चाहिए',now:stamp,strictGrounding:true});
+ assert.equal(r.interpreter,'contextual_grounded');assert.equal(r.result.state.answers.location,'कोरबा');
+});
