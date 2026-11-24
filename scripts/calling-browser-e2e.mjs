@@ -289,6 +289,10 @@ try{
  await adminPage.screenshot({path:'artifacts/calling-admin-clients.png',fullPage:true});
  await adminPage.getByRole('link',{name:'Minutes & Wallet',exact:true}).click();
  await adminPage.getByRole('heading',{name:'Provider financial journal',exact:true}).waitFor();
+ await adminPage.route('**/v1/human/credits/provider-usage-summary?days=7',r=>r.fulfill({json:{available:true,currency:'INR',totalSpend:123.456,fromDate:'2026-11-17',toDate:'2026-11-24',checkedAt:new Date().toISOString()}}));
+ await adminPage.getByRole('button',{name:'Check Plivo spend',exact:true}).click();
+ await adminPage.getByText('INR 123.456',{exact:true}).waitFor();
+ await adminPage.unroute('**/v1/human/credits/provider-usage-summary?days=7');
  await adminPage.getByText('No provider transactions recorded. Actual balance unknown.',{exact:true}).waitFor();
  await adminPage.locator('[name="providerJournalAmount"],#providerJournalAmount').first().fill('12.50');
  await adminPage.locator('[name="providerJournalReference"],#providerJournalReference').first().fill('browser-receipt-1');

@@ -703,6 +703,25 @@ function adminTransactionExplorer(main){
  kind.addEventListener('change',()=>{offset=0;load()});
  card.append(node('p',{class:'note',text:'Cross-company minute ledger and reservation history. Original charges and returned minutes remain separate. No external payment or revenue entries.'}),div('formrow',lab('Transaction type',kind),refresh,exportBtn),body,div('formrow',prev,next));main.append(card);load();
 }
+function providerUsageOverview(main){
+ const card=div('card',title('Plivo account spend')),body=div('stack',node('p',{class:'muted',text:'Not checked. Select a completed UTC date window and read the provider summary.'}));
+ const period=node('select',{class:'field','aria-label':'Spend reporting window'},[['7','Last 7 completed UTC days'],['30','Last 30 completed UTC days']].map(([value,text])=>node('option',{value,text})));
+ let version=0;
+ const refresh=btn('Check Plivo spend',async()=>{
+  const seq=++version;refresh.disabled=period.disabled=true;
+  try{
+   const d=await api('/v1/human/credits/provider-usage-summary?days='+period.value);
+   if(seq!==version||!card.isConnected)return;
+   if(!d.available){body.replaceChildren(node('p',{class:'err',text:'Provider usage unavailable. No expense or balance has been inferred.'}));return;}
+   body.replaceChildren(div('overview-grid',overviewMetric('Provider reported account spend',d.currency+' '+String(d.totalSpend),'receipt')),
+    node('p',{class:'muted',text:d.fromDate+' inclusive → '+d.toDate+' exclusive (UTC) · checked '+formatIst(d.checkedAt)}),
+    node('p',{class:'note',text:'Entire Plivo account, including other services, subaccounts and applicable charges. Not live balance, a client-specific cost or an automatically posted journal expense.'}));
+  }catch{if(card.isConnected)body.replaceChildren(node('p',{class:'err',text:'Provider usage unavailable.'}));}
+  finally{refresh.disabled=period.disabled=false;}
+ },true);
+ period.addEventListener('change',()=>body.replaceChildren(node('p',{class:'muted',text:'Window changed. Check Plivo spend to load the selected period.'})));
+ card.append(div('formrow',lab('Spend reporting window',period),refresh),body);main.append(card);
+}
 function providerFinancialJournal(main){
  const card=div('card',title('Provider financial journal')),body=div('stack');
  const provider=node('select',{class:'field'},['plivo','sarvam'].map(v=>node('option',{value:v,text:v==='plivo'?'Plivo':'Sarvam'})));
@@ -765,6 +784,7 @@ async function adminMinuteWallet(main){
  company.addEventListener('change',()=>select().catch(asError));
  card.append(div('formrow',lab('Search clients',search),btn('Find company',()=>find().catch(asError),true)),
   lab('Client company',company),detail);main.append(card);
+ providerUsageOverview(main);
  providerFinancialJournal(main);
  adminTransactionExplorer(main);
  productionCostPlanner(main);
