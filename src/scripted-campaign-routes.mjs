@@ -142,9 +142,12 @@ export async function handleScriptedCallingRequest(req,env,user,{now=Date.now()}
      ORDER BY j.created_at DESC,j.id DESC LIMIT ? OFFSET ?`).bind(tid,campaign,campaign,limit,offset).all(),
     db.prepare('SELECT COUNT(*) AS total '+scope).bind(tid,campaign,campaign).first()
    ]);
-   const results=rows.results.map(({answersJson,savedToLead,...row})=>({
-    ...row,answers:answersJson?JSON.parse(answersJson):null,savedToLead:savedToLead===1
-   }));
+   const results=rows.results.map(({answersJson,savedToLead,...row})=>{
+    const stored=answersJson?JSON.parse(answersJson):null;
+    const partial=stored?.__partial===true;
+    if(partial)delete stored.__partial;
+    return {...row,answers:stored,partial,savedToLead:savedToLead===1&&!partial};
+   });
    return json({results,total:count.total,limit,offset});
   }
   if(action==='state'){
