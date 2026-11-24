@@ -10,21 +10,26 @@ Owner amendment 2026-11-24: both workspaces use chat-inspired dark reference sty
 - [ ] Device deactivate/replace with audit, consent and no lost active hangup; safe uncertain-call reconciliation.
 - [ ] Update stale release readiness from verified evidence; IST timestamps and language preference.
 ## Phase 2 — real seconds wallet (disabled until approved)
-- [ ] Immutable integer-second ledger, balances and transaction IDs; distinct provider cost and customer charge.
-- [ ] Atomic allocations, purchases, recovery, refunds, reservation, settlement and release; idempotency and concurrency.
-- [ ] Dispatch spend gate, insufficient funds, backing reserve, fail closed; never convert provisional INR to paid seconds silently.
-- [ ] Audit reason/actor/reference and financial reconciliation; separate internal tests.
+- [x] Immutable integer-second ledger, balances and transaction IDs; distinct provider cost and customer charge.
+- [x] Atomic allocations, purchases, recovery, refunds, reservation, settlement and release; idempotency and concurrency.
+- [x] Dispatch spend gate, insufficient funds, backing reserve, fail closed; never convert provisional INR to paid seconds silently.
+- [x] Audit reason/actor/reference and financial reconciliation; separate internal tests.
 ## Phase 3 — provider billing
-- [ ] Final verified CDR automation, retry observation only, provider-billed versus connected seconds, discrepancies and recovery.
-- [ ] Verified provider currency/funds, pricing/version, revenue/cost/margin and financial reports.
+- [x] Final verified CDR automation, retry observation only, provider-billed versus connected seconds, discrepancies and recovery.
+- [x] Verified provider currency/funds, pricing/version, revenue/cost/margin and financial reports.
 ## Phase 4 — complete UI
-- [ ] Super Admin Dashboard, Clients, Live Calls, Minutes, Transactions, Plans, Reports, Settings, Security.
-- [ ] Client Dashboard with balance, customers, interested leads, calls, visits; Upload Excel/Add Customer/Start campaign/CRM; minutes and history.
-- [ ] All actions backed by real APIs; no placeholder metrics as facts; consolidate selectors and hide irrelevant diagnostics.
+- [x] Super Admin Dashboard, Clients, Live Calls, Minutes, Transactions, Plans, Reports, Settings, Security.
+- [x] Client Dashboard with balance, customers, interested leads, calls, visits; Upload Excel/Add Customer/Start campaign/CRM; minutes and history.
+- [x] All actions backed by real APIs; no placeholder metrics as facts; consolidate selectors and hide irrelevant diagnostics.
 - [ ] Mobile/tablet/desktop and permission E2E; loading, retry, error, and empty states.
 ## Phase 5 — external payment / manual credit allocation (no payment gateway)
-- [ ] Boss handles payments externally; Super Admin allocates minutes on creation and later top-ups, with audited references and reversals.
-- [ ] No checkout, payment selection, payment gateway integration or in-app payment collection. Transaction history records credits, not unverified revenue.
+- [x] Boss handles payments externally; Super Admin allocates minutes on creation and later top-ups, with audited references and reversals.
+- [x] No checkout, payment selection, payment gateway integration or in-app payment collection. Transaction history records credits, not unverified revenue.
+## Status recheck 2026-11-24
+Ticked items above are implemented in code with automated tests (PRs #191–#202 and the UI simplification change). They are not live acceptance: no real provider invoice, real customer call or commercial launch is implied.
+- UI simplification: client Home tab (overview, quick actions, follow-ups) instead of repeating the overview on every tab; refresh keeps the open client tab; plain labels (Available / Used / On hold / Total received); duplicate Results count table removed; admin safety/settlement/funding review, provider reports and pilot test tools folded under Advanced sections with a "Needs attention" summary.
+- Still open and operator-only: real Hindi/English call acceptance, Plivo KYC/DLT/caller number, consent and DND evidence, reviewed provider budgets, production backup/restore and deletion, load/soak tests, alerts and runbook.
+
 ## Phase 6 — commercial release
 - [ ] Provider-authorized traffic, current consent/DND, scope, account/number and completed real call acceptance.
 - [ ] Production backups, isolated restore drill, retention/PII deletion, security and load/soak tests, alerts, runbook.

@@ -56,3 +56,20 @@ test('both admin and client use charcoal theme, scoped ledger and reduced motion
  assert.match(overview,/\/v1\/human\/credits\/minute-ledger\?tenantId=/);assert.doesNotMatch(overview,/\/v1\/human\/credits\/admin-dashboard/);
  assert.match(overview,/uncommittedSeconds/);assert.match(overview,/content\.renderVersion===version/);
 });
+
+test('client workspace opens on Home and restores the tab from the URL after refresh',()=>{
+ assert.match(js,/\['home','Home','grid'/);
+ assert.match(js,/clientTab:'home'/);
+ assert.match(js,/if\(items\.some\(x=>x\[0\]===hashTab\)\)state\.clientTab=hashTab;/);
+ assert.match(js,/sections\.home\.append\(overview\)/);
+ // Duplicated counts table and repeated overview on every tab were removed.
+ assert.doesNotMatch(js,/table\(\['Measure','Count'\]/);
+ assert.doesNotMatch(js,/content\.replaceChildren\(overview,/);
+});
+
+test('rarely used admin review and provider tools are folded away from daily work',()=>{
+ assert.match(js,/Advanced · provider safety, settlement and funding review/);
+ assert.match(js,/aria-label':'Needs attention'/);
+ assert.match(js,/Provider costs & reports/);
+ assert.match(js,/Test tools · verify last call/);
+});
