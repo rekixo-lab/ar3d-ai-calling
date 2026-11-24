@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import vm from 'node:vm';
 import worker from '../src/index.mjs';
 import {js} from '../src/app-assets.mjs';
-import {beginFixedVoicePreview,advanceFixedVoicePreview}
+import {beginFixedVoicePreview,advanceFixedVoicePreview,advanceContextualVoice,CONTEXTUAL_MODEL}
   from '../src/fixed-voice-turns.mjs';
 
 const origin='https://calling.example.test',cookie='ar3d_calling_session='+'a'.repeat(64);
@@ -290,4 +290,44 @@ test('Spoken Hindi and Hinglish plot sizes normalize without a paid call',()=>{
  }
  assert.equal(turn(sizeState(),'एक हजार वर्ग फीट',.5).action,'repeat');
  assert.equal(turn(sizeState(),'कॉल मत करना, एक हजार वर्ग फीट').action,'opt_out_requested');
+});
+
+
+test('Natural short choices, budget and interest responses advance without inference',()=>{
+ const s=beginFixedVoicePreview({now:stamp}).state;
+ for(const [text,type] of [['फ्लैट only','flat'],['flat','flat'],['अपार्टमेंट','flat'],['जमीन','plot'],['ghar','house'],['विला','house']])
+  assert.equal(turn(s,text).state.answers.propertyType,type,text);
+ let budget=s;for(const x of ['प्लॉट','कोरबा','पुराना बस स्टैंड','एक हजार वर्ग फीट'])budget=turn(budget,x).state;
+ for(const [text,amount] of [['पैंतीस लाख रुपये','3500000'],['एक करोड़ बीस लाख','12000000'],['25 lakh','2500000'],['3.5 crore','35000000'],['करीब पच्चीस लाख तक','2500000']])
+  assert.equal(turn(budget,text).state.answers.budgetInr,Number(amount),text);
+ for(const text of ['20 या 30 लाख','20-30 lakh','नहीं 25 लाख'])assert.equal(turn(budget,text).action,'repeat',text);
+ const interest=turn(budget,'25 लाख').state;
+ for(const text of ['जी','हाँ जी','बिल्कुल','haan','sure'])assert.equal(turn(interest,text).state.answers.interest,'interested',text);
+ for(const text of ['नहीं','जी नहीं','nahi','no'])assert.equal(turn(interest,text).state.answers.interest,'not_interested',text);
+});
+
+test('Context-aware adapter validates one grounded field, rejects invented evidence and preserves safety',async()=>{
+ const s=beginFixedVoicePreview({now:stamp}).state;
+ let invocations=0;
+ const ai={async run(model,input){invocations++;assert.equal(model,CONTEXTUAL_MODEL);assert.equal(input.response_format.type,'json_schema');
+  const context=JSON.parse(input.messages[1].content);assert.equal(context.field,'propertyType');
+  return {response:{action:'answer',value:'flat',evidence:'रहने वाला अपार्टमेंट जैसा'}}}};
+ const direct=await advanceContextualVoice(ai,s,{transcript:'flat only',now:stamp});
+ assert.equal(direct.result.state.answers.propertyType,'flat');assert.equal(invocations,0);
+ const natural=await advanceContextualVoice(ai,s,{transcript:'रहने वाला अपार्टमेंट जैसा',now:stamp});
+ // Existing explicit apartment synonym already resolves this answer.
+ assert.equal(natural.result.state.answers.propertyType,'flat');
+ const contextual=await advanceContextualVoice({run:async()=>({response:{action:'answer',value:'flat',evidence:'बहुमंजिला इमारत में एक यूनिट'}})},s,{transcript:'बहुमंजिला इमारत में एक यूनिट',now:stamp});
+ assert.equal(contextual.interpreter,'contextual');assert.equal(contextual.result.state.answers.propertyType,'flat');
+ for(const response of [{action:'answer',value:'flat',evidence:'invented'},{action:'answer',value:'unknown',evidence:'कुछ अच्छा'},{action:'answer',value:'flat',evidence:'कुछ अच्छा',consent:true}]){
+  const r=await advanceContextualVoice({run:async()=>({response})},s,{transcript:'कुछ अच्छा',now:stamp});
+  assert.equal(r.result.action,'repeat');assert.equal(r.result.state.index,0);
+ }
+ const blocked={run:async()=>{assert.fail('must not call model')}};
+ assert.equal((await advanceContextualVoice(blocked,s,{transcript:'कॉल मत करना',now:stamp})).result.action,'opt_out_requested');
+ assert.equal((await advanceContextualVoice(blocked,s,{transcript:'प्लॉट या फ्लैट',now:stamp})).result.action,'repeat');
+ assert.equal((await advanceContextualVoice(blocked,s,{transcript:'सुनाई नहीं दिया',now:stamp})).result.action,'repeat');
+ assert.equal((await advanceContextualVoice(blocked,s,{transcript:'कुछ अच्छा',confidence:.4,now:stamp})).result.action,'repeat');
+ const timeout=await advanceContextualVoice({run:()=>new Promise(()=>{})},s,{transcript:'कुछ अच्छा',now:stamp,timeoutMs:1});
+ assert.equal(timeout.interpreter,'contextual_unavailable');assert.equal(timeout.result.action,'repeat');
 });
