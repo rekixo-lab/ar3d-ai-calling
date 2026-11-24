@@ -77,6 +77,31 @@ async function providerPreview(env,fetcher){
   return json({available:false,reason:'provider_balance_unavailable',verifiedInr:false});
  }
 }
+// Official Plivo UsageSummary: meta.total_spend covers the complete window
+// even when page_size=1; never add paginated row amounts or infer currency.
+// Account-wide observations are not a tenant expense or wallet debit.
+async function providerUsageSummary(env,fetcher,days){
+ const auth=env.PLIVO_AUTH_ID,token=env.PLIVO_AUTH_TOKEN;
+ const end=new Date();end.setUTCHours(0,0,0,0);
+ const start=new Date(end.getTime()-days*86400000);
+ const fromDate=start.toISOString().slice(0,10),toDate=end.toISOString().slice(0,10);
+ const unavailable=()=>json({available:false,provider:'Plivo',fromDate,toDate,reason:'provider_usage_unavailable',journalWrites:0});
+ if(typeof auth!=='string'||!/^[A-Za-z0-9]{8,64}$/.test(auth)||typeof token!=='string'||!/^[A-Za-z0-9]{16,128}$/.test(token))return unavailable();
+ try{
+  const query=new URLSearchParams({from_date:fromDate,to_date:toDate,granularity:'day',page_size:'1'});
+  const res=await fetcher('https://api.plivo.com/v1/Account/'+encodeURIComponent(auth)+'/UsageSummary/?'+query,{
+   method:'GET',redirect:'manual',signal:AbortSignal.timeout(5000),headers:{Authorization:'Basic '+btoa(auth+':'+token),Accept:'application/json'}
+  });
+  if(!res.ok||!res.headers.get('content-type')?.toLowerCase().includes('json')||Number(res.headers.get('content-length'))>65536||!res.body)return unavailable();
+  const reader=res.body.getReader(),decoder=new TextDecoder('utf-8',{fatal:true});let bytes=0,raw='';
+  try{while(true){const {done,value}=await reader.read();if(done)break;bytes+=value.byteLength;if(bytes>65536){await reader.cancel();return unavailable();}raw+=decoder.decode(value,{stream:true});}raw+=decoder.decode();}
+  finally{reader.releaseLock();}
+  const m=JSON.parse(raw)?.meta;
+  if(!m||m.auth_id!==auth||m.subaccount_auth!==undefined||m.granularity!=='day'||Date.parse(m.from_date)!==start.getTime()||Date.parse(m.to_date)!==end.getTime()||
+   !['INR','USD'].includes(m.currency)||typeof m.total_spend!=='number'||!Number.isFinite(m.total_spend)||m.total_spend<0||m.total_spend>1000000000)return unavailable();
+  return json({available:true,provider:'Plivo',fromDate,toDate,currency:m.currency,totalSpend:m.total_spend,scope:'entire_account_including_subaccounts_and_other_charges',checkedAt:new Date().toISOString(),journalWrites:0,clientDebits:0,dispatchEnabled:false});
+ }catch{return unavailable();}
+}
 // Cloudflare Workers does not implement the RequestInit error redirect mode.
 // Use redirect:'manual' and reject non-2xx statuses to prevent credential
 // forwarding across provider redirects. Do not replace with 'follow'.
@@ -274,6 +299,13 @@ export async function handleCreditWalletRequest(req,env,user,{fetcher=fetch}={})
  if(!env.CONTROL_DB)return fail('database unavailable',503);
  const db=env.CONTROL_DB,path=url.pathname.slice(base.length+1);
  try{
+  if(path==='provider-usage-summary'){
+   if(req.method!=='GET')return fail('method not allowed',405);
+   if(!await currentMfa(env,user))return fail('current MFA Super Admin required',403);
+   const keys=[...url.searchParams.keys()],days=url.searchParams.get('days');
+   if(keys.length!==1||keys[0]!=='days'||!['7','30'].includes(days))return fail('invalid usage window',400);
+   return providerUsageSummary(env,fetcher,Number(days));
+  }
   if(path==='provider-journal'){
    if(!await currentMfa(env,user))return fail('current MFA Super Admin required',403);
    if(req.method==='GET'){

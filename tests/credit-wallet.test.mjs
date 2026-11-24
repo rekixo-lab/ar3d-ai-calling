@@ -557,3 +557,32 @@ test('admin settlement queue counts distinguish unknown sessions and signed-ende
  assert.equal(data.position.heldSeconds,180);assert.equal((await route(f,'admin-dashboard',client)).status,403);
  }finally{f.close()}
 });
+
+test('Plivo usage summary checks account, date, currency and complete-window total without posting expenses',async()=>{
+ const f=fixture();try{
+ f.env.PLIVO_AUTH_ID='TESTACCOUNT123';f.env.PLIVO_AUTH_TOKEN='SYNTHETICAUTHTOKEN123';
+ let requests=0,change={};
+ const fetcher=async(url,opts)=>{
+  requests++;const u=new URL(url);
+  assert.equal(u.origin,'https://api.plivo.com');assert.equal(u.pathname,'/v1/Account/TESTACCOUNT123/UsageSummary/');
+  assert.equal(opts.method,'GET');assert.equal(opts.redirect,'manual');assert.equal(u.searchParams.get('page_size'),'1');assert.equal(u.searchParams.get('granularity'),'day');
+  const from=u.searchParams.get('from_date'),to=u.searchParams.get('to_date');
+  assert.equal(Date.parse(to)-Date.parse(from),7*86400000);
+  return Response.json({meta:{auth_id:'TESTACCOUNT123',granularity:'day',from_date:from+'T00:00:00Z',to_date:to+'T00:00:00Z',currency:'INR',total_spend:123.456789,next_page_token:'secret-cursor',...change},usage:[{total_amount:1}],other_charges:[{total_amount:2}]});
+ };
+ const path='provider-usage-summary?days=7';
+ assert.equal((await route(f,path,admin,'GET',undefined,{fetcher})).status,403);
+ freshMfa(f);
+ assert.equal((await route(f,path,client,'GET',undefined,{fetcher})).status,403);
+ assert.equal((await route(f,'provider-usage-summary?days=7&days=30',admin,'GET',undefined,{fetcher})).status,400);
+ assert.equal(requests,0);
+ let d=await (await route(f,path,admin,'GET',undefined,{fetcher})).json();
+ assert.equal(d.available,true);assert.equal(d.currency,'INR');assert.equal(d.totalSpend,123.456789);assert.equal(d.journalWrites,0);
+ assert.ok(!JSON.stringify(d).includes('TESTACCOUNT123'));assert.ok(!JSON.stringify(d).includes('secret-cursor'));
+ for(const invalid of [{auth_id:'OTHERACCOUNT'},{currency:'UNKNOWN'},{from_date:'2020-01-01'},{total_spend:null},{subaccount_auth:'SUB'},{total_spend:-1}]){
+  change=invalid;d=await (await route(f,path,admin,'GET',undefined,{fetcher})).json();assert.equal(d.available,false);assert.equal(d.totalSpend,undefined);
+ }
+ assert.equal(f.c.db.prepare('SELECT COUNT(*) AS n FROM provider_financial_journal').get().n,0);
+ assert.equal(f.c.db.prepare('SELECT COUNT(*) AS n FROM tenant_minute_ledger').get().n,0);
+ }finally{f.close()}
+});
