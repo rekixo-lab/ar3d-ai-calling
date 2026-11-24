@@ -558,3 +558,45 @@ test('five-device internal registry is capped, audited, consent-attested and ten
   assert.equal(row.lead_id,enrolled[0]);assert.equal(row.destination,first);assert.equal(row.hangup_at,now);
  }finally{f.close()}
 });
+
+test('signed incomplete campaign call preserves accepted answers for review without changing lead or redialing',async()=>{
+ for(const mode of ['ended','needs_review','suppressed']){
+  const f=fixture();try{
+   await setup(f);const env=f.env,config=await approvedCampaignPhone(env);
+   const spoken=['प्लॉट','रायपुर','repeat','repeat','repeat'];
+   env.AI.run=async()=>({text:spoken.shift()});
+   let hook;
+   const submitted=await tickScriptedTenant(env,f.r.wrap,tid,config,{now,apiFetch:async (_url,opts)=>{
+    hook=JSON.parse(opts.body).answer_url.replace(/\/answer$/,'');return accepted();
+   }});
+   assert.equal(submitted.state,'submitted');
+   const cb=(step,params)=>handleScriptedPhoneCallback(signed(hook+'/'+step,{CallUUID:callId,...params},env.PLIVO_AUTH_TOKEN),env,{now,fetcher:async()=>new Response('RIFF',{headers:{'Content-Type':'audio/wav'}})});
+   await cb('answer',{ALegRequestUUID:'synthetic-plivo-request-123',To:internalNumber,From:config.caller,Direction:'outbound'});
+   await cb('consent',{Digits:'1'});
+   const original=f.r.db.prepare('SELECT * FROM leads WHERE id=?').get(lead);
+   for(let i=0;i<(mode==='needs_review'?5:2);i++){
+    const response=await cb('turn/'+i,{RecordingID:'record-id-0'+i});
+    assert.equal(response.status,200,await response.clone().text());
+   }
+   assert.equal(f.r.db.prepare('SELECT COUNT(*) AS n FROM scripted_call_results').get().n,0);
+   if(mode==='suppressed')f.r.db.prepare("UPDATE leads SET consent_status='denied',dnd_status='blocked' WHERE id=?").run(lead);
+   const before=f.r.db.prepare('SELECT * FROM leads WHERE id=?').get(lead);
+   assert.equal((await cb('hangup',{Duration:'45'})).status,204);
+   const tick=()=>tickScriptedTenant(env,f.r.wrap,tid,config,{now:now+60000,apiFetch:()=>assert.fail('no redial')});
+   assert.equal((await tick()).state,'reconciled');
+   await tick();
+   const result=await (await route(f,'results',{tenantId:tid},client,'GET')).json();
+   const row=result.results[0];assert.equal(row.state,'failed');assert.equal(row.savedToLead,false);
+   if(mode==='suppressed'){
+    assert.equal(row.answers,null);assert.equal(row.partial,false);
+   }else{
+    assert.equal(row.partial,true);
+    assert.deepEqual(row.answers,{propertyType:'plot',location:'रायपुर'});
+    assert.deepEqual(original,before);
+   }
+   assert.deepEqual(f.r.db.prepare('SELECT * FROM leads WHERE id=?').get(lead),before);
+   assert.equal(f.r.db.prepare("SELECT COUNT(*) AS n FROM crm_audit_events WHERE action='calling.partial_result_saved'").get().n,mode==='suppressed'?0:1);
+   assert.equal((await route(f,'results',{tenantId:tid},{id:'foreign'},'GET')).status,403);
+  }finally{f.close()}
+ }
+});
