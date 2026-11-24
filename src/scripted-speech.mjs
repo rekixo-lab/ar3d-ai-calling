@@ -35,3 +35,18 @@ export async function transcribeScriptedAnswer(ai,bytes,language,{vadFilter=true
  const text=typeof result?.text==='string'?result.text.trim().replace(/\s+/g,' '):'';
  return text&&text.length<=220?text:null;
 }
+
+// Recorded-audio Nova-3 via the existing Workers AI binding. No new account or
+// streaming socket required. Keep the actual container MIME type; no raw PCM
+// encoding override. Do not log audio, recognition results or provider errors.
+export async function transcribeNovaRecordedAnswer(ai,bytes,language,contentType){
+ if(!ai?.run||!bytes.length||bytes.length>ANSWER_MAX_BYTES||!['hi','en'].includes(language)||!supportsAnswerAudio(contentType))throw Error('invalid_audio');
+ let binary='';
+ for(let i=0;i<bytes.length;i+=8192)binary+=String.fromCharCode(...bytes.subarray(i,i+8192));
+ const raw=await ai.run('@cf/deepgram/nova-3',{audio:{body:btoa(binary),contentType},language},{signal:AbortSignal.timeout(12000)});
+ const alt=raw?.results?.channels?.[0]?.alternatives?.[0];
+ if(typeof alt?.transcript!=='string')throw Error('invalid_nova_response');
+ const text=alt.transcript.trim().replace(/\s+/g,' ');
+ const confidence=typeof alt.confidence==='number'&&Number.isFinite(alt.confidence)&&alt.confidence>=0&&alt.confidence<=1?alt.confidence:null;
+ return {text:text&&text.length<=220?text:null,confidence};
+}
