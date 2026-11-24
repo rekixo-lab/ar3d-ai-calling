@@ -1297,7 +1297,7 @@ function aiTestingPanel(content,tenantId,role){
      table(['Question','Interpreted answer'],[
       ['Property type',a.propertyType],['Location',a.location],['Area',a.area],
       ['Size',a.size],['Budget (INR)',a.budgetMinInr!=null?a.budgetMinInr+' – '+a.budgetInr:a.budgetInr??'—'],
-      ['Interest',a.interest],['Visit date',a.visitDate||'Not requested']
+      ['Interest',a.interest],['Visit date',a.visitDate||'Not requested'],['Preferred visit time (IST)',a.visitAt?formatIst(a.visitAt):'Not stated']
      ]),node('p',{class:'muted',text:result.savedToCrm?
        'Auto-save completed for '+selectedName+'. This is simulated qualification, not a verified customer phone call or a confirmed visit.':
        'Preview only. To save these answers, use a new test with explicit CRM auto-save or open Customers / Excel → Details → 7 Fixed Questions.'}));
@@ -1514,7 +1514,7 @@ function campaignResultsPanel(tenantId,content,role){
   const fields=[
    ['Property type',q.propertyType],['City or location',q.location],['Area',q.area],['Property size',q.size],
    ['Budget',q.budgetMinInr!=null?answerBudget(q.budgetMinInr)+' – '+answerBudget(q.budgetInr):answerBudget(q.budgetInr)],['Interest',({interested:'Interested',later:'Follow up later',not_interested:'Not interested'})[q.interest]],
-   ['Preferred visit date',q.visitDate]
+   ['Preferred visit date',q.visitDate],['Preferred visit time (IST)',q.visitAt?formatIst(q.visitAt):null]
   ];
   answer.replaceChildren(div('row between',title(result.name+(result.partial?' — partial call answers':' — call answers'),'h3'),
    btn('Close answers',()=>{answer.hidden=true;trigger?.focus()},true)),

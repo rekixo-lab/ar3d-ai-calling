@@ -76,7 +76,7 @@ async function save(env,user,context,result,access){
  const survey=normalizePropertySurvey({
   propertyType:a.propertyType,location:a.location,area:a.area||null,
   size:a.size,budgetInr:a.budgetInr??null,...(a.budgetMinInr!==undefined?{budgetMinInr:a.budgetMinInr}:{}),interest:a.interest,
-  visitDate:a.visitDate||null,visitAt:null
+  visitDate:a.visitDate||null,visitAt:a.visitAt??null
  });
  const crm=surveyToCrm(survey);
  const original=await db.prepare(

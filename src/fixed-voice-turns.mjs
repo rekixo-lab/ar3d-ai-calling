@@ -211,6 +211,28 @@ function parseDate(str,now){
     throw Error('invalid or past visit date');
   return date;
 }
+// Extract a visit time only when the customer explicitly supplies AM/PM,
+// a Hindi day-part, or an unambiguous 24-hour HH:mm. No guessed time.
+function parseVisitPreference(input,now){
+ const date=parseDate(input,now);
+ const time=input.match(/(?:^|\s)(?:(सुबह|दोपहर|शाम|रात)\s+)?([0-9]{1,2}|[\p{L}\p{M}]+)(?::([0-9]{2}))?\s*(?:(बजे)|\b(am|pm)\b)/iu);
+ const military=input.match(/(?:^|\s)([01]?\d|2[0-3]):([0-5]\d)(?:$|[\s।,.])/u);
+ const timeMention=/(?:बजे|\b(?:am|pm)\b|\d{1,2}:\d{2})/iu.test(input);
+ if(!time&&!military){if(timeMention)throw Error('unclear visit time');return {date,at:null};}
+ let hour,minute;
+ if(time){
+  hour=spokenQuantity(time[2]);minute=Number(time[3]||0);
+  const part=time[1]||time[5]?.toLowerCase();
+  if(!part||!Number.isInteger(hour)||hour<1||hour>12||minute>59)throw Error('state morning or evening for visit time');
+  const pm=['दोपहर','शाम','रात','pm'].includes(part);
+  // 12 at night is ambiguous with the stated calendar day; request clarification.
+  if(part==='रात'&&hour===12)throw Error('unclear midnight date');
+  hour=hour%12+(pm?12:0);
+ }else{hour=Number(military[1]);minute=Number(military[2]);}
+ const stamp=Date.parse(date+'T'+String(hour).padStart(2,'0')+':'+String(minute).padStart(2,'0')+':00+05:30');
+ if(!Number.isFinite(stamp)||stamp<now+60000||stamp>now+366*86400000)throw Error('invalid or past visit time');
+ return {date,at:new Date(stamp).toISOString()};
+}
 function validate(state,now){
   if(!state||typeof state!=='object'||Array.isArray(state)||
      Object.keys(state).some(k=>!['version','status','language','index','answers',
@@ -223,7 +245,8 @@ function validate(state,now){
      !Number.isSafeInteger(state.startedAt)||state.startedAt<0||
      state.startedAt>now+60000||now-state.startedAt>MAX_AGE_MS||
      !state.answers||typeof state.answers!=='object'||Array.isArray(state.answers)||
-     Object.keys(state.answers).some(k=>!FIELDS.includes(k)&&k!=='budgetMinInr')||
+     Object.keys(state.answers).some(k=>!FIELDS.includes(k)&&!['budgetMinInr','visitAt'].includes(k))||
+     (Object.hasOwn(state.answers,'visitAt')&&(state.index!==7||state.answers.interest!=='interested'||typeof state.answers.visitAt!=='string'||!Number.isFinite(Date.parse(state.answers.visitAt))))||
      (Object.hasOwn(state.answers,'budgetMinInr')&&(!Number.isSafeInteger(state.answers.budgetMinInr)||state.answers.budgetMinInr<10000||state.answers.budgetMinInr>state.answers.budgetInr||!Number.isSafeInteger(state.answers.budgetInr)||state.index<=4)))
     throw Error('invalid or expired voice preview session');
   return state;
@@ -264,7 +287,7 @@ export function advanceFixedVoicePreview(current,{transcript,confidence=1,now=Da
     return response(out,'opt_out_requested',
       'Stop further calls and verify the opt-out in the CRM; preview did not modify consent.');
   }
-  let parsed,range=null;
+  let parsed,range=null,visit=null;
   try{
     if(AGAIN.test(input)||NOT_HEARD.test(input)||MISUNDERSTOOD.test(input)||confidence<0.70)
       throw Error('recognition unclear; repeat question');
@@ -274,7 +297,7 @@ export function advanceFixedVoicePreview(current,{transcript,confidence=1,now=Da
     else if(field==='size')parsed=parseSize(input,out.answers.propertyType);
     else if(field==='budgetInr'){range=parseBudgetRange(input);parsed=range?range.upper:parseBudget(input);}
     else if(field==='interest')parsed=parseInterest(input);
-    else if(field==='visitDate')parsed=parseDate(input,now);
+    else if(field==='visitDate'){visit=parseVisitPreference(input,now);parsed=visit.date;}
     else throw Error('unsupported voice question');
   }catch(e){
     out.attempts=state.attempts+1;
@@ -286,6 +309,7 @@ export function advanceFixedVoicePreview(current,{transcript,confidence=1,now=Da
   }
   const field=FIELDS[out.index];
   out.answers[field]=parsed;
+  if(field==='visitDate'&&visit?.at)out.answers.visitAt=visit.at;
   if(field==='budgetInr'){if(range)out.answers.budgetMinInr=range.lower;else delete out.answers.budgetMinInr;}
   out.attempts=0;
   out.index++;
@@ -305,7 +329,7 @@ export function advanceFixedVoicePreview(current,{transcript,confidence=1,now=Da
       ...(Object.hasOwn(out.answers,'budgetMinInr')?{budgetMinInr:out.answers.budgetMinInr}:{}),
       interest:out.answers.interest,
       visitDate:out.answers.visitDate||null,
-      visitAt:null
+      visitAt:out.answers.visitAt??null
     },{now});
     return response(out,'completed',
       'Staff must review all recognized answers before saving. No call or booking occurred.');
@@ -382,7 +406,8 @@ export async function advanceContextualVoice(ai,current,{transcript,confidence=1
    throw Error('contextual_conflicting_evidence');
   if(strictGrounding){
    if(!['next_question','completed'].includes(directEvidence.action)||directEvidence.state.answers[field]!==proposal.state.answers[field]||
-    (field==='budgetInr'&&directEvidence.state.answers.budgetMinInr!==proposal.state.answers.budgetMinInr))throw Error('contextual_customer_evidence_not_parseable');
+    (field==='budgetInr'&&directEvidence.state.answers.budgetMinInr!==proposal.state.answers.budgetMinInr)||
+    (field==='visitDate'&&directEvidence.state.answers.visitAt!==proposal.state.answers.visitAt))throw Error('contextual_customer_evidence_not_parseable');
    return {result:directEvidence,interpreter:'contextual_grounded'};
   }
   return {result:proposal,interpreter:'contextual'};
@@ -395,7 +420,7 @@ export async function advanceContextualVoice(ai,current,{transcript,confidence=1
 // persist raw utterances. Missing units must be stated in the next answer;
 // never infer or combine amounts from different questions or sessions.
 // Deterministic multi-answer fast path. Accept only a contiguous set of
-// explicitly labelled fields (the first may be the current question without
+// explicitly labelled fields in any order within a contiguous set (the first may be the current question without
 // a label). Never use inference, update previously accepted fields, or treat
 // qualification as consent. A single utterance remains one turn.
 const LABELLED_FIELDS=[
@@ -409,7 +434,7 @@ const LABELLED_FIELDS=[
 ];
 function advanceLabelledFields(current,input,confidence,now){
  if(confidence<.7||STOP.test(input)||AGAIN.test(input)||NOT_HEARD.test(input)||MISUNDERSTOOD.test(input))return null;
- const clauses=input.split(/\s*[;；।]\s*|,\s+/u).filter(Boolean);
+ const clauses=input.split(/\s*[;；।]\s*|,\s+|\s+(?:और|and)\s+(?=(?:प्रॉपर्टी|property|टाइप|शहर|लोकेशन|city|location|एरिया|इलाका|area|neighborhood|साइज|साइज़|size|माप|बजट|budget|रुचि|interest|विजिट|तारीख|visit date)\s)/iu).filter(Boolean);
  if(clauses.length<2||clauses.length>7)return null;
  const labels=clauses.map(clause=>{
   const matched=LABELLED_FIELDS.map(([field,re])=>({field,match:clause.match(re)})).filter(x=>x.match);
@@ -418,9 +443,13 @@ function advanceLabelledFields(current,input,confidence,now){
  if(!labels.slice(1).some(Boolean))return null;
  const repeat=()=>({result:advanceFixedVoicePreview(current,{transcript:'repeat',confidence,now}),interpreter:'labelled_unclear',pendingQuantity:null});
  if(labels.slice(1).some(x=>!x))return repeat();
+ const parts=labels.map((label,i)=>label||{field:FIELDS[current.index],value:clauses[i]});
+ // Accept out-of-order labels within this utterance only if all intervening
+ // required fields are present, and reject duplicates instead of guessing.
+ if(new Set(parts.map(x=>x.field)).size!==parts.length)return repeat();
+ parts.sort((a,b)=>FIELDS.indexOf(a.field)-FIELDS.indexOf(b.field));
  let next=current,last=null;
- for(let i=0;i<clauses.length;i++){
-  const part=labels[i]||{field:FIELDS[current.index],value:clauses[i]};
+ for(const part of parts){
   if(next.status!=='active'||part.field!==FIELDS[next.index])return repeat();
   // Reset turns only for the synthetic sub-step; final state records one
   // real spoken utterance. No raw speech is retained.
