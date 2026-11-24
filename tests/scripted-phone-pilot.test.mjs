@@ -798,9 +798,17 @@ test('saved recording probe is no-dial, current-MFA and explicit-consent only; r
   assert.equal(inputs.length,3);
   const [base,hint,nova]=inputs.map(x=>x.input);
   assert.equal(base.audio,hint.audio);assert.equal(base.initial_prompt,undefined);assert.match(hint.initial_prompt,/बजट/);assert.equal(base.vad_filter,hint.vad_filter);
-  assert.deepEqual(nova.audio,{body:base.audio,contentType:'audio/wav'});assert.equal(nova.language,'hi');
+  assert.equal(nova.audio.contentType,'audio/wav');assert.equal(nova.language,'hi');
+  assert.equal(btoa(await new Response(nova.audio.body).text()),base.audio);
   assert.equal(compared.nova.transcript,'बीस लाख');assert.equal(compared.nova.parserAction,'next_question');assert.equal(compared.nova.normalizedAnswer,2000000);assert.equal(compared.nova.confidence,.96);assert.equal(compared.contentType,'audio/wav');assert.equal(compared.recordingDurationMs,6000);
-  assert.equal(compared.phoneCallsStarted,0);assert.equal(compared.crmChanged,false);assert.equal(calls,9);assert.deepEqual(f.c.db.prepare('SELECT * FROM scripted_phone_pilots').get(),controlBefore);
+  assert.equal(compared.phoneCallsStarted,0);assert.equal(compared.crmChanged,false);assert.equal(calls,9);
+  assert.equal((await handleScriptedPhoneAdmin(req('PLAY_ONE_CONSENTED_INTERNAL_LAST_ANSWER'),env,client,{now,fetcher})).status,403);
+  const playback=await handleScriptedPhoneAdmin(req('PLAY_ONE_CONSENTED_INTERNAL_LAST_ANSWER'),env,admin,{now,fetcher});
+  assert.equal(playback.headers.get('Content-Type'),'audio/wav');assert.equal(playback.headers.get('Cache-Control'),'no-store');assert.equal(await playback.text(),'RIFF');assert.equal(inputs.length,3);assert.equal(calls,11);
+  env.AI.run=async(model)=>{if(model==='@cf/deepgram/nova-3')throw Error('5006: private provider error');return {text:'तीस लाख'}};
+  const failed=await (await handleScriptedPhoneAdmin(req('SHOW_ONE_CONSENTED_INTERNAL_LAST_ANSWER'),env,admin,{now,fetcher})).json();
+  assert.equal(failed.nova.failureCode,'workers_ai_5006');assert.equal(failed.nova.stt,'service_failed');assert.doesNotMatch(JSON.stringify(failed),/private provider error/);
+  assert.deepEqual(f.c.db.prepare('SELECT * FROM scripted_phone_pilots').get(),controlBefore);
   assert.deepEqual(f.r.db.prepare('SELECT * FROM leads WHERE id=?').get(lead),before);
  }finally{f.close()}
 });

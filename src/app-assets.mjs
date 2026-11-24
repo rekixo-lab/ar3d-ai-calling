@@ -169,8 +169,26 @@ function scriptedPhonePilotPanel(){
    lastAnswerProbe.disabled=true;lastAnswerReport.replaceChildren();
    try{
     const d=await api('/v1/human/scripted-phone-pilot/recording-probe','POST',{confirm:'SHOW_ONE_CONSENTED_INTERNAL_LAST_ANSWER'});
-    lastAnswerReport.replaceChildren(table(['Diagnostic','Result'],[['Outcome',d.state.replaceAll('_',' ')],['Question',d.question??'—'],['Media HTTP',d.mediaHttp??'—'],['Downloaded bytes',d.bytes],['Media type',d.contentType??'—'],['Recording duration (ms)',d.recordingDurationMs??'—']]),table(['Same recording','Whisper','Whisper + hint','Nova-3 recorded'],[['STT',d.stt.replaceAll('_',' '),d.hinted?.stt?.replaceAll('_',' ')??'—',d.nova?.stt?.replaceAll('_',' ')??'—'],['Recognized words',d.transcript??'—',d.hinted?.transcript??'—',d.nova?.transcript??'—'],['Deterministic parser',d.parserAction??'—',d.hinted?.parserAction??'—',d.nova?.parserAction??'—'],['Normalized answer',d.normalizedAnswer??'—',d.hinted?.normalizedAnswer??'—',d.nova?.normalizedAnswer??'—'],['Reported confidence','—','—',d.nova?.confidence??'—']]),node('p',{class:'muted',text:'Three fresh recognition runs on the latest recording by provider time, not the original callback transcript. Question inferred from saved state; contextual interpretation and split-answer memory are not replayed. Check the words against what you actually said. Do not share private speech.'}),btn('Clear transcript',()=>lastAnswerReport.replaceChildren(),true));
+    lastAnswerReport.replaceChildren(table(['Diagnostic','Result'],[['Outcome',d.state.replaceAll('_',' ')],['Question',d.question??'—'],['Media HTTP',d.mediaHttp??'—'],['Downloaded bytes',d.bytes],['Media type',d.contentType??'—'],['Recording duration (ms)',d.recordingDurationMs??'—']]),table(['Same recording','Whisper','Whisper + hint','Nova-3 recorded'],[['STT',d.stt.replaceAll('_',' '),d.hinted?.stt?.replaceAll('_',' ')??'—',d.nova?.stt?.replaceAll('_',' ')??'—'],['Recognized words',d.transcript??'—',d.hinted?.transcript??'—',d.nova?.transcript??'—'],['Deterministic parser',d.parserAction??'—',d.hinted?.parserAction??'—',d.nova?.parserAction??'—'],['Normalized answer',d.normalizedAnswer??'—',d.hinted?.normalizedAnswer??'—',d.nova?.normalizedAnswer??'—'],['Reported confidence','—','—',d.nova?.confidence??'—'],['Safe error code',d.failureCode??'—',d.hinted?.failureCode??'—',d.nova?.failureCode??'—']]),node('p',{class:'muted',text:'Three fresh recognition runs on the latest recording by provider time, not the original callback transcript. Question inferred from saved state; contextual interpretation and split-answer memory are not replayed. Check the words against what you actually said. Do not share private speech.'}),btn('Clear transcript',()=>lastAnswerReport.replaceChildren(),true));
    }catch(e){asError(e)}finally{lastAnswerProbe.disabled=false}
+  },true);
+  const listenReport=div('stack');
+  let revokeListening=null;
+  const listen=btn('Listen to last saved answer (no call, no AI)',async()=>{
+   if(!window.confirm('Confirm the internal recipient consents to you listening privately to this saved answer. No new call or AI recognition. Do not share or download the audio.'))return;
+   revokeListening?.();listenReport.replaceChildren();listen.disabled=true;
+   try{
+    const r=await fetch('/v1/human/scripted-phone-pilot/recording-probe',{method:'POST',credentials:'same-origin',cache:'no-store',headers:{'Content-Type':'application/json'},body:JSON.stringify({confirm:'PLAY_ONE_CONSENTED_INTERNAL_LAST_ANSWER'})});
+    if(!r.ok||!['audio/mpeg','audio/wav','audio/x-wav'].includes(r.headers.get('Content-Type'))){
+     const d=await r.json();throw Error(d.error||d.state||'Playback unavailable');
+    }
+    const blob=await r.blob();if(blob.size<1||blob.size>524288)throw Error('Invalid audio size');
+    const url=URL.createObjectURL(blob),audio=node('audio',{controls:'controls',preload:'none',src:url,controlslist:'nodownload', 'aria-label':'Latest consented internal answer'});
+    const clear=()=>{audio.pause();audio.removeAttribute('src');audio.load();URL.revokeObjectURL(url);listenReport.replaceChildren();revokeListening=null};
+    const timeout=setTimeout(clear,60000);
+    revokeListening=()=>{clearTimeout(timeout);clear()};
+    listenReport.append(node('p',{class:'muted',text:'Latest short recording by provider time, not necessarily the last callback. Listen privately. Audio player clears after 60 seconds.'}),audio,btn('Clear audio',()=>revokeListening?.(),true));
+   }catch(e){asError(e)}finally{listen.disabled=false}
   },true);
   const device=node('select',{class:'field','aria-label':'Internal test number'});
   const engine=node('select',{class:'field','aria-label':'Speech recognition engine'},[
@@ -256,7 +274,7 @@ function scriptedPhonePilotPanel(){
   }
   enrollment.hidden=true;device.addEventListener('change',updateAvailability);
   card.append(status,prepare,prepared,enrollment,div('formrow',lab('Internal test number',device),lab('Recorded prompt language',language),lab('Speech recognition engine',engine),call,
-    btn('Refresh fixed-question pilot status',()=>refresh().catch(asError),true)),cooldown,results,mediaCheck,mediaReport,probe,probeReport,answerProbe,answerReport,lastAnswerProbe,lastAnswerReport);
+    btn('Refresh fixed-question pilot status',()=>refresh().catch(asError),true)),cooldown,results,mediaCheck,mediaReport,probe,probeReport,answerProbe,answerReport,lastAnswerProbe,lastAnswerReport,listen,listenReport);
   refresh().catch(()=>{status.textContent='Pilot status requires a current MFA Super Admin session.'});
   return card;
 }

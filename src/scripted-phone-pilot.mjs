@@ -4,7 +4,7 @@ import {mutationOriginAllowed} from './human-auth.mjs';
 import {beginFixedVoicePreview,advanceFixedVoicePreview,advanceContextualVoice,advanceInternalVoice} from './fixed-voice-turns.mjs';
 import {normalizePropertySurvey,surveyToCrm} from './fixed-property-survey.mjs';
 import {streamToken,validStreamToken,openNovaSocket,upgradePlivoTurn} from './streaming-speech.mjs';
-import {ANSWER_MAX_BYTES,answerContentType,readBoundedBytes,supportsAnswerAudio,transcribeScriptedAnswer,transcribeNovaRecordedAnswer} from './scripted-speech.mjs';
+import {ANSWER_MAX_BYTES,answerContentType,readBoundedBytes,supportsAnswerAudio,transcribeScriptedAnswer,transcribeNovaRecordedAnswer,speechFailureCode} from './scripted-speech.mjs';
 
 const ADMIN='/v1/human/scripted-phone-pilot',HOOK='/v1/provider/plivo/scripted-pilot';
 const UUID=/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
@@ -408,8 +408,10 @@ export async function handleScriptedPhoneAdmin(req,env,user,{now=Date.now(),fetc
   if(req.method!=='POST'||!config||!mutationOriginAllowed(req)||new URL(req.url).origin!==config.origin||new URL(req.url).search)return error('invalid_recording_probe_request',400);
   try{
    const data=parseJsonBody(new TextDecoder('utf-8',{fatal:true}).decode(await readBoundedBytes(req,512)),512);
-   if(Object.keys(data).join(',')!=='confirm'||!['REPROCESS_ONE_CONSENTED_INTERNAL_RECORDING','SHOW_ONE_CONSENTED_INTERNAL_FIRST_ANSWER','SHOW_ONE_CONSENTED_INTERNAL_LAST_ANSWER'].includes(data.confirm))return error('explicit_recording_probe_confirmation_required',400);
-   return json(await probeInternalRecording(env,config,fetcher,{showFirstAnswer:data.confirm==='SHOW_ONE_CONSENTED_INTERNAL_FIRST_ANSWER',showLastAnswer:data.confirm==='SHOW_ONE_CONSENTED_INTERNAL_LAST_ANSWER',now}));
+   if(Object.keys(data).join(',')!=='confirm'||!['REPROCESS_ONE_CONSENTED_INTERNAL_RECORDING','SHOW_ONE_CONSENTED_INTERNAL_FIRST_ANSWER','SHOW_ONE_CONSENTED_INTERNAL_LAST_ANSWER','PLAY_ONE_CONSENTED_INTERNAL_LAST_ANSWER'].includes(data.confirm))return error('explicit_recording_probe_confirmation_required',400);
+   const playback=data.confirm==='PLAY_ONE_CONSENTED_INTERNAL_LAST_ANSWER';
+   const report=await probeInternalRecording(env,config,fetcher,{showFirstAnswer:data.confirm==='SHOW_ONE_CONSENTED_INTERNAL_FIRST_ANSWER',showLastAnswer:playback||data.confirm==='SHOW_ONE_CONSENTED_INTERNAL_LAST_ANSWER',playback,now});
+   return report instanceof Response?report:json(report);
   }catch{return error('recording_probe_unavailable',503)}
  }
  if(path===ADMIN+'/media-diagnostics'){
@@ -589,7 +591,7 @@ function verifiedRecordingUrl(config,row,recording,body){
 // No recording or transcript is retained, logged or written to CRM.
 // A separate explicit consent confirmation permits displaying one first-answer
 // transcript to the current-MFA operator only; default probe returns no text.
-async function probeInternalRecording(env,config,fetcher,{showFirstAnswer=false,showLastAnswer=false,now=Date.now()}={}){
+async function probeInternalRecording(env,config,fetcher,{showFirstAnswer=false,showLastAnswer=false,playback=false,now=Date.now()}={}){
  const result={phoneCallsStarted:0,crmChanged:false,metadataHttp:null,mediaHost:null,mediaHttp:null,bytes:0,stt:'not_started'};
  const row=await env.CONTROL_DB.prepare(
   "SELECT provider_call_id,lead_id,destination,language,survey_json,CASE WHEN json_valid(survey_json) THEN json_extract(survey_json,'$.index') END AS question_index FROM scripted_phone_pilots WHERE tenant_id=? AND job_id IS NULL AND provider_account_id=? AND caller=? AND hangup_at IS NOT NULL AND provider_call_id IS NOT NULL AND turn>0 AND CASE WHEN json_valid(survey_json) THEN COALESCE(json_extract(survey_json,'$.phoneMeta.engine'),'whisper')='whisper' ELSE 0 END ORDER BY created_at DESC LIMIT 1")
@@ -617,6 +619,12 @@ async function probeInternalRecording(env,config,fetcher,{showFirstAnswer=false,
   if(!supportsAnswerAudio(contentType)){try{await response.body?.cancel()}catch{}return {...result,state:'media_type_invalid'}}
   bytes=await readBoundedBytes(response,ANSWER_MAX_BYTES);result.bytes=bytes.length;
  }catch{return {...result,state:'media_read_failed'}}
+ // Separately consented, current-MFA internal listening only. No model call,
+ // provider URL, download link, storage or CRM mutation.
+ if(playback){
+  if(!['audio/mpeg','audio/wav','audio/x-wav'].includes(contentType))return {...result,state:'playback_type_unsupported'};
+  return new Response(bytes,{headers:{...headers,'Content-Type':contentType,'Content-Length':String(bytes.length)}});
+ }
  try{
   if(showLastAnswer){
    const {phoneMeta,...previous}=JSON.parse(row.survey_json);
@@ -628,7 +636,7 @@ async function probeInternalRecording(env,config,fetcher,{showFirstAnswer=false,
    const recognize=async(run)=>{
     let transcript,confidence=null;
     try{({text:transcript,confidence=null}=await run())}
-    catch{return {stt:'service_failed',transcript:null,parserAction:null,normalizedAnswer:null,confidence:null}}
+    catch(e){return {stt:'service_failed',failureCode:speechFailureCode(e),transcript:null,parserAction:null,normalizedAnswer:null,confidence:null}}
     if(!transcript)return {stt:'empty_text',transcript:null,parserAction:null,normalizedAnswer:null,confidence};
     try{
      const replay=advanceFixedVoicePreview(replayState,{transcript,now,confidence:confidence??1});

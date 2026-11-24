@@ -41,12 +41,22 @@ export async function transcribeScriptedAnswer(ai,bytes,language,{vadFilter=true
 // encoding override. Do not log audio, recognition results or provider errors.
 export async function transcribeNovaRecordedAnswer(ai,bytes,language,contentType){
  if(!ai?.run||!bytes.length||bytes.length>ANSWER_MAX_BYTES||!['hi','en'].includes(language)||!supportsAnswerAudio(contentType))throw Error('invalid_audio');
- let binary='';
- for(let i=0;i<bytes.length;i+=8192)binary+=String.fromCharCode(...bytes.subarray(i,i+8192));
- const raw=await ai.run('@cf/deepgram/nova-3',{audio:{body:btoa(binary),contentType},language},{signal:AbortSignal.timeout(12000)});
+ // Cloudflare's documented binary stream input, not Whisper's base64 JSON.
+ const raw=await ai.run('@cf/deepgram/nova-3',{audio:{body:new Blob([bytes],{type:contentType}).stream(),contentType},language});
  const alt=raw?.results?.channels?.[0]?.alternatives?.[0];
  if(typeof alt?.transcript!=='string')throw Error('invalid_nova_response');
  const text=alt.transcript.trim().replace(/\s+/g,' ');
  const confidence=typeof alt.confidence==='number'&&Number.isFinite(alt.confidence)&&alt.confidence>=0&&alt.confidence<=1?alt.confidence:null;
  return {text:text&&text.length<=220?text:null,confidence};
+}
+
+// Only fixed categories and numeric Workers AI error codes. Never return raw
+// provider error strings (which may contain speech or account information).
+export function speechFailureCode(error){
+ if(error?.message==='invalid_nova_response')return 'invalid_response_shape';
+ if(error?.message==='invalid_audio')return 'invalid_audio';
+ if(['TimeoutError','AbortError'].includes(error?.name))return 'timeout';
+ const match=typeof error?.message==='string'?error.message.match(/^(?:AiError:\s*)?(\d{4}):/):null;
+ const code=Number.isInteger(error?.code)?error.code:match?Number(match[1]):null;
+ return code>=1000&&code<=9999?'workers_ai_'+code:'provider_error_unclassified';
 }
