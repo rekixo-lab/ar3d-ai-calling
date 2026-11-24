@@ -722,9 +722,10 @@ test('recording 403 may recover only through matching authenticated regional met
     assert.equal(opts.redirect,'manual');
     if(url.endsWith('/Call/')){hook=JSON.parse(opts.body).answer_url.replace(/\/answer$/,'');return Response.json({request_uuid:requestId},{status:202})}
     if(url.startsWith('https://media.plivo.com/'))return new Response('forbidden',{status:403});
-    if(url.startsWith('https://api.plivo.com/')&&url.endsWith('/Recording/'+recording+'/'))return Response.json({
+    if(url.includes('/Recording/?call_uuid='))return Response.json({objects:[{
      recording_id:recording,call_uuid:mode==='wrong_call'?'another-call':callId,recording_format:'mp3',
-     recording_url:'https://'+(mode==='wrong_host'?'untrusted.invalid':'aps1.media.plivo.com')+'/v1/Account/syntheticAuth/Recording/'+recording+'.mp3'});
+     recording_url:'https://'+(mode==='wrong_host'?'untrusted.invalid':'aps1.media.plivo.com')+'/v1/Account/syntheticAuth/Recording/'+recording+'.mp3'}]});
+    if(url.endsWith('/Recording/'+recording+'/'))return new Response(null,{status:404});
     assert.match(url,/^https:\/\/aps1\.media\.plivo\.com\//);regional++;
     return new Response('RIFF',{headers:{'Content-Type':'audio/wav'}});
    };
