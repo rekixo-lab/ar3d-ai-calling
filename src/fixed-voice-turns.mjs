@@ -461,7 +461,7 @@ const LABELLED_FIELDS=[
 ];
 function advanceLabelledFields(current,input,confidence,now){
  if(confidence<.7||STOP.test(input)||AGAIN.test(input)||NOT_HEARD.test(input)||MISUNDERSTOOD.test(input))return null;
- const clauses=input.split(/\s*[;；।]\s*|,\s+(?!\d)|,\s*(?=(?:बजट|budget|शहर|city|लोकेशन|location|एरिया|area|साइज|size)\b|(?:मेरा|हमारा|my)\s+(?:बजट|budget))|\s+(?:और|and)\s+(?=(?:प्रॉपर्टी|property|टाइप|शहर|लोकेशन|city|location|एरिया|इलाका|area|neighborhood|साइज|साइज़|size|माप|बजट|budget|(?:मेरा|हमारा|my)\s+(?:बजट|budget)|रुचि|interest|विजिट|तारीख|visit date)\s)/iu).map(x=>x.trim()).filter(Boolean);
+ const clauses=input.split(/\s*[;；।]\s*|,\s+|\s+(?:और|and)\s+(?=(?:प्रॉपर्टी|property|टाइप|शहर|लोकेशन|city|location|एरिया|इलाका|area|neighborhood|साइज|साइज़|size|माप|बजट|budget|(?:मेरा|हमारा|my)\s+(?:बजट|budget)|रुचि|interest|विजिट|तारीख|visit date)\s)/iu).map(x=>x.trim()).filter(Boolean);
  if(clauses.length<2||clauses.length>7)return null;
  const labels=clauses.map(clause=>{
   const matched=LABELLED_FIELDS.map(([field,re])=>({field,match:clause.match(re)})).filter(x=>x.match);
@@ -491,7 +491,7 @@ function advanceLabelledFields(current,input,confidence,now){
 // to this call and leave the current question outstanding.
 function advanceExplicitCorrection(current,input,confidence,now){
  const prefix=input.match(/^(?:सुधार(?: कीजिए)?|correction|actually|नहीं|नही)\s*[:：,।]?\s+/iu);
- const phrase=(prefix?input.slice(prefix[0].length):input).replace(/[।.!?]+$/u,'').trim();
+ const phrase=(prefix?input.slice(prefix[0].length):input).replace(/[।.!]+$/u,'').trim();
  const labels=LABELLED_FIELDS.map(([field,re])=>({field,match:phrase.match(re)})).filter(x=>x.match);
  if(labels.length!==1)return null;
  const {field,match}=labels[0];
@@ -502,6 +502,9 @@ function advanceExplicitCorrection(current,input,confidence,now){
  if(confidence<.7||STOP.test(input)||NOT_HEARD.test(input)||MISUNDERSTOOD.test(input))return repeat();
  if(index>current.index)return repeat(); // never store an early answer as another field
  if(index===current.index){
+  // Preserve the established direct-first/optional contextual path for an
+  // ordinary natural budget sentence, rather than treating it as a correction.
+  if(!prefix&&field==='budgetInr'&&/^(?:मेरा|हमारा|my)\s+/iu.test(phrase))return null;
   const result=advanceFixedVoicePreview(current,{transcript:match[1],confidence,now});
   return {result,interpreter:'labelled_current_answer',pendingQuantity:null};
  }
