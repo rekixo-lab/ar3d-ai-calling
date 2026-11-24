@@ -83,6 +83,7 @@ test('Plivo balance is only Super Admin MFA, account type/currency are never inf
    seen++;
    assert.equal(url,'https://api.plivo.com/v1/Account/TESTACCOUNT123/');
    assert.equal(options.method,'GET');
+    assert.equal(options.redirect,'manual');
    assert.ok(options.headers.Authorization.startsWith('Basic '));
    return Response.json({cash_credits:'1000.00',account_type:'developer',billing_mode:'prepaid'});
   }});

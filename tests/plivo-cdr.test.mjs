@@ -27,7 +27,7 @@ const good={
 const gateway=(data=good)=>async(url,options)=>{
  assert.equal(url,'https://api.plivo.com/v1/Account/TESTACCOUNT123/Call/'+call+'/');
  assert.equal(options.method,'GET');
- assert.equal(options.redirect,'error');
+ assert.equal(options.redirect,'manual');
  assert.match(options.headers.Authorization,/^Basic /);
  return Response.json(data);
 };

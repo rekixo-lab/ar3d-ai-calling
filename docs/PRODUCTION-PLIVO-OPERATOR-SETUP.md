@@ -43,6 +43,14 @@ Check existing Worker bindings `CONTROL_DB`, `CRM_DB`, `AI`, and private R2 `REC
 
 In **AR3D Super Admin → Clients → Plivo balance & client credit budgets (operator)** (requires current MFA), use **Check Plivo API & rented numbers**. It must report authenticated Plivo API, an appropriately masked rented caller and the configured caller matching this account. This read-only check is **not** an approved call route or consent verification.
 
+### Fixed Cloudflare Runtime bug: Plivo API was failing before HTTP
+
+In the 24 November 2026 Production incident, the Worker reported `plivo_account_network_error` even though `PLIVO_AUTH_ID` and `PLIVO_AUTH_TOKEN` **Secret names were correctly bound**. The root cause was the **outgoing Plivo fetch configuration**: the Workers Runtime does not support the RequestInit **error redirect mode**, so creating the request threw `TypeError` before reaching Plivo. This is documented by Cloudflare: <https://developers.cloudflare.com/workers/runtime-apis/request/> (Request `redirect` supports only `follow` and `manual`).
+
+The fix uses **manual redirect mode** for all outbound Plivo GET/POST requests in the Calling Worker. Callers explicitly reject non-2xx/redirect responses rather than following 3xx with sensitive Basic Auth headers. The changed areas are account balance/ownership/usage, CDR lookups, Voice API call placement and authorized audio retrieval. The CI source regression test prevents this unsupported redirect mode from being reintroduced.
+
+**Operator after main deploy success:** hard refresh Super Admin → Clients → `Check Plivo API & rented numbers`. You should now see either Plivo API authenticated / configured caller match, or an actionable **real Plivo HTTP status** such as 401, 403, 429, or a genuine network/timeout error. **Do not rotate good Secrets again just because the previous broken Worker showed network error.** No number purchase, callback reassignment, or outbound calling campaign is needed to validate the fix.
+
 ### Troubleshooting "Plivo API connection not verified" after Secrets are configured
 
 On the **current deployed** version, go to Super Admin → **Clients → Plivo balance & client credit budgets (operator)** → **Check Plivo API & rented numbers**. The operator-only result now separates runtime Secret presence, syntax, provider HTTP response, network failures and owned-number inventory. The result **never returns raw Auth ID, Token, full number or provider error body**:

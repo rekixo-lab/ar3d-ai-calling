@@ -39,7 +39,7 @@ export async function handlePlivoCdrRequest(req,env,user,{fetcher=fetch}={}){
      job.accountSid!==auth)return fail('Plivo billing not configured for this call',503);
   const res=await fetcher('https://api.plivo.com/v1/Account/'+encodeURIComponent(auth)+
    '/Call/'+encodeURIComponent(job.callUuid)+'/',{
-    method:'GET',redirect:'error',signal:AbortSignal.timeout(5000),
+    method:'GET',redirect:'manual',signal:AbortSignal.timeout(5000),
     headers:{Authorization:'Basic '+btoa(auth+':'+token),Accept:'application/json'}
    });
   if(!res.ok||!res.headers.get('content-type')?.toLowerCase().includes('application/json')||
