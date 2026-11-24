@@ -190,7 +190,7 @@ function scriptedPhonePilotPanel(){
   }
   const call=btn('Call the verified internal number once',async()=>{
     const selected=config?.devices?.find(x=>x.leadId===device.value);
-    if(busy||refreshing||!selected||config?.availability?.ready!==true||!window.confirm('Place one internal pilot call to the selected test number ending '+selected.destinationLast4+'? Confirm the actual recipient has already explicitly agreed to this AI test and recording of their answers. A brief recording/processing notice is played, then the first question starts without pressing 1. Selected recognition: '+engine.options[engine.selectedIndex].textContent+'. Telephony and AI usage may be charged.'))return;
+    if(busy||refreshing||!selected||config?.availability?.ready!==true||!window.confirm('Place one internal pilot call to the selected test number ending '+selected.destinationLast4+'? Confirm the actual recipient has explicitly agreed to this AI test and the selected speech processing service, including recording for Whisper or live transcription for Deepgram. A brief recording/processing notice is played, then the first question starts without pressing 1. Selected recognition: '+engine.options[engine.selectedIndex].textContent+'. Telephony and AI usage may be charged.'))return;
     busy=true;updateAvailability();
     try{
       await api('/v1/human/scripted-phone-pilot','POST',{language:language.value,leadId:selected.leadId,engine:engine.value,confirm:'CALL_ONE_PRECONSENTED_INTERNAL_NUMBER'});
