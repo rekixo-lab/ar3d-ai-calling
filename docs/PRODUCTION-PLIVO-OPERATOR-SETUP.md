@@ -43,6 +43,25 @@ Check existing Worker bindings `CONTROL_DB`, `CRM_DB`, `AI`, and private R2 `REC
 
 In **AR3D Super Admin → Clients → Plivo balance & client credit budgets (operator)** (requires current MFA), use **Check Plivo API & rented numbers**. It must report authenticated Plivo API, an appropriately masked rented caller and the configured caller matching this account. This read-only check is **not** an approved call route or consent verification.
 
+### Troubleshooting "Plivo API connection not verified" after Secrets are configured
+
+On the **current deployed** version, go to Super Admin → **Clients → Plivo balance & client credit budgets (operator)** → **Check Plivo API & rented numbers**. The operator-only result now separates runtime Secret presence, syntax, provider HTTP response, network failures and owned-number inventory. The result **never returns raw Auth ID, Token, full number or provider error body**:
+
+| Result | What the operator should do |
+| --- | --- |
+| `plivo_auth_id_missing` / `plivo_auth_token_missing` | In **Cloudflare → Workers & Pages → ar3d-ai-calling → Settings → Variables and Secrets**, confirm each exact Secret binding name is present **in the deployed Worker**. Save to the correct Worker, check deployment/version, then retry. |
+| `plivo_auth_id_format_invalid` / `plivo_auth_token_format_invalid` | Re-enter exact Plivo Home Auth ID or Auth Token in **Secret** type; remove accidental spaces and newlines. Do not disclose their values to chat or GitHub. |
+| `plivo_account_unauthorized` / HTTP 401 | The provider rejected that credential pair. Re-check both values were copied from the **same Plivo organization/account**, not an old trial organization or another subaccount. |
+| `plivo_account_forbidden` / HTTP 403 | The account exists but Plivo denied this API operation. Review account permissions/support; **KYC status alone does not prove API route access**. |
+| `plivo_account_not_found` / HTTP 404 | Confirm the Auth ID and correct Plivo organization. |
+| `plivo_account_rate_limited` / HTTP 429 | Stop clicking repeatedly and retry later. |
+| `plivo_account_timeout` / `plivo_account_network_error` | Open **Cloudflare Worker → Logs** to check connectivity. The UI does not show credentials or raw provider bodies. |
+| `plivo_account_invalid_response` | Plivo returned an unexpected response; check provider status and the deployed endpoint. |
+| Account authenticated, but `plivo_number_list_*` | The account works; only the rented-number list failed. The Worker also tries a **read-only GET** for the configured **+918065491333** number without purchasing it. The UI will show whether this individual-number lookup succeeded. |
+| `configured caller found` / number `••••1333` | Confirms the connected account owns the selected caller; still not proof of outbound service/transactional authorization or DND/consent. |
+
+If you still see **only** the old generic line `Plivo API connection not verified · number list not available · caller ownership not verified` with none of these detailed reasons, you may still be running **the old Worker version**. Verify the **main-push Cloudflare deploy** and hard-refresh the app before editing credentials again.
+
 ### 3. Confirm production Plivo voice application and audio
 
 In **Plivo Console → Applications → AR3D_Production**:
