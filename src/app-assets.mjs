@@ -733,7 +733,7 @@ function providerFinancialJournal(main){
   finally{refresh.disabled=false}
  }
  card.append(node('p',{class:'note',text:'Record real external receipts and invoices only. Recorded net is not the live provider balance; never enter the same funds in two currencies. No payment or call action.'}),
-  div('formrow',lab('Provider',provider),lab('Currency',currency),lab('Transaction type',kind),lab('Amount',amount)),
+  div('formrow',lab('Provider',provider),lab('Currency',currency),lab('Provider transaction type',kind),lab('Amount',amount)),
   div('formrow',lab('Evidence reference',reference),lab('Reason',reason)),div('formrow',save,refresh),body,div('formrow',prev,next));main.append(card);load();
  foregroundRefresh(card,15000,load,()=>!card.closest('[hidden]')&&!busy);
 }
