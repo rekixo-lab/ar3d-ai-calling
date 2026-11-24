@@ -314,12 +314,12 @@ export async function handleCreditWalletRequest(req,env,user,{fetcher=fetch}={})
    if(!await currentMfa(env,user))return fail('current MFA Super Admin required',403);
    const keys=[...url.searchParams.keys()],tid=url.searchParams.get('tenantId'),kind=url.searchParams.get('kind')||'all',offset=url.searchParams.get('offset')||'0';
    if(keys.some(k=>!['tenantId','kind','offset'].includes(k)||url.searchParams.getAll(k).length!==1)||
-      (tid!==null&&!uuid.test(tid))||!['all','allocation','recovery','call_reversal','reserved','settled','released'].includes(kind)||!/^\d{1,6}$/.test(offset))return fail('invalid transaction filter',400);
+      (tid!==null&&!uuid.test(tid))||!['all','allocation','recovery','call_reversal','purchase','reserved','settled','released'].includes(kind)||!/^\d{1,6}$/.test(offset))return fail('invalid transaction filter',400);
    // One row per actual immutable ledger adjustment or call reservation.
    // Settlement is a state of that reservation, not a second debit.
    const rows=(await db.prepare(`WITH entries AS (
     SELECT l.tenant_id AS tenantId,l.id AS reference,l.created_at AS createdAt,NULL AS closedAt,
-     CASE WHEN l.id LIKE 'call-reversal:%' THEN 'call_reversal' ELSE l.kind END AS kind,
+     CASE WHEN l.id LIKE 'call-reversal:%' THEN 'call_reversal' WHEN l.id LIKE 'purchase:%' THEN 'purchase' ELSE l.kind END AS kind,
      l.delta_seconds AS deltaSeconds,l.balance_seconds AS allocatedBalanceSeconds,NULL AS reservedSeconds,NULL AS chargedSeconds
      FROM tenant_minute_ledger l WHERE (? IS NULL OR l.tenant_id=?)
     UNION ALL
@@ -343,9 +343,10 @@ export async function handleCreditWalletRequest(req,env,user,{fetcher=fetch}={})
    const [clients,sessions,transactions,funding]=await Promise.all([
     db.prepare("SELECT COUNT(*) AS total,COALESCE(SUM(CASE WHEN status='active' THEN 1 ELSE 0 END),0) AS active FROM tenants").first(),
     db.prepare("SELECT COALESCE(SUM(CASE WHEN job_id IS NULL THEN 1 ELSE 0 END),0) AS internalEnded,COALESCE(SUM(CASE WHEN job_id IS NOT NULL THEN 1 ELSE 0 END),0) AS campaignEnded FROM scripted_phone_pilots WHERE hangup_at IS NOT NULL").first(),
-    db.prepare("SELECT l.created_at AS createdAt,t.display_name AS company,CASE WHEN l.id LIKE 'call-reversal:%' THEN 'call_reversal' ELSE l.kind END AS kind,l.delta_seconds AS deltaSeconds,l.balance_seconds AS balanceSeconds FROM tenant_minute_ledger l JOIN tenants t ON t.id=l.tenant_id ORDER BY l.sequence DESC LIMIT 10").all(),fundingPosition(db,fundingCap(env))
+    db.prepare("SELECT l.created_at AS createdAt,t.display_name AS company,CASE WHEN l.id LIKE 'call-reversal:%' THEN 'call_reversal' WHEN l.id LIKE 'purchase:%' THEN 'purchase' ELSE l.kind END AS kind,l.delta_seconds AS deltaSeconds,l.balance_seconds AS balanceSeconds FROM tenant_minute_ledger l JOIN tenants t ON t.id=l.tenant_id ORDER BY l.sequence DESC LIMIT 10").all(),fundingPosition(db,fundingCap(env))
    ]);
-   return json({clients,funding:{...funding,reviewedProviderCeilings:providerFundingCaps(env)},position:{...position,uncommittedSeconds:position.allocatedSeconds-position.heldSeconds-position.usedSeconds},internal:{ended:sessions.internalEnded},campaign:{ended:sessions.campaignEnded},transactions:transactions.results,providerRequests:0,externalPaymentsRecorded:false,dispatchEnabledByDashboard:false});
+   const purchases=await db.prepare('SELECT COUNT(*) AS count,COALESCE(SUM(paid_paise),0) AS collectedPaise,COALESCE(SUM(purchased_seconds),0) AS purchasedSeconds FROM tenant_credit_purchases').first();
+   return json({clients,purchases,funding:{...funding,reviewedProviderCeilings:providerFundingCaps(env)},position:{...position,uncommittedSeconds:position.allocatedSeconds-position.heldSeconds-position.usedSeconds},internal:{ended:sessions.internalEnded},campaign:{ended:sessions.campaignEnded},transactions:transactions.results,providerRequests:0,externalPaymentsRecorded:purchases.count>0,dispatchEnabledByDashboard:false});
   }
   if(path==='reverse-call-charge'){
    if(req.method!=='POST')return fail('method not allowed',405);
@@ -377,6 +378,32 @@ export async function handleCreditWalletRequest(req,env,user,{fetcher=fetch}={})
    if(Number(inserted.meta.changes)!==1){const old=await lookup();return old?replay(old):fail('balance changed; refresh before reversing',409)}
    return json({transactionId:id,creditedSeconds:h.charged,allocatedSeconds:next,replayed:false},201);
   }
+  if(path==='client-purchase'){
+   if(req.method!=='POST')return fail('method not allowed',405);
+   if(!await currentMfa(env,user)||!mutationOriginAllowed(req))return fail('current MFA Super Admin and same origin required',403);
+   if(url.search)return fail('unsupported query',400);
+   const d=await boundedBody(req);
+   if(!d||Object.keys(d).sort().join(',')!=='expectedBalanceSeconds,id,paidPaise,purchasedSeconds,receiptRef,tenantId'||
+    !uuid.test(d.id||'')||!uuid.test(d.tenantId||'')||!Number.isSafeInteger(d.paidPaise)||d.paidPaise<1||d.paidPaise>1000000000||
+    !Number.isSafeInteger(d.purchasedSeconds)||d.purchasedSeconds<60||d.purchasedSeconds>999999960||d.purchasedSeconds%60!==0||
+    !Number.isSafeInteger(d.expectedBalanceSeconds)||d.expectedBalanceSeconds<0||d.expectedBalanceSeconds+d.purchasedSeconds>1000000000||
+    typeof d.receiptRef!=='string'||!/^[A-Za-z0-9][A-Za-z0-9._:/-]{3,119}$/.test(d.receiptRef))return fail('invalid purchase');
+   const ref=d.receiptRef.toUpperCase();
+   const lookup=()=>db.prepare('SELECT * FROM tenant_credit_purchases WHERE id=? OR receipt_ref=? LIMIT 2').bind(d.id,ref).all();
+   const replay=rows=>rows.length===1&&rows[0].id===d.id&&rows[0].tenant_id===d.tenantId&&rows[0].receipt_ref===ref&&rows[0].paid_paise===d.paidPaise&&rows[0].purchased_seconds===d.purchasedSeconds&&rows[0].previous_seconds===d.expectedBalanceSeconds&&rows[0].actor===user.id;
+   const reply=(replayed)=>json({transactionId:'purchase:'+d.id,allocatedSeconds:d.expectedBalanceSeconds+d.purchasedSeconds,replayed,dispatchEnabled:false},replayed?200:201);
+   const old=(await lookup()).results;
+   if(old.length)return replay(old)?reply(true):fail('receipt already recorded or conflicting purchase',409);
+   // One insert invokes the allocation trigger. A stale balance or any
+   // allocation failure rolls back the purchase as well.
+   const result=await db.prepare(`INSERT INTO tenant_credit_purchases(id,tenant_id,receipt_ref,paid_paise,purchased_seconds,previous_seconds,actor,created_at)
+     SELECT ?,id,?,?,?,?,?,? FROM tenants WHERE id=? AND status IN ('trial','active')
+     AND COALESCE((SELECT balance_seconds FROM tenant_minute_ledger WHERE tenant_id=tenants.id ORDER BY sequence DESC LIMIT 1),0)=?
+     AND NOT EXISTS(SELECT 1 FROM tenant_credit_purchases WHERE id=? OR receipt_ref=?)`)
+     .bind(d.id,ref,d.paidPaise,d.purchasedSeconds,d.expectedBalanceSeconds,user.id,new Date().toISOString(),d.tenantId,d.expectedBalanceSeconds,d.id,ref).run();
+   if(result.meta.changes!==1){const rows=(await lookup()).results;return replay(rows)?reply(true):fail('receipt already recorded or balance changed; refresh',409);}
+   return reply(false);
+  }
   if(path==='minute-ledger'){
    const isAdmin=user?.globalRole==='super_admin';
    if(isAdmin&&!await currentMfa(env,user))return fail('current MFA Super Admin required',403);
@@ -386,7 +413,9 @@ export async function handleCreditWalletRequest(req,env,user,{fetcher=fetch}={})
     const t=isAdmin?await tenant(env,tid):await requireMembership(db,user,tid,true);
     if(!t)return fail(isAdmin?'tenant not found':'forbidden',isAdmin?404:403);
     // Single SELECT gives a consistent balance and history snapshot.
-    const rows=(await db.prepare(`SELECT id AS transactionId,CASE WHEN id LIKE 'call-reversal:%' THEN 'call_reversal' ELSE kind END AS kind,delta_seconds AS deltaSeconds,previous_seconds AS previousSeconds,balance_seconds AS balanceSeconds,created_at AS createdAt${isAdmin?',actor,reason':''},
+    const rows=(await db.prepare(`SELECT id AS transactionId,CASE WHEN id LIKE 'call-reversal:%' THEN 'call_reversal' WHEN id LIKE 'purchase:%' THEN 'purchase' ELSE kind END AS kind,delta_seconds AS deltaSeconds,previous_seconds AS previousSeconds,balance_seconds AS balanceSeconds,created_at AS createdAt${isAdmin?',actor,reason':''},
+     (SELECT p.paid_paise FROM tenant_credit_purchases p WHERE p.tenant_id=tenant_minute_ledger.tenant_id AND 'purchase:'||p.id=tenant_minute_ledger.id) AS paidPaise,
+     (SELECT p.receipt_ref FROM tenant_credit_purchases p WHERE p.tenant_id=tenant_minute_ledger.tenant_id AND 'purchase:'||p.id=tenant_minute_ledger.id) AS receiptRef,
      (SELECT balance_seconds FROM tenant_minute_ledger WHERE tenant_id=? ORDER BY sequence DESC LIMIT 1) AS currentBalance
      FROM tenant_minute_ledger WHERE tenant_id=? ORDER BY sequence DESC LIMIT 51 OFFSET ?`).bind(tid,tid,Number(offset)).all()).results;
     const position=await minutePosition(db,tid);

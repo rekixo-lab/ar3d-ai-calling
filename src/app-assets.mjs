@@ -527,13 +527,16 @@ async function adminDashboard(main,openView){
     div('chart-grid',
      countChart('Credit position · recorded seconds',[['Used',p.usedSeconds],['Reserved',p.heldSeconds],['Uncommitted',p.uncommittedSeconds]],formatSeconds),
      countChart('Ended calls · recorded counts',[['Internal tests',d.internal.ended],['Campaign calls',d.campaign.ended]])),
+    title('Client payment records','h3'),
+    div('overview-grid',overviewMetric('Recorded collections',Number.isSafeInteger(d.purchases?.collectedPaise)?'₹'+(d.purchases.collectedPaise/100).toFixed(2):'Unavailable','wallet'),overviewMetric('Purchased minutes',formatSeconds(d.purchases?.purchasedSeconds),'receipt')),
+    node('p',{class:'muted',text:'Recorded external collections, not recognized revenue or profit.'}),
     title('Funding review','h3'),
     div('overview-grid',overviewMetric('Reviewed cumulative capacity',formatSeconds(d.funding?.capSeconds),'wallet'),overviewMetric('Remaining funded capacity',formatSeconds(d.funding?.remainingFundedSeconds),'wallet'),overviewMetric('Unbacked allocations',formatSeconds(d.funding?.unbackedAllocationSeconds),'receipt')),
     div('overview-grid',overviewMetric('Plivo reviewed ceiling',formatSeconds(d.funding?.reviewedProviderCeilings?.plivo),'phone'),overviewMetric('Sarvam reviewed ceiling',formatSeconds(d.funding?.reviewedProviderCeilings?.sarvam),'spark')),
     node('p',{class:'note',text:'Independent reviewed lifetime capacity ceilings, not live cash balances. Either missing ceiling or exhausted capacity blocks new campaigns.'}),
     title('Recent credit adjustments','h3'),
     table(['Date (IST)','Company','Adjustment','Minutes','Balance'],d.transactions.map(t=>[formatIst(t.createdAt),t.company,t.kind,String(t.deltaSeconds/60),formatSeconds(t.balanceSeconds)])),
-    node('p',{class:'note',text:'Uncommitted credits are ledger balances, not carrier funds or authorization to dial. External payments and revenue are not recorded here.'}));
+    node('p',{class:'note',text:'Uncommitted credits are ledger balances, not carrier funds or authorization to dial. External payment records are manual; revenue and margin are not inferred.'}));
   }catch(e){providers.setClients(null);freshness.textContent='Update unavailable';body.replaceChildren(node('p',{class:'err',text:'Dashboard unavailable. Refresh after signing in with current MFA.'}));}
   finally{refresh.disabled=false}
  }
@@ -677,7 +680,7 @@ function downloadReportCsv(filename,headers,rows){
 }
 function adminTransactionExplorer(main){
  const card=div('card',title('All credit transactions')),body=div('stack');
- const kind=node('select',{class:'field','aria-label':'Transaction type'},[['all','All transactions'],['allocation','Allocations'],['recovery','Recoveries'],['call_reversal','Returned minutes'],['reserved','Pending holds'],['settled','Settled calls'],['released','Released holds']].map(([value,text])=>node('option',{value,text})));
+ const kind=node('select',{class:'field','aria-label':'Transaction type'},[['all','All transactions'],['allocation','Allocations'],['purchase','Paid purchases'],['recovery','Recoveries'],['call_reversal','Returned minutes'],['reserved','Pending holds'],['settled','Settled calls'],['released','Released holds']].map(([value,text])=>node('option',{value,text})));
  let offset=0,version=0,rows=[];
  const headers=['Created (IST)','Company','Reference','Type','Adjustment seconds','Allocated balance seconds','Reserved seconds','Charged seconds','Closed (IST)'];
  const values=x=>[formatIst(x.createdAt),x.company,x.reference,x.kind,x.deltaSeconds,x.allocatedBalanceSeconds,x.reservedSeconds,x.chargedSeconds,x.closedAt?formatIst(x.closedAt):null];
@@ -770,7 +773,7 @@ function manualMinuteLedger(main,tenantId,admin,onBalance=()=>{},registerRefresh
  let balance=null,uncommitted=null,offset=0,seq=0,pending=null,busy=false;
  const refresh=btn('Refresh credits',()=>load().catch(asError),true),prev=btn('Previous',()=>{offset=Math.max(0,offset-50);load().catch(asError)},true),next=btn('Next',()=>{offset+=50;load().catch(asError)},true);
  const submit=btn('Save credit adjustment',async()=>{
-  if(busy||balance===null)return;
+  if(busy||balance===null||purchasePending)return;
   if(!pending){
    if(!minutes.checkValidity()||!reason.checkValidity()||reason.value.trim().length<10){notice('Enter whole minutes and a reason of at least 10 characters.',true);return}
    const delta=Number(minutes.value)*60*Number(mode.value);
@@ -783,6 +786,27 @@ function manualMinuteLedger(main,tenantId,admin,onBalance=()=>{},registerRefresh
   catch(e){asError(e);notice('Adjustment not confirmed. Retry the same transaction or refresh after checking history.',true)}
   finally{busy=false;submit.disabled=balance===null}
  });
+ const paid=input('purchasePaid','text','Amount received (INR)'),purchased=input('purchaseMinutes','number','Calling minutes'),receipt=input('purchaseReceipt','text','Unique external receipt reference');
+ paid.inputMode='decimal';purchased.min='1';purchased.max='16666666';purchased.step='1';receipt.maxLength=120;
+ let purchasePending=null;
+ const purchase=btn('Record payment & allocate credits',async()=>{
+  if(busy||balance===null||pending)return;
+  if(!purchasePending){
+   const raw=paid.value.trim(),ref=receipt.value.trim();
+   if(!/^\d{1,8}(?:\.\d{1,2})?$/.test(raw)||!purchased.checkValidity()||!/^[A-Za-z0-9][A-Za-z0-9._:/-]{3,119}$/.test(ref)){notice('Enter the received INR amount, whole minutes and unique receipt reference.',true);return;}
+   const [whole,frac='']=raw.split('.'),paise=Number(whole)*100+Number(frac.padEnd(2,'0'));
+   const seconds=Number(purchased.value)*60;
+   if(paise<1||paise>1000000000||seconds<60||balance+seconds>1000000000){notice('Purchase amount or minutes out of range.',true);return;}
+   if(!confirm('Confirm externally received payment of ₹'+(paise/100).toFixed(2)+' for '+seconds/60+' calling minutes? No online payment will occur.'))return;
+   purchasePending={tenantId,id:crypto.randomUUID(),paidPaise:paise,purchasedSeconds:seconds,expectedBalanceSeconds:balance,receiptRef:ref};
+  }
+  busy=true;purchase.disabled=submit.disabled=true;
+  try{await api('/v1/human/credits/client-purchase','POST',purchasePending);purchasePending=null;paid.value=purchased.value=receipt.value='';offset=0;await load();notice('Payment recorded and credits allocated.');}
+  catch(e){asError(e);notice('Purchase not confirmed. Retry the same receipt or check history before clearing.',true);}
+  finally{busy=false;purchase.disabled=submit.disabled=balance===null;}
+ });
+ const clearPurchase=btn('Clear pending purchase & refresh',()=>{if(busy)return;if(purchasePending&&!confirm('Check credit history before clearing the pending receipt. Continue?'))return;purchasePending=null;offset=0;load().catch(asError)},true);
+ if(admin)form.append(title('Record client purchase','h3'),node('p',{class:'muted',text:'Confirm payment outside AR3D first. One receipt grants minutes once. No expiry or automatic payment.'}),div('formrow',lab('Received INR',paid),lab('Purchased calling minutes',purchased),lab('Payment receipt reference',receipt)),div('formrow',purchase,clearPurchase));
  const reset=btn('Clear pending adjustment & refresh',()=>{if(busy)return;if(pending&&!confirm('Check transaction history before creating another adjustment. Clear this pending request?'))return;pending=null;offset=0;load().catch(asError)},true);
  if(admin)form.append(div('formrow',lab('Adjustment',mode),lab('Whole calling minutes',minutes),lab('Audit reason',reason)),div('formrow',submit,reset));
  async function reverseCall(h){
@@ -802,14 +826,14 @@ function manualMinuteLedger(main,tenantId,admin,onBalance=()=>{},registerRefresh
    const metric=(name,value)=>div('card metric',node('span',{class:'muted',text:name}),node('strong',{text:formatSeconds(value)}));
    body.replaceChildren(div('metrics',metric('Net allocated',balance),metric('Reserved',d.heldSeconds),metric('Used',d.usedSeconds),metric('Uncommitted',d.uncommittedSeconds),metric('Funding-checked minutes',d.spendableSeconds)),
     node('p',{class:'note',text:'Funding-checked minutes are a current snapshot, not a reservation or permission for a specific customer. Independent telecom clearance and dispatch limits still apply. No online payments.'}),
-    title('Credit adjustments','h3'),table(['Date (IST)','Transaction ID','Type','Change (min)','Before','After',...(admin?['Actor','Reason']:[])],d.transactions.map(t=>[formatIst(t.createdAt),t.transactionId,t.kind,(t.deltaSeconds>0?'+':'')+String(t.deltaSeconds/60),formatSeconds(t.previousSeconds),formatSeconds(t.balanceSeconds),...(admin?[t.actor,t.reason]:[])])),
+    title('Credit adjustments','h3'),table(['Date (IST)','Transaction ID','Type','Change (min)','Before','After','Payment (INR)','Receipt',...(admin?['Actor','Reason']:[])],d.transactions.map(t=>[formatIst(t.createdAt),t.transactionId,t.kind,(t.deltaSeconds>0?'+':'')+String(t.deltaSeconds/60),formatSeconds(t.previousSeconds),formatSeconds(t.balanceSeconds),Number.isSafeInteger(t.paidPaise)?'₹'+(t.paidPaise/100).toFixed(2):'—',t.receiptRef||'—',...(admin?[t.actor,t.reason]:[])])),
     title('Call credit history','h3'),table(['Created (IST)','Call reference','Status','Reserved','Charged','Returned','Closed (IST)',...(admin?['Action']:[])],(d.callTransactions||[]).map(h=>[formatIst(h.createdAt),h.jobId,h.state,formatSeconds(h.reservedSeconds),formatSeconds(h.chargedSeconds),formatSeconds(h.reversedSeconds),h.closedAt?formatIst(h.closedAt):'—',...(admin?[h.state==='settled'&&h.chargedSeconds>0&&!h.reversedSeconds?btn('Reverse charge',()=>reverseCall(h),true):'—']:[])])));
    prev.disabled=offset===0;next.disabled=!d.hasMore;
   }catch(e){if(id===seq){balance=null;uncommitted=null;onBalance(null);body.replaceChildren(node('p',{class:'err',text:'Credit ledger unavailable. Refresh to retry.'}))}throw e}
   finally{if(id===seq){refresh.disabled=false;submit.disabled=busy||balance===null}}
  }
  panel.append(body,form,div('formrow',refresh,prev,next));main.append(panel);
- const refreshVisible=()=>{if(!refresh.disabled&&!busy&&!pending)return load().catch(asError)};
+ const refreshVisible=()=>{if(!refresh.disabled&&!busy&&!pending&&!purchasePending)return load().catch(asError)};
  registerRefresh(refreshVisible);
  if(admin)foregroundRefresh(panel,15000,refreshVisible,()=>!panel.closest('[hidden]'));
  return load().catch(asError);
