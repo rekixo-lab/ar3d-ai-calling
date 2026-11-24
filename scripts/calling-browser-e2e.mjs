@@ -152,6 +152,17 @@ try{
  await page.getByText('3BHK',{exact:true}).waitFor();
  assert.equal(await page.getByRole('row',{name:/Fictional buyer/}).count(),0);
  await page.screenshot({path:'artifacts/calling-results-'+viewport.width+'.png',fullPage:true});
+ // A review snapshot is shown separately from a completed CRM save.
+ f.r.db.prepare("UPDATE scripted_call_results SET answers_json=?,saved_to_lead=0 WHERE tenant_id=? AND job_id=?")
+  .run(JSON.stringify({propertyType:'flat',location:'Raipur',__partial:true}),tid,job);
+ f.r.db.prepare("UPDATE calling_jobs SET state='failed',provider_status='needs_review' WHERE tenant_id=? AND id=?").run(tid,job);
+ await page.getByRole('button',{name:'Close answers'}).click();
+ await page.getByRole('button',{name:'Refresh customer answers'}).click();
+ await page.getByRole('row',{name:/Uploaded buyer.*Partial · review needed/}).waitFor();
+ await page.getByRole('button',{name:'View partial answers'}).click();
+ await page.getByText(/Incomplete conversation. Only accepted answers/).waitFor();
+ await page.getByRole('heading',{name:'Uploaded buyer — partial call answers'}).waitFor();
+ await page.screenshot({path:'artifacts/partial-crm-'+viewport.width+'.png',fullPage:true});
  assert.deepEqual(errors,[]);await context.close();
  console.log('Calling UI '+viewport.width+': CSV-only campaign, disabled calling guard, saved answers in Results / CRM PASS');
  }
