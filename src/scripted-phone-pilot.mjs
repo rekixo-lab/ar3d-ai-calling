@@ -612,6 +612,17 @@ async function probeInternalRecording(env,config,fetcher){
  }catch{return {...result,state:'media_downloaded',stt:'service_failed'}}
 }
 
+// Same authenticated, call-scoped listing that passed the saved-recording
+// production diagnostic. Never use the URL of a different answer or call.
+async function resolveRecordedAnswerUrl(config,row,recording,fetcher){
+ const listed=await providerMetadata(config,'Recording/?call_uuid='+encodeURIComponent(row.provider_call_id)+'&limit=20',fetcher);
+ const matches=Array.isArray(listed.body?.objects)?listed.body.objects.filter(x=>x?.call_uuid===row.provider_call_id&&x.recording_id===recording):[];
+ if(matches.length>1)return null;
+ if(matches.length===1)return verifiedRecordingUrl(config,row,recording,matches[0]);
+ // The list can lag immediately after the recording callback.
+ const one=await providerMetadata(config,'Recording/'+recording+'/',fetcher);
+ return verifiedRecordingUrl(config,row,recording,one.body);
+}
 async function recordingAnswer(config,env,row,params,fetcher){
  if(!ID.test(params.get('RecordingID')||''))return {text:null,reason:'recording_id_missing'};
  const recording=params.get('RecordingID');
@@ -629,8 +640,7 @@ async function recordingAnswer(config,env,row,params,fetcher){
    reason='recording_http_'+(Number.isInteger(response.status)?response.status:'unknown');
    const transient=[404,409,425,429,500,502,503,504].includes(response.status);
    if(response.status===403&&attempt===0){
-    const metadata=await providerMetadata(config,'Recording/'+recording+'/',fetcher);
-    const verified=verifiedRecordingUrl(config,row,recording,metadata.body);
+    const verified=await resolveRecordedAnswerUrl(config,row,recording,fetcher);
     if(!verified||verified==='https://media.plivo.com/v1/Account/'+config.authId+'/Recording/'+recording+'.mp3')return {text:null,reason:'recording_http_403'};
     try{await response.body?.cancel()}catch{}
     response=await fetcher(verified,{headers:{Authorization:config.authorization},redirect:'manual',signal:AbortSignal.timeout(2500)});
