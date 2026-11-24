@@ -36,10 +36,23 @@ function cleaned(input){
      /[\u0000-\u001f\u007f]/u.test(input))throw Error('invalid voice preview answer');
   return digits(input.trim());
 }
+// Normalize only explicit conversational wrappers; never geocode, translate,
+// infer a city from an area, or choose between alternatives.
 function smallText(str,field){
-  const value=str.replace(/^[।.!?\s]+|[।.!?\s]+$/g,'').trim();
-  if(NON_ANSWER.test(value)||NOT_HEARD.test(value)||MISUNDERSTOOD.test(value))
-    throw Error('not a location or area answer; repeat or review');
+  const raw=str.normalize('NFC').trim();
+  if(/[?？]/u.test(raw)||/(?:\b(?:where|which|what|how much|how many|tell me|do you have|is there)\b|कहाँ|कहां|कौन\s*सा|कौन\s*सी|कितना|कितनी|क्या\s+(?:है|आपके|मिलेगा|मिलता|मिलेंगे))/iu.test(raw))
+    throw Error('conflicting question, not a location answer; repeat or review');
+  if(/(?:\s(?:या|अथवा|or)\s|\/)/iu.test(raw))
+    throw Error('conflicting location choices; repeat or review');
+  let value=raw.replace(/^[।.!\s]+|[।.!\s]+$/g,'').trim().replace(/\s+/gu,' ');
+  value=value.replace(/^(?:(?:जी|हाँ|हां|मुझे|हमको|हमें|मैं|i want|i need|i prefer|looking for)\s+)+/iu,'')
+    .replace(/^(?:(?:शहर|लोकेशन|city|location|एरिया|इलाका|area|neighborhood)\s*[:：]\s*|(?:शहर|लोकेशन|city|location|एरिया|इलाका|area|neighborhood)\s+)/iu,'')
+    .replace(/\s+(?:(?:में|मे)\s+)?(?:चाहिए|चाहिये|देख रहा हूँ|देख रही हूँ|लेना है|please)$/iu,'')
+    .replace(/\s+(?:में|मे)$/u,'').trim();
+  if(NON_ANSWER.test(value)||NOT_HEARD.test(value)||MISUNDERSTOOD.test(value)||
+    /^(?:कहीं भी|कोई भी|anywhere|any location|any area|not decided|अभी तय नहीं|अभी नहीं|बताऊंगा|बाद में)$/iu.test(value)||
+    !/[\p{L}]/u.test(value))
+    throw Error('conflicting non-specific location answer; repeat or review');
   if(value.length<2||value.length>120)throw Error('unclear '+field+'; repeat or review');
   return value;
 }
