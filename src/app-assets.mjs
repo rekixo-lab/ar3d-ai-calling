@@ -2,7 +2,7 @@ export const html=`<!doctype html><html lang="en"><head><meta charset="utf-8"><m
 export {css} from './dashboard-styles.mjs';
 export const js=String.raw`'use strict';
 const root=document.getElementById('app');
-const state={me:null,tenant:null,notice:'',clientTab:'customers',clientSetTab:null};
+const state={me:null,tenant:null,notice:'',clientTab:'home',clientSetTab:null};
 const node=(tag,props={},children=[])=>{const n=document.createElement(tag);for(const [k,v] of Object.entries(props)){if(k==='class')n.className=v;else if(k==='value')n.value=v;else if(k==='type')n.type=v;else if(k==='onclick')n.addEventListener('click',v);else if(k==='onsubmit')n.addEventListener('submit',v);else if(k==='text')n.textContent=v;else n.setAttribute(k,String(v))}for(const ch of (Array.isArray(children)?children:[children])){if(ch!==null&&ch!==undefined)n.append(ch instanceof Node?ch:document.createTextNode(String(ch)))}return n};
 const div=(className,...ch)=>node('div',{class:className},ch);
 const iconPaths={wallet:'M20 8V6a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h15v-4 M3 8h17a2 2 0 0 1 2 2v4a2 2 0 0 1-2 2h-5a4 4 0 0 1 0-8h5 M16 12h.01',clock:'M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20 M12 6v6l4 2',receipt:'M4 3l3 2 3-2 3 2 3-2 4 2v16l-4-2-3 2-3-2-3 2-3-2z M8 9h8 M8 13h8 M8 17h4',chart:'M3 3v18h18 M7 16v-4 M12 16V7 M17 16V4',grid:'M3 3h7v7H3z M14 3h7v7h-7z M3 14h7v7H3z M14 14h7v7h-7z',users:'M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2 M16 3a4 4 0 0 1 0 8 M22 21v-2a4 4 0 0 0-3-3.87 M13 7a4 4 0 1 1-8 0 4 4 0 0 1 8 0',phone:'M22 16.92v3a2 2 0 0 1-2.18 2A19.79 19.79 0 0 1 3.09 5.18 2 2 0 0 1 5.08 3h3a2 2 0 0 1 2 1.72c.13.96.36 1.9.69 2.79a2 2 0 0 1-.45 2.11L9.05 10.9a16 16 0 0 0 4.05 4.05l1.27-1.27a2 2 0 0 1 2.11-.45c.89.33 1.83.56 2.79.69A2 2 0 0 1 22 16.92',shield:'M12 22s8-4 8-11V5l-8-3-8 3v6c0 7 8 11 8 11 M9 12l2 2 4-4',mail:'M4 4h16a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2 M22 6l-10 7L2 6',settings:'M4 7h16 M4 17h16 M8 4v6 M16 14v6',upload:'M12 16V3 M7 8l5-5 5 5 M3 16v4a1 1 0 0 0 1 1h16a1 1 0 0 0 1-1v-4',plus:'M12 5v14 M5 12h14',arrow:'M5 12h14 M13 6l6 6-6 6',logout:'M9 21H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h5 M16 17l5-5-5-5 M21 12H9',spark:'m12 3 2.7 6.3L21 12l-6.3 2.7L12 21l-2.7-6.3L3 12l6.3-2.7L12 3',calendar:'M4 5h16v16H4z M16 3v4 M8 3v4 M4 11h16',play:'m8 5 11 7-11 7V5',pause:'M8 5v14 M16 5v14',refresh:'M20 7v5h-5 M4 17v-5h5 M6.1 7a7 7 0 0 1 11.6-2L20 8 M4 16l2.3 3a7 7 0 0 0 11.6-2',search:'M21 21l-5-5 M18 10a8 8 0 1 1-16 0 8 8 0 0 1 16 0',file:'M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z M14 2v6h6 M8 13h8 M8 17h5'};
@@ -149,7 +149,7 @@ function inviteView(token){
 }
 async function logout(){
  try{await api('/v1/human/logout','POST',{})}
- finally{state.me=null;state.clientTab='customers';state.adminTab='clients';state.importCampaign=null;openSignIn()}
+ finally{state.me=null;state.clientTab='home';state.adminTab='clients';state.importCampaign=null;openSignIn()}
 }
 function scriptedPhonePilotPanel(){
   const card=div('card',title('Internal phone test'));
@@ -280,7 +280,9 @@ function scriptedPhonePilotPanel(){
   }
   enrollment.hidden=true;device.addEventListener('change',updateAvailability);
   card.append(status,prepare,prepared,enrollment,div('formrow',lab('Internal test number',device),lab('Recorded prompt language',language),lab('Speech recognition engine',engine),lab('Internal answer timing',timing),call,
-    btn('Refresh fixed-question pilot status',()=>refresh().catch(asError),true)),cooldown,results,verifyResult,verifiedReport,sarvamProbe,sarvamReport,listen,listenReport);
+    btn('Refresh fixed-question pilot status',()=>refresh().catch(asError),true)),cooldown,results,
+    node('details',{class:'card tools'},[node('summary',{text:'Test tools · verify last call, Sarvam check, listen to answer'}),
+     div('row',verifyResult,sarvamProbe,listen),verifiedReport,sarvamReport,listenReport]));
   refresh().catch(()=>{status.textContent='Pilot status requires a current MFA Super Admin session.'});
   return card;
 }
@@ -296,6 +298,7 @@ function dashboard(){
   ['company','Company details','building','Manage company information and client requests.'],
   ['security','Security','shield','Manage two-factor authentication and recovery codes.']
  ]:[
+  ['home','Home','grid','Your minutes, customers and what needs attention today.'],
   ['customers','Customers / Excel','users','Import customers and prepare a calling campaign.'],
   ['ai-test','AI Testing','spark','Practice the seven fixed questions without a phone call or CRM update.'],
   ['calling','Calling','phone','Review your campaign and start or pause approved calls.'],
@@ -361,9 +364,11 @@ function dashboard(){
    areas.set(key,area);main.append(area);
   }
  }
- if(admin)openView(items.some(x=>x[0]===location.hash.slice(1))?location.hash.slice(1):state.adminTab||'clients');
+ const hashTab=location.hash.slice(1);
+ if(admin)openView(items.some(x=>x[0]===hashTab)?hashTab:state.adminTab||'clients');
  else{
-  openView(state.clientTab||'customers');
+  if(items.some(x=>x[0]===hashTab))state.clientTab=hashTab;
+  openView(state.clientTab||'home');
   if(state.me.tenants.length)clientPanel(main,openView);
   else main.append(div('card',title('No company assigned'),node('p',{class:'muted',text:'Ask your administrator to invite this email address.'})));
  }
@@ -425,12 +430,12 @@ function providerBalancePanel(openView){
  sarvam.append(node('p',{class:'muted',text:'Check your organisation’s Credits Left in Sarvam Settings → Billing. No estimated balance is displayed.'}),
   node('a',{class:'provider-link',href:'https://dashboard.sarvam.ai/',target:'_blank',rel:'noopener noreferrer',text:'Open Sarvam dashboard'}));
  const clients=overviewMetric('Client allocated minutes','Loading…','users');
- const clientRemaining=node('p',{class:'muted',text:'Uncommitted: Loading…'});
+ const clientRemaining=node('p',{class:'muted',text:'Left with clients: Loading…'});
  clients.append(clientRemaining,btn('Manage client credits',()=>openView('wallet',{focus:true,resetScroll:true}),true));
  function setClients(position){
   const fmt=v=>Number.isSafeInteger(v)&&v>=0?formatSeconds(v):'Unavailable';
   clients.querySelector('strong').textContent=fmt(position?.allocatedSeconds);
-  clientRemaining.textContent='Uncommitted: '+fmt(position?.uncommittedSeconds);
+  clientRemaining.textContent='Left with clients: '+fmt(position?.uncommittedSeconds);
  }
  async function load(){
   if(refresh.disabled)return;
@@ -459,7 +464,7 @@ async function adminDashboard(main,openView){
  const panel=div('card',title('Business overview')),body=div('stack');
  const refresh=btn('Refresh dashboard',()=>{providers.load();load()},true);
  const freshness=node('p',{class:'muted',role:'status',text:'Updating…'});
- panel.append(div('row between',node('p',{class:'muted',text:'Recorded credits and calls · refreshes every 15 seconds while open.'}),refresh),freshness,body);
+ panel.append(div('row between',freshness,refresh),body);
  const providers=providerBalancePanel(openView);
  main.append(providers.panel,panel);
  async function load(){
@@ -471,24 +476,34 @@ async function adminDashboard(main,openView){
    const p=d.position;
    providers.setClients(p);
    freshness.textContent='Updated '+formatIst(new Date().toISOString());
-   body.replaceChildren(div('overview-grid',
+   const blocked=(d.providerSafety||[]).filter(x=>x.blocked);
+   const q=d.settlementQueue||{};
+   const attention=[
+    ...blocked.map(x=>(x.provider==='plivo'?'Plivo':'Sarvam')+' is blocked ('+x.code+'). New client calls are stopped.'),
+    ...(q.missingSession>0?[q.missingSession+' call(s) need settlement review.']:[]),
+    ...(q.endedAwaitingReview>0?[q.endedAwaitingReview+' ended call(s) waiting for charge check.']:[]),
+    ...(!d.providerBudget?.configured?['Provider budget not set yet. Client calls stay blocked until it is set.']:[])
+   ];
+   const advanced=node('details',{class:'card advanced-review'},node('summary',{text:'Advanced · provider safety, settlement and funding review'}));
+   if(blocked.length||q.missingSession>0)advanced.open=true;
+   body.replaceChildren(
+    ...(attention.length?[node('section',{class:'chart-panel','aria-label':'Needs attention'},[title('Needs attention','h3'),...attention.map(t=>node('p',{class:'banner err',role:'status',text:t}))])]:[node('p',{class:'note',role:'status',text:'Everything looks fine. No provider block or pending review.'})]),
+    div('overview-grid',
     overviewMetric('Client companies',safeCount(d.clients.total),'users'),
     overviewMetric('Active companies',safeCount(d.clients.active),'users'),
-    overviewMetric('Net allocated',formatSeconds(p.allocatedSeconds),'wallet'),
-    overviewMetric('Reserved',formatSeconds(p.heldSeconds),'clock'),
-    overviewMetric('Used',formatSeconds(p.usedSeconds),'receipt'),
-    overviewMetric('Uncommitted',formatSeconds(p.uncommittedSeconds),'wallet'),
+    overviewMetric('Minutes given to clients',formatSeconds(p.allocatedSeconds),'wallet'),
+    overviewMetric('Minutes used',formatSeconds(p.usedSeconds),'receipt'),
+    overviewMetric('On hold (live calls)',formatSeconds(p.heldSeconds),'clock'),
+    overviewMetric('Minutes left with clients',formatSeconds(p.uncommittedSeconds),'wallet'),
     overviewMetric('Ended internal tests',safeCount(d.internal.ended),'phone'),
     overviewMetric('Ended campaign calls',safeCount(d.campaign.ended),'phone')),
     div('overview-actions',btn('Manage clients',()=>openView('clients',{focus:true,resetScroll:true})),btn('Credit transactions',()=>openView('wallet',{focus:true,resetScroll:true}),true),btn('Calling setup',()=>openView('calling',{focus:true,resetScroll:true}),true)),
-    div('chart-grid',
-     countChart('Credit position · recorded seconds',[['Used',p.usedSeconds],['Reserved',p.heldSeconds],['Uncommitted',p.uncommittedSeconds]],formatSeconds),
-     countChart('Ended calls · recorded counts',[['Internal tests',d.internal.ended],['Campaign calls',d.campaign.ended]])),
-    title('Client payment records','h3'),
-    div('overview-grid',overviewMetric('Outstanding service credits',formatSeconds(p.outstandingSeconds),'wallet')),
-    node('p',{class:'muted',text:'Outstanding includes reserved and uncommitted seconds for all companies, including inactive accounts.'}),
-    div('overview-grid',overviewMetric('Recorded collections',Number.isSafeInteger(d.purchases?.collectedPaise)?'₹'+(d.purchases.collectedPaise/100).toFixed(2):'Unavailable','wallet'),overviewMetric('Purchased minutes',formatSeconds(d.purchases?.purchasedSeconds),'receipt')),
-    node('p',{class:'muted',text:'Recorded external collections, not recognized revenue or profit.'}),
+    title('Client payments','h3'),
+    div('overview-grid',overviewMetric('Payments recorded',Number.isSafeInteger(d.purchases?.collectedPaise)?'₹'+(d.purchases.collectedPaise/100).toFixed(2):'Unavailable','wallet'),overviewMetric('Minutes sold',formatSeconds(d.purchases?.purchasedSeconds),'receipt'),overviewMetric('Minutes still owed to clients',formatSeconds(p.outstandingSeconds),'wallet')),
+    title('Recent credit adjustments','h3'),
+    table(['Date (IST)','Company','Adjustment','Minutes','Balance'],d.transactions.map(t=>[formatIst(t.createdAt),t.company,t.kind,String(t.deltaSeconds/60),formatSeconds(t.balanceSeconds)])),
+    advanced);
+   advanced.append(
     title('Provider safety review','h3'),
     div('overview-grid',...(d.providerSafety||[]).map(p=>overviewMetric(p.provider==='plivo'?'Plivo safety':'Sarvam safety',p.blocked?'Blocked · '+p.code:'No recorded block','shield'))),
     node('p',{class:'note',text:'A provider fault blocks new commercial calls across clients, not existing credit settlement. No recorded fault is not evidence of available funds.'}),
@@ -512,10 +527,7 @@ async function adminDashboard(main,openView){
     title('Funding review','h3'),
     div('overview-grid',overviewMetric('Reviewed cumulative capacity',formatSeconds(d.funding?.capSeconds),'wallet'),overviewMetric('Remaining funded capacity',formatSeconds(d.funding?.remainingFundedSeconds),'wallet'),overviewMetric('Unbacked allocations',formatSeconds(d.funding?.unbackedAllocationSeconds),'receipt')),
     div('overview-grid',overviewMetric('Plivo reviewed ceiling',formatSeconds(d.funding?.reviewedProviderCeilings?.plivo),'phone'),overviewMetric('Sarvam reviewed ceiling',formatSeconds(d.funding?.reviewedProviderCeilings?.sarvam),'spark')),
-    node('p',{class:'note',text:'Independent reviewed lifetime capacity ceilings, not live cash balances. Either missing ceiling or exhausted capacity blocks new campaigns.'}),
-    title('Recent credit adjustments','h3'),
-    table(['Date (IST)','Company','Adjustment','Minutes','Balance'],d.transactions.map(t=>[formatIst(t.createdAt),t.company,t.kind,String(t.deltaSeconds/60),formatSeconds(t.balanceSeconds)])),
-    node('p',{class:'note',text:'Uncommitted credits are ledger balances, not carrier funds or authorization to dial. External payment records are manual; revenue and margin are not inferred.'}));
+    node('p',{class:'note',text:'Independent reviewed lifetime capacity ceilings, not live cash balances. Either missing ceiling or exhausted capacity blocks new campaigns.'}));
   }catch(e){providers.setClients(null);freshness.textContent='Update unavailable';body.replaceChildren(node('p',{class:'err',text:'Dashboard unavailable. Refresh after signing in with current MFA.'}));}
   finally{refresh.disabled=false}
  }
@@ -635,7 +647,7 @@ function minuteUsagePanel(main,tenantId,admin){
     metric('Returned credits',formatSeconds(d.returnedSeconds),'Recorded charge reversals'),
     metric('Verified calls',String(d.verifiedCalls),'Final provider records'),
     metric('Awaiting CDR',String(d.pendingCalls),'Not included in verified totals')),
-    node('p',{class:'note',text:'Connected and billed durations are separate. A provider may bill in increments. A matched held call can settle billed seconds after verification. No online payments or calling approval from this report.'}),
+    node('p',{class:'muted',text:'Provider billed time can be higher than connected time because calls are billed in steps.'}),
     ...(admin&&d.internal?[node('p',{class:'muted',text:'Internal tests (not client charges): '+d.internal.calls+' calls · '+formatSeconds(d.internal.connectedSeconds)+' signed hangup time.'})]:[]),
     title('Call usage records','h3'),table(headers,rows),
     btn('Export call statement (CSV)',()=>downloadReportCsv('ar3d-call-statement-'+offset+'.csv',headers,d.records.map(r=>[...dataRow(r),settlementLabel(r)])),true),
@@ -834,12 +846,15 @@ async function adminMinuteWallet(main){
  company.addEventListener('change',()=>select().catch(asError));
  card.append(div('formrow',lab('Search clients',search),btn('Find company',()=>find().catch(asError),true)),
   lab('Client company',company),detail);main.append(card);
- clientFinancialOverview(main);
- providerUsageOverview(main);
- providerFinancialJournal(main);
  adminTransactionExplorer(main);
  recordedCollectionsPanel(main);
- productionCostPlanner(main);
+ // Provider-side money and planning tools are used rarely; keep them folded.
+ const providerReports=node('details',{class:'card provider-reports'},node('summary',{text:'Provider costs & reports · Plivo spend, provider journal, financial position, cost planner'}));
+ main.append(providerReports);
+ clientFinancialOverview(providerReports);
+ providerUsageOverview(providerReports);
+ providerFinancialJournal(providerReports);
+ productionCostPlanner(providerReports);
  creditWalletOperator(main);
  await find();
 }
@@ -902,8 +917,8 @@ function manualMinuteLedger(main,tenantId,admin,onBalance=()=>{},registerRefresh
   const id=++seq;refresh.disabled=prev.disabled=next.disabled=submit.disabled=purchase.disabled=true;
   try{const d=await api('/v1/human/credits/minute-ledger?'+new URLSearchParams({tenantId,offset:String(offset)}));if(id!==seq)return;balance=d.allocatedSeconds;uncommitted=d.uncommittedSeconds;onBalance(d);
    const metric=(name,value)=>div('card metric',node('span',{class:'muted',text:name}),node('strong',{text:formatSeconds(value)}));
-   body.replaceChildren(div('metrics',metric('Net allocated',balance),metric('Reserved',d.heldSeconds),metric('Used',d.usedSeconds),metric('Uncommitted',d.uncommittedSeconds),metric('Funding-checked minutes',d.spendableSeconds)),
-    node('p',{class:'note',text:'Funding-checked minutes are a current snapshot, not a reservation or permission for a specific customer. Independent telecom clearance and dispatch limits still apply. No online payments.'}),
+   body.replaceChildren(div('metrics',metric('Available minutes',d.uncommittedSeconds),metric('Used minutes',d.usedSeconds),metric('On hold (live calls)',d.heldSeconds),metric('Total minutes received',balance),...(admin?[metric('Callable now',d.spendableSeconds)]:[])),
+    ...(admin?[node('p',{class:'note',text:'Callable now is a current snapshot after provider funding checks, not a reservation for a specific customer. Telecom clearance and dispatch limits still apply.'})]:[]),
     title('Credit adjustments','h3'),table(['Date (IST)','Transaction ID','Type','Change (min)','Before','After','Payment (INR)','Receipt',...(admin?['Actor','Reason']:[])],d.transactions.map(t=>[formatIst(t.createdAt),t.transactionId,t.kind,(t.deltaSeconds>0?'+':'')+String(t.deltaSeconds/60),formatSeconds(t.previousSeconds),formatSeconds(t.balanceSeconds),Number.isSafeInteger(t.paidPaise)?'₹'+(t.paidPaise/100).toFixed(2):'—',t.receiptRef||'—',...(admin?[t.actor,t.reason]:[])])),
     title('Call credit history','h3'),table(['Created (IST)','Call reference','Status','Reserved','Charged','Returned','Closed (IST)',...(admin?['Action']:[])],(d.callTransactions||[]).map(h=>[formatIst(h.createdAt),h.jobId,h.state,formatSeconds(h.reservedSeconds),formatSeconds(h.chargedSeconds),formatSeconds(h.reversedSeconds),h.closedAt?formatIst(h.closedAt):'—',...(admin?[h.state==='settled'&&h.chargedSeconds>0&&!h.reversedSeconds?btn('Reverse charge',()=>reverseCall(h),true):'—']:[])])));
    prev.disabled=offset===0;next.disabled=!d.hasMore;
@@ -1402,8 +1417,7 @@ function clientDashboardOverview(data,onRefresh){
        ['Visit requests',count('siteVisits'),'calendar']].map(([label,value,symbol])=>
       div('card metric',div('metric-heading',div('metric-symbol',icon(symbol)),
        node('span',{class:'muted',text:label})),node('strong',{text:value})))),
-  node('p',{class:'muted',text:'These figures are this company’s CRM records, not verified Plivo call minutes or charges.'}),
-  btn('View follow-ups and next actions',()=>{state.clientTab='results';state.clientSetTab?.('results')},true));
+  );
  summary.setAttribute('aria-label','Selected company overview');
  return summary;
 }
@@ -1431,24 +1445,25 @@ async function renderClient(id,content){
  const overview=clientDashboardOverview(d,()=>renderClient(id,content));
  const grid=overview.querySelector('.client-metrics');
  const current=()=>content.isConnected&&content.renderVersion===version;
- const campaignMetric=overviewMetric('Completed campaign jobs','Loading…','phone');
- grid.append(campaignMetric);
+ const campaignMetric=overviewMetric('Completed calls','Loading…','phone');
+ const interestedMetric=overviewMetric('Interested customers','Loading…','spark');
+ grid.append(campaignMetric,interestedMetric);
  const reportRefresh=()=>api('/v1/human/operations/report?tenantId='+encodeURIComponent(id)).then(report=>{
   if(!current())return;
   campaignMetric.querySelector('strong').textContent=safeCount(report.jobs?.completed);
- }).catch(()=>{if(current())campaignMetric.querySelector('strong').textContent='Unavailable'});
+  interestedMetric.querySelector('strong').textContent=safeCount(report.leadPipeline?.interested);
+ }).catch(()=>{if(current()){campaignMetric.querySelector('strong').textContent='Unavailable';interestedMetric.querySelector('strong').textContent='Unavailable'}});
  reportRefresh();
  let syncCredit=()=>{},refreshCredit=()=>{};
- const snapshotStatus=node('p',{class:'muted',role:'status',text:'Live overview · refreshing every 15 seconds while open'});
+ const snapshotStatus=node('p',{class:'muted',role:'status',text:'Updates automatically'});
  overview.append(snapshotStatus);
  if(d.role==='client_admin'){
-  const creditRows=[['Funding-checked','spendableSeconds','wallet'],['Uncommitted','uncommittedSeconds','wallet'],['Net allocated','allocatedSeconds','wallet'],['Reserved','heldSeconds','clock'],['Used','usedSeconds','receipt']];
+  const creditRows=[['Available minutes','uncommittedSeconds','wallet'],['Used minutes','usedSeconds','receipt'],['On hold (live calls)','heldSeconds','clock'],['Total minutes received','allocatedSeconds','wallet']];
   const creditMetrics=creditRows.map(([label,key,symbol])=>({key,metric:overviewMetric(label,'Loading…',symbol)}));
   grid.append(...creditMetrics.map(x=>x.metric));
-  overview.append(node('p',{class:'note',text:'Credits are manually allocated by your administrator. Uncommitted balance does not itself authorize calls.'}),
-   div('overview-actions',btn('Credit history',()=>content.openView('wallet',{focus:true,resetScroll:true}),true),btn('Import customers',()=>content.openView('customers',{focus:true,resetScroll:true}),true),btn('Campaigns',()=>content.openView('calling',{focus:true,resetScroll:true}),true)));
+  overview.append(node('p',{class:'muted',text:'Minutes are added by AR3D after your payment.'}));
   const remaining=node('strong',{class:'sidebar-credit-value',text:'Loading…'});
-  const available=node('p',{class:'muted',text:'Funding-checked: Loading…'});
+  const available=node('p',{class:'muted',text:'Callable now: Loading…'});
   const refresh=btn('Refresh balance',()=>refreshCredit(),true);
   let balanceVersion=0;
   const checked=node('p',{class:'muted',text:'Checking balance…'});
@@ -1458,7 +1473,7 @@ async function renderClient(id,content){
    const fmt=v=>Number.isSafeInteger(v)&&v>=0?formatSeconds(v):'Unavailable';
    for(const {key,metric} of creditMetrics)metric.querySelector('strong').textContent=fmt(w?.[key]);
    remaining.textContent=fmt(w?.uncommittedSeconds);
-   available.textContent='Funding-checked: '+fmt(w?.spendableSeconds);
+   available.textContent='Callable now: '+fmt(w?.spendableSeconds);
    checked.textContent=w?'Updated '+formatIst(new Date().toISOString()):'Update unavailable';
   };
   async function refreshBalance(){
@@ -1472,19 +1487,25 @@ async function renderClient(id,content){
    finally{refresh.disabled=false}
   }
   if(sidebarWallet){
-   sidebarWallet.replaceChildren(div('sidebar-credit-label',icon('wallet'),node('span',{text:'Remaining calling minutes'})),
-    remaining,available,checked,div('sidebar-credit-actions',btn('Wallet',()=>content.openView('wallet',{focus:true,resetScroll:true}),true),refresh));
+   sidebarWallet.replaceChildren(div('sidebar-credit-label',icon('wallet'),node('span',{text:'Available minutes'})),
+    remaining,checked,div('sidebar-credit-actions',btn('Wallet',()=>content.openView('wallet',{focus:true,resetScroll:true}),true),refresh));
    sidebarWallet.hidden=false;
   }
   refreshCredit=refreshBalance;
   refreshBalance();
  }
- const sections=Object.fromEntries(['customers','ai-test','calling','results','wallet','company'].map(key=>[
+ const sections=Object.fromEntries(['home','customers','ai-test','calling','results','wallet','company'].map(key=>[
   key,node('section',{class:'workspace-section',id:key,hidden:true})
  ]));
  const loaded=new Set();
  let walletRefresh=null;
+ const go=key=>()=>content.openView(key,{focus:true,resetScroll:true});
+ const quickActions=div('card',title('Quick actions'),div('overview-actions',
+  ...(d.role==='client_admin'?[btn('Upload customer Excel',go('customers'))]:[]),
+  btn('Calling campaigns',go('calling'),true),btn('See call results',go('results'),true),
+  ...(d.role==='client_admin'?[btn('Minutes history',go('wallet'),true)]:[])));
  const renderers={
+  home:section=>{section.append(quickActions);nextActionsPanel(id,section)},
   customers:async section=>{
    if(d.role==='client_admin')section.append(manualCustomerPanel(id,content));
    await crmWorkflow(id,section,d.role,content);
@@ -1492,7 +1513,6 @@ async function renderClient(id,content){
   'ai-test':section=>aiTestingPanel(section,id,d.role),
   calling:section=>customerCallingPanel(id,section,d.role,content.openView),
   results:async section=>{
-   nextActionsPanel(id,section);
    operationsReportPanel(id,section);
    campaignResultsPanel(id,section,d.role);
    if(d.role==='client_admin'){
@@ -1508,7 +1528,8 @@ async function renderClient(id,content){
   wallet:section=>{if(d.role==='client_admin'){manualMinuteLedger(section,id,false,syncCredit,fn=>{walletRefresh=fn});return minuteUsagePanel(section,id,false)}section.append(node('p',{class:'note',text:'Wallet and transaction details require Client Admin access.'}))},
   company:section=>clientCompanySummary(id,section,d.role,d.tenant.name)
  };
- content.replaceChildren(overview,...Object.values(sections));
+ sections.home.append(overview);
+ content.replaceChildren(...Object.values(sections));
  function selectSection(key){
   if(!Object.hasOwn(sections,key))return;
   for(const [name,section] of Object.entries(sections))section.hidden=name!==key;
@@ -1522,7 +1543,7 @@ async function renderClient(id,content){
   });
  }
  state.clientSetTab=selectSection;
- content.openView(state.clientTab||'customers');
+ content.openView(state.clientTab||'home');
  const initialRefresh=refreshCredit;
  refreshCredit=()=>walletRefresh&&!sections.wallet.hidden?walletRefresh():initialRefresh();
  content.stopLiveRefresh=foregroundRefresh(overview,15000,async()=>{
@@ -1774,26 +1795,8 @@ function operationsReportPanel(tenantId,content){
    const data=await api('/v1/human/operations/report?tenantId='+encodeURIComponent(tenantId));
    if(!card.isConnected)return;
    const jobs=data.jobs;
-   const lines=[
-    ['CRM customers',data.customers.total],
-    ['Interested customers',data.leadPipeline.interested],
-    ['Follow-up leads',data.leadPipeline.followup],
-    ['Follow-ups already due',data.leadPipeline.dueFollowups],
-    ['Not interested',data.leadPipeline.not_interested],
-    ['Blocked / denied customers',data.customers.blockedOrDenied],
-    ['Campaigns running',data.campaigns.running],
-    ['Queued call jobs',jobs.queued],
-    ['Provider in-flight jobs',jobs.reserved+jobs.submitted],
-    ['Unknown provider outcomes',jobs.unknown],
-    ['Failed jobs',jobs.failed],
-    ['Completed jobs',jobs.completed],
-    ['Visit requests',data.visits.requested],
-    ['CRM audit events · last 7 days',data.recentActivity.auditEvents],
-    ['AI test auto-saves · last 7 days',data.recentActivity.simulatedCrmAutoSaves]
-   ];
    view.replaceChildren(
-    node('p',{class:'muted',text:'Updated '+new Date(data.asOf).toLocaleString()+
-      ' · last 7 days for activity counts · not billable provider usage'}),
+    node('p',{class:'muted',text:'Updated '+formatIst(data.asOf)}),
     div('chart-grid',
      countChart('Lead pipeline · CRM counts',[['Interested',data.leadPipeline.interested],['Follow-up',data.leadPipeline.followup],['Not interested',data.leadPipeline.not_interested]]),
      countChart('Call job outcomes · recorded counts',[['Completed',jobs.completed],['Failed',jobs.failed],['Unknown',jobs.unknown],['Queued',jobs.queued],['In flight',jobs.reserved+jobs.submitted]])),
@@ -1802,10 +1805,7 @@ function operationsReportPanel(tenantId,content){
      actionNotice('Follow-ups already due',data.leadPipeline.dueFollowups),
      actionNotice('Unknown provider outcomes requiring manual review',jobs.unknown)
     ]),
-    table(['Measure','Count'],lines.map(([name,count])=>[name,String(count)])),
-    node('p',{class:data.providerReview.needsManualReconciliation?'banner err':'note',
-     role:'status',text:data.providerReview.notice}),
-    node('p',{class:'muted',text:'No automatic redial, consent changes or billing actions. Any uncertain provider response stays locked until manually reconciled.'})
+    ...(data.providerReview.needsManualReconciliation?[node('p',{class:'banner err',role:'status',text:data.providerReview.notice})]:[])
    );
   }catch(error){
    if(card.isConnected)view.replaceChildren(node('p',{class:'banner err',role:'alert',

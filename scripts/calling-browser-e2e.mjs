@@ -160,7 +160,6 @@ try{
   JSON.stringify({propertyType:'flat',location:'Raipur',area:'Shankar Nagar',size:'3BHK',budgetInr:3500000,interest:'interested',visitDate:'2027-01-12'}),at);
  await page.getByRole('link',{name:'Results / CRM',exact:true}).click();
  await page.getByRole('heading',{name:'Operations & Security Report'}).waitFor();
- await page.getByRole('row',{name:/Unknown provider outcomes 0/}).waitFor();
  const outcomes=page.getByRole('region',{name:'Call job outcomes · recorded counts'});
  await outcomes.waitFor();
  assert.equal(await outcomes.locator('meter[aria-label="Completed"]').getAttribute('value'),'1');
@@ -231,16 +230,18 @@ try{
  await multiPage.locator('.workspace-role').getByText('Client viewer',{exact:true}).waitFor();
  const overview=multiPage.locator('.client-summary');
  await overview.getByText('Demo',{exact:true}).waitFor();
+ await multiPage.getByRole('link',{name:'Home',exact:true}).waitFor();
  assert.equal(await multiPage.locator('input[type=file]').count(),0);
  assert.equal(await multiPage.getByText('Secondary-only buyer',{exact:true}).count(),0);
  await multiPage.locator('.company-switch select').selectOption(otherTenant);
  await multiPage.locator('.workspace-role').getByText('Client Admin',{exact:true}).waitFor();
  await overview.getByText('Secondary Builder',{exact:true}).waitFor();
  await multiPage.locator('#client-sidebar-wallet .sidebar-credit-value').getByText('0m 00s',{exact:true}).waitFor();
+ assert.equal(await overview.getByText('1',{exact:true}).count(),1);
+ await multiPage.getByRole('link',{name:'Customers / Excel',exact:true}).click();
  await multiPage.getByText('Secondary-only buyer',{exact:true}).waitFor();
  assert.equal(await multiPage.getByText('Fictional buyer',{exact:true}).count(),0);
  assert.equal(await multiPage.locator('input[type=file]').count(),1);
- assert.equal(await overview.getByText('1',{exact:true}).count(),1);
  // Confirm the previously broken manual add-customer form really persists
  // only to the selected tenant, with consent and DND still unknown.
  await multiPage.getByText('Add one customer manually',{exact:true}).click();
@@ -250,6 +251,8 @@ try{
  await multiPage.getByText('Secondary manual buyer',{exact:true}).waitFor();
  assert.equal(f.r.db.prepare('SELECT COUNT(*) AS n FROM leads WHERE tenant_id=?').get(otherTenant).n,2);
  assert.equal(f.r.db.prepare("SELECT consent_status,dnd_status FROM leads WHERE tenant_id=? AND name='Secondary manual buyer'").get(otherTenant).consent_status,'unknown');
+ await multiPage.getByRole('link',{name:'Home',exact:true}).click();
+ await overview.getByText('2',{exact:true}).waitFor();
  assert.equal(await overview.getByText('2',{exact:true}).count(),1);
  await multiPage.screenshot({path:'artifacts/client-tenant-switch-mobile.png',fullPage:true});
  await multiPage.locator('.company-switch select').selectOption(tid);
@@ -257,6 +260,7 @@ try{
  await overview.getByText('Demo',{exact:true}).waitFor();
  assert.ok(await multiPage.locator('#client-sidebar-wallet').isHidden());
  assert.equal(await multiPage.locator('#client-sidebar-wallet').innerText(),'');
+ await multiPage.getByRole('link',{name:'Customers / Excel',exact:true}).click();
  await multiPage.getByText('Fictional buyer',{exact:true}).waitFor();
  assert.equal(await multiPage.getByText('Secondary-only buyer',{exact:true}).count(),0);
  assert.equal(await multiPage.locator('input[type=file]').count(),0);
@@ -288,6 +292,7 @@ try{
  await adminPage.getByRole('heading',{name:'Client directory'}).waitFor();
  await adminPage.screenshot({path:'artifacts/calling-admin-clients.png',fullPage:true});
  await adminPage.getByRole('link',{name:'Minutes & Wallet',exact:true}).click();
+ await adminPage.getByText(/^Provider costs & reports/).click();
  await adminPage.getByRole('heading',{name:'Provider financial journal',exact:true}).waitFor();
  await adminPage.getByRole('heading',{name:'Client financial position',exact:true}).waitFor();
  await adminPage.getByRole('button',{name:'Export financial page (CSV)',exact:true}).waitFor();
@@ -386,7 +391,7 @@ try{
  addInvite.run(await sha256hex(invite),tid,loginEmail,start+3600000,new Date(start).toISOString());
  addInvite.run(await sha256hex(expiredInvite),tid,loginEmail,start-1000,new Date(start).toISOString());
  const visitInvite=token=>loginPage.goto(origin+'/app#invite='+token);
- const dashboard=()=>loginPage.getByRole('heading',{name:'Customers / Excel',exact:true}).waitFor();
+ const dashboard=()=>loginPage.getByRole('heading',{name:'Home',exact:true}).waitFor();
  const logout=async()=>{
   await loginPage.getByRole('button',{name:'Sign out',exact:true}).click();
   await loginPage.getByRole('button',{name:'Sign in',exact:true}).waitFor();
