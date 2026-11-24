@@ -25,7 +25,9 @@ export function buildPlivoReadinessSnapshot(env){
   ['pilotDestination',indiaMobile(env?.AR3D_SCRIPTED_PILOT_VERIFIED_NUMBER),'Internal pilot destination is configured'],
   ['pilotTenantId',uuid(env?.AR3D_SCRIPTED_PILOT_TENANT_ID),'Internal pilot tenant ID is configured'],
   ['pilotLeadId',uuid(env?.AR3D_SCRIPTED_PILOT_LEAD_ID),'Internal pilot CRM lead ID is configured'],
-  ['workersAi',typeof env?.AI?.run==='function','Workers AI transcription binding exists'],
+  ['workersAi',typeof env?.AI?.run==='function','Legacy Workers AI test binding exists'],
+  ['sarvamSpeech',typeof env?.SARVAM_API_KEY==='string'&&Boolean(env.SARVAM_API_KEY.trim()),'Sarvam speech credential is configured (presence only)'],
+  ['fundingReview',env?.AR3D_FUNDED_CAMPAIGN_DISPATCH==='approved'&&typeof env?.AR3D_FUNDED_CUMULATIVE_SECONDS==='string'&&/^\d{1,12}$/.test(env.AR3D_FUNDED_CUMULATIVE_SECONDS),'Operator funding envelope is configured; not verified provider funds'],
   ['privateRecordings',typeof env?.RECORDINGS?.get==='function'&&
     typeof env?.RECORDINGS?.head==='function','Private R2 recording/prompt binding exists'],
   ['customerDispatchSwitch',env?.AR3D_SCRIPTED_CAMPAIGNS_ENABLED==='enabled','Customer campaign switch is enabled']
@@ -34,7 +36,7 @@ export function buildPlivoReadinessSnapshot(env){
   {id:'open_conversation',ready:false,label:'Optional later upgrade: open-ended real-time conversation is not part of the agreed fixed-question v1'},
   {id:'provider_dnd',ready:false,label:'Independently verified provider DND/suppression lookup is not integrated'},
   {id:'privacy_disaster_recovery',ready:false,label:'Production PII deletion, scheduled backup and verified restore drill are not signed off'},
-  {id:'billing',ready:false,label:'Durable provider-rated minute reconciliation, paid subscriptions and invoicing are not implemented'}
+  {id:'billing',ready:false,label:'Manual minute ledger, holds and matched CDR reconciliation are implemented; provider funding, actual commercial settlement and cost acceptance still require verification. External payments are out of scope.'}
  ];
  const external=[
   {id:'india_kyc',verified:false,label:'India business KYC and permitted traffic classification require Plivo/provider confirmation'},
@@ -103,7 +105,7 @@ export function productionSetupActions(snapshot,audioPacks,internalLead){
   step('internal_call','Operator','Complete one signed Production acceptance call',false,
    'With allowed purpose and verified owned recipient only, temporarily enable the internal pilot, then review Plivo Logs, seven Hindi turns, signed callbacks and CRM.'),
   step('customer_campaigns','Provider/operator','Keep customer campaigns disabled until independent gates pass',false,
-   'Do not enable AR3D_SCRIPTED_CAMPAIGNS_ENABLED for new property marketing on this 080 number. Planned credits do not grant dial permission.')
+   'Do not enable AR3D_SCRIPTED_CAMPAIGNS_ENABLED for new property marketing on this 080 number. Allocated minutes and a funding envelope do not grant dial permission.')
  ];
 }
 export async function handleLaunchReadiness(req,env,user){

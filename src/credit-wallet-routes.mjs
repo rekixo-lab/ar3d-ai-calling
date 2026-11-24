@@ -273,6 +273,26 @@ export async function handleCreditWalletRequest(req,env,user,{fetcher=fetch}={})
  if(!env.CONTROL_DB)return fail('database unavailable',503);
  const db=env.CONTROL_DB,path=url.pathname.slice(base.length+1);
  try{
+  if(path==='admin-transactions'){
+   if(req.method!=='GET')return fail('method not allowed',405);
+   if(!await currentMfa(env,user))return fail('current MFA Super Admin required',403);
+   const keys=[...url.searchParams.keys()],tid=url.searchParams.get('tenantId'),kind=url.searchParams.get('kind')||'all',offset=url.searchParams.get('offset')||'0';
+   if(keys.some(k=>!['tenantId','kind','offset'].includes(k)||url.searchParams.getAll(k).length!==1)||
+      (tid!==null&&!uuid.test(tid))||!['all','allocation','recovery','call_reversal','reserved','settled','released'].includes(kind)||!/^\d{1,6}$/.test(offset))return fail('invalid transaction filter',400);
+   // One row per actual immutable ledger adjustment or call reservation.
+   // Settlement is a state of that reservation, not a second debit.
+   const rows=(await db.prepare(`WITH entries AS (
+    SELECT l.tenant_id AS tenantId,l.id AS reference,l.created_at AS createdAt,NULL AS closedAt,
+     CASE WHEN l.id LIKE 'call-reversal:%' THEN 'call_reversal' ELSE l.kind END AS kind,
+     l.delta_seconds AS deltaSeconds,l.balance_seconds AS allocatedBalanceSeconds,NULL AS reservedSeconds,NULL AS chargedSeconds
+     FROM tenant_minute_ledger l WHERE (? IS NULL OR l.tenant_id=?)
+    UNION ALL
+    SELECT h.tenant_id,h.job_id,h.created_at,h.closed_at,CASE WHEN h.state='held' THEN 'reserved' ELSE h.state END,
+     NULL,NULL,h.reserved_seconds,h.charged_seconds FROM tenant_minute_holds h WHERE (? IS NULL OR h.tenant_id=?))
+    SELECT e.*,t.display_name AS company FROM entries e JOIN tenants t ON t.id=e.tenantId
+    WHERE (?='all' OR e.kind=?) ORDER BY e.createdAt DESC,e.tenantId,e.reference LIMIT 51 OFFSET ?`).bind(tid,tid,tid,tid,kind,kind,Number(offset)).all()).results;
+   return json({transactions:rows.slice(0,50),offset:Number(offset),hasMore:rows.length>50,providerRequests:0});
+  }
   if(path==='admin-dashboard'){
    if(req.method!=='GET')return fail('method not allowed',405);
    if(!await currentMfa(env,user))return fail('current MFA Super Admin required',403);

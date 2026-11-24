@@ -414,3 +414,29 @@ test('customer contextual interpretation cannot infer unparseable evidence or an
  r=await advanceContextualVoice(model({action:'answer',value:'कोरबा',evidence:'कोरबा'}),city,{transcript:'मुझे शहर कोरबा में चाहिए',now:stamp,strictGrounding:true});
  assert.equal(r.interpreter,'contextual_grounded');assert.equal(r.result.state.answers.location,'कोरबा');
 });
+
+test('out-of-order labelled answers in one utterance are validated in dependency order',async()=>{
+ const state=beginFixedVoicePreview({now:stamp}).state;
+ const ai={run:()=>assert.fail('labelled answers should stay deterministic')};
+ const r=await advanceInternalVoice(ai,state,{transcript:'बजट 30 लाख और शहर कोरबा और प्रॉपर्टी घर और साइज 3BHK और एरिया बस स्टैंड',now:stamp});
+ assert.equal(r.interpreter,'labelled_multi_answer');assert.equal(r.result.currentField,'interest');assert.equal(r.result.state.turns,1);
+ assert.deepEqual(r.result.state.answers,{propertyType:'house',location:'कोरबा',area:'बस स्टैंड',size:'3BHK',budgetInr:3000000});
+ const bad=await advanceInternalVoice(ai,state,{transcript:'प्रॉपर्टी घर; शहर कोरबा; शहर रायपुर',now:stamp});
+ assert.equal(bad.result.action,'repeat');assert.deepEqual(bad.result.state.answers,{});
+});
+test('explicit visit time stays a preference in India timezone, never a booking',()=>{
+ let state=beginFixedVoicePreview({now:stamp}).state;
+ for(const text of ['घर','कोरबा','बस स्टैंड','3BHK','30 लाख','हाँ'])state=turn(state,text).state;
+ const r=turn(state,'2027-01-12 सुबह 10 बजे');
+ assert.equal(r.action,'completed');assert.equal(r.state.answers.visitDate,'2027-01-12');
+ assert.equal(r.state.answers.visitAt,'2027-01-12T04:30:00.000Z');
+ assert.equal(turn(state,'2027-01-12 17:30').state.answers.visitAt,'2027-01-12T12:00:00.000Z');
+ assert.equal(turn(state,'2027-01-12 5 बजे').action,'repeat');
+ assert.equal(turn(state,'2027-01-12').state.answers.visitAt,undefined);
+});
+
+test('ambiguous alternative visit days and times never silently choose the first',()=>{
+ let state=beginFixedVoicePreview({now:stamp}).state;
+ for(const text of ['घर','कोरबा','बस स्टैंड','3BHK','30 लाख','हाँ'])state=turn(state,text).state;
+ for(const text of ['2027-01-12 सुबह 10 बजे या 11 बजे','2027-01-12 or 2027-01-13','2027-01-12 10:00 और 11:00','2027-01-12 रात 12 बजे'])assert.equal(turn(state,text).action,'repeat',text);
+});

@@ -45,6 +45,8 @@ test('MFA Super Admin sees nonsecret configuration checks and honest launch bloc
    AR3D_SCRIPTED_PILOT_TENANT_ID:'11111111-1111-4111-8111-111111111111',
    AR3D_SCRIPTED_PILOT_LEAD_ID:'33333333-3333-4333-8333-333333333333',
    AR3D_SCRIPTED_CAMPAIGNS_ENABLED:'enabled',
+   SARVAM_API_KEY:'synthetic-sarvam-credential-123',
+   AR3D_FUNDED_CAMPAIGN_DISPATCH:'approved',AR3D_FUNDED_CUMULATIVE_SECONDS:'123456789',
    AI:{run:async()=>assert.fail('Never call transcription from readiness')},
    RECORDINGS:{get:async()=>assert.fail('Never read audio bytes'),head:async key=>{
     assert.match(key,/^scripted-phone-pilot\/(?:hi|en)\/[A-Za-z-]+\.mp3$/);
@@ -67,7 +69,7 @@ test('MFA Super Admin sees nonsecret configuration checks and honest launch bloc
   assert.equal(data.scriptedCallingImplemented,true);
   assert.deepEqual(data.internalLead,{state:'lead_unavailable',ready:false});
   assert.equal(data.setupActions.find(x=>x.id==='recipient_match').ready,false);
-  assert.equal(data.environment.length,12);
+  assert.equal(data.environment.length,14);
   assert.ok(data.environment.every(x=>x.configured));
   assert.equal(audioHeads.length,24,'11 essential clips plus optional retry per language');
   assert.deepEqual(data.audioPacks.map(pack=>[pack.language,pack.requiredTotal,pack.requiredReady,
@@ -77,7 +79,7 @@ test('MFA Super Admin sees nonsecret configuration checks and honest launch bloc
   assert.ok(data.engineering.some(x=>x.id==='open_conversation'&&x.ready===false));
   assert.ok(data.external.some(x=>x.id==='india_kyc'&&x.verified===false));
   const text=JSON.stringify(data);
-  for(const secret of [env.PLIVO_AUTH_ID,env.PLIVO_AUTH_TOKEN,env.AR3D_PLIVO_CALLER_NUMBER,
+  for(const secret of [env.SARVAM_API_KEY,env.AR3D_FUNDED_CUMULATIVE_SECONDS,env.PLIVO_AUTH_ID,env.PLIVO_AUTH_TOKEN,env.AR3D_PLIVO_CALLER_NUMBER,
     env.AR3D_SCRIPTED_PILOT_VERIFIED_NUMBER,env.AR3D_SCRIPTED_PILOT_TENANT_ID])
     assert.ok(!text.includes(secret),'private configuration leaked');
   assert.equal(f.c.db.prepare('SELECT total_changes() AS n').get().n,beforeControl);

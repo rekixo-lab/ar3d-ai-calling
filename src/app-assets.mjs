@@ -536,6 +536,33 @@ function minuteUsagePanel(main,tenantId,admin){
  }
  return load();
 }
+// Spreadsheet-safe CSV: escape all fields and neutralize formula prefixes,
+// including whitespace-prefixed formulas in customer/company names.
+function downloadReportCsv(filename,headers,rows){
+ const cell=value=>{let text=String(value??'');if(/^[\s\u0000-\u001f]*[=+@-]/u.test(text))text="'"+text;return '"'+text.replace(/"/g,'""')+'"'};
+ const csv=[headers,...rows].map(row=>row.map(cell).join(',')).join('\r\n');
+ const href=URL.createObjectURL(new Blob(['\ufeff',csv],{type:'text/csv;charset=utf-8'}));
+ const anchor=node('a',{href,download:filename});document.body.append(anchor);anchor.click();anchor.remove();URL.revokeObjectURL(href);
+}
+function adminTransactionExplorer(main){
+ const card=div('card',title('All credit transactions')),body=div('stack');
+ const kind=node('select',{class:'field','aria-label':'Transaction type'},[['all','All transactions'],['allocation','Allocations'],['recovery','Recoveries'],['call_reversal','Returned minutes'],['reserved','Pending holds'],['settled','Settled calls'],['released','Released holds']].map(([value,text])=>node('option',{value,text})));
+ let offset=0,version=0,rows=[];
+ const headers=['Created (IST)','Company','Reference','Type','Adjustment seconds','Allocated balance seconds','Reserved seconds','Charged seconds','Closed (IST)'];
+ const values=x=>[formatIst(x.createdAt),x.company,x.reference,x.kind,x.deltaSeconds,x.allocatedBalanceSeconds,x.reservedSeconds,x.chargedSeconds,x.closedAt?formatIst(x.closedAt):null];
+ const prev=btn('Previous',()=>{offset=Math.max(0,offset-50);load()},true),next=btn('Next',()=>{offset+=50;load()},true),refresh=btn('Refresh transactions',()=>load(),true);
+ const exportBtn=btn('Export this page (CSV)',()=>downloadReportCsv('ar3d-credit-transactions-'+offset+'.csv',headers,rows.map(values)),true);
+ async function load(){
+  const seq=++version;prev.disabled=next.disabled=refresh.disabled=exportBtn.disabled=true;rows=[];
+  body.replaceChildren(node('p',{class:'muted',text:'Loading credit history…'}));
+  try{const d=await api('/v1/human/credits/admin-transactions?'+new URLSearchParams({kind:kind.value,offset:String(offset)}));if(seq!==version||!card.isConnected)return;rows=d.transactions;
+   body.replaceChildren(table(headers,rows.map(x=>values(x).map(v=>v??'—'))));prev.disabled=offset===0;next.disabled=!d.hasMore;exportBtn.disabled=!rows.length;
+  }catch(e){if(seq===version){body.replaceChildren(node('p',{class:'err',text:'Transaction history unavailable.'}));asError(e)}}
+  finally{if(seq===version)refresh.disabled=false}
+ }
+ kind.addEventListener('change',()=>{offset=0;load()});
+ card.append(node('p',{class:'note',text:'Cross-company minute ledger and reservation history. Original charges and returned minutes remain separate. No external payment or revenue entries.'}),div('formrow',lab('Transaction type',kind),refresh,exportBtn),body,div('formrow',prev,next));main.append(card);load();
+}
 async function adminMinuteWallet(main){
  const card=div('card',title('Client minute management')),company=node('select',{class:'field','aria-label':'Minute wallet company'}),
   search=input('walletSearch','search','Find company by name or email'),detail=div('stack');
@@ -555,6 +582,7 @@ async function adminMinuteWallet(main){
  company.addEventListener('change',()=>select().catch(asError));
  card.append(div('formrow',lab('Search clients',search),btn('Find company',()=>find().catch(asError),true)),
   lab('Client company',company),detail);main.append(card);
+ adminTransactionExplorer(main);
  productionCostPlanner(main);
  creditWalletOperator(main);
  await find();
@@ -1297,7 +1325,7 @@ function aiTestingPanel(content,tenantId,role){
      table(['Question','Interpreted answer'],[
       ['Property type',a.propertyType],['Location',a.location],['Area',a.area],
       ['Size',a.size],['Budget (INR)',a.budgetMinInr!=null?a.budgetMinInr+' – '+a.budgetInr:a.budgetInr??'—'],
-      ['Interest',a.interest],['Visit date',a.visitDate||'Not requested']
+      ['Interest',a.interest],['Visit date',a.visitDate||'Not requested'],['Preferred visit time (IST)',a.visitAt?formatIst(a.visitAt):'Not stated']
      ]),node('p',{class:'muted',text:result.savedToCrm?
        'Auto-save completed for '+selectedName+'. This is simulated qualification, not a verified customer phone call or a confirmed visit.':
        'Preview only. To save these answers, use a new test with explicit CRM auto-save or open Customers / Excel → Details → 7 Fixed Questions.'}));
@@ -1463,7 +1491,9 @@ function campaignResultsPanel(tenantId,content,role){
  card.id='client-reports';
  content.append(card);
  const campaign=node('select',{class:'field','aria-label':'Filter results by campaign'});
- let offset=0,fetching=false,loaded=false;
+ let offset=0,fetching=false,loaded=false,page=[];
+ const exportBtn=btn('Export this page (CSV)',()=>downloadReportCsv('ar3d-campaign-results-'+offset+'.csv',['Customer','Campaign','State','Outcome','Connected seconds','Partial','Reviewed','Saved to CRM','Property type','Location','Area','Size','Budget minimum INR','Budget maximum INR','Interest','Visit date','Visit time (IST)'],page.map(r=>[r.name,r.campaign,r.state,r.outcome,r.durationSeconds,r.partial,r.partialReviewed,r.savedToLead,r.answers?.propertyType,r.answers?.location,r.answers?.area,r.answers?.size,r.answers?.budgetMinInr,r.answers?.budgetInr,r.answers?.interest,r.answers?.visitDate,r.answers?.visitAt?formatIst(r.answers.visitAt):null])),true);
+ exportBtn.disabled=true;
  const back=btn('Previous results',()=>{offset=Math.max(0,offset-50);refresh().catch(asError)},true);
  const next=btn('Next results',()=>{offset+=50;refresh().catch(asError)},true);
  const refreshBtn=btn('Refresh customer answers',()=>refresh().catch(asError),true);
@@ -1473,7 +1503,7 @@ function campaignResultsPanel(tenantId,content,role){
   queued:'Queued / awaiting clearance',reserved:'Preparing call',submitted:'Call sent',failed:'Call unsuccessful',unknown:'Awaiting verification',blocked:'Blocked'};
  async function refresh(){
   if(fetching)return;
-  fetching=true;refreshBtn.disabled=true;campaign.disabled=true;back.disabled=true;next.disabled=true;
+  fetching=true;refreshBtn.disabled=true;campaign.disabled=true;back.disabled=true;next.disabled=true;exportBtn.disabled=true;page=[];
   try{
    if(!loaded){
     const {campaigns}=await api('/v1/human/campaigns?tenantId='+encodeURIComponent(tenantId));
@@ -1483,12 +1513,13 @@ function campaignResultsPanel(tenantId,content,role){
    const query=new URLSearchParams({tenantId,offset:String(offset)});
    if(campaign.value)query.set('campaignId',campaign.value);
    const {results,total}=await api('/v1/human/calling/results?'+query);
+   page=results;exportBtn.disabled=!page.length;
    answer.hidden=true;
    output.replaceChildren(
     node('p',{class:'muted',text:total?(offset+1)+'–'+(offset+results.length)+' of '+total+' customers':'Campaign call attempts will appear here.'}),
     table(['Customer','Campaign','Outcome','CRM','Answers','Calling credits'],results.map(r=>[
      r.name,r.campaign,outcomes[r.outcome]||outcomes[r.state]||r.state,
-     r.answers?(r.partial?'Partial · review needed':r.savedToLead?'Saved to lead':'Lead needs review'):'—',
+     r.answers?(r.partial?(r.partialReviewed?'Partial · reviewed':'Partial · review needed'):r.savedToLead?'Saved to lead':'Lead needs review'):'—',
      r.answers?btn(r.partial?'View partial answers':'View answers',()=>showAnswers(r),true):'—',
      role==='client_admin'&&['completed','failed'].includes(r.state)?
       btn('Check credits',()=>checkCharge(r),true):'—'
@@ -1514,11 +1545,11 @@ function campaignResultsPanel(tenantId,content,role){
   const fields=[
    ['Property type',q.propertyType],['City or location',q.location],['Area',q.area],['Property size',q.size],
    ['Budget',q.budgetMinInr!=null?answerBudget(q.budgetMinInr)+' – '+answerBudget(q.budgetInr):answerBudget(q.budgetInr)],['Interest',({interested:'Interested',later:'Follow up later',not_interested:'Not interested'})[q.interest]],
-   ['Preferred visit date',q.visitDate]
+   ['Preferred visit date',q.visitDate],['Preferred visit time (IST)',q.visitAt?formatIst(q.visitAt):null]
   ];
   answer.replaceChildren(div('row between',title(result.name+(result.partial?' — partial call answers':' — call answers'),'h3'),
    btn('Close answers',()=>{answer.hidden=true;trigger?.focus()},true)),
-   ...(result.partial?[node('p',{class:'note',text:'Incomplete conversation. Only accepted answers are shown; the main customer profile was not changed. Review before following up.'})]:[]),
+   ...(result.partial?[node('p',{class:'note',text:result.partialReviewed?'Partial answers reviewed. Existing customer data was preserved.':'Incomplete conversation. Review accepted answers before filling blank CRM fields.'}),...(role==='client_admin'&&!result.partialReviewed? [btn('Review & fill blank CRM fields',async()=>{if(!confirm('Save this partial result to the customer notes and fill only blank location, size and budget fields? Existing values, consent and visits will not change.'))return;try{await api('/v1/human/calling/review-partial','POST',{tenantId,jobId:result.id,expectedUpdatedAt:result.leadUpdatedAt});notice('Partial result reviewed.');await refresh()}catch(e){asError(e)}},true)]:[])]:[]),
    node('dl',{class:'answer-fields'},
    fields.map(([label,value])=>div('',node('dt',{text:label}),node('dd',{text:value||'—'})))));
   answer.hidden=false;
@@ -1526,7 +1557,7 @@ function campaignResultsPanel(tenantId,content,role){
   answer.focus();
  }
  campaign.addEventListener('change',()=>{offset=0;refresh().catch(asError)});
- card.append(div('formrow',lab('Campaign',campaign),refreshBtn),chargeInfo,answer,output,div('formrow',back,next));
+ card.append(div('formrow',lab('Campaign',campaign),refreshBtn,...(role==='client_admin'?[exportBtn]:[])),chargeInfo,answer,output,div('formrow',back,next));
  content.addEventListener('workspace-tab-shown',()=>refresh().catch(asError));
  if(!content.hidden)refresh().catch(asError);
 }
