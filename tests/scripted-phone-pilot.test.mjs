@@ -752,7 +752,7 @@ test('saved recording probe is no-dial, current-MFA and explicit-consent only; r
    AR3D_SCRIPTED_PILOT_LEAD_ID:lead,RECORDINGS:{head:async()=>({size:4}),get:async()=>null},
    AI:{async run(){return {text:'private transcript'}}}};
   f.c.db.prepare("INSERT INTO scripted_phone_pilots(id,tenant_id,lead_id,lead_updated_at,actor_id,language,destination,caller,rate_slot,expires_at,phase,turn,provider_call_id,survey_json,created_at,provider_account_id,hangup_at) VALUES(?,?,?,?,?,?,?,?,?,?,'ended',1,?,?,?,?,?)")
-   .run(crypto.randomUUID(),tid,lead,new Date(now).toISOString(),admin.id,'hi',internalNumber,env.AR3D_PLIVO_CALLER_NUMBER,1,now+600000,callId,JSON.stringify({phoneMeta:{engine:'whisper'}}),new Date(now).toISOString(),env.PLIVO_AUTH_ID,now);
+   .run(crypto.randomUUID(),tid,lead,new Date(now).toISOString(),admin.id,'hi',internalNumber,env.AR3D_PLIVO_CALLER_NUMBER,1,now+600000,callId,JSON.stringify({index:0,phoneMeta:{engine:'whisper'}}),new Date(now).toISOString(),env.PLIVO_AUTH_ID,now);
   let calls=0,media=0;
   const req=(confirm='REPROCESS_ONE_CONSENTED_INTERNAL_RECORDING')=>new Request(origin+'/v1/human/scripted-phone-pilot/recording-probe',{method:'POST',headers:{Origin:origin},body:JSON.stringify({confirm})});
   const fetcher=async(url,opts)=>{
@@ -768,6 +768,15 @@ test('saved recording probe is no-dial, current-MFA and explicit-consent only; r
   const r=await handleScriptedPhoneAdmin(req(),env,admin,{now,fetcher});assert.equal(r.status,200,await r.clone().text());
   const d=await r.json();assert.equal(d.mediaHttp,200);assert.equal(d.stt,'text_received');assert.equal(d.bytes,4);assert.equal(media,1);assert.equal(calls,2);
   assert.doesNotMatch(JSON.stringify(d),/private transcript|record-id|syntheticAuth/);
+  const inspect=await handleScriptedPhoneAdmin(req('SHOW_ONE_CONSENTED_INTERNAL_FIRST_ANSWER'),env,admin,{now,fetcher});
+  assert.equal(inspect.status,200);const detail=await inspect.json();
+  assert.equal(detail.transcript,'private transcript');assert.equal(detail.parserAction,'repeat');assert.equal(detail.propertyType,null);
+  env.AI.run=async()=>({text:'मुझे प्लॉट चाहिए'});
+  const good=await (await handleScriptedPhoneAdmin(req('SHOW_ONE_CONSENTED_INTERNAL_FIRST_ANSWER'),env,admin,{now,fetcher})).json();
+  assert.equal(good.parserAction,'next_question');assert.equal(good.propertyType,'plot');
+  f.c.db.prepare("UPDATE scripted_phone_pilots SET survey_json=?").run(JSON.stringify({index:1,phoneMeta:{engine:'whisper'}}));
+  const blocked=await (await handleScriptedPhoneAdmin(req('SHOW_ONE_CONSENTED_INTERNAL_FIRST_ANSWER'),env,admin,{now,fetcher})).json();
+  assert.equal(blocked.state,'first_question_not_confirmed');assert.equal(blocked.transcript,undefined);assert.equal(calls,6);
   assert.deepEqual(f.r.db.prepare('SELECT * FROM leads WHERE id=?').get(lead),before);
  }finally{f.close()}
 });
