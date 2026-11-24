@@ -47,6 +47,8 @@ test('verified internal pilot only: consent, fixed prompts, AI answers, and one 
     const payload=JSON.parse(options.body);
     assert.equal(payload.to,internalNumber);
     assert.equal(payload.time_limit,180);
+    assert.equal(payload.ring_timeout,25);
+    assert.equal(Object.hasOwn(payload,'hangup_on_ring'),false,'must not schedule hangup of answered call');
     hook=payload.answer_url.replace(/\/answer$/,'');
     return Response.json({request_uuid:requestId},{status:202});
    }
