@@ -1,6 +1,7 @@
 import {resolveCrmDb} from './core.mjs';
 import {providerFaultBlocked} from './provider-safety.mjs';
-import {minutePosition,reserveMinutes,closeMinuteHold,fundingCap,fundingPosition,affordableCallSeconds,BILLING_PULSE_SECONDS} from './minute-holds.mjs';
+import {moneyBudgetConfig,providerBudgetPosition,reserveBudgetedMinutes} from './provider-cost-reservations.mjs';
+import {minutePosition,closeMinuteHold,fundingCap,fundingPosition,affordableCallSeconds,BILLING_PULSE_SECONDS} from './minute-holds.mjs';
 import {SCRIPTED_CALLING_POLICY,approvedCampaignPhone,reserveCampaignQuestionnaire,scriptedPromptsReady,submitScriptedPhone} from './scripted-phone-pilot.mjs';
 
 export const CAMPAIGN_CRON='* * * * *';
@@ -28,12 +29,12 @@ export function campaignScanOffset(now,count){
   (pass*CAMPAIGN_WORK_LIMIT)%CAMPAIGN_SCAN_LIMIT)%count;
 }
 // Separate, operator-only release gate. Never set by UI, allocation or deployment.
-export const fundedDispatchApproved=env=>env.AR3D_FUNDED_CAMPAIGN_DISPATCH==='approved'&&fundingCap(env)!==null;
+export const fundedDispatchApproved=env=>env.AR3D_FUNDED_CAMPAIGN_DISPATCH==='approved'&&fundingCap(env)!==null&&moneyBudgetConfig(env)!==null;
 export const creditOnlyCallingApproved=env=>fundedDispatchApproved(env)&&env.AR3D_CREDIT_ONLY_CALLING==='approved';
 export async function scriptedCampaignConfiguration(env){
  const carrier=Boolean(await approvedCampaignPhone(env)),funded=fundedDispatchApproved(env);
  const blocked=carrier&&funded?await providerFaultBlocked(env.CONTROL_DB):false;
- const missing=[...(!carrier?['Plivo setup, a completed internal pilot and campaign authorization']:[]),...(!funded?['Separate reviewed Plivo and Sarvam funding ceilings, combined ceiling and manual dispatch approval']:[])];
+ const missing=[...(!carrier?['Plivo setup, a completed internal pilot and campaign authorization']:[]),...(!funded?['Separate reviewed provider time and monetary ceilings, combined ceiling and manual dispatch approval']:[])];
  if(blocked)missing.push('Provider billing or authentication fault requires Super Admin review');
  return {ready:carrier&&funded&&!blocked,missing,creditOnly:carrier&&!blocked&&creditOnlyCallingApproved(env)};
 }
@@ -165,8 +166,9 @@ export async function tickScriptedTenant(env,db,tid,config,{apiFetch=fetch,now=D
  if(!await scriptedPromptsReady(env,job.language,tid))return {state:'prompts_incomplete'};
  const position=await minutePosition(env.CONTROL_DB,tid),cap=fundingCap(env);
  if(position.uncommittedSeconds<BILLING_PULSE_SECONDS)return {state:'insufficient_credits'};
- const funding=await fundingPosition(env.CONTROL_DB,cap);
- const needed=affordableCallSeconds(policy.max_seconds,position.uncommittedSeconds,funding.remainingFundedSeconds);
+ const funding=await fundingPosition(env.CONTROL_DB,cap),budgetConfig=moneyBudgetConfig(env);
+ const money=await providerBudgetPosition(env.CONTROL_DB,budgetConfig);
+ const needed=affordableCallSeconds(policy.max_seconds,position.uncommittedSeconds,Math.min(funding.remainingFundedSeconds,money.remainingSeconds));
  if(needed<BILLING_PULSE_SECONDS)return {state:'provider_funding_exhausted'};
  const dayStart=new Date(Math.floor((now+330*60000)/86400000)*86400000-330*60000).toISOString();
  // D1 serializes this ONE reservation statement, including quotas and uniqueness.
@@ -177,7 +179,7 @@ export async function tickScriptedTenant(env,db,tid,config,{apiFetch=fetch,now=D
   // CRM and Control are separate D1 databases. Claim CRM first, then reserve
   // credits before creating any provider session. A crash locks the attempt
   // for review; never retry a provider POST or silently release a hold.
-  const hold=await reserveMinutes(env.CONTROL_DB,{tenantId:tid,job:job.id,maxSeconds:needed,now,globalCap:cap});
+  const hold=await reserveBudgetedMinutes(env.CONTROL_DB,{tenantId:tid,job:job.id,maxSeconds:needed,now,globalCap:cap,config:budgetConfig});
   if(!hold.ok||hold.replayed){
    if(!hold.ok&&hold.state==='insufficient_or_unavailable'){
     await updateJob(db,job,'failed',at,{error:'credit_reservation_unavailable'});

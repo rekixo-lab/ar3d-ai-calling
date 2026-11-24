@@ -544,6 +544,12 @@ async function adminDashboard(main,openView){
      overviewMetric('Ended · settlement pending',safeCount(d.settlementQueue?.endedAwaitingReview),'receipt'),
      overviewMetric('Missing session · review',safeCount(d.settlementQueue?.missingSession),'alert')),
     node('p',{class:'note',text:'Oldest hold: '+formatIst(d.settlementQueue?.oldestHeldAt)+' · Automatic CDR settlement: '+(d.settlementQueue?.automaticApproved?'operator approved':'not approved')+'. Uncertain calls retain reserved credits until verified; never release by age alone.'}),
+    title('Provider monetary reservations','h3'),
+    ...(d.providerBudget?.configured?[table(['Provider','Currency','Reviewed budget','Committed maximum','Remaining','Status'],d.providerBudget.accounts.map(a=>{
+      const fmt=n=>Number.isSafeInteger(n)?(n/1000000).toFixed(6):'Unavailable';
+      return [a.provider,a.currency,fmt(a.capMicros),fmt(a.committedMicros),fmt(a.remainingMicros),a.low===null?'Review required':a.low?'Low budget':'Available budget'];
+    })),node('p',{class:'note',text:d.providerBudget.ready?'Reviewed budget available · capacity '+formatSeconds(d.providerBudget.remainingSeconds):'New calls blocked by monetary budget: '+d.providerBudget.reason})]:[node('p',{class:'note',text:'Reviewed provider monetary budgets not configured. Commercial calls blocked.'})]),
+    node('p',{class:'muted',text:'Conservative monetary commitments, not actual provider balances or verified expenses. Settled calls retain their maximum until invoice reconciliation; only verified no-submission releases the budget.'}),
     title('Funding review','h3'),
     div('overview-grid',overviewMetric('Reviewed cumulative capacity',formatSeconds(d.funding?.capSeconds),'wallet'),overviewMetric('Remaining funded capacity',formatSeconds(d.funding?.remainingFundedSeconds),'wallet'),overviewMetric('Unbacked allocations',formatSeconds(d.funding?.unbackedAllocationSeconds),'receipt')),
     div('overview-grid',overviewMetric('Plivo reviewed ceiling',formatSeconds(d.funding?.reviewedProviderCeilings?.plivo),'phone'),overviewMetric('Sarvam reviewed ceiling',formatSeconds(d.funding?.reviewedProviderCeilings?.sarvam),'spark')),

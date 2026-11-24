@@ -2,6 +2,7 @@ import {requireMembership,mutationOriginAllowed} from './human-auth.mjs';
 import {resolveCrmDb,parseJsonBody} from './core.mjs';
 import {scriptedCampaignConfiguration} from './scripted-campaign-dispatch.mjs';
 import {minutePosition,fundingCap,fundingPosition,affordableCallSeconds,BILLING_PULSE_SECONDS} from './minute-holds.mjs';
+import {moneyBudgetConfig,providerBudgetPosition} from './provider-cost-reservations.mjs';
 import {SCRIPTED_CALLING_POLICY,scriptedPromptsReady} from './scripted-phone-pilot.mjs';
 const BASE='/v1/human/calling';
 const UUID=/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
@@ -32,7 +33,8 @@ async function creditPreflight(env,tid,policy,configuration){
  if(!configuration.ready||!policy?.enabled||requiredSeconds===null)return {availableSeconds:position.uncommittedSeconds,requiredSeconds,ready:false,reason:'approval_required'};
  if(position.uncommittedSeconds<requiredSeconds)return {availableSeconds:position.uncommittedSeconds,requiredSeconds,ready:false,reason:'insufficient_credits'};
  const funding=await fundingPosition(env.CONTROL_DB,fundingCap(env));
- const maxCallSeconds=affordableCallSeconds(policy.maxSeconds,position.uncommittedSeconds,funding.remainingFundedSeconds);
+ const money=await providerBudgetPosition(env.CONTROL_DB,moneyBudgetConfig(env));
+ const maxCallSeconds=affordableCallSeconds(policy.maxSeconds,position.uncommittedSeconds,Math.min(funding.remainingFundedSeconds,money.remainingSeconds));
  const ready=maxCallSeconds>=requiredSeconds;
  return {availableSeconds:position.uncommittedSeconds,requiredSeconds,maxCallSeconds,ready,reason:ready?null:'funding_review_required'};
 }
