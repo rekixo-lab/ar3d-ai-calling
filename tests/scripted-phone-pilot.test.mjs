@@ -480,7 +480,7 @@ test('internal pilot cooldown starts at signed hangup, blocks unsigned terminal 
    AR3D_SCRIPTED_PILOT_ENABLED:'enabled',AR3D_PLIVO_RECORDING_AUTH:'confirmed',
    AR3D_SCRIPTED_PILOT_ORIGIN:origin,AR3D_PLIVO_CALLER_NUMBER:'+918000000000',
    AR3D_SCRIPTED_PILOT_VERIFIED_NUMBER:internalNumber,AR3D_SCRIPTED_PILOT_TENANT_ID:tid,
-   AR3D_SCRIPTED_PILOT_LEAD_ID:lead,RECORDINGS:{head:async()=>({size:4})},AI:{run:async()=>({text:''})}};
+   AR3D_SCRIPTED_PILOT_LEAD_ID:lead,RECORDINGS:{head:async()=>({size:4}),get:async()=>({size:4,body:new Uint8Array(4)})},AI:{run:async()=>({text:''})}};
   let dials=0,hook;
   const fetcher=async(url,options)=>{
    dials++;hook=JSON.parse(options.body).answer_url.replace(/\/answer$/,'');
