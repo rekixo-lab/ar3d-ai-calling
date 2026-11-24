@@ -3,6 +3,7 @@
 // new calls. Trial/India currency and fundability remain independently gated.
 import {mutationOriginAllowed} from './human-auth.mjs';
 import {resolveCrmDb} from './core.mjs';
+import {closeMinuteHold} from './minute-holds.mjs';
 const PATH='/v1/human/plivo-cost-reconcile';
 const UUID=/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
 const JOB_ID=/^[a-f0-9]{32}$/i;
@@ -41,6 +42,19 @@ async function currentMfa(db,user){
  ).bind(user.id,user.token_hash,Date.now()).first();
 }
 
+// Only a persisted, matched CDR plus a signed-ended session may settle a
+// hold. Older jobs without holds remain observations. Retry after a crash
+// between databases is safe because the CDR and terminal hold are idempotent.
+async function settleObservedCall(env,job,tid,jid,cdr){
+ const hold=await env.CONTROL_DB.prepare('SELECT state FROM tenant_minute_holds WHERE tenant_id=? AND job_id=?').bind(tid,jid).first();
+ if(!hold)return {state:'no_hold',clientCreditsDebited:false};
+ const session=await env.CONTROL_DB.prepare(`SELECT id FROM scripted_phone_pilots WHERE tenant_id=? AND job_id=? AND provider_account_id=?
+ AND provider_call_id=? AND caller=? AND destination=? AND hangup_at IS NOT NULL
+ AND phase IN ('completed','declined','ended','needs_review')`).bind(tid,jid,job.accountSid,job.callUuid,job.caller,job.destination).first();
+ if(!session||cdr.billed_duration%30!==0)return {state:'needs_review',clientCreditsDebited:false};
+ const result=await closeMinuteHold(env.CONTROL_DB,{tenantId:tid,job:jid,billedSeconds:cdr.billed_duration,kind:'verified_cdr',evidenceRef:'plivo-cdr:'+job.callUuid});
+ return {state:result.ok?'settled':result.state,clientCreditsDebited:result.ok&&cdr.billed_duration>0,replayed:result.replayed===true};
+}
 export async function handlePlivoCostReconcile(req,env,user,{fetcher=fetch}={}){
  const url=new URL(req.url);
  if(url.pathname!==PATH)return null;
@@ -109,12 +123,14 @@ export async function handlePlivoCostReconcile(req,env,user,{fetcher=fetch}={}){
     "SELECT ?,?,'human:'||?,'plivo.cdr_observed',?,? WHERE changes()=1"
    ).bind(tid,crypto.randomUUID(),user.id,jid,at)
   ]);
-  if(Number(recorded[0]?.meta?.changes)===1&&
-     Number(recorded[1]?.meta?.changes)===1)
+  const newlyRecorded=Number(recorded[0]?.meta?.changes)===1&&Number(recorded[1]?.meta?.changes)===1;
+  if(newlyRecorded){
+   const settlement=await settleObservedCall(env,job,tid,jid,cdr);
    return json({tenantId:tid,jobId:jid,recorded:true,alreadyRecorded:false,
     currency:'unverified',providerReportedAmount:cdr.total_amount,
-    billedSeconds:cdr.billed_duration,clientCreditsDebited:false,
-    notice:'The provider CDR was recorded once for later review. No wallet credit was deducted.'});
+    billedSeconds:cdr.billed_duration,clientCreditsDebited:settlement.clientCreditsDebited,settlement,
+    notice:settlement.state==='settled'?'Matched call minutes settled once.':'CDR recorded; no new client debit.'});
+  }
   const old=await db.prepare(
    'SELECT provider_call_uuid AS callUuid,reported_amount AS amount,'+
    'billed_seconds AS billedSeconds,call_seconds AS callSeconds '+
@@ -123,10 +139,11 @@ export async function handlePlivoCostReconcile(req,env,user,{fetcher=fetch}={}){
   if(!old||old.callUuid!==job.callUuid||old.amount!==cdr.total_amount||
      old.billedSeconds!==cdr.billed_duration||old.callSeconds!==cdr.call_duration)
    return fail('provider CDR changed; billing needs manual review',409);
+  const settlement=await settleObservedCall(env,job,tid,jid,cdr);
   return json({tenantId:tid,jobId:jid,recorded:true,alreadyRecorded:true,
    currency:'unverified',providerReportedAmount:old.amount,
-   billedSeconds:old.billedSeconds,clientCreditsDebited:false,
-   notice:'This identical provider CDR was already recorded. No duplicate or wallet debit.'});
+   billedSeconds:old.billedSeconds,clientCreditsDebited:settlement.clientCreditsDebited,settlement,
+   notice:'Identical provider CDR; settlement is idempotent.'});
  }catch(e){
   if(/JSON|invalid/i.test(String(e?.message||'')))return fail('invalid request');
   console.error('AR3D Plivo CDR observation unavailable');

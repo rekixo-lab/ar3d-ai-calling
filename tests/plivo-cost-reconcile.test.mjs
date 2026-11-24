@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {fixture,tid,cid,lead,at,admin,client} from './helpers/calling-fixture.mjs';
 import {handlePlivoCostReconcile} from '../src/plivo-cost-reconcile-routes.mjs';
+import {reserveMinutes,minutePosition} from '../src/minute-holds.mjs';
 
 const job='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const run='bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
@@ -146,4 +147,22 @@ test('reconcile accepts compact campaign IDs and observes a CDR only once',async
   assert.equal((await handlePlivoCostReconcile(request({...data,jobId:'z'.repeat(32)}),f.env,admin,opts)).status,400);
   assert.equal(f.c.db.prepare('SELECT COUNT(*) AS n FROM tenant_credit_audit').get().n,0);
  }finally{f.close()}
+});
+
+test('matched signed-ended held call settles exactly once, mismatch and overreserve remain held',async()=>{
+ for(const mode of ['matched','unsigned','overreserve']){
+  const f=fixture();try{seed(f);
+   f.c.db.prepare("INSERT INTO tenant_minute_ledger(id,tenant_id,kind,delta_seconds,previous_seconds,balance_seconds,actor,reason,created_at) VALUES('synthetic-funding',?,'allocation',180,0,180,'admin','Synthetic test allocation',?)").run(tid,at);
+   assert.equal((await reserveMinutes(f.env.CONTROL_DB,{tenantId:tid,job,maxSeconds:60})).ok,true);
+   f.c.db.prepare(`INSERT INTO scripted_phone_pilots(id,tenant_id,lead_id,lead_updated_at,actor_id,language,destination,caller,expires_at,phase,survey_json,created_at,provider_account_id,job_id,provider_call_id,hangup_at)
+   VALUES('test-session',?,?,?,'admin','hi','+919000000001','+918000000000',9999999999999,'completed','{}',?,'TESTACCOUNT123',?,?,?)`).run(tid,lead,at,at,job,call,mode==='unsigned'?null:999);
+   const data=mode==='overreserve'?{...good,billed_duration:90}:good;
+   const opts={fetcher:gateway(data)};
+   const first=await handlePlivoCostReconcile(request(),f.env,admin,opts);assert.equal(first.status,200,await first.clone().text());
+   assert.equal((await first.json()).settlement.state,mode==='matched'?'settled':mode==='unsigned'?'needs_review':'over_reserve_review');
+   const second=await handlePlivoCostReconcile(request(),f.env,admin,opts);assert.equal(second.status,200);
+   const position=await minutePosition(f.env.CONTROL_DB,tid);
+   assert.equal(position.usedSeconds,mode==='matched'?60:0);assert.equal(position.heldSeconds,mode==='matched'?0:60);
+  }finally{f.close()}
+ }
 });
