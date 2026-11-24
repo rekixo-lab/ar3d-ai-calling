@@ -405,8 +405,8 @@ export async function handleScriptedPhoneAdmin(req,env,user,{now=Date.now(),fetc
   if(req.method!=='POST'||!config||!mutationOriginAllowed(req)||new URL(req.url).origin!==config.origin||new URL(req.url).search)return error('invalid_recording_probe_request',400);
   try{
    const data=parseJsonBody(new TextDecoder('utf-8',{fatal:true}).decode(await readBoundedBytes(req,512)),512);
-   if(Object.keys(data).join(',')!=='confirm'||data.confirm!=='REPROCESS_ONE_CONSENTED_INTERNAL_RECORDING')return error('explicit_recording_probe_confirmation_required',400);
-   return json(await probeInternalRecording(env,config,fetcher));
+   if(Object.keys(data).join(',')!=='confirm'||!['REPROCESS_ONE_CONSENTED_INTERNAL_RECORDING','SHOW_ONE_CONSENTED_INTERNAL_FIRST_ANSWER'].includes(data.confirm))return error('explicit_recording_probe_confirmation_required',400);
+   return json(await probeInternalRecording(env,config,fetcher,{showFirstAnswer:data.confirm==='SHOW_ONE_CONSENTED_INTERNAL_FIRST_ANSWER',now}));
   }catch{return error('recording_probe_unavailable',503)}
  }
  if(path===ADMIN+'/media-diagnostics'){
@@ -582,13 +582,16 @@ function verifiedRecordingUrl(config,row,recording,body){
 
 // Deliberately reuse one already recorded answer. Only current-MFA operator,
 // explicit renewed consent, eligible enrolled internal lead, signed ended call.
-// No recording or transcript is returned, retained, logged or written to CRM.
-async function probeInternalRecording(env,config,fetcher){
+// No recording or transcript is retained, logged or written to CRM.
+// A separate explicit consent confirmation permits displaying one first-answer
+// transcript to the current-MFA operator only; default probe returns no text.
+async function probeInternalRecording(env,config,fetcher,{showFirstAnswer=false,now=Date.now()}={}){
  const result={phoneCallsStarted:0,crmChanged:false,metadataHttp:null,mediaHost:null,mediaHttp:null,bytes:0,stt:'not_started'};
  const row=await env.CONTROL_DB.prepare(
-  "SELECT provider_call_id,lead_id,destination,language FROM scripted_phone_pilots WHERE tenant_id=? AND job_id IS NULL AND provider_account_id=? AND caller=? AND hangup_at IS NOT NULL AND provider_call_id IS NOT NULL AND turn>0 AND CASE WHEN json_valid(survey_json) THEN COALESCE(json_extract(survey_json,'$.phoneMeta.engine'),'whisper')='whisper' ELSE 0 END ORDER BY created_at DESC LIMIT 1")
+  "SELECT provider_call_id,lead_id,destination,language,CASE WHEN json_valid(survey_json) THEN json_extract(survey_json,'$.index') END AS question_index FROM scripted_phone_pilots WHERE tenant_id=? AND job_id IS NULL AND provider_account_id=? AND caller=? AND hangup_at IS NOT NULL AND provider_call_id IS NOT NULL AND turn>0 AND CASE WHEN json_valid(survey_json) THEN COALESCE(json_extract(survey_json,'$.phoneMeta.engine'),'whisper')='whisper' ELSE 0 END ORDER BY created_at DESC LIMIT 1")
   .bind(config.tenant,config.authId,config.caller).first();
  if(!row||!ID.test(row.provider_call_id)||!['hi','en'].includes(row.language))return {...result,state:'no_matching_recorded_call'};
+ if(showFirstAnswer&&row.question_index!==0)return {...result,state:'first_question_not_confirmed'};
  const target=await selectDevice(env,config,row.lead_id),crm=await pilotCrm(env,config.tenant);
  if(!target||target.destination!==row.destination||!crm||!await eligiblePilotLead(crm,target))return {...result,state:'internal_device_unavailable'};
  const metadata=await providerMetadata(config,'Recording/?call_uuid='+encodeURIComponent(row.provider_call_id)+'&limit=20',fetcher);
@@ -610,7 +613,12 @@ async function probeInternalRecording(env,config,fetcher){
  }catch{return {...result,state:'media_read_failed'}}
  try{
   const text=await transcribeScriptedAnswer(env.AI,bytes,row.language,{vadFilter:false});
-  return {...result,state:'media_downloaded',stt:text?'text_received':'empty_text'};
+  const output={...result,state:'media_downloaded',stt:text?'text_received':'empty_text'};
+  if(showFirstAnswer&&text){
+   const replay=advanceFixedVoicePreview(beginFixedVoicePreview({language:row.language,now}).state,{transcript:text,now});
+   return {...output,transcript:text,parserAction:replay.action,propertyType:replay.state.answers.propertyType??null};
+  }
+  return output;
  }catch{return {...result,state:'media_downloaded',stt:'service_failed'}}
 }
 
