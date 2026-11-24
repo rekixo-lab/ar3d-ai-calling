@@ -138,7 +138,10 @@ const streamingEngine='deepgram_stream';
 function isStreaming(row){return internalDirect(row)&&JSON.parse(row.survey_json).phoneMeta?.engine===streamingEngine}
 function internalDirect(row){return !row.job_id&&JSON.parse(row.survey_json).phoneMeta?.mode==='direct_preconsented'}
 const speak=(language,text)=>'<Speak voice="'+(language==='hi'?'Polly.Aditi':'WOMAN')+'" language="'+(language==='hi'?'hi-IN':'en-US')+'">'+escapeXml(text)+'</Speak>';
-function directOpening(row){return speak(row.language,row.language==='hi'?'नमस्कार, मैं ए आर थ्री डी की ए आई सहायक हूँ। आपके जवाब रिकॉर्ड किए जाएंगे। अगर आप बात नहीं करना चाहते, तो मना कर सकते हैं।':'Hello, I am the AR3D AI assistant. Your answers will be recorded. You can decline at any time.');}
+function directOpening(row){
+ if(isStreaming(row))return speak(row.language,row.language==='hi'?'नमस्कार, मैं ए आर थ्री डी की ए आई सहायक हूँ। आपके जवाब ए आई से समझे और टेक्स्ट में दर्ज किए जाएंगे। अगर आप बात नहीं करना चाहते, तो मना कर सकते हैं।':'Hello, I am the AR3D AI assistant. Your speech will be processed and your answers saved as text. You can decline at any time.');
+ return speak(row.language,row.language==='hi'?'नमस्कार, मैं ए आर थ्री डी की ए आई सहायक हूँ। आपके जवाब रिकॉर्ड किए जाएंगे। अगर आप बात नहीं करना चाहते, तो मना कर सकते हैं।':'Hello, I am the AR3D AI assistant. Your answers will be recorded. You can decline at any time.');
+}
 
 function responseFor(config,row,{repeatCue=false,directOpeningCue=false,liveToken=null}={}){
  const audio=name=>play(callback(config,row.id,'audio/'+name+'.mp3'));
