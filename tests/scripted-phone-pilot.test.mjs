@@ -753,12 +753,15 @@ test('saved recording probe is no-dial, current-MFA and explicit-consent only; r
    AI:{async run(){return {text:'private transcript'}}}};
   f.c.db.prepare("INSERT INTO scripted_phone_pilots(id,tenant_id,lead_id,lead_updated_at,actor_id,language,destination,caller,rate_slot,expires_at,phase,turn,provider_call_id,survey_json,created_at,provider_account_id,hangup_at) VALUES(?,?,?,?,?,?,?,?,?,?,'ended',1,?,?,?,?,?)")
    .run(crypto.randomUUID(),tid,lead,new Date(now).toISOString(),admin.id,'hi',internalNumber,env.AR3D_PLIVO_CALLER_NUMBER,1,now+600000,callId,JSON.stringify({index:0,phoneMeta:{engine:'whisper'}}),new Date(now).toISOString(),env.PLIVO_AUTH_ID,now);
-  let calls=0,media=0;
+  let calls=0,media=0,ordered=false;
   const req=(confirm='REPROCESS_ONE_CONSENTED_INTERNAL_RECORDING')=>new Request(origin+'/v1/human/scripted-phone-pilot/recording-probe',{method:'POST',headers:{Origin:origin},body:JSON.stringify({confirm})});
   const fetcher=async(url,opts)=>{
    calls++;assert.equal(opts.method,'GET');assert.equal(opts.redirect,'manual');
-   if(url.includes('/Recording/?'))return Response.json({objects:[{call_uuid:callId,recording_id:'record-id-00',recording_format:'mp3',recording_duration_ms:6000,recording_url:'https://aps1.media.plivo.com/v1/Account/syntheticAuth/Recording/record-id-00.mp3'}]});
-   assert.match(url,/^https:\/\/aps1\.media\.plivo\.com\//);media++;
+   if(url.includes('/Recording/?')){
+    const entry=(id,start)=>({call_uuid:callId,recording_id:id,recording_format:'mp3',recording_duration_ms:6000,recording_url:'https://aps1.media.plivo.com/v1/Account/syntheticAuth/Recording/'+id+'.mp3',...(start?{recording_start_ms:start}:{})});
+    return Response.json({objects:ordered?[entry('record-id-01','1407235163907.00000'),entry('record-id-00','1407235153907.00000')]:[entry('record-id-00')]});
+   }
+   assert.match(url,/^https:\/\/aps1\.media\.plivo\.com\//);if(ordered)assert.match(url,/record-id-01\.mp3$/);media++;
    return new Response('RIFF',{headers:{'Content-Type':'audio/wav'}});
   };
   assert.equal((await handleScriptedPhoneAdmin(req(),env,client,{now,fetcher})).status,403);
@@ -779,6 +782,19 @@ test('saved recording probe is no-dial, current-MFA and explicit-consent only; r
   assert.equal(blocked.state,'first_question_not_confirmed');assert.equal(blocked.transcript,undefined);assert.equal(calls,6);
   const last=await (await handleScriptedPhoneAdmin(req('SHOW_ONE_CONSENTED_INTERNAL_LAST_ANSWER'),env,admin,{now,fetcher})).json();
   assert.equal(last.state,'last_answer_order_unverified');assert.equal(last.transcript,undefined);assert.equal(calls,7);
+  ordered=true;
+  f.c.db.prepare("UPDATE scripted_phone_pilots SET survey_json=?").run(JSON.stringify({version:1,status:'needs_review',language:'hi',index:4,answers:{propertyType:'plot',location:'रायपुर',area:'अमलीडीह',size:'1000 sqft'},attempts:3,turns:9,startedAt:now,phoneMeta:{engine:'whisper'}}));
+  const inputs=[];
+  env.AI.run=async(model,input)=>{
+   assert.equal(model,'@cf/openai/whisper-large-v3-turbo');inputs.push(input);
+   return {text:input.initial_prompt?'तीस लाख':'तीस'};
+  };
+  const controlBefore=f.c.db.prepare('SELECT * FROM scripted_phone_pilots').get();
+  const compared=await (await handleScriptedPhoneAdmin(req('SHOW_ONE_CONSENTED_INTERNAL_LAST_ANSWER'),env,admin,{now,fetcher})).json();
+  assert.equal(compared.question,'budgetInr');assert.equal(compared.transcript,'तीस');assert.equal(compared.parserAction,'repeat');assert.equal(compared.normalizedAnswer,null);
+  assert.equal(compared.hinted.transcript,'तीस लाख');assert.equal(compared.hinted.parserAction,'next_question');assert.equal(compared.hinted.normalizedAnswer,3000000);
+  assert.equal(inputs.length,2);assert.equal(inputs[0].audio,inputs[1].audio);assert.equal(inputs[0].initial_prompt,undefined);assert.match(inputs[1].initial_prompt,/बजट/);assert.equal(inputs[0].vad_filter,inputs[1].vad_filter);
+  assert.equal(compared.phoneCallsStarted,0);assert.equal(compared.crmChanged,false);assert.equal(calls,9);assert.deepEqual(f.c.db.prepare('SELECT * FROM scripted_phone_pilots').get(),controlBefore);
   assert.deepEqual(f.r.db.prepare('SELECT * FROM leads WHERE id=?').get(lead),before);
  }finally{f.close()}
 });

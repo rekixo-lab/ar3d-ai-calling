@@ -165,11 +165,11 @@ function scriptedPhonePilotPanel(){
   },true);
   const lastAnswerReport=div('stack');
   const lastAnswerProbe=btn('Inspect last rejected answer (no call)',async()=>{
-   if(!window.confirm('Confirm the internal recipient agrees to reprocess and display the latest saved answer to you. AI usage may be charged. No new call or CRM update. Keep the transcript private.'))return;
+   if(!window.confirm('Confirm the internal recipient agrees to reprocess and display the latest saved answer twice (without and with a topic hint). Two AI recognition runs may be charged. No new call or CRM update. Keep the transcript private.'))return;
    lastAnswerProbe.disabled=true;lastAnswerReport.replaceChildren();
    try{
     const d=await api('/v1/human/scripted-phone-pilot/recording-probe','POST',{confirm:'SHOW_ONE_CONSENTED_INTERNAL_LAST_ANSWER'});
-    lastAnswerReport.replaceChildren(table(['Diagnostic','Result'],[['Outcome',d.state.replaceAll('_',' ')],['Question',d.question??'—'],['Media HTTP',d.mediaHttp??'—'],['Whisper STT',d.stt.replaceAll('_',' ')],['Recognized words',d.transcript??'—'],['Parser',d.parserAction??'—'],['Normalized answer',d.normalizedAnswer??'—']]),node('p',{class:'muted',text:'Latest recording by provider time; may not exactly match the last callback. Do not share private speech.'}),btn('Clear transcript',()=>lastAnswerReport.replaceChildren(),true));
+    lastAnswerReport.replaceChildren(table(['Diagnostic','Result'],[['Outcome',d.state.replaceAll('_',' ')],['Question',d.question??'—'],['Media HTTP',d.mediaHttp??'—'],['Downloaded bytes',d.bytes]]),table(['Same recording','Without hint','With topic hint'],[['Whisper STT',d.stt.replaceAll('_',' '),d.hinted?.stt?.replaceAll('_',' ')??'—'],['Recognized words',d.transcript??'—',d.hinted?.transcript??'—'],['Deterministic parser',d.parserAction??'—',d.hinted?.parserAction??'—'],['Normalized answer',d.normalizedAnswer??'—',d.hinted?.normalizedAnswer??'—']]),node('p',{class:'muted',text:'Two fresh recognition runs on the latest recording by provider time, not the original callback transcript. Question inferred from saved state; contextual interpretation and split-answer memory are not replayed. Check the words against what you actually said. Do not share private speech.'}),btn('Clear transcript',()=>lastAnswerReport.replaceChildren(),true));
    }catch(e){asError(e)}finally{lastAnswerProbe.disabled=false}
   },true);
   const device=node('select',{class:'field','aria-label':'Internal test number'});
