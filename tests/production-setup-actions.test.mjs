@@ -13,7 +13,7 @@ const present={
  AR3D_SCRIPTED_PILOT_VERIFIED_NUMBER:'+919876543210',
  AR3D_SCRIPTED_PILOT_TENANT_ID:'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
  AR3D_SCRIPTED_PILOT_LEAD_ID:'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
- AI:{run:()=>{}},
+ SARVAM_API_KEY:'synthetic-key',
  RECORDINGS:{get:()=>{},head:()=>{}}
 };
 

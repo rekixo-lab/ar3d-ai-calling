@@ -662,9 +662,8 @@ async function probeInternalRecording(env,config,fetcher,{playback=false,now=Dat
    const {phoneMeta,...previous}=JSON.parse(row.survey_json);
    const field=FIELDS[row.question_index];
    const replayState={...previous,status:'active',attempts:0,turns:0,startedAt:now};
-   // Same bytes, language and VAD settings; only the topic hint differs.
-   // These are fresh recognition runs, not the original callback transcript.
-   // Deterministic parser only: historical contextual/memory state is not recoverable.
+   // Fresh recognition, not the original callback transcript. Historical
+   // contextual/memory state is not recoverable.
    const recognize=async(run)=>{
     let transcript,confidence=null;
     try{({text:transcript,confidence=null}=await run())}

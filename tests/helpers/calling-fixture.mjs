@@ -45,12 +45,12 @@ export function configureScriptedCampaign(f){
   AR3D_SCRIPTED_PILOT_ENABLED:'enabled',AR3D_SCRIPTED_PILOT_ORIGIN:'https://app.example.invalid',
   AR3D_SCRIPTED_PILOT_VERIFIED_NUMBER:'+919000000009',AR3D_SCRIPTED_PILOT_TENANT_ID:tid,
   AR3D_SCRIPTED_PILOT_LEAD_ID:'88888888-8888-4888-8888-888888888888',
-  AI:{async run(){return {text:'test'}}},RECORDINGS:{async get(){return null},async head(){return {size:42}}}
+  SARVAM_API_KEY:'synthetic-key',AR3D_CAMPAIGN_SARVAM_DISCLOSURE:'approved',syntheticSpeech:{async run(){return {text:'test'}}},RECORDINGS:{async get(){return null},async head(){return {size:42}}}
  });
  f.c.db.prepare("INSERT INTO tenant_minute_ledger(id,tenant_id,kind,delta_seconds,previous_seconds,balance_seconds,actor,reason,created_at) VALUES('synthetic-funding',?,'allocation',6000,0,6000,'admin','Synthetic test allocation',?)").run(tid,at);
  f.c.db.prepare(`INSERT INTO scripted_phone_pilots(id,tenant_id,lead_id,lead_updated_at,actor_id,language,destination,caller,
   rate_slot,expires_at,phase,provider_account_id,survey_json,created_at,hangup_at)
-  VALUES('synthetic-completed-pilot',?,?,?,'admin','hi',?,?,1,?,'completed',?,'{}',?,?)`)
+  VALUES('synthetic-completed-pilot',?,?,?,'admin','hi',?,?,1,?,'completed',?,'{"phoneMeta":{"engine":"sarvam"}}',?,?)`)
   .run(tid,f.env.AR3D_SCRIPTED_PILOT_LEAD_ID,at,f.env.AR3D_SCRIPTED_PILOT_VERIFIED_NUMBER,
    f.env.AR3D_PLIVO_CALLER_NUMBER,now+600000,f.env.PLIVO_AUTH_ID,at,now);
 }
