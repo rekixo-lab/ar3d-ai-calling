@@ -439,7 +439,7 @@ test('recording and STT failures play repeat cue, bounded at three attempts, wit
     }
     assert.match(url,/^https:\/\/media\.plivo\.com\//);
     reads++;
-    if(mode==='http'||(mode==='recover'&&reads===1))return new Response('not ready',{status:404});
+    if(mode==='http'||(mode==='recover'&&reads<=2))return new Response('not ready',{status:404});
     if(mode==='network')throw Error('synthetic network error');
     if(mode==='type')return new Response('{}',{headers:{'Content-Type':'application/json'}});
     if(mode==='empty_body')return new Response(null,{headers:{'Content-Type':'audio/mpeg'}});
