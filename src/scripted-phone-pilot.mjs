@@ -294,7 +294,7 @@ export async function handleScriptedPhoneAdmin(req,env,user,{now=Date.now(),fetc
   const recent=await env.CONTROL_DB.prepare(`SELECT id,
     CASE WHEN phase='requested' AND provider_request_id IS NOT NULL THEN 'submitted' ELSE phase END AS phase,
     language,created_at,turn,duration_seconds,hangup_at IS NOT NULL AS signed_hangup,
-    provider_call_id IS NOT NULL AS signed_answer FROM scripted_phone_pilots
+    provider_call_id IS NOT NULL AS provider_call_reference FROM scripted_phone_pilots
     WHERE tenant_id=? AND lead_id=? AND job_id IS NULL ORDER BY created_at DESC LIMIT 5`).bind(config.tenant,config.lead).all();
   return json({configured:true,destinationLast4:config.destination.slice(-4),recent:recent.results});
  }catch{return error('scripted_phone_pilot_unavailable',503)}
