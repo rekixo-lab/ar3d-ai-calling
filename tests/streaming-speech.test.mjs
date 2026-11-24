@@ -18,7 +18,7 @@ test('Nova websocket binding and token are scoped to one call and turn',async()=
  const capability=await streamToken('secret',row);
  assert.equal(await validStreamToken('secret',row,capability),true);
  assert.equal(await validStreamToken('secret',{...row,turn:1},capability),false);
- assert.equal(await openNovaSocket({async run(model,params,options){assert.equal(model,'@cf/deepgram/nova-3');assert.equal(params.encoding,'mulaw');assert.equal(params.sample_rate,8000);assert.equal(params.language,'multi');assert.deepEqual(options,{websocket:true});return {webSocket:ws}}},'hi'),ws);
+ assert.equal(await openNovaSocket({async run(model,params,options){assert.equal(model,'@cf/deepgram/nova-3');assert.equal(params.encoding,'mulaw');assert.equal(params.sample_rate,'8000');assert.equal(params.language,'hi');assert.equal(params.endpointing,'1200');assert.deepEqual(options,{websocket:true});return {webSocket:ws}}},'hi'),ws);
 });
 test('Plivo inbound mu-law chunks become binary speech input; final text commits once',async()=>{
  const socket=new Socket(),upstream=new Socket(),answers=[];
@@ -28,7 +28,7 @@ test('Plivo inbound mu-law chunks become binary speech input; final text commits
  upstream.message({type:'Results',is_final:false,channel:{alternatives:[{transcript:'wrong'}]}});assert.equal(answers.length,0);
  upstream.message({type:'Results',is_final:true,speech_final:false,channel:{alternatives:[{transcript:'मुझे',confidence:.94}]}});
  upstream.message({type:'Results',is_final:true,speech_final:true,channel:{alternatives:[{transcript:'प्लॉट चाहिए',confidence:.91}]}});
- await wait();assert.deepEqual(answers,[{text:'मुझे प्लॉट चाहिए',reason:'recognized',confidence:.91}]);assert.equal(socket.closed,true);assert.equal(upstream.closed,true);
+ await wait();assert.deepEqual(answers,[{text:'मुझे प्लॉट चाहिए',reason:'recognized',confidence:.91,audioMs:0,streamStarted:true,sttConnected:true}]);assert.equal(socket.closed,true);assert.equal(upstream.closed,true);
 });
 test('wrong call identity, provider errors and timeout never invent a transcript',async()=>{
  for(const mode of ['identity','error','timeout']){
@@ -40,4 +40,15 @@ test('wrong call identity, provider errors and timeout never invent a transcript
   assert.equal(answers.length,1);assert.equal(answers[0].text,null);assert.equal(answers[0].reason,{identity:'stream_protocol_invalid',error:'stream_service_failed',timeout:'stream_final_timeout'}[mode]);
   assert.equal(opened,mode==='identity'?0:1);assert.equal(socket.closed,true);
  }
+});
+
+test('empty final during start does not consume the answer before audio arrives',async()=>{
+ const socket=new Socket(),upstream=new Socket(),answers=[];
+ bridgePlivoTurn(socket,{accountId:'account-test',callId:'call-test-123',language:'hi',connect:async()=>upstream,onAnswer:async a=>answers.push(a),maxMs:100,setupMs:100});
+ socket.message(start);await wait();
+ upstream.message({type:'Results',is_final:true,speech_final:true,channel:{alternatives:[{transcript:''}]}});
+ assert.equal(answers.length,0);
+ socket.message({...media,media:{...media.media,payload:btoa(String.fromCharCode(...new Uint8Array(160).fill(255)))}});
+ upstream.message({type:'Results',is_final:true,speech_final:true,channel:{alternatives:[{transcript:'प्लॉट',confidence:.95}]}});
+ await wait();assert.equal(answers[0].audioMs,20);assert.equal(answers[0].text,'प्लॉट');
 });

@@ -22,6 +22,8 @@ async function run(){
   CASE WHEN json_valid(p.survey_json) THEN json_extract(p.survey_json,'$.attempts') END AS attempts,
   CASE WHEN json_valid(p.survey_json) THEN json_extract(p.survey_json,'$.index') END AS question_index,
   CASE WHEN json_valid(p.survey_json) THEN json_extract(p.survey_json,'$.phoneMeta.lastAudioOutcome') END AS audio_outcome,
+  CASE WHEN json_valid(p.survey_json) THEN json_extract(p.survey_json,'$.phoneMeta.audioMs') END AS audio_ms,
+  CASE WHEN json_valid(p.survey_json) THEN json_extract(p.survey_json,'$.phoneMeta.sttConnected') END AS stt_connected,
   CASE WHEN json_valid(p.survey_json) THEN COALESCE(json_extract(p.survey_json,'$.phoneMeta.engine'),'whisper') END AS engine,
   p.provider_call_id IS NOT NULL AS signed_call_reference,
   p.provider_request_id IS NOT NULL AS request_reference
@@ -45,6 +47,8 @@ async function run(){
   questionIndex:Number.isSafeInteger(p.question_index)?p.question_index:null,
   engine:['whisper','deepgram_stream'].includes(p.engine)?p.engine:null,
   audioOutcome:typeof p.audio_outcome==='string'&&/^(recognized|speech_empty|speech_unrecognized|speech_service_failed|stream_(connect_failed|start_missing|service_failed|final_timeout|no_audio|protocol_invalid|disconnected)|recording_(id_missing|fetch_failed|type_invalid|body_invalid|http_(?:[0-9]{3}|unknown)))$/.test(p.audio_outcome)?p.audio_outcome:null,
+  audioMs:Number.isSafeInteger(p.audio_ms)?p.audio_ms:null,
+  sttConnected:p.stt_connected==null?null:p.stt_connected===1,
   durationSeconds:Number.isSafeInteger(p.duration_seconds)?p.duration_seconds:null,
   signedHangup:p.signed_hangup===1,providerCallReference:p.signed_call_reference===1,
   providerRequestReference:p.request_reference===1,crmLeadMatched:crm?.matched===1,

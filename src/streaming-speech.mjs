@@ -1,6 +1,6 @@
 // Per-answer live audio bridge. No recordings, raw transcripts or credentials
 // are persisted here. The caller has already been pre-consented and notified.
-const MAX_BYTES=16*8000;
+const MAX_BYTES=18*8000;
 export async function streamToken(secret,row){
  const key=await crypto.subtle.importKey('raw',new TextEncoder().encode(secret),{name:'HMAC',hash:'SHA-256'},false,['sign']);
  const bytes=await crypto.subtle.sign('HMAC',key,new TextEncoder().encode(['ar3d-stream-v2',row.id,row.provider_call_id,row.turn,row.expires_at].join(':')));
@@ -15,8 +15,8 @@ export async function validStreamToken(secret,row,token){
 export async function openNovaSocket(ai,language){
  // Cloudflare Workers AI websocket transport, not a public Deepgram API key.
  const resp=await ai.run('@cf/deepgram/nova-3',{
-  encoding:'mulaw',sample_rate:8000,channels:1,language:language==='hi'?'multi':'en',
-  interim_results:true,endpointing:'850',punctuate:false,smart_format:false
+  encoding:'mulaw',sample_rate:'8000',channels:'1',language:language==='hi'?'hi':'en-IN',
+  interim_results:'true',endpointing:'1200',punctuate:'false',smart_format:'false'
  },{websocket:true});
  const ws=resp?.webSocket;
  if(!ws||typeof ws.accept!=='function')throw Error('stream_upgrade_failed');
@@ -29,14 +29,15 @@ function decode(payload){
  const raw=atob(payload);if(!raw.length||raw.length>3200)throw Error('invalid media');
  return Uint8Array.from(raw,c=>c.charCodeAt(0)).buffer;
 }
-export function bridgePlivoTurn(socket,{accountId,callId,language,connect,onAnswer,maxMs=16000,finalMs=1500,setupMs=4500}){
+export function bridgePlivoTurn(socket,{accountId,callId,language,connect,onAnswer,maxMs=18000,finalMs=2000,setupMs=6500}){
  let upstream=null,streamId=null,finished=false,started=false,bytes=0,lastChunk=0,queue=[],parts=[],confidence=1,flushing=false;
- let deadline,flushTimer,setupTimer;
+ let deadline,flushTimer,setupTimer,firstAudioTimer;
+ let connected=false;
  const finish=async(text,reason)=>{
   if(finished)return;finished=true;
-  clearTimeout(deadline);clearTimeout(flushTimer);clearTimeout(setupTimer);
+  clearTimeout(deadline);clearTimeout(flushTimer);clearTimeout(setupTimer);clearTimeout(firstAudioTimer);
   queue=[];parts=[];close(upstream);
-  try{await onAnswer({text,reason,confidence})}catch{/* signed next callback fails closed or recovers */}
+  try{await onAnswer({text,reason,confidence,audioMs:Math.floor(bytes/8),streamStarted:started,sttConnected:connected})}catch{/* signed next callback fails closed or recovers */}
   finally{close(socket)}
  };
  function finalText(){
@@ -48,7 +49,7 @@ export function bridgePlivoTurn(socket,{accountId,callId,language,connect,onAnsw
   if(!upstream){void finish(null,started?'stream_connect_failed':'stream_start_missing');return}
   try{upstream.send(JSON.stringify({type:'Finalize'}))}
   catch{void finish(null,'stream_service_failed');return}
-  flushTimer=setTimeout(()=>void finish(null,bytes?'stream_final_timeout':'stream_no_audio'),finalMs);
+  flushTimer=setTimeout(()=>{const text=finalText();void finish(text,text?'recognized':bytes?'stream_final_timeout':'stream_no_audio')},finalMs);
  }
  async function start(){
   setupTimer=setTimeout(()=>void finish(null,'stream_connect_failed'),setupMs);
@@ -67,7 +68,7 @@ export function bridgePlivoTurn(socket,{accountId,callId,language,connect,onAnsw
       parts.push(a.transcript.trim());if(parts.join(' ').length>220){void finish(null,'speech_unrecognized');return}
       if(Number.isFinite(a.confidence)&&a.confidence>=0&&a.confidence<=1)confidence=Math.min(confidence,a.confidence);
      }
-     if(m.speech_final===true||(flushing&&m.from_finalize===true)){
+     if(bytes>0&&(m.speech_final===true||(flushing&&m.from_finalize===true))){
       const text=finalText();
       if(text||flushing)void finish(text,text?'recognized':'speech_empty');
      }
@@ -75,7 +76,7 @@ export function bridgePlivoTurn(socket,{accountId,callId,language,connect,onAnsw
    });
    ws.addEventListener('close',()=>{if(!finished)void finish(null,'stream_service_failed')});
    ws.addEventListener('error',()=>void finish(null,'stream_service_failed'));
-   ws.accept();clearTimeout(setupTimer);
+   ws.accept();connected=true;clearTimeout(setupTimer);
    for(const chunk of queue)ws.send(chunk);
    queue=[];
    if(flushing)ws.send(JSON.stringify({type:'Finalize'}));
@@ -102,6 +103,7 @@ export function bridgePlivoTurn(socket,{accountId,callId,language,connect,onAnsw
    lastChunk=chunk;
    const data=decode(m.media.payload);
    if(bytes+data.byteLength>MAX_BYTES){finalize();return}
+   if(bytes===0){clearTimeout(firstAudioTimer);deadline=setTimeout(finalize,maxMs)}
    bytes+=data.byteLength;
    if(upstream)upstream.send(data);
    else {if(queue.length>=250)throw Error('buffer limit');queue.push(data)}
@@ -109,7 +111,7 @@ export function bridgePlivoTurn(socket,{accountId,callId,language,connect,onAnsw
  });
  socket.addEventListener('close',()=>{if(!finished)void finish(null,'stream_disconnected')});
  socket.addEventListener('error',()=>void finish(null,'stream_disconnected'));
- deadline=setTimeout(finalize,maxMs);
+ firstAudioTimer=setTimeout(()=>void finish(null,started?'stream_no_audio':'stream_start_missing'),setupMs+2000);
  socket.accept();
 }
 export function upgradePlivoTurn(args){
