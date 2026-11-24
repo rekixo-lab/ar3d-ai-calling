@@ -36,15 +36,9 @@ Each item remains open until its specific evidence exists. Green CI and deploy a
 - Improve short-answer capture and bounded media availability retry; show reason and accepted question count. Verify on actual Hindi and English calls; do not assume synthetic tests prove recognition or enable live campaigns.
 - Natural recorded direct opening may replace synthesized notice only after reviewing that it preserves notice. Evaluate streaming/ASR separately if batch recording still fails; verify provider charges and language before enabling.
 
-## Streaming V2 pilot
-- Optional Deepgram Nova-3 through existing Workers AI binding. Each prerecorded prompt is followed by a bounded inbound mu-law stream, finalized by the STT service; signed Redirect resumes the same questionnaire. No MP3 download or raw audio retention for streamed answers. Not continuous duplex/barge-in. No automatic fallback/redial or campaign routing change.
-- Current-MFA enrolled, explicitly preconsented internal tests only. Per-call/turn HMAC, signed continuation/hangup, atomic claim, confidence check, no raw speech in logs. Actual provider websocket transport and real Hindi/Hinglish acceptance remain open.
-- Sarvam is not yet integrated or configured; disabled selector until separate approved setup and privacy/billing verification. Do not claim the streaming model is free.
-
-## Recorded-answer recovery evidence (2026-11-24)
-Operator's live saved-answer probe: metadata HTTP 200, aps1.media.plivo.com media HTTP 200, 17136 bytes and Whisper text received. This verifies transport and nonempty STT output for one stored answer, not accuracy or live questionnaire completion. Prefer the proven call-scoped recording metadata listing when the legacy global media host returns 403; exact recording and call match plus host/account/path allowlist remain required. Whisper is the internal selector default until streaming acceptance. Nova stream connection remains unresolved; no automatic dial or campaign enablement. Next acceptance: operator initiates one consented internal Hindi call and verifies accepted answers and CRM save.
-
-## Contextual internal conversation pilot
-Retain fast deterministic interpretation for short explicit responses, support spoken Indian-number budgets and affirmatives/refusals. For internal direct-consented tests only, a bounded Workers AI Llama 3.3 70B contextual fallback uses the current question, property type, India date and utterance; no phone/name, tool execution, campaign approval or CRM authority. Require exact evidence quote and canonical answer validated by the same state machine. Timeout/invalid output falls back safely. The model is not yet proven live; customer campaign flow remains deterministic, disabled until independently approved. Multi-slot/out-of-order capture, semantic confirmation, audio interruption/barge-in and open-ended customer FAQ still need separate acceptance and engineering.
+## Single speech provider
+- Sarvam Saaras v4 handles recorded-answer recognition in both internal and customer flows. Sarvam 105B Conversations provides bounded, evidence-validated contextual proposals only when the deterministic interpreter cannot resolve a response and the required disclosures are approved.
+- Keep signed Plivo callbacks, recording URL allowlists, retry limits, consent, DND and provider funding gates. Do not automatically switch providers, redial, or enable a customer campaign.
+- The isolated Sarvam realtime research probe is not a live call route. Real-device acceptance, measured latency and actual invoice verification remain required.
 
 Superseding implementation sequence: see approved-hindi-production-architecture.md owner amendment for nine stages. Stage 1 increment is read-only per-call cost intelligence, no client debit or campaign enablement.

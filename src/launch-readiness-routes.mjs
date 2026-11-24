@@ -27,7 +27,6 @@ export function buildPlivoReadinessSnapshot(env){
   ['pilotDestination',indiaMobile(env?.AR3D_SCRIPTED_PILOT_VERIFIED_NUMBER),'Internal pilot destination is configured'],
   ['pilotTenantId',uuid(env?.AR3D_SCRIPTED_PILOT_TENANT_ID),'Internal pilot tenant ID is configured'],
   ['pilotLeadId',uuid(env?.AR3D_SCRIPTED_PILOT_LEAD_ID),'Internal pilot CRM lead ID is configured'],
-  ['workersAi',typeof env?.AI?.run==='function','Legacy Workers AI test binding exists'],
   ['sarvamSpeech',typeof env?.SARVAM_API_KEY==='string'&&Boolean(env.SARVAM_API_KEY.trim()),'Sarvam speech credential is configured (presence only)'],
   ['fundingReview',env?.AR3D_FUNDED_CAMPAIGN_DISPATCH==='approved'&&fundingCap(env)!==null&&moneyBudgetConfig(env)!==null,'Separate reviewed time and monetary ceilings configured; not live provider funds'],
   ['privateRecordings',typeof env?.RECORDINGS?.get==='function'&&

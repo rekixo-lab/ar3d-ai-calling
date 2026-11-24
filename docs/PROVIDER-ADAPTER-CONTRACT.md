@@ -19,4 +19,4 @@ This module is **a private internal normalization contract**, not a specificatio
 A production provider adapter and secure transport remain entirely unimplemented. This is testable groundwork to reduce future integration mistakes, not live functionality.
 
 
-The optional browser SpeechRecognition/SpeechSynthesis playground in `/app/simulator` is NOT a server-side or telecom provider adapter. Audio processing may be handled by the browser vendor and is outside this project's Worker. Do not treat browser speech tests as evidence of Hindi-language production performance or compliance.
+The text simulator at `/app/simulator` offers typed answers and optional question playback only. The separate authenticated seven-question client preview transcribes explicitly consented short WAV clips through Sarvam. Neither preview is a telecom provider adapter or proof of real-call Hindi performance or compliance.

@@ -360,7 +360,7 @@ export function advanceFixedVoicePreview(current,{transcript,confidence=1,now=Da
 // for consent, customer clearance, dialing, bookings or arbitrary CRM writes.
 // It proposes one answer for the CURRENT question only. Every proposal is
 // evidence-linked and re-enters the same validated state machine.
-export const CONTEXTUAL_MODEL='@cf/meta/llama-3.3-70b-instruct-fp8-fast';
+export const CONTEXTUAL_MODEL='sarvam-105b-conversations';
 const CONTEXTUAL_SCHEMA={
  type:'object',additionalProperties:false,
  properties:{action:{type:'string',enum:['answer','unclear','stop']},value:{type:'string'},evidence:{type:'string'}},

@@ -160,44 +160,7 @@ function scriptedPhonePilotPanel(){
   language.value=state.internalPilotLanguage||'hi';
   language.addEventListener('change',()=>{state.internalPilotLanguage=language.value});
   const status=node('p',{class:'note',role:'status',text:'Checking pilot configuration…'});
-  const results=div('stack'),prepared=div('stack'),mediaReport=div('stack');
-  const mediaCheck=btn('Check last call media (no call)',async()=>{
-   mediaCheck.disabled=true;
-   try{
-    const d=await api('/v1/human/scripted-phone-pilot/media-diagnostics');
-    mediaReport.replaceChildren(table(['Provider check','Result','HTTP','Matching records'],[
-     ['Latest Nova-3 streams',d.streams.state.replaceAll('_',' '),d.streams.httpStatus??'—',d.streams.count??'—'],
-     ['Latest Whisper recordings',d.recordings.state.replaceAll('_',' '),d.recordings.httpStatus??'—',d.recordings.count??'—']]),
-     node('p',{class:'muted',text:'No new phone call, audio download or transcription. Matching recording duration: '+(d.recordings.durationMs??'—')+' ms. A zero count or unavailable API is not proof of provider failure.'}));
-   }catch(e){asError(e)}finally{mediaCheck.disabled=false}
-  },true);
-  const probeReport=div('stack');
-  const probe=btn('Test one saved recording (no call)',async()=>{
-   if(!window.confirm('Confirm the recipient of the latest recorded internal test has agreed to reprocess one saved answer with Workers AI. AI usage may be charged. No new call or CRM update.'))return;
-   probe.disabled=true;
-   try{
-    const d=await api('/v1/human/scripted-phone-pilot/recording-probe','POST',{confirm:'REPROCESS_ONE_CONSENTED_INTERNAL_RECORDING'});
-    probeReport.replaceChildren(table(['Diagnostic','Result'],[['Outcome',d.state.replaceAll('_',' ')],['Metadata HTTP',d.metadataHttp??'—'],['Verified media host',d.mediaHost??'—'],['Media HTTP',d.mediaHttp??'—'],['Downloaded bytes',d.bytes],['Whisper STT',d.stt.replaceAll('_',' ')]]),node('p',{class:'muted',text:'No new call or CRM change. Audio and transcript are not retained by this diagnostic.'}));
-   }catch(e){asError(e)}finally{probe.disabled=false}
-  },true);
-  const answerReport=div('stack');
-  const answerProbe=btn('Inspect first answer recognition (no call)',async()=>{
-   if(!window.confirm('Confirm the recipient of the latest recorded internal test explicitly agrees to reprocess and display ONE existing answer transcript to you. AI usage may be charged. No new call, no CRM changes. Do not share private speech.'))return;
-   answerProbe.disabled=true;answerReport.replaceChildren();
-   try{
-    const d=await api('/v1/human/scripted-phone-pilot/recording-probe','POST',{confirm:'SHOW_ONE_CONSENTED_INTERNAL_FIRST_ANSWER'});
-    answerReport.replaceChildren(table(['Diagnostic','Result'],[['Outcome',d.state.replaceAll('_',' ')],['Media HTTP',d.mediaHttp??'—'],['Downloaded bytes',d.bytes],['Whisper STT',d.stt.replaceAll('_',' ')],['Recognized words',d.transcript??'—'],['First question parser',d.parserAction??'—'],['Property type',d.propertyType??'—']]),node('p',{class:'muted',text:'Diagnostic only. One existing answer; nothing is saved to CRM. Clear before sharing the screen.'}),btn('Clear transcript',()=>answerReport.replaceChildren(),true));
-   }catch(e){asError(e)}finally{answerProbe.disabled=false}
-  },true);
-  const lastAnswerReport=div('stack');
-  const lastAnswerProbe=btn('Inspect last rejected answer (no call)',async()=>{
-   if(!window.confirm('Confirm the internal recipient agrees to reprocess and display the latest saved answer using Whisper twice and Cloudflare-hosted Deepgram Nova-3 once. Three AI recognition runs may be charged. No new call or CRM update. Keep the transcript private.'))return;
-   lastAnswerProbe.disabled=true;lastAnswerReport.replaceChildren();
-   try{
-    const d=await api('/v1/human/scripted-phone-pilot/recording-probe','POST',{confirm:'SHOW_ONE_CONSENTED_INTERNAL_LAST_ANSWER'});
-    lastAnswerReport.replaceChildren(table(['Diagnostic','Result'],[['Outcome',d.state.replaceAll('_',' ')],['Question',d.question??'—'],['Media HTTP',d.mediaHttp??'—'],['Downloaded bytes',d.bytes],['Media type',d.contentType??'—'],['Recording duration (ms)',d.recordingDurationMs??'—']]),table(['Same recording','Whisper','Whisper + hint','Nova-3 recorded'],[['STT',d.stt.replaceAll('_',' '),d.hinted?.stt?.replaceAll('_',' ')??'—',d.nova?.stt?.replaceAll('_',' ')??'—'],['Recognized words',d.transcript??'—',d.hinted?.transcript??'—',d.nova?.transcript??'—'],['Deterministic parser',d.parserAction??'—',d.hinted?.parserAction??'—',d.nova?.parserAction??'—'],['Normalized answer',d.normalizedAnswer??'—',d.hinted?.normalizedAnswer??'—',d.nova?.normalizedAnswer??'—'],['Reported confidence','—','—',d.nova?.confidence??'—'],['Safe error code',d.failureCode??'—',d.hinted?.failureCode??'—',d.nova?.failureCode??'—']]),node('p',{class:'muted',text:'Three fresh recognition runs on the latest recording by provider time, not the original callback transcript. Question inferred from saved state; contextual interpretation and split-answer memory are not replayed. Check the words against what you actually said. Do not share private speech.'}),btn('Clear transcript',()=>lastAnswerReport.replaceChildren(),true));
-   }catch(e){asError(e)}finally{lastAnswerProbe.disabled=false}
-  },true);
+  const results=div('stack'),prepared=div('stack');
   const sarvamReport=div('stack');
   const sarvamProbe=btn('Test Sarvam Hindi STT (no call)',async()=>{
    if(!window.confirm('Confirm the internal recipient agrees to send the latest saved answer to Sarvam AI for transcription and, only if needed, contextual interpretation; display the results privately. Up to two AI requests may incur charges. No new call or CRM update.'))return;
@@ -238,13 +201,7 @@ function scriptedPhonePilotPanel(){
    }catch(e){asError(e)}finally{listen.disabled=false}
   },true);
   const device=node('select',{class:'field','aria-label':'Internal test number'});
-  const engine=node('select',{class:'field','aria-label':'Speech recognition engine'},[
-    node('option',{value:'sarvam',text:'Sarvam Saaras v4 · Hindi-first'}),
-    node('option',{value:'whisper',text:'Whisper · legacy diagnostic'}),
-    node('option',{value:'deepgram_stream',text:'Deepgram Nova-3 · experimental'})
-  ]);
-  engine.value=state.internalSpeechEngine||'sarvam';
-  engine.addEventListener('change',()=>{state.internalSpeechEngine=engine.value;updateAvailability()});
+  const engine=node('span',{text:'Sarvam Saaras v4'});
   const mobile=input('internalTestMobile','tel','10-digit Indian mobile');mobile.maxLength=13;
   const enroll=btn('Add test number',async()=>{
     const raw=mobile.value.trim().replace(/\s/g,'');
@@ -271,7 +228,7 @@ function scriptedPhonePilotPanel(){
   function updateAvailability(){
     const available=config?.availability;
     const seconds=Math.max(0,Math.ceil((deadline-Date.now())/1000));
-    call.disabled=busy||refreshing||!config?.configured||available?.ready!==true||!device.value||!config?.engines?.includes(engine.value);
+    call.disabled=busy||refreshing||!config?.configured||available?.ready!==true||!device.value||!config?.sarvamConfigured;
     enroll.disabled=busy||refreshing||!config?.enrollmentEnabled||(config?.devices?.length||0)>=5;
     cooldown.textContent=!config?.configured?'':available?.reason==='awaiting_signed_hangup'?
       'Waiting for signed hangup from Plivo. Do not redial an unconfirmed call.':
@@ -292,10 +249,10 @@ function scriptedPhonePilotPanel(){
   }
   const call=btn('Call the verified internal number once',async()=>{
     const selected=config?.devices?.find(x=>x.leadId===device.value);
-    if(busy||refreshing||!selected||config?.availability?.ready!==true||!window.confirm('Place one internal pilot call to the selected test number ending '+selected.destinationLast4+'? Confirm the actual recipient has been informed BEFORE this call about AI processing, text retention and their right to decline, and has explicitly agreed to the selected provider processing their speech and text. Sarvam uses recorded answers and Sarvam AI speech recognition and optional contextual interpretation. Legacy Whisper and Deepgram use Workers AI. For Sarvam, explicitly confirm the recipient has already received and accepted the recording notice before placing this call; it will not be repeated in the greeting. Other recorded calls play their usual notice. No keypad required. Selected recognition: '+engine.options[engine.selectedIndex].textContent+'. Telephony and AI usage may be charged.'))return;
+    if(busy||refreshing||!selected||config?.availability?.ready!==true||!window.confirm('Place one internal pilot call to the selected test number ending '+selected.destinationLast4+'? Confirm the actual recipient has been informed BEFORE this call about AI processing, text retention and their right to decline, and has explicitly agreed to the selected provider processing their speech and text. Sarvam uses recorded answers and Sarvam AI speech recognition and optional contextual interpretation. Explicitly confirm the recipient has already received and accepted the recording notice before placing this call; it will not be repeated in the greeting. No keypad required. Telephony and AI usage may be charged.'))return;
     busy=true;updateAvailability();
     try{
-      await api('/v1/human/scripted-phone-pilot','POST',{language:language.value,leadId:selected.leadId,engine:engine.value,confirm:engine.value==='sarvam'?'CALL_ONE_INTERNAL_SARVAM_WITH_PRIOR_RECORDING_NOTICE':'CALL_ONE_PRECONSENTED_INTERNAL_NUMBER'});
+      await api('/v1/human/scripted-phone-pilot','POST',{language:language.value,leadId:selected.leadId,engine:'sarvam',confirm:'CALL_ONE_INTERNAL_SARVAM_WITH_PRIOR_RECORDING_NOTICE'});
       notice('Pilot submitted. Waiting for signed hangup.');
     }catch(err){asError(err)}
     finally{try{await refresh()}catch(err){asError(err)}busy=false;updateAvailability()}
@@ -307,9 +264,7 @@ function scriptedPhonePilotPanel(){
     try{
     config=await api('/v1/human/scripted-phone-pilot');
     deadline=Date.now()+1000*(config.availability?.retryAfterSeconds||0);
-    for(const option of engine.options)option.disabled=!config.engines?.includes(option.value);
-    if(!config.sarvamConfigured&&engine.value==='sarvam')status.textContent='Sarvam API key is missing; configure Worker Secret SARVAM_API_KEY.';
-    status.textContent=config.configured?'Choose one pre-consented internal device. No keypad required. Complete answers update only its test lead.':'Waiting for Plivo: approve a caller number and configure the internal test.';
+    status.textContent=config.configured&&!config.sarvamConfigured?'Sarvam API key missing. Configure the Worker secret.':config.configured?'Choose one pre-consented internal device. No keypad required. Complete answers update only its test lead.':'Waiting for Plivo: approve a caller number and configure the internal test.';
     const previous=device.value;
     device.replaceChildren(...(config.devices||[]).map(x=>node('option',{value:x.leadId,text:(x.primary?'Primary':'Test device')+' · ••••'+x.destinationLast4})));
     if(config.devices?.some(x=>x.leadId===previous))device.value=previous;
@@ -317,13 +272,13 @@ function scriptedPhonePilotPanel(){
     prepare.hidden=!!config.configured;
 
     results.replaceChildren(...(config.recent?.length?[table(['Started','Test number','Language','Speech engine','Status','Provider call reference','Attempts processed','Questions accepted','Audio result','Audio received (ms)','Audio bytes','Media host','STT connected','Answer interpreter','STT ms','Interpret ms','LLM requests','STT audio ms','Safe error','Signed hangup','Seconds'],
-      config.recent.map(x=>[formatIst(x.created_at),x.destinationLast4?'••••'+x.destinationLast4:'—',x.language,x.engine==='sarvam'?'Sarvam Saaras v4':x.engine==='deepgram_stream'?'Deepgram live':'Whisper',x.phase,x.provider_call_reference?'Received':'Not received',x.turn??'—',x.question_index??'—',x.last_audio_outcome?x.last_audio_outcome.replaceAll('_',' '):'—',x.audio_ms??'—',x.audio_bytes??'—',x.media_host??'—',x.stt_connected==null?'—':x.stt_connected?'Yes':'No',x.interpreter??'—',x.recognition_ms??'—',x.interpretation_ms??'—',x.llm_requests??'—',x.stt_audio_ms??'—',x.failure_code??'—',x.signed_hangup?'Received':'Not received',x.duration_seconds??'—']))]:[]));
+      config.recent.map(x=>[formatIst(x.created_at),x.destinationLast4?'••••'+x.destinationLast4:'—',x.language,x.engine==='sarvam'?'Sarvam Saaras v4':'Historical call',x.phase,x.provider_call_reference?'Received':'Not received',x.turn??'—',x.question_index??'—',x.last_audio_outcome?x.last_audio_outcome.replaceAll('_',' '):'—',x.audio_ms??'—',x.audio_bytes??'—',x.media_host??'—',x.stt_connected==null?'—':x.stt_connected?'Yes':'No',x.interpreter??'—',x.recognition_ms??'—',x.interpretation_ms??'—',x.llm_requests??'—',x.stt_audio_ms??'—',x.failure_code??'—',x.signed_hangup?'Received':'Not received',x.duration_seconds??'—']))]:[]));
     }catch(err){config=null;status.textContent='Could not verify internal call availability. Refresh status to retry.';throw err}
     finally{refreshing=false;updateAvailability();scheduleCheck()}
   }
   enrollment.hidden=true;device.addEventListener('change',updateAvailability);
   card.append(status,prepare,prepared,enrollment,div('formrow',lab('Internal test number',device),lab('Recorded prompt language',language),lab('Speech recognition engine',engine),call,
-    btn('Refresh fixed-question pilot status',()=>refresh().catch(asError),true)),cooldown,results,verifyResult,verifiedReport,sarvamProbe,sarvamReport,listen,listenReport,node('details',{class:'card'},[node('summary',{text:'Legacy recognition diagnostics (no call)'}),mediaCheck,mediaReport,probe,probeReport,answerProbe,answerReport,lastAnswerProbe,lastAnswerReport]));
+    btn('Refresh fixed-question pilot status',()=>refresh().catch(asError),true)),cooldown,results,verifyResult,verifiedReport,sarvamProbe,sarvamReport,listen,listenReport);
   refresh().catch(()=>{status.textContent='Pilot status requires a current MFA Super Admin session.'});
   return card;
 }
@@ -2639,7 +2594,7 @@ function fixedSurveyPanel(tenantId,lead,onSave){
       // Browser speech is opt-in, may depend on browser speech services and
       // is never a verified telecom recording or a trusted speech transcript.
       const speechArea=div('stack',
-        node('p',{class:'note',text:'Optional browser voice preview. The browser may use its own speech service. Do not use sensitive real-customer audio without an approved notice and permission. Always review the recognized text before Save.'}));
+        node('p',{class:'note',text:'Optional question playback. Browser speech synthesis is for listening only. Do not use sensitive real-customer audio without an approved notice and permission. Always review the recognized text before Save.'}));
       const promptPick=node('select',{class:'field'},[
         'propertyType','location','area','size','budgetInr','interest','visitDate'
       ].map((value,i)=>node('option',{value:String(i),text:'Question '+(i+1)})));
@@ -2652,54 +2607,10 @@ function fixedSurveyPanel(tenantId,lead,onSave){
         utterance.lang=language.value==='hi'?'hi-IN':'en-IN';
         window.speechSynthesis.speak(utterance);
       },true);
-      const micField=node('select',{class:'field'},[
-        ['location','Location'],['area','Area'],['size','Property size'],['budget','Budget']
-      ].map(([value,label])=>node('option',{value,text:label})));
-      const dictate=btn('Dictate answer (browser mic)',()=>{
-        const Recognition=window.SpeechRecognition||window.webkitSpeechRecognition;
-        if(!Recognition)return notice('Browser speech recognition unavailable. Type the answer.',true);
-        const engine=new Recognition();
-        engine.lang=language.value==='hi'?'hi-IN':'en-IN';
-        engine.interimResults=false;engine.maxAlternatives=1;
-        dictate.disabled=true;
-        engine.onend=()=>{dictate.disabled=false};
-        engine.onerror=()=>{dictate.disabled=false;notice('Speech recognition failed. Type the answer instead.',true)};
-        engine.onresult=e=>{
-          const words=String(e.results?.[0]?.[0]?.transcript||'').trim();
-          if(!words)return;
-          const target=micField.value;
-          if(target==='location')city.value=words.slice(0,120);
-          else if(target==='area')area.value=words.slice(0,120);
-          else if(target==='size'){
-            if(propertyType.value==='plot')sizeInput.value=words.slice(0,80);
-            else{
-              const m=words.match(/[1-5]\s*(?:BHK|बीएचके)/i);
-              if(m){const number=m[0].match(/[1-5]/)[0];
-                sizeInput.value=number==='5'?'5BHK+':number+'BHK'}
-              else notice('BHK not recognized. Select 2BHK/3BHK manually.',true);
-            }
-          }else{
-            const cleaned=words.replace(/[०-९]/g,ch=>String('०१२३४५६७८९'.indexOf(ch)))
-              .replace(/,/g,'');
-            const m=cleaned.match(/\d+(?:\.\d+)?/);
-            const scale=/करोड़|crore/i.test(cleaned)?10000000:
-              /लाख|lakh|lac/i.test(cleaned)?100000:
-              /हजार|thousand|thou/i.test(cleaned)?1000:1;
-            const number=m?Math.round(Number(m[0])*scale):NaN;
-            if(Number.isSafeInteger(number)&&number>0)budget.value=String(number);
-            else notice('Budget not recognized. Enter amount in rupees manually.',true);
-          }
-          notice('Browser speech captured. Review the answer before saving.');
-        };
-        engine.start();
-      },true);
-      const Recognition=window.SpeechRecognition||window.webkitSpeechRecognition;
-      if(!Recognition)dictate.disabled=true;
-      speechArea.append(div('formrow',lab('Listen to',promptPick),speak),
-        div('formrow',lab('Fill from microphone',micField),dictate));
+      speechArea.append(div('formrow',lab('Listen to',promptPick),speak));
       form.append(speechArea);
       const voiceDemo=div('card',title('Question-by-question Voice Preview (no calls)','h3'),
-        node('p',{class:'note',text:'Use fictional answers in this preview. Cloudflare transcribes each short microphone clip. Review the answers before saving them. No phone call is placed.'}));
+        node('p',{class:'note',text:'Use fictional answers in this preview. Sarvam transcribes each short microphone clip after explicit consent. AI usage may be charged. Review the answers before saving them. No phone call is placed.'}));
       const questionText=node('p',{class:'banner',text:'Start to hear the first fixed question.'});
       const voiceHint=node('p',{class:'muted',text:'Review each answer. Unsupported or low-confidence speech will repeat the question.'});
       const voiceAnswer=input('demoVoiceAnswer','text','Type or dictate the answer');
@@ -2730,12 +2641,30 @@ function fixedSurveyPanel(tenantId,lead,onSave){
         utterance.lang=language.value==='en'?'en-IN':'hi-IN';
         window.speechSynthesis.speak(utterance);
       },true);
+      async function encodePreviewWav(blob){
+        if(blob.size>1048576)throw Error('Recording too large. Use a shorter answer.');
+        const Context=window.AudioContext||window.webkitAudioContext;
+        if(!Context||!window.OfflineAudioContext)throw Error('Audio conversion unavailable. Type the answer.');
+        const ctx=new Context();let decoded;
+        try{decoded=await ctx.decodeAudioData(await blob.arrayBuffer())}finally{await ctx.close()}
+        if(!Number.isFinite(decoded.duration)||decoded.duration<=0||decoded.duration>13)throw Error('Use an answer up to 12 seconds.');
+        const length=Math.ceil(decoded.duration*16000),offline=new OfflineAudioContext(1,length,16000),source=offline.createBufferSource();
+        source.buffer=decoded;source.connect(offline.destination);source.start();
+        const rendered=await offline.startRendering(),samples=rendered.getChannelData(0);
+        const buffer=new ArrayBuffer(44+samples.length*2),view=new DataView(buffer);
+        const label=(offset,text)=>{for(let i=0;i<text.length;i++)view.setUint8(offset+i,text.charCodeAt(i))};
+        label(0,'RIFF');view.setUint32(4,buffer.byteLength-8,true);label(8,'WAVE');label(12,'fmt ');view.setUint32(16,16,true);
+        view.setUint16(20,1,true);view.setUint16(22,1,true);view.setUint32(24,16000,true);view.setUint32(28,32000,true);view.setUint16(32,2,true);view.setUint16(34,16,true);label(36,'data');view.setUint32(40,samples.length*2,true);
+        for(let i=0;i<samples.length;i++){const n=Math.max(-1,Math.min(1,samples[i]));view.setInt16(44+i*2,n<0?n*32768:n*32767,true)}
+        return new Blob([buffer],{type:'audio/wav'});
+      }
       let answerRecorder=null;
-      const voiceDictate=btn('Record answer for Cloudflare',async()=>{
+      const voiceDictate=btn('Record answer with Sarvam',async()=>{
         if(answerRecorder?.state==='recording'){answerRecorder.stop();return}
         if(!demoState||demoState.status!=='active')return notice('Start the preview first',true);
         if(!navigator.mediaDevices?.getUserMedia||!window.MediaRecorder)
           return notice('Audio recording unavailable. Type the answer.',true);
+        if(!confirm('Send a short fictional microphone answer to Sarvam AI for transcription? AI usage may be charged. Do not use real customer audio without consent.'))return;
         const turn=demoState;
         const label=voiceDictate.querySelector('span');
         voiceDictate.disabled=true;
@@ -2754,9 +2683,11 @@ function fixedSurveyPanel(tenantId,lead,onSave){
             try{
               if(demoState!==turn||!voiceDictate.isConnected||!chunks.length)return;
               const type=recorder.mimeType||chunks[0].type;
+              const wav=await encodePreviewWav(new Blob(chunks,{type}));
+              if(demoState!==turn||!voiceDictate.isConnected)return;
               const params=new URLSearchParams({tenantId,language:turn.language});
               const response=await fetch('/v1/human/voice-preview/transcribe?'+params,{
-                method:'POST',headers:{'Content-Type':type},body:new Blob(chunks,{type}),cache:'no-store'
+                method:'POST',headers:{'Content-Type':'audio/wav','X-AR3D-Speech-Consent':'sarvam'},body:wav,cache:'no-store'
               });
               const result=await response.json();
               if(!response.ok)throw Error(result.error||'Transcription failed');
@@ -2764,7 +2695,7 @@ function fixedSurveyPanel(tenantId,lead,onSave){
               if(result.text)voiceAnswer.value=result.text;
               voiceHint.textContent=result.text?'Review the transcription, then click Next.':'No clear speech detected. Record again or type the answer.';
             }catch(err){asError(err)}
-            finally{label.textContent='Record answer for Cloudflare';voiceDictate.disabled=false}
+            finally{label.textContent='Record answer with Sarvam';voiceDictate.disabled=false}
           },{once:true});
           recorder.start();
           label.textContent='Stop recording';voiceDictate.disabled=false;

@@ -17,7 +17,7 @@ Open **/app → Super Admin → Calling Setup → Plivo Go-Live Readiness**. The
 
 ## Work that can be engineered without the final Plivo credentials
 
-1. **Optional future conversational upgrade — not a v1 blocker:** Plivo bidirectional streaming, RAG/LLM dialog, streaming TTS, barge-in and human-handoff may be added later. The **agreed v1** is already based on a bounded fixed-question flow with reviewed R2 MP3 prompts and Workers AI transcription of short answers; it must still pass a verified real-device internal test before customer use.
+1. **Optional future conversational upgrade — not a v1 blocker:** Plivo bidirectional streaming, RAG/LLM dialog, streaming TTS, barge-in and human-handoff may be added later. The **agreed v1** is already based on a bounded fixed-question flow with reviewed R2 MP3 prompts and Sarvam Saaras v4 transcription of short answers; it must still pass a verified real-device internal test before customer use.
 2. **Security / privacy:** implement retention and deletion policy for call audio and PII, recovery procedures, operator audit, rate limits and backups with an actually verified restoration drill. Independent vulnerability assessment and MFA rollout also require real-world sign-off.
 3. **Consent and DND evidence:** code enforces per-lead clearance and opt-outs, but an independent live DND lookup/verification and lawful evidence workflow are still to be integrated and accepted. Never infer permission from imported Excel/CSV.
 4. **Product operations:** verified carrier usage events, payment subscriptions and invoicing if charging users, durable retry reconciliation and truthful quotas. Synthetic preview of minutes or charges is not billing.

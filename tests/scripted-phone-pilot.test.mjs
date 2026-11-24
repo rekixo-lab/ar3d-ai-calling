@@ -2,12 +2,26 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createHmac} from 'node:crypto';
 import {fixture,tid,lead,admin,client,now,until,route,configureScriptedCampaign,setup,accepted} from './helpers/calling-fixture.mjs';
-import {approvedCampaignPhone,handleScriptedPhoneAdmin,handleScriptedPhoneCallback,scriptedPromptsReady} from '../src/scripted-phone-pilot.mjs';
+import {approvedCampaignPhone,handleScriptedPhoneAdmin,handleScriptedPhoneCallback as realPhoneCallback,scriptedPromptsReady} from '../src/scripted-phone-pilot.mjs';
 import {tickScriptedTenant} from '../src/scripted-campaign-dispatch.mjs';
 import worker from '../src/index.mjs';
 import {handleCrmRequest} from '../src/crm-routes.mjs';
 import {handleFixedVoicePreviewRequest} from '../src/fixed-voice-preview-routes.mjs';
 
+// Test-only transport: exercise the production Sarvam HTTP contract while
+// retaining synthetic transcript sequences from the questionnaire regressions.
+function handleScriptedPhoneCallback(req,env,options={}){
+ const fetcher=options.fetcher||(()=>assert.fail('unexpected provider request'));
+ return realPhoneCallback(req,env,{...options,fetcher:async(url,opts)=>{
+  if(url==='https://api.sarvam.ai/speech-to-text'&&env.syntheticSpeech){
+   assert.equal(opts.body.get('model'),'saaras:v4');
+   const result=await env.syntheticSpeech.run(opts.body.get('model'),{language:opts.body.get('language_code'),audio:await opts.body.get('file').text()});
+   return Response.json({transcript:result.text});
+  }
+  if(url==='https://api.sarvam.ai/v1/chat/completions'&&env.syntheticSpeech)return Response.json({choices:[{finish_reason:'stop',message:{content:JSON.stringify({action:'unclear',value:'',evidence:''})}}]});
+  return fetcher(url,opts);
+ }});
+}
 const origin='https://app.example.invalid';
 const token='synthetictestonlytoken0123456789';
 const internalNumber='+919000000001';
@@ -27,16 +41,16 @@ test('verified internal pilot only: consent, fixed prompts, AI answers, and one 
  const f=fixture();
  try{
   const answers=['प्लॉट','रायपुर','अमलीडीह','बारह सौ वर्ग फीट','45 लाख','बाद में'];
-  const env={...f.env,PLIVO_AUTH_ID:'syntheticAuth',PLIVO_AUTH_TOKEN:token,
+  const env={...f.env,SARVAM_API_KEY:'synthetic-key',PLIVO_AUTH_ID:'syntheticAuth',PLIVO_AUTH_TOKEN:token,
    AR3D_SCRIPTED_PILOT_ENABLED:'enabled',AR3D_PLIVO_RECORDING_AUTH:'confirmed',
    AR3D_SCRIPTED_PILOT_ORIGIN:origin,AR3D_PLIVO_CALLER_NUMBER:'+918000000000',
    AR3D_SCRIPTED_PILOT_VERIFIED_NUMBER:internalNumber,AR3D_SCRIPTED_PILOT_TENANT_ID:tid,
    AR3D_SCRIPTED_PILOT_LEAD_ID:lead,
    RECORDINGS:{head:async()=>({size:4}),get:async()=>({size:4,body:new Uint8Array(4)})},
-   AI:{async run(model,input){
-    assert.equal(model,'@cf/openai/whisper-large-v3-turbo');
-    assert.equal(input.language,'hi');
-    assert.equal(input.audio,'UklGRg==');
+   syntheticSpeech:{async run(model,input){
+    assert.equal(model,'saaras:v4');
+    assert.equal(input.language,'hi-IN');
+    assert.equal(input.audio,'RIFF');
     return {text:answers.shift()};
    }}
   };
@@ -57,7 +71,7 @@ test('verified internal pilot only: consent, fixed prompts, AI answers, and one 
    return new Response('RIFF',{headers:{'Content-Type':'audio/wav'}});
   };
   const start=(configuration=env)=>handleScriptedPhoneAdmin(new Request(origin+'/v1/human/scripted-phone-pilot',{
-   method:'POST',headers:{Origin:origin},body:JSON.stringify({language:'hi',confirm:'CALL_ONE_VERIFIED_INTERNAL_NUMBER'})
+   method:'POST',headers:{Origin:origin},body:JSON.stringify({language:'hi',confirm:'CALL_ONE_CONSENTED_INTERNAL_SARVAM_KEYPAD'})
   }),configuration,admin,{now,fetcher});
   assert.equal((await start({...env,AR3D_SCRIPTED_PILOT_ENABLED:undefined})).status,503);
   assert.equal(dialCount,0);
@@ -102,25 +116,15 @@ test('verified internal pilot only: consent, fixed prompts, AI answers, and one 
  }finally{f.close()}
 });
 
-test('Cloudflare microphone transcription requires a writable tenant membership',async()=>{
+test('Sarvam microphone transcription requires writable membership, origin and explicit consent',async()=>{
  const f=fixture();try{
-  let aiCalls=0;
-  const env={...f.env,AI:{async run(model,options){
-   aiCalls++;
-   assert.match(model,/whisper/);
-   assert.equal(options.audio,'UklGRg==');
-   return {text:' बजट   45 लाख '};
-  }}};
-  const submit=user=>handleFixedVoicePreviewRequest(new Request(origin+'/v1/human/voice-preview/transcribe?language=hi&tenantId='+tid,{
-   method:'POST',headers:{'Content-Type':'audio/wav'},body:'RIFF'
-  }),env,user);
-  assert.equal((await submit({id:'viewer'})).status,403);
-  assert.equal(aiCalls,0);
-  assert.deepEqual(await (await submit({id:'client'})).json(),{text:'बजट 45 लाख',reviewRequired:true});
-  assert.equal(aiCalls,1);
+ let aiCalls=0;const env={...f.env,SARVAM_API_KEY:'synthetic-key'};
+ const fetcher=async(url,opts)=>{aiCalls++;assert.equal(url,'https://api.sarvam.ai/speech-to-text');assert.equal(opts.body.get('model'),'saaras:v4');assert.equal(await opts.body.get('file').text(),'RIFF');return Response.json({transcript:' बजट   45 लाख '})};
+ const submit=(user,consent='sarvam',requestOrigin=origin)=>handleFixedVoicePreviewRequest(new Request(origin+'/v1/human/voice-preview/transcribe?language=hi&tenantId='+tid,{method:'POST',headers:{Origin:requestOrigin,'Content-Type':'audio/wav','X-AR3D-Speech-Consent':consent},body:'RIFF'}),env,user,{fetcher});
+ assert.equal((await submit({id:'viewer'})).status,403);assert.equal((await submit({id:'client'},'')).status,403);assert.equal((await submit({id:'client'},'sarvam','https://foreign.invalid')).status,403);assert.equal(aiCalls,0);
+ assert.deepEqual(await (await submit({id:'client'})).json(),{text:'बजट 45 लाख',reviewRequired:true});assert.equal(aiCalls,1);
  }finally{f.close()}
 });
-
 
 test('queued customer call uses signed callbacks, scoped audio and durable opt-out',async()=>{
  const f=fixture();
@@ -128,7 +132,7 @@ test('queued customer call uses signed callbacks, scoped audio and durable opt-o
   await setup(f);
   const env=f.env,config=await approvedCampaignPhone(env),audioKeys=[];
   env.RECORDINGS.get=async key=>{audioKeys.push(key);return {size:4,body:new Uint8Array(4)}};
-  env.AI.run=()=>assert.fail('opt-out on the opening prompt must not record/transcribe');
+  env.syntheticSpeech.run=()=>assert.fail('opt-out on the opening prompt must not record/transcribe');
   let hook;
   const started=await tickScriptedTenant(env,f.r.wrap,tid,config,{now,apiFetch:async (_url,opts)=>{
    hook=JSON.parse(opts.body).answer_url.replace(/\/answer$/,'');
@@ -202,7 +206,7 @@ test('CSV campaign → approved dial → seven signed answers → client CRM res
    assert.equal(clearance.status,200,await clearance.text());
    let hook;
    const responses=['flat','Raipur','Shankar Nagar','3BHK','35 lakh','yes','2027-01-12'];
-   env.AI.run=async()=>({text:responses.shift()});
+   env.syntheticSpeech.run=async()=>({text:responses.shift()});
    const tick=await tickScriptedTenant(env,f.r.wrap,tid,config,{now,apiFetch:async (_url,opts)=>{
     const payload=JSON.parse(opts.body);
     assert.equal(payload.to,'+919000000005');
@@ -244,13 +248,13 @@ test('Scripted phone repeats the location prompt after hearing trouble instead o
  const f=fixture();
  try{
   const spoken=['प्लॉट','आपकी आवाज नहीं आ रही','रायपुर','अमलीडीह','1200 वर्ग फुट','45 लाख','बाद में'];
-  const env={...f.env,PLIVO_AUTH_ID:'syntheticAuth',PLIVO_AUTH_TOKEN:token,
+  const env={...f.env,SARVAM_API_KEY:'synthetic-key',PLIVO_AUTH_ID:'syntheticAuth',PLIVO_AUTH_TOKEN:token,
    AR3D_SCRIPTED_PILOT_ENABLED:'enabled',AR3D_PLIVO_RECORDING_AUTH:'confirmed',
    AR3D_SCRIPTED_PILOT_ORIGIN:origin,AR3D_PLIVO_CALLER_NUMBER:'+918000000000',
    AR3D_SCRIPTED_PILOT_VERIFIED_NUMBER:internalNumber,AR3D_SCRIPTED_PILOT_TENANT_ID:tid,
    AR3D_SCRIPTED_PILOT_LEAD_ID:lead,
    RECORDINGS:{head:async()=>({size:4}),get:async()=>({size:4,body:new Uint8Array(4)})},
-   AI:{async run(){return {text:spoken.shift()}}}
+   syntheticSpeech:{async run(){return {text:spoken.shift()}}}
   };
   let providerCalls=0,hook;
   const fetcher=async(url,options)=>{
@@ -263,7 +267,7 @@ test('Scripted phone repeats the location prompt after hearing trouble instead o
   };
   const started=await handleScriptedPhoneAdmin(new Request(origin+'/v1/human/scripted-phone-pilot',{
    method:'POST',headers:{Origin:origin},
-   body:JSON.stringify({language:'hi',confirm:'CALL_ONE_VERIFIED_INTERNAL_NUMBER'})
+   body:JSON.stringify({language:'hi',confirm:'CALL_ONE_CONSENTED_INTERNAL_SARVAM_KEYPAD'})
   }),env,admin,{now,fetcher});
   assert.equal(started.status,202);
   assert.equal(providerCalls,1);
@@ -337,13 +341,13 @@ test('Silence from speech recognition ends in review, never saves invented CRM v
  const f=fixture();
  try{
   let sttRuns=0,submitted=0,hook;
-  const env={...f.env,PLIVO_AUTH_ID:'syntheticAuth',PLIVO_AUTH_TOKEN:token,
+  const env={...f.env,SARVAM_API_KEY:'synthetic-key',PLIVO_AUTH_ID:'syntheticAuth',PLIVO_AUTH_TOKEN:token,
    AR3D_SCRIPTED_PILOT_ENABLED:'enabled',AR3D_PLIVO_RECORDING_AUTH:'confirmed',
    AR3D_SCRIPTED_PILOT_ORIGIN:origin,AR3D_PLIVO_CALLER_NUMBER:'+918000000000',
    AR3D_SCRIPTED_PILOT_VERIFIED_NUMBER:internalNumber,AR3D_SCRIPTED_PILOT_TENANT_ID:tid,
    AR3D_SCRIPTED_PILOT_LEAD_ID:lead,
    RECORDINGS:{head:async()=>({size:4}),get:async()=>({size:4,body:new Uint8Array(4)})},
-   AI:{async run(){return {text:sttRuns++===0?'प्लॉट':'   '}}}
+   syntheticSpeech:{async run(){return {text:sttRuns++===0?'प्लॉट':'   '}}}
   };
   const fetcher=async(url,options)=>{
    if(url.startsWith('https://api.plivo.com/')){
@@ -355,7 +359,7 @@ test('Silence from speech recognition ends in review, never saves invented CRM v
   };
   const started=await handleScriptedPhoneAdmin(new Request(origin+'/v1/human/scripted-phone-pilot',{
    method:'POST',headers:{Origin:origin},
-   body:JSON.stringify({language:'hi',confirm:'CALL_ONE_VERIFIED_INTERNAL_NUMBER'})
+   body:JSON.stringify({language:'hi',confirm:'CALL_ONE_CONSENTED_INTERNAL_SARVAM_KEYPAD'})
   }),env,admin,{now,fetcher});
   assert.equal(started.status,202);
   const callback=(step,params={})=>handleScriptedPhoneCallback(
@@ -420,17 +424,17 @@ test('MFA-only internal customer preparation is scoped, idempotent and never dia
 });
 
 test('recording and STT failures play repeat cue, bounded at three attempts, without redial or invented answers',async()=>{
- for(const mode of ['http','network','type','empty_body','speech','missing_id','recover']){
+ for(const mode of ['http','network','type','empty_body','missing_id','recover']){
   const f=fixture();
   try{
    let hook,submitted=0,reads=0,stt=0;
-   const env={...f.env,PLIVO_AUTH_ID:'syntheticAuth',PLIVO_AUTH_TOKEN:token,
+   const env={...f.env,SARVAM_API_KEY:'synthetic-key',PLIVO_AUTH_ID:'syntheticAuth',PLIVO_AUTH_TOKEN:token,
     AR3D_SCRIPTED_PILOT_ENABLED:'enabled',AR3D_PLIVO_RECORDING_AUTH:'confirmed',
     AR3D_SCRIPTED_PILOT_ORIGIN:origin,AR3D_PLIVO_CALLER_NUMBER:'+918000000000',
     AR3D_SCRIPTED_PILOT_VERIFIED_NUMBER:internalNumber,AR3D_SCRIPTED_PILOT_TENANT_ID:tid,
     AR3D_SCRIPTED_PILOT_LEAD_ID:lead,
     RECORDINGS:{head:async()=>({size:4}),get:async()=>({size:4,body:new Uint8Array(4)})},
-    AI:{async run(){stt++;if(mode==='speech')throw Error('synthetic private error');return {text:'प्लॉट चाहिए'}}}
+    syntheticSpeech:{async run(){stt++;return {text:'प्लॉट चाहिए'}}}
    };
    const fetcher=async(url,options)=>{
     if(url.startsWith('https://api.plivo.com/')){
@@ -446,7 +450,7 @@ test('recording and STT failures play repeat cue, bounded at three attempts, wit
     return new Response('RIFF',{headers:{'Content-Type':'audio/wav'}});
    };
    const start=await handleScriptedPhoneAdmin(new Request(origin+'/v1/human/scripted-phone-pilot',{
-    method:'POST',headers:{Origin:origin},body:JSON.stringify({language:'hi',confirm:'CALL_ONE_VERIFIED_INTERNAL_NUMBER'})
+    method:'POST',headers:{Origin:origin},body:JSON.stringify({language:'hi',confirm:'CALL_ONE_CONSENTED_INTERNAL_SARVAM_KEYPAD'})
    }),env,admin,{now,fetcher});
    assert.equal(start.status,202);
    const cb=(step,params={})=>handleScriptedPhoneCallback(signed(hook+'/'+step,{CallUUID:callId,...params}),env,{now,fetcher});
@@ -476,18 +480,18 @@ test('recording and STT failures play repeat cue, bounded at three attempts, wit
 test('internal pilot cooldown starts at signed hangup, blocks unsigned terminal attempts and concurrent starts',async()=>{
  const f=fixture();
  try{
-  const env={...f.env,PLIVO_AUTH_ID:'syntheticAuth',PLIVO_AUTH_TOKEN:token,
+  const env={...f.env,SARVAM_API_KEY:'synthetic-key',PLIVO_AUTH_ID:'syntheticAuth',PLIVO_AUTH_TOKEN:token,
    AR3D_SCRIPTED_PILOT_ENABLED:'enabled',AR3D_PLIVO_RECORDING_AUTH:'confirmed',
    AR3D_SCRIPTED_PILOT_ORIGIN:origin,AR3D_PLIVO_CALLER_NUMBER:'+918000000000',
    AR3D_SCRIPTED_PILOT_VERIFIED_NUMBER:internalNumber,AR3D_SCRIPTED_PILOT_TENANT_ID:tid,
-   AR3D_SCRIPTED_PILOT_LEAD_ID:lead,RECORDINGS:{head:async()=>({size:4}),get:async()=>({size:4,body:new Uint8Array(4)})},AI:{run:async()=>({text:''})}};
+   AR3D_SCRIPTED_PILOT_LEAD_ID:lead,RECORDINGS:{head:async()=>({size:4}),get:async()=>({size:4,body:new Uint8Array(4)})},syntheticSpeech:{run:async()=>({text:''})}};
   let dials=0,hook;
   const fetcher=async(url,options)=>{
    dials++;hook=JSON.parse(options.body).answer_url.replace(/\/answer$/,'');
    return Response.json({request_uuid:dials===1?requestId:'24111111-2222-3333-4444-555555555556'},{status:202});
   };
   const start=at=>handleScriptedPhoneAdmin(new Request(origin+'/v1/human/scripted-phone-pilot',{
-   method:'POST',headers:{Origin:origin},body:JSON.stringify({language:'hi',confirm:'CALL_ONE_VERIFIED_INTERNAL_NUMBER'})
+   method:'POST',headers:{Origin:origin},body:JSON.stringify({language:'hi',confirm:'CALL_ONE_CONSENTED_INTERNAL_SARVAM_KEYPAD'})
   }),env,admin,{now:at,fetcher});
   const status=async at=>(await (await handleScriptedPhoneAdmin(new Request(origin+'/v1/human/scripted-phone-pilot'),env,admin,{now:at,fetcher})).json()).availability;
   assert.equal((await status(now)).ready,true);
@@ -515,11 +519,11 @@ test('five-device internal registry is capped, audited, consent-attested and ten
  const f=fixture();
  try{
   f.c.db.prepare("UPDATE tenants SET display_name='AR3D Internal' WHERE id=?").run(tid);
-  const env={...f.env,PLIVO_AUTH_ID:'syntheticAuth',PLIVO_AUTH_TOKEN:token,
+  const env={...f.env,SARVAM_API_KEY:'synthetic-key',PLIVO_AUTH_ID:'syntheticAuth',PLIVO_AUTH_TOKEN:token,
    AR3D_SCRIPTED_PILOT_ENABLED:'enabled',AR3D_PLIVO_RECORDING_AUTH:'confirmed',
    AR3D_SCRIPTED_PILOT_ORIGIN:origin,AR3D_PLIVO_CALLER_NUMBER:'+918000000000',
    AR3D_SCRIPTED_PILOT_VERIFIED_NUMBER:internalNumber,AR3D_SCRIPTED_PILOT_TENANT_ID:tid,
-   AR3D_SCRIPTED_PILOT_LEAD_ID:lead,RECORDINGS:{head:async()=>({size:4}),get:async()=>({size:4,body:new Uint8Array(4)})},AI:{run:async()=>({text:'प्लॉट'})}};
+   AR3D_SCRIPTED_PILOT_LEAD_ID:lead,RECORDINGS:{head:async()=>({size:4}),get:async()=>({size:4,body:new Uint8Array(4)})},syntheticSpeech:{run:async()=>({text:'प्लॉट'})}};
   let dials=0,hook,destination;
   const fetcher=async(url,options)=>{
    dials++;const b=JSON.parse(options.body);destination=b.to;hook=b.answer_url.replace(/\/answer$/,'');
@@ -543,7 +547,7 @@ test('five-device internal registry is capped, audited, consent-attested and ten
   assert.ok(!JSON.stringify(status).includes(first));
   assert.equal(f.r.db.prepare("SELECT COUNT(*) AS n FROM crm_audit_events WHERE action='lead.internal_test_device_enrolled'").get().n,4);
   assert.equal(f.r.db.prepare("SELECT COUNT(*) AS n FROM leads WHERE name='AR3D Internal Device Test' AND consent_status='unknown' AND dnd_status='unknown'").get().n,4);
-  const start=leadId=>request('',{leadId,language:'hi',confirm:'CALL_ONE_VERIFIED_INTERNAL_NUMBER'});
+  const start=leadId=>request('',{leadId,language:'hi',confirm:'CALL_ONE_CONSENTED_INTERNAL_SARVAM_KEYPAD'});
   assert.equal((await start('99999999-9999-4999-8999-999999999999')).status,403);
   assert.equal((await start(enrolled[0])).status,202);
   assert.equal(destination,first);
@@ -564,7 +568,7 @@ test('signed incomplete campaign call preserves accepted answers for review with
   const f=fixture();try{
    await setup(f);const env=f.env,config=await approvedCampaignPhone(env);
    const spoken=['प्लॉट','रायपुर','repeat','repeat','repeat'];
-   env.AI.run=async()=>({text:spoken.shift()});
+   env.syntheticSpeech.run=async()=>({text:spoken.shift()});
    let hook;
    const submitted=await tickScriptedTenant(env,f.r.wrap,tid,config,{now,apiFetch:async (_url,opts)=>{
     hook=JSON.parse(opts.body).answer_url.replace(/\/answer$/,'');return accepted();
@@ -603,13 +607,13 @@ test('signed incomplete campaign call preserves accepted answers for review with
 
 test('preconsented internal test skips keypad, announces recording and retries temporary media availability',async()=>{
  const f=fixture();try{
-  const env={...f.env,PLIVO_AUTH_ID:'syntheticAuth',PLIVO_AUTH_TOKEN:token,
+  const env={...f.env,SARVAM_API_KEY:'synthetic-key',PLIVO_AUTH_ID:'syntheticAuth',PLIVO_AUTH_TOKEN:token,
    AR3D_SCRIPTED_PILOT_ENABLED:'enabled',AR3D_PLIVO_RECORDING_AUTH:'confirmed',
    AR3D_SCRIPTED_PILOT_ORIGIN:origin,AR3D_PLIVO_CALLER_NUMBER:'+918000000000',
    AR3D_SCRIPTED_PILOT_VERIFIED_NUMBER:internalNumber,AR3D_SCRIPTED_PILOT_TENANT_ID:tid,
    AR3D_SCRIPTED_PILOT_LEAD_ID:lead,
    RECORDINGS:{head:async()=>({size:4}),get:async()=>({size:4,body:new Uint8Array(4)})},
-   AI:{async run(_model,options){assert.equal(options.vad_filter,false);return {text:'प्लॉट चाहिए'}}}
+   syntheticSpeech:{async run(_model,options){assert.equal(options.language,'hi-IN');return {text:'प्लॉट चाहिए'}}}
   };
   let hook,reads=0;
   const fetcher=async(url,opts)=>{
@@ -621,7 +625,7 @@ test('preconsented internal test skips keypad, announces recording and retries t
    reads++;return reads===1?new Response('not ready',{status:404}):new Response('RIFF',{headers:{'Content-Type':'audio/wav'}});
   };
   const start=await handleScriptedPhoneAdmin(new Request(origin+'/v1/human/scripted-phone-pilot',{
-   method:'POST',headers:{Origin:origin},body:JSON.stringify({language:'hi',confirm:'CALL_ONE_PRECONSENTED_INTERNAL_NUMBER'})
+   method:'POST',headers:{Origin:origin},body:JSON.stringify({language:'hi',confirm:'CALL_ONE_PRECONSENTED_INTERNAL_SARVAM_NUMBER'})
   }),env,admin,{now,fetcher});assert.equal(start.status,202);
   const cb=(step,params)=>handleScriptedPhoneCallback(signed(hook+'/'+step,{CallUUID:callId,...params}),env,{now,fetcher});
   const details={ALegRequestUUID:requestId,From:'918000000000',To:'919000000001',Direction:'outbound'};
@@ -638,85 +642,15 @@ test('preconsented internal test skips keypad, announces recording and retries t
  }finally{f.close()}
 });
 
-test('streaming pilot XML and one-time authenticated turn claim preserve existing questionnaire',async()=>{
- const f=fixture();try{
-  const env={...f.env,PLIVO_AUTH_ID:'syntheticAuth',PLIVO_AUTH_TOKEN:token,
-   AR3D_SCRIPTED_PILOT_ENABLED:'enabled',AR3D_PLIVO_RECORDING_AUTH:'confirmed',
-   AR3D_SCRIPTED_PILOT_ORIGIN:origin,AR3D_PLIVO_CALLER_NUMBER:'+918000000000',
-   AR3D_SCRIPTED_PILOT_VERIFIED_NUMBER:internalNumber,AR3D_SCRIPTED_PILOT_TENANT_ID:tid,
-   AR3D_SCRIPTED_PILOT_LEAD_ID:lead,
-   RECORDINGS:{head:async()=>({size:4}),get:async()=>({size:4,body:new Uint8Array(4)})},
-   AI:{async run(){assert.fail('no model or recording request until stream starts')}}
-  };
-  let hook,bridge;
-  const fetcher=async(url,opts)=>{
-   assert.match(url,/api\.plivo\.com/);hook=JSON.parse(opts.body).answer_url.replace(/\/answer$/,'');
-   return Response.json({request_uuid:requestId},{status:202});
-  };
-  const start=await handleScriptedPhoneAdmin(new Request(origin+'/v1/human/scripted-phone-pilot',{
-   method:'POST',headers:{Origin:origin},body:JSON.stringify({language:'hi',engine:'deepgram_stream',confirm:'CALL_ONE_PRECONSENTED_INTERNAL_NUMBER'})
-  }),env,admin,{now,fetcher});assert.equal(start.status,202);
-  const cb=(step,params)=>handleScriptedPhoneCallback(signed(hook+'/'+step,{CallUUID:callId,...params}),env,{now,fetcher});
-  const opening=await (await cb('answer',{ALegRequestUUID:requestId,From:'918000000000',To:'919000000001',Direction:'outbound'})).text();
-  assert.match(opening,/ए आई असिस्टेंट हूँ/);assert.doesNotMatch(opening,/टेक्स्ट में दर्ज|रिकॉर्ड किए जाएंगे/);
-  assert.match(opening,/propertyType\.mp3.*<Stream/);assert.doesNotMatch(opening,/<Record |<GetDigits/);
-  assert.match(opening,/audio\/x-mulaw;rate=8000/);assert.match(opening,/stream-next\/0/);
-  const url=opening.match(/>(wss:[^<]+)<\/Stream>/)[1].replace(/^wss:/,'https:');
-  const claim=(uri)=>handleScriptedPhoneCallback(new Request(uri,{headers:{Upgrade:'websocket'}}),env,{now,fetcher,streamUpgrade:args=>{bridge=args;return new Response('synthetic upgrade')}});
-  assert.equal((await claim(url.replace(/[a-f0-9]{64}$/,'0'.repeat(64)))).status,403);
-  assert.equal((await claim(url)).status,200);
-  assert.equal((await claim(url)).status,403);
-  assert.equal(bridge.callId,callId);
-  assert.equal((await cb('turn/0',{RecordingID:'record-id-00'})).status,200);
-  // Use current simulated time for the injected callback's server clock.
-  const previous=Date.now;Date.now=()=>now;
-  try{await bridge.onAnswer({text:'प्लॉट',reason:'recognized',confidence:.95})}finally{Date.now=previous}
-  const next=await (await cb('stream-next/0',{})).text();assert.match(next,/location\.mp3.*<Stream/);
-  assert.match(next,/stream-next\/1/);
-  assert.equal((await claim(url)).status,403);
-  assert.match(await (await cb('stream-next/1',{})).text(),/तकनीकी सेवा/);
-  const row=JSON.parse(f.c.db.prepare('SELECT survey_json FROM scripted_phone_pilots').get().survey_json);
-  assert.equal(row.answers.propertyType,'plot');assert.equal(row.attempts,0);
-  assert.equal(row.phoneMeta.lastAudioOutcome,'stream_start_missing');assert.equal(row.phoneMeta.technicalFailure,true);
-  assert.equal((await cb('hangup',{Duration:'30'})).status,204);
- }finally{f.close()}
-});
-
-test('read-only internal media diagnostics scopes requests to signed ended calls and returns no IDs or URLs',async()=>{
- const f=fixture();try{
-  const env={...f.env,PLIVO_AUTH_ID:'syntheticAuth',PLIVO_AUTH_TOKEN:token,
-   AR3D_SCRIPTED_PILOT_ENABLED:'enabled',AR3D_PLIVO_RECORDING_AUTH:'confirmed',
-   AR3D_SCRIPTED_PILOT_ORIGIN:origin,AR3D_PLIVO_CALLER_NUMBER:'+918000000000',
-   AR3D_SCRIPTED_PILOT_VERIFIED_NUMBER:internalNumber,AR3D_SCRIPTED_PILOT_TENANT_ID:tid,
-   AR3D_SCRIPTED_PILOT_LEAD_ID:lead,RECORDINGS:{head:async()=>({size:4}),get:async()=>null},
-   AI:{async run(){assert.fail('no STT')}}};
-  const ids=[callId,'34111111-2222-3333-4444-555555555555'];
-  for(let i=0;i<2;i++)f.c.db.prepare("INSERT INTO scripted_phone_pilots(id,tenant_id,lead_id,lead_updated_at,actor_id,language,destination,caller,rate_slot,expires_at,phase,provider_call_id,survey_json,created_at,provider_account_id,hangup_at) VALUES(?,?,?,?,?,?,?,?,?,?,'ended',?,?,?,?,?)")
-   .run(crypto.randomUUID(),tid,lead,new Date(now).toISOString(),admin.id,'hi',internalNumber,env.AR3D_PLIVO_CALLER_NUMBER,i,now+600000,ids[i],JSON.stringify({phoneMeta:{engine:i?'whisper':'deepgram_stream'}}),new Date(now+i).toISOString(),env.PLIVO_AUTH_ID,now);
-  const req=new Request(origin+'/v1/human/scripted-phone-pilot/media-diagnostics');let reads=0;
-  const fetcher=async(url,opts)=>{
-   reads++;assert.equal(opts.method,'GET');assert.equal(opts.redirect,'manual');
-   if(url.includes('/Stream/')){assert.ok(url.includes(ids[0]));return Response.json({objects:[{call_uuid:ids[0],end_time:'2026-11-20',service_url:'wss://private.invalid/token'}]})}
-   assert.ok(url.includes('call_uuid='+ids[1]));return Response.json({objects:[{call_uuid:ids[1],recording_duration_ms:'6000',recording_url:'https://private.invalid/audio'},{call_uuid:'other',recording_duration_ms:'9999'}]});
-  };
-  assert.equal((await handleScriptedPhoneAdmin(req,env,client,{now,fetcher})).status,403);
-  assert.equal(reads,0);
-  const r=await handleScriptedPhoneAdmin(req,env,admin,{now,fetcher});assert.equal(r.status,200);
-  const data=await r.json();assert.equal(data.streams.count,1);assert.equal(data.recordings.durationMs,6000);
-  assert.equal(data.recordings.count,1);assert.equal(data.phoneCallsStarted,0);assert.equal(reads,2);
-  assert.doesNotMatch(JSON.stringify(data),/private|34111111|14111111/);
- }finally{f.close()}
-});
-
 test('recording 403 may recover only through matching authenticated regional metadata',async()=>{
  for(const mode of ['regional','wrong_call','wrong_host']){
   const f=fixture();try{
-   const env={...f.env,PLIVO_AUTH_ID:'syntheticAuth',PLIVO_AUTH_TOKEN:token,
+   const env={...f.env,SARVAM_API_KEY:'synthetic-key',PLIVO_AUTH_ID:'syntheticAuth',PLIVO_AUTH_TOKEN:token,
     AR3D_SCRIPTED_PILOT_ENABLED:'enabled',AR3D_PLIVO_RECORDING_AUTH:'confirmed',
     AR3D_SCRIPTED_PILOT_ORIGIN:origin,AR3D_PLIVO_CALLER_NUMBER:'+918000000000',
     AR3D_SCRIPTED_PILOT_VERIFIED_NUMBER:internalNumber,AR3D_SCRIPTED_PILOT_TENANT_ID:tid,
     AR3D_SCRIPTED_PILOT_LEAD_ID:lead,RECORDINGS:{head:async()=>({size:4}),get:async()=>null},
-    AI:{async run(){assert.equal(mode,'regional');return {text:'प्लॉट'}}}};
+    syntheticSpeech:{async run(){assert.equal(mode,'regional');return {text:'प्लॉट'}}}};
    let hook,regional=0;const recording='record-id-00';
    const fetcher=async(url,opts)=>{
     assert.equal(opts.redirect,'manual');
@@ -730,7 +664,7 @@ test('recording 403 may recover only through matching authenticated regional met
     return new Response('RIFF',{headers:{'Content-Type':'audio/wav'}});
    };
    const start=await handleScriptedPhoneAdmin(new Request(origin+'/v1/human/scripted-phone-pilot',{
-    method:'POST',headers:{Origin:origin},body:JSON.stringify({language:'hi',confirm:'CALL_ONE_PRECONSENTED_INTERNAL_NUMBER'})
+    method:'POST',headers:{Origin:origin},body:JSON.stringify({language:'hi',confirm:'CALL_ONE_PRECONSENTED_INTERNAL_SARVAM_NUMBER'})
    }),env,admin,{now,fetcher});assert.equal(start.status,202);
    const cb=(step,params)=>handleScriptedPhoneCallback(signed(hook+'/'+step,{CallUUID:callId,...params}),env,{now,fetcher});
    await cb('answer',{ALegRequestUUID:requestId,From:'918000000000',To:'919000000001',Direction:'outbound'});
@@ -743,99 +677,43 @@ test('recording 403 may recover only through matching authenticated regional met
  }
 });
 
-test('saved recording probe is no-dial, current-MFA and explicit-consent only; returns no speech or IDs',async()=>{
+test('Sarvam recording replay is MFA-only, explicit consent, no dial, no CRM mutation',async()=>{
  const f=fixture();try{
-  const env={...f.env,PLIVO_AUTH_ID:'syntheticAuth',PLIVO_AUTH_TOKEN:token,
-   AR3D_SCRIPTED_PILOT_ENABLED:'enabled',AR3D_PLIVO_RECORDING_AUTH:'confirmed',
-   AR3D_SCRIPTED_PILOT_ORIGIN:origin,AR3D_PLIVO_CALLER_NUMBER:'+918000000000',
-   AR3D_SCRIPTED_PILOT_VERIFIED_NUMBER:internalNumber,AR3D_SCRIPTED_PILOT_TENANT_ID:tid,
-   AR3D_SCRIPTED_PILOT_LEAD_ID:lead,RECORDINGS:{head:async()=>({size:4}),get:async()=>null},
-   AI:{async run(){return {text:'private transcript'}}}};
-  f.c.db.prepare("INSERT INTO scripted_phone_pilots(id,tenant_id,lead_id,lead_updated_at,actor_id,language,destination,caller,rate_slot,expires_at,phase,turn,provider_call_id,survey_json,created_at,provider_account_id,hangup_at) VALUES(?,?,?,?,?,?,?,?,?,?,'ended',1,?,?,?,?,?)")
-   .run(crypto.randomUUID(),tid,lead,new Date(now).toISOString(),admin.id,'hi',internalNumber,env.AR3D_PLIVO_CALLER_NUMBER,1,now+600000,callId,JSON.stringify({index:0,phoneMeta:{engine:'whisper'}}),new Date(now).toISOString(),env.PLIVO_AUTH_ID,now);
-  let calls=0,media=0,ordered=false;
-  const req=(confirm='REPROCESS_ONE_CONSENTED_INTERNAL_RECORDING')=>new Request(origin+'/v1/human/scripted-phone-pilot/recording-probe',{method:'POST',headers:{Origin:origin},body:JSON.stringify({confirm})});
-  const fetcher=async(url,opts)=>{
-   calls++;assert.equal(opts.method,'GET');assert.equal(opts.redirect,'manual');
-   if(url.includes('/Recording/?')){
-    const entry=(id,start)=>({call_uuid:callId,recording_id:id,recording_format:'mp3',recording_duration_ms:6000,recording_url:'https://aps1.media.plivo.com/v1/Account/syntheticAuth/Recording/'+id+'.mp3',...(start?{recording_start_ms:start}:{})});
-    return Response.json({objects:ordered?[entry('record-id-01','1407235163907.00000'),entry('record-id-00','1407235153907.00000')]:[entry('record-id-00')]});
-   }
-   assert.match(url,/^https:\/\/aps1\.media\.plivo\.com\//);if(ordered)assert.match(url,/record-id-01\.mp3$/);media++;
-   return new Response('RIFF',{headers:{'Content-Type':'audio/wav'}});
-  };
-  assert.equal((await handleScriptedPhoneAdmin(req(),env,client,{now,fetcher})).status,403);
-  assert.equal((await handleScriptedPhoneAdmin(req('wrong'),env,admin,{now,fetcher})).status,400);
-  assert.equal(calls,0);
-  const before=f.r.db.prepare('SELECT * FROM leads WHERE id=?').get(lead);
-  const r=await handleScriptedPhoneAdmin(req(),env,admin,{now,fetcher});assert.equal(r.status,200,await r.clone().text());
-  const d=await r.json();assert.equal(d.mediaHttp,200);assert.equal(d.stt,'text_received');assert.equal(d.bytes,4);assert.equal(media,1);assert.equal(calls,2);
-  assert.doesNotMatch(JSON.stringify(d),/private transcript|record-id|syntheticAuth/);
-  const inspect=await handleScriptedPhoneAdmin(req('SHOW_ONE_CONSENTED_INTERNAL_FIRST_ANSWER'),env,admin,{now,fetcher});
-  assert.equal(inspect.status,200);const detail=await inspect.json();
-  assert.equal(detail.transcript,'private transcript');assert.equal(detail.parserAction,'repeat');assert.equal(detail.propertyType,null);
-  env.AI.run=async()=>({text:'मुझे प्लॉट चाहिए'});
-  const good=await (await handleScriptedPhoneAdmin(req('SHOW_ONE_CONSENTED_INTERNAL_FIRST_ANSWER'),env,admin,{now,fetcher})).json();
-  assert.equal(good.parserAction,'next_question');assert.equal(good.propertyType,'plot');
-  f.c.db.prepare("UPDATE scripted_phone_pilots SET survey_json=?").run(JSON.stringify({index:1,phoneMeta:{engine:'whisper'}}));
-  const blocked=await (await handleScriptedPhoneAdmin(req('SHOW_ONE_CONSENTED_INTERNAL_FIRST_ANSWER'),env,admin,{now,fetcher})).json();
-  assert.equal(blocked.state,'first_question_not_confirmed');assert.equal(blocked.transcript,undefined);assert.equal(calls,6);
-  const last=await (await handleScriptedPhoneAdmin(req('SHOW_ONE_CONSENTED_INTERNAL_LAST_ANSWER'),env,admin,{now,fetcher})).json();
-  assert.equal(last.state,'last_answer_order_unverified');assert.equal(last.transcript,undefined);assert.equal(calls,7);
-  ordered=true;
-  f.c.db.prepare("UPDATE scripted_phone_pilots SET survey_json=?").run(JSON.stringify({version:1,status:'needs_review',language:'hi',index:4,answers:{propertyType:'plot',location:'रायपुर',area:'अमलीडीह',size:'1000 sqft'},attempts:3,turns:9,startedAt:now,phoneMeta:{engine:'whisper'}}));
-  const inputs=[];
-  env.AI.run=async(model,input)=>{
-   inputs.push({model,input});
-   if(model==='@cf/deepgram/nova-3')return {results:{channels:[{alternatives:[{transcript:'बीस लाख',confidence:.96}]}]}};
-   assert.equal(model,'@cf/openai/whisper-large-v3-turbo');
-   return {text:input.initial_prompt?'तीस लाख':'तीस'};
-  };
-  const controlBefore=f.c.db.prepare('SELECT * FROM scripted_phone_pilots').get();
-  const compared=await (await handleScriptedPhoneAdmin(req('SHOW_ONE_CONSENTED_INTERNAL_LAST_ANSWER'),env,admin,{now,fetcher})).json();
-  assert.equal(compared.question,'budgetInr');assert.equal(compared.transcript,'तीस');assert.equal(compared.parserAction,'repeat');assert.equal(compared.normalizedAnswer,null);
-  assert.equal(compared.hinted.transcript,'तीस लाख');assert.equal(compared.hinted.parserAction,'next_question');assert.equal(compared.hinted.normalizedAnswer,3000000);
-  assert.equal(inputs.length,3);
-  const [base,hint,nova]=inputs.map(x=>x.input);
-  assert.equal(base.audio,hint.audio);assert.equal(base.initial_prompt,undefined);assert.match(hint.initial_prompt,/बजट/);assert.equal(base.vad_filter,hint.vad_filter);
-  assert.equal(nova.audio.contentType,'audio/wav');assert.equal(nova.language,'hi');
-  assert.equal(btoa(await new Response(nova.audio.body).text()),base.audio);
-  assert.equal(compared.nova.transcript,'बीस लाख');assert.equal(compared.nova.parserAction,'next_question');assert.equal(compared.nova.normalizedAnswer,2000000);assert.equal(compared.nova.confidence,.96);assert.equal(compared.contentType,'audio/wav');assert.equal(compared.recordingDurationMs,6000);
-  assert.equal(compared.phoneCallsStarted,0);assert.equal(compared.crmChanged,false);assert.equal(calls,9);
-  assert.equal((await handleScriptedPhoneAdmin(req('PLAY_ONE_CONSENTED_INTERNAL_LAST_ANSWER'),env,client,{now,fetcher})).status,403);
-  const playback=await handleScriptedPhoneAdmin(req('PLAY_ONE_CONSENTED_INTERNAL_LAST_ANSWER'),env,admin,{now,fetcher});
-  assert.equal(playback.headers.get('Content-Type'),'audio/wav');assert.equal(playback.headers.get('Cache-Control'),'no-store');assert.equal(await playback.text(),'RIFF');assert.equal(inputs.length,3);assert.equal(calls,11);
-  env.AI.run=async(model)=>{if(model==='@cf/deepgram/nova-3')throw Error('5006: private provider error');return {text:'तीस लाख'}};
-  const failed=await (await handleScriptedPhoneAdmin(req('SHOW_ONE_CONSENTED_INTERNAL_LAST_ANSWER'),env,admin,{now,fetcher})).json();
-  assert.equal(failed.nova.failureCode,'workers_ai_5006');assert.equal(failed.nova.stt,'service_failed');assert.doesNotMatch(JSON.stringify(failed),/private provider error/);
-  const beforeMissing=calls;
-  const notConfigured=await (await handleScriptedPhoneAdmin(req('REPLAY_ONE_CONSENTED_INTERNAL_LAST_SARVAM'),env,admin,{now,fetcher})).json();
-  assert.equal(notConfigured.state,'sarvam_not_configured');assert.equal(calls,beforeMissing);
-  env.SARVAM_API_KEY='synthetic-test-key';
-  let sarvamRequests=0;
-  const sarvamFetcher=async(url,opts)=>{
-   if(url!=='https://api.sarvam.ai/speech-to-text')return fetcher(url,opts);
-   sarvamRequests++;assert.equal(opts.method,'POST');assert.equal(opts.redirect,'manual');
-   assert.equal(opts.headers['api-subscription-key'],'synthetic-test-key');assert.equal(opts.body.get('model'),'saaras:v4');assert.equal(opts.body.get('language_code'),'hi-IN');assert.equal(opts.body.get('mode'),'transcribe');assert.equal(await opts.body.get('file').text(),'RIFF');
-   return Response.json({transcript:'बीस लाख'});
-  };
-  assert.equal((await handleScriptedPhoneAdmin(req('REPLAY_ONE_CONSENTED_INTERNAL_LAST_SARVAM'),env,client,{now,fetcher:sarvamFetcher})).status,403);
-  assert.equal(sarvamRequests,0);
-  const sarvam=await (await handleScriptedPhoneAdmin(req('REPLAY_ONE_CONSENTED_INTERNAL_LAST_SARVAM'),env,admin,{now,fetcher:sarvamFetcher})).json();
-  assert.equal(sarvamRequests,1);assert.equal(sarvam.transcript,'बीस लाख');assert.equal(sarvam.normalizedAnswer,2000000);assert.equal(sarvam.phoneCallsStarted,0);assert.equal(sarvam.crmChanged,false);assert.doesNotMatch(JSON.stringify(sarvam),/synthetic-test-key/);
-  assert.deepEqual(f.c.db.prepare('SELECT * FROM scripted_phone_pilots').get(),controlBefore);
-  assert.deepEqual(f.r.db.prepare('SELECT * FROM leads WHERE id=?').get(lead),before);
+ const env={...f.env,SARVAM_API_KEY:'synthetic-key',PLIVO_AUTH_ID:'syntheticAuth',PLIVO_AUTH_TOKEN:token,
+ AR3D_SCRIPTED_PILOT_ENABLED:'enabled',AR3D_PLIVO_RECORDING_AUTH:'confirmed',AR3D_SCRIPTED_PILOT_ORIGIN:origin,AR3D_PLIVO_CALLER_NUMBER:'+918000000000',
+ AR3D_SCRIPTED_PILOT_VERIFIED_NUMBER:internalNumber,AR3D_SCRIPTED_PILOT_TENANT_ID:tid,AR3D_SCRIPTED_PILOT_LEAD_ID:lead,RECORDINGS:{head:async()=>({size:4}),get:async()=>null}};
+ const state={version:1,status:'needs_review',language:'hi',index:4,answers:{propertyType:'plot',location:'रायपुर',area:'अमलीडीह',size:'1000 sqft'},attempts:3,turns:9,startedAt:now,phoneMeta:{engine:'sarvam'}};
+ f.c.db.prepare("INSERT INTO scripted_phone_pilots(id,tenant_id,lead_id,lead_updated_at,actor_id,language,destination,caller,rate_slot,expires_at,phase,turn,provider_call_id,survey_json,created_at,provider_account_id,hangup_at) VALUES(?,?,?,?,?,?,?,?,?,?,'ended',1,?,?,?,?,?)")
+ .run(crypto.randomUUID(),tid,lead,new Date(now).toISOString(),admin.id,'hi',internalNumber,env.AR3D_PLIVO_CALLER_NUMBER,1,now+600000,callId,JSON.stringify(state),new Date(now).toISOString(),env.PLIVO_AUTH_ID,now);
+ let calls=0,stt=0,ordered=false;
+ const fetcher=async(url,opts)=>{
+  calls++;assert.equal(opts.redirect,'manual');
+  if(url==='https://api.sarvam.ai/speech-to-text'){stt++;assert.equal(opts.body.get('model'),'saaras:v4');assert.equal(await opts.body.get('file').text(),'RIFF');return Response.json({transcript:'बीस लाख'});}
+  assert.equal(opts.method,'GET');
+  if(url.includes('/Recording/?'))return Response.json({objects:[{call_uuid:callId,recording_id:'record-id-00',recording_format:'mp3',recording_duration_ms:6000,recording_url:'https://aps1.media.plivo.com/v1/Account/syntheticAuth/Recording/record-id-00.mp3',...(ordered?{recording_start_ms:1407235163907}:{})}]});
+  assert.match(url,/aps1\.media\.plivo\.com/);return new Response('RIFF',{headers:{'Content-Type':'audio/wav'}});
+ };
+ const req=(confirm='REPLAY_ONE_CONSENTED_INTERNAL_LAST_SARVAM')=>new Request(origin+'/v1/human/scripted-phone-pilot/recording-probe',{method:'POST',headers:{Origin:origin},body:JSON.stringify({confirm})});
+ assert.equal((await handleScriptedPhoneAdmin(req(),env,client,{now,fetcher})).status,403);
+ assert.equal((await handleScriptedPhoneAdmin(req('retired-mode'),env,admin,{now,fetcher})).status,400);
+ assert.equal(calls,0);
+ const before=f.r.db.prepare('SELECT * FROM leads WHERE id=?').get(lead),controlBefore=f.c.db.prepare('SELECT * FROM scripted_phone_pilots').get();
+ const blocked=await (await handleScriptedPhoneAdmin(req(),env,admin,{now,fetcher})).json();assert.equal(blocked.state,'last_answer_order_unverified');assert.equal(stt,0);
+ ordered=true;
+ const result=await (await handleScriptedPhoneAdmin(req(),env,admin,{now,fetcher})).json();assert.equal(result.normalizedAnswer,2000000);assert.equal(result.transcript,'बीस लाख');assert.equal(result.interpretation.llmRequests,0);assert.equal(stt,1);assert.equal(result.crmChanged,false);
+ const playback=await handleScriptedPhoneAdmin(req('PLAY_ONE_CONSENTED_INTERNAL_LAST_ANSWER'),env,admin,{now,fetcher});assert.equal(await playback.text(),'RIFF');assert.equal(stt,1);
+ assert.deepEqual(f.c.db.prepare('SELECT * FROM scripted_phone_pilots').get(),controlBefore);assert.deepEqual(f.r.db.prepare('SELECT * FROM leads WHERE id=?').get(lead),before);
  }finally{f.close()}
 });
 
 test('signed regional RecordUrl fast path downloads one answer and exposes safe live audio metrics',async()=>{
  const f=fixture();try{
-  const env={...f.env,PLIVO_AUTH_ID:'syntheticAuth',PLIVO_AUTH_TOKEN:token,
+  const env={...f.env,SARVAM_API_KEY:'synthetic-key',PLIVO_AUTH_ID:'syntheticAuth',PLIVO_AUTH_TOKEN:token,
    AR3D_SCRIPTED_PILOT_ENABLED:'enabled',AR3D_PLIVO_RECORDING_AUTH:'confirmed',
    AR3D_SCRIPTED_PILOT_ORIGIN:origin,AR3D_PLIVO_CALLER_NUMBER:'+918000000000',
    AR3D_SCRIPTED_PILOT_VERIFIED_NUMBER:internalNumber,AR3D_SCRIPTED_PILOT_TENANT_ID:tid,
    AR3D_SCRIPTED_PILOT_LEAD_ID:lead,RECORDINGS:{head:async()=>({size:4}),get:async()=>null},
-   AI:{async run(){return {text:'प्लॉट'}}}};
+   syntheticSpeech:{async run(){return {text:'प्लॉट'}}}};
   let hook,media=0;const recording='record-id-00',mediaUrl='https://aps1.media.plivo.com/v1/Account/syntheticAuth/Recording/'+recording+'.mp3';
   const fetcher=async(url,opts)=>{
    assert.equal(opts.redirect,'manual');
@@ -844,7 +722,7 @@ test('signed regional RecordUrl fast path downloads one answer and exposes safe 
    return new Response('RIFF',{headers:{'Content-Type':'audio/wav'}});
   };
   const start=await handleScriptedPhoneAdmin(new Request(origin+'/v1/human/scripted-phone-pilot',{
-   method:'POST',headers:{Origin:origin},body:JSON.stringify({language:'hi',confirm:'CALL_ONE_PRECONSENTED_INTERNAL_NUMBER'})
+   method:'POST',headers:{Origin:origin},body:JSON.stringify({language:'hi',confirm:'CALL_ONE_PRECONSENTED_INTERNAL_SARVAM_NUMBER'})
   }),env,admin,{now,fetcher});assert.equal(start.status,202);
   const cb=(step,params)=>handleScriptedPhoneCallback(signed(hook+'/'+step,{CallUUID:callId,...params}),env,{now,fetcher});
   await cb('answer',{ALegRequestUUID:requestId,From:'918000000000',To:'919000000001',Direction:'outbound'});
@@ -861,19 +739,19 @@ test('signed regional RecordUrl fast path downloads one answer and exposes safe 
 test('Internal live callback asks for missing unit and remembers only normalized quantity',async()=>{
  const f=fixture();try{
   const spoken=['प्लॉट','कोरबा','अमलीडीह','एक हजार','वर्ग फीट','पच्चीस','लाख','बाद में'];
-  const env={...f.env,PLIVO_AUTH_ID:'syntheticAuth',PLIVO_AUTH_TOKEN:token,
+  const env={...f.env,SARVAM_API_KEY:'synthetic-key',PLIVO_AUTH_ID:'syntheticAuth',PLIVO_AUTH_TOKEN:token,
    AR3D_SCRIPTED_PILOT_ENABLED:'enabled',AR3D_PLIVO_RECORDING_AUTH:'confirmed',
    AR3D_SCRIPTED_PILOT_ORIGIN:origin,AR3D_PLIVO_CALLER_NUMBER:'+918000000000',
    AR3D_SCRIPTED_PILOT_VERIFIED_NUMBER:internalNumber,AR3D_SCRIPTED_PILOT_TENANT_ID:tid,
    AR3D_SCRIPTED_PILOT_LEAD_ID:lead,RECORDINGS:{head:async()=>({size:4}),get:async()=>null},
-   AI:{async run(model){assert.match(model,/whisper/);return {text:spoken.shift()}}}};
+   syntheticSpeech:{async run(model){assert.equal(model,'saaras:v4');return {text:spoken.shift()}}}};
   let hook;
   const fetcher=async(url,opts)=>{
    if(url.endsWith('/Call/')){hook=JSON.parse(opts.body).answer_url.replace(/\/answer$/,'');return Response.json({request_uuid:requestId},{status:202})}
    return new Response('RIFF',{headers:{'Content-Type':'audio/wav'}});
   };
   const start=await handleScriptedPhoneAdmin(new Request(origin+'/v1/human/scripted-phone-pilot',{
-   method:'POST',headers:{Origin:origin},body:JSON.stringify({language:'hi',confirm:'CALL_ONE_PRECONSENTED_INTERNAL_NUMBER'})
+   method:'POST',headers:{Origin:origin},body:JSON.stringify({language:'hi',confirm:'CALL_ONE_PRECONSENTED_INTERNAL_SARVAM_NUMBER'})
   }),env,admin,{now,fetcher});assert.equal(start.status,202);
   const cb=(step,params)=>handleScriptedPhoneCallback(signed(hook+'/'+step,{CallUUID:callId,...params}),env,{now,fetcher});
   await cb('answer',{ALegRequestUUID:requestId,From:'918000000000',To:'919000000001',Direction:'outbound'});
@@ -898,12 +776,12 @@ test('Internal live callback asks for missing unit and remembers only normalized
 
 test('consented Sarvam internal call uses one STT per turn, direct parser and no campaign authorization',async()=>{
  const f=fixture();try{
-  const env={...f.env,PLIVO_AUTH_ID:'syntheticAuth',PLIVO_AUTH_TOKEN:token,
+  const env={...f.env,SARVAM_API_KEY:'synthetic-key',PLIVO_AUTH_ID:'syntheticAuth',PLIVO_AUTH_TOKEN:token,
    AR3D_SCRIPTED_PILOT_ENABLED:'enabled',AR3D_PLIVO_RECORDING_AUTH:'confirmed',
    AR3D_SCRIPTED_PILOT_ORIGIN:origin,AR3D_PLIVO_CALLER_NUMBER:'+918000000000',
    AR3D_SCRIPTED_PILOT_VERIFIED_NUMBER:internalNumber,AR3D_SCRIPTED_PILOT_TENANT_ID:tid,AR3D_SCRIPTED_PILOT_LEAD_ID:lead,
    RECORDINGS:{head:async()=>({size:4}),get:async()=>({size:4,body:new Uint8Array(4)})},
-   AI:{async run(){throw Error('legacy AI must not be called')}}};
+   };delete env.SARVAM_API_KEY;
   let hook,dials=0,stt=0;
   const phrases=['प्लॉट','रायपुर','अमलीडीह','1000 वर्ग फुट','20 लाख।','बाद में'];
   const fetcher=async(url,opts)=>{
@@ -917,7 +795,7 @@ test('consented Sarvam internal call uses one STT per turn, direct parser and no
   const start=confirm=>handleScriptedPhoneAdmin(new Request(origin+'/v1/human/scripted-phone-pilot',{method:'POST',headers:{Origin:origin},body:JSON.stringify({language:'hi',engine:'sarvam',confirm})}),env,admin,{now,fetcher});
   assert.equal((await start('CALL_ONE_PRECONSENTED_INTERNAL_SARVAM_NUMBER')).status,409);assert.equal(dials,0);
   env.SARVAM_API_KEY='synthetic-key';
-  assert.equal((await start('CALL_ONE_PRECONSENTED_INTERNAL_NUMBER')).status,400);assert.equal(dials,0);
+  assert.equal((await start('retired-mode')).status,400);assert.equal(dials,0);
   assert.equal((await start('CALL_ONE_INTERNAL_SARVAM_WITH_PRIOR_RECORDING_NOTICE')).status,202);assert.equal(dials,1);
   const cb=(step,params)=>handleScriptedPhoneCallback(signed(hook+'/'+step,{CallUUID:callId,...params}),env,{now,fetcher});
   const opening=await (await cb('answer',{ALegRequestUUID:requestId,From:'918000000000',To:'919000000001',Direction:'outbound'})).text();
@@ -943,14 +821,14 @@ test('consented Sarvam internal call uses one STT per turn, direct parser and no
 test('Sarvam campaign requires explicit engine disclosure, consent and verified matching pilot',async()=>{
  const f=fixture();try{
   await setup(f);const env=f.env;
-  env.AR3D_CAMPAIGN_SPEECH_ENGINE='sarvam';env.SARVAM_API_KEY='synthetic-key';
+  delete env.syntheticSpeech;delete env.AR3D_CAMPAIGN_SARVAM_DISCLOSURE;env.SARVAM_API_KEY='synthetic-key';
   assert.equal(await approvedCampaignPhone(env),null);
   env.AR3D_CAMPAIGN_SARVAM_DISCLOSURE='approved';
+  f.c.db.prepare("UPDATE scripted_phone_pilots SET survey_json='{}' WHERE job_id IS NULL").run();
   assert.equal(await approvedCampaignPhone(env),null);
   f.c.db.prepare("UPDATE scripted_phone_pilots SET survey_json=? WHERE job_id IS NULL").run(JSON.stringify({phoneMeta:{engine:'sarvam'}}));
   const config=await approvedCampaignPhone(env);assert.equal(config.engine,'sarvam');
   let hook,requests=0;
-  env.AI.run=()=>assert.fail('no legacy STT or LLM');
   const start=await tickScriptedTenant(env,f.r.wrap,tid,config,{now,apiFetch:async(_url,opts)=>{hook=JSON.parse(opts.body).answer_url.replace(/\/answer$/,'');return accepted()}});
   assert.equal(start.state,'submitted');
   const callback=(step,params)=>handleScriptedPhoneCallback(signed(hook+'/'+step,{CallUUID:callId,...params},env.PLIVO_AUTH_TOKEN),env,{now,fetcher:async(url,opts)=>{
@@ -969,7 +847,7 @@ test('Sarvam campaign requires explicit engine disclosure, consent and verified 
 test('signed Sarvam campaign STT 402 blocks subsequent commercial calls and preserves current hold',async()=>{
  const f=fixture();try{
  await setup(f);const env=f.env;
- env.AR3D_CAMPAIGN_SPEECH_ENGINE='sarvam';env.SARVAM_API_KEY='synthetic-key';env.AR3D_CAMPAIGN_SARVAM_DISCLOSURE='approved';
+ delete env.syntheticSpeech;env.SARVAM_API_KEY='synthetic-key';env.AR3D_CAMPAIGN_SARVAM_DISCLOSURE='approved';
  f.c.db.prepare("UPDATE scripted_phone_pilots SET survey_json=? WHERE job_id IS NULL").run(JSON.stringify({phoneMeta:{engine:'sarvam'}}));
  const config=await approvedCampaignPhone(env);assert.equal(config.engine,'sarvam');
  let hook,requests=0;

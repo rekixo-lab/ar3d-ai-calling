@@ -146,11 +146,11 @@ test('simulator speech-preview UI is syntactically valid and labeled text-only',
   assert.match(simulatorJs,/voice-preview\?tenantId=/);
 });
 
-test('optional browser speech sandbox is explicit, syntax-safe and never auto-sends recognized text',()=>{
+test('simulator keeps optional question playback and typed fictional answers',()=>{
   assert.doesNotThrow(()=>new vm.Script(simulatorJs));
   assert.match(simulatorHtml,/id="speak-demo"/);
-  assert.match(simulatorHtml,/id="mic-demo"/);
-  assert.match(simulatorHtml,/fictional response/);
-  assert.match(simulatorJs,/SpeechRecognition/);
-  assert.match(simulatorJs,/Review the fictional response and press Send manually/);
+  assert.match(simulatorHtml,/type your answers/);
+  assert.match(simulatorHtml,/microphone transcription with Sarvam/);
+  assert.match(simulatorJs,/synth\.speak\(utterance\)/);
+  assert.doesNotMatch(simulatorHtml,/id="mic-demo"/);
 });
