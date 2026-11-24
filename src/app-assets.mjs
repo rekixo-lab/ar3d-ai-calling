@@ -163,6 +163,15 @@ function scriptedPhonePilotPanel(){
     answerReport.replaceChildren(table(['Diagnostic','Result'],[['Outcome',d.state.replaceAll('_',' ')],['Media HTTP',d.mediaHttp??'—'],['Downloaded bytes',d.bytes],['Whisper STT',d.stt.replaceAll('_',' ')],['Recognized words',d.transcript??'—'],['First question parser',d.parserAction??'—'],['Property type',d.propertyType??'—']]),node('p',{class:'muted',text:'Diagnostic only. One existing answer; nothing is saved to CRM. Clear before sharing the screen.'}),btn('Clear transcript',()=>answerReport.replaceChildren(),true));
    }catch(e){asError(e)}finally{answerProbe.disabled=false}
   },true);
+  const lastAnswerReport=div('stack');
+  const lastAnswerProbe=btn('Inspect last rejected answer (no call)',async()=>{
+   if(!window.confirm('Confirm the internal recipient agrees to reprocess and display the latest saved answer to you. AI usage may be charged. No new call or CRM update. Keep the transcript private.'))return;
+   lastAnswerProbe.disabled=true;lastAnswerReport.replaceChildren();
+   try{
+    const d=await api('/v1/human/scripted-phone-pilot/recording-probe','POST',{confirm:'SHOW_ONE_CONSENTED_INTERNAL_LAST_ANSWER'});
+    lastAnswerReport.replaceChildren(table(['Diagnostic','Result'],[['Outcome',d.state.replaceAll('_',' ')],['Question',d.question??'—'],['Media HTTP',d.mediaHttp??'—'],['Whisper STT',d.stt.replaceAll('_',' ')],['Recognized words',d.transcript??'—'],['Parser',d.parserAction??'—'],['Normalized answer',d.normalizedAnswer??'—']]),node('p',{class:'muted',text:'Latest recording by provider time; may not exactly match the last callback. Do not share private speech.'}),btn('Clear transcript',()=>lastAnswerReport.replaceChildren(),true));
+   }catch(e){asError(e)}finally{lastAnswerProbe.disabled=false}
+  },true);
   const device=node('select',{class:'field','aria-label':'Internal test number'});
   const engine=node('select',{class:'field','aria-label':'Speech recognition engine'},[
     node('option',{value:'deepgram_stream',text:'Deepgram Nova-3 · experimental (connection unverified)'}),
@@ -247,7 +256,7 @@ function scriptedPhonePilotPanel(){
   }
   enrollment.hidden=true;device.addEventListener('change',updateAvailability);
   card.append(status,prepare,prepared,enrollment,div('formrow',lab('Internal test number',device),lab('Recorded prompt language',language),lab('Speech recognition engine',engine),call,
-    btn('Refresh fixed-question pilot status',()=>refresh().catch(asError),true)),cooldown,results,mediaCheck,mediaReport,probe,probeReport,answerProbe,answerReport);
+    btn('Refresh fixed-question pilot status',()=>refresh().catch(asError),true)),cooldown,results,mediaCheck,mediaReport,probe,probeReport,answerProbe,answerReport,lastAnswerProbe,lastAnswerReport);
   refresh().catch(()=>{status.textContent='Pilot status requires a current MFA Super Admin session.'});
   return card;
 }
