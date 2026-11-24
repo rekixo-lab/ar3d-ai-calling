@@ -289,6 +289,12 @@ try{
  await adminPage.screenshot({path:'artifacts/calling-admin-clients.png',fullPage:true});
  await adminPage.getByRole('link',{name:'Minutes & Wallet',exact:true}).click();
  await adminPage.getByRole('heading',{name:'Provider financial journal',exact:true}).waitFor();
+ await adminPage.getByRole('heading',{name:'Client financial position',exact:true}).waitFor();
+ await adminPage.getByRole('button',{name:'Export financial page (CSV)',exact:true}).waitFor();
+ const reportTable=adminPage.locator('table[aria-label="Client financial position records"]');
+ await reportTable.locator('thead th').first().waitFor();
+ assert.equal(await reportTable.locator('thead th').count(),16);
+ assert.equal(await reportTable.locator('tbody tr').first().locator('td').count(),16);
  await adminPage.route('**/v1/human/credits/provider-usage-summary?days=7',r=>r.fulfill({json:{available:true,currency:'INR',totalSpend:123.456,fromDate:'2026-11-17',toDate:'2026-11-24',checkedAt:new Date().toISOString()}}));
  await adminPage.getByRole('button',{name:'Check Plivo spend',exact:true}).click();
  await adminPage.getByText('INR 123.456',{exact:true}).waitFor();

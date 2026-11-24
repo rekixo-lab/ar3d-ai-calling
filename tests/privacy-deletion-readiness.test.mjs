@@ -31,6 +31,7 @@ test('Super Admin dry-run enumerates actual dependencies without deleting anythi
   assert.equal(result.dependentRecords.consentReferences,1);
   assert.equal(result.dependentRecords.campaignCandidates,1);
   assert.equal(result.dependentRecords.calls,0);
+  for(const key of ['leadNotes','staffAssignments','callIntentProposals','scriptedCallResults','verifiedProviderCosts','directLeadAuditEvents','phoneSessions'])assert.ok(Number.isSafeInteger(result.dependentRecords[key]),key);
   assert.ok(result.checksRequired.includes('verified_production_backup_and_isolated_restore'));
   assert.equal(f.r.db.prepare('SELECT total_changes() AS n').get().n,before);
   assert.equal(f.r.db.prepare('SELECT COUNT(*) AS n FROM leads WHERE tenant_id=? AND id=?').get(tid,lead).n,1);

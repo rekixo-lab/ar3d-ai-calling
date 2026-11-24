@@ -483,6 +483,8 @@ async function adminDashboard(main,openView){
      countChart('Credit position · recorded seconds',[['Used',p.usedSeconds],['Reserved',p.heldSeconds],['Uncommitted',p.uncommittedSeconds]],formatSeconds),
      countChart('Ended calls · recorded counts',[['Internal tests',d.internal.ended],['Campaign calls',d.campaign.ended]])),
     title('Client payment records','h3'),
+    div('overview-grid',overviewMetric('Outstanding service credits',formatSeconds(p.outstandingSeconds),'wallet')),
+    node('p',{class:'muted',text:'Outstanding includes reserved and uncommitted seconds for all companies, including inactive accounts.'}),
     div('overview-grid',overviewMetric('Recorded collections',Number.isSafeInteger(d.purchases?.collectedPaise)?'₹'+(d.purchases.collectedPaise/100).toFixed(2):'Unavailable','wallet'),overviewMetric('Purchased minutes',formatSeconds(d.purchases?.purchasedSeconds),'receipt')),
     node('p',{class:'muted',text:'Recorded external collections, not recognized revenue or profit.'}),
     title('Provider safety review','h3'),
@@ -760,6 +762,31 @@ function providerCostReconciliation(main,tenantId){
  }
  card.append(node('p',{class:'note',text:'Super Admin only. Link exact verified per-call expense evidence; aggregate invoices cannot be allocated here. Zero cost requires explicit evidence. Provider overruns stop future calls. This does not change client credits.'}),div('formrow',refresh,prev,next),body);main.append(card);load();
 }
+function clientFinancialOverview(main){
+ const card=div('card',title('Client financial position')),body=div('stack');let offset=0,seq=0;
+ const fmtPaise=n=>Number.isSafeInteger(n)?'INR '+(n/100).toFixed(2):'Review required';
+ const fmtMicros=n=>Number.isSafeInteger(n)?(n/1000000).toFixed(6):'Unavailable';
+ const headers=['Company','Status','Collections','Purchased','Net charged','Outstanding','Reserved','Uncommitted','Remaining prepaid value','Plivo INR','Plivo USD','Sarvam INR','Sarvam USD','Calls missing cost evidence','Indicative contribution INR','Review status'];
+ const dataRow=r=>[r.company,r.status,fmtPaise(r.paidPaise),formatSeconds(r.purchasedSeconds),formatSeconds(r.netUsedSeconds),formatSeconds(r.outstandingSeconds),formatSeconds(r.heldSeconds),formatSeconds(r.uncommittedSeconds),fmtPaise(r.remainingPrepaidValuePaise),fmtMicros(r.plivoInrMicros),fmtMicros(r.plivoUsdMicros),fmtMicros(r.sarvamInrMicros),fmtMicros(r.sarvamUsdMicros),String(r.incompleteCostCalls),fmtMicros(r.contributionMicros),r.contributionStatus];
+ const refresh=btn('Refresh financial report',load,true),prev=btn('Previous companies',()=>{offset=Math.max(0,offset-50);load()},true),next=btn('Next companies',()=>{offset+=50;load()},true);
+ async function load(){
+  if(refresh.disabled)return;
+  const id=++seq;refresh.disabled=prev.disabled=next.disabled=true;
+  try{
+   const d=await api('/v1/human/credits/client-financial-report?offset='+offset);
+   if(id!==seq||!card.isConnected)return;
+   const reportTable=table(headers,d.rows.map(dataRow));reportTable.querySelector('table').setAttribute('aria-label','Client financial position records');
+   body.replaceChildren(node('p',{class:'muted',text:'Cumulative position · updated '+formatIst(d.asOf)}),
+    reportTable,btn('Export financial page (CSV)',()=>downloadReportCsv('ar3d-client-financial-'+offset+'.csv',headers,d.rows.map(dataRow)),true));
+   prev.disabled=offset===0;next.disabled=!d.hasMore;
+  }catch(e){if(id===seq)body.replaceChildren(node('p',{class:'err',text:'Financial report unavailable; no values inferred.'}));}
+  finally{if(id===seq)refresh.disabled=false;}
+ }
+ card.append(node('p',{class:'note',text:'Super Admin only. Outstanding credits include holds. Remaining prepaid value uses FIFO only for purchase-only ledgers; manual adjustments require review. Provider amounts are exact attributed entries in native currency and may be incomplete. Indicative contribution is consumed paid value less complete INR provider expenses, before taxes, refunds and overhead—not verified profit or recognized revenue. No assumed FX.'}),div('formrow',refresh,prev,next),body);
+ // This is a cumulative, potentially expensive financial report. Fetch on open
+ // and explicit refresh/page changes instead of polling every 15 seconds.
+ main.append(card);load();
+}
 async function adminMinuteWallet(main){
  const card=div('card',title('Client minute management')),company=node('select',{class:'field','aria-label':'Minute wallet company'}),
   search=input('walletSearch','search','Find company by name or email'),detail=div('stack');
@@ -779,6 +806,7 @@ async function adminMinuteWallet(main){
  company.addEventListener('change',()=>select().catch(asError));
  card.append(div('formrow',lab('Search clients',search),btn('Find company',()=>find().catch(asError),true)),
   lab('Client company',company),detail);main.append(card);
+ clientFinancialOverview(main);
  providerUsageOverview(main);
  providerFinancialJournal(main);
  adminTransactionExplorer(main);

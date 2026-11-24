@@ -494,7 +494,7 @@ test('admin dashboard reports actual balances, is MFA-only and never queries car
   const r=await route(f,'admin-dashboard',admin,'GET',undefined,{fetcher:noFetch});
   assert.equal(r.status,200,await r.clone().text());const d=await r.json();
   assert.deepEqual(d.clients,{total:1,active:1});
-  assert.deepEqual(d.position,{allocatedSeconds:600,heldSeconds:0,usedSeconds:0,uncommittedSeconds:600});
+  assert.deepEqual(d.position,{allocatedSeconds:600,heldSeconds:0,usedSeconds:0,uncommittedSeconds:600,outstandingSeconds:600});
   assert.equal(d.transactions.length,1);assert.equal(d.transactions[0].company,'Demo');
   assert.equal(d.providerRequests,0);assert.equal(d.externalPaymentsRecorded,false);assert.equal(d.dispatchEnabledByDashboard,false);
   assert.equal((await route(f,'admin-dashboard?tenantId='+tid)).status,400);

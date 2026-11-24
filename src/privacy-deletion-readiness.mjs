@@ -14,7 +14,10 @@ const sources=[
  ['campaignCandidates','call_campaign_candidates'],
  ['siteVisits','site_visits'],
  ['consentReferences','lead_consent_evidence'],
- ['optOutEvents','lead_opt_out_events']
+ ['optOutEvents','lead_opt_out_events'],
+ ['leadNotes','lead_notes'],
+ ['staffAssignments','lead_staff_assignments'],
+ ['callIntentProposals','call_intent_proposals']
 ];
 
 export async function handleDeletionReadiness(req,env,user){
@@ -51,6 +54,15 @@ export async function handleDeletionReadiness(req,env,user){
    return Number(row?.n||0);
   }));
   const dependentRecords=Object.fromEntries(sources.map(([name],i)=>[name,counts[i]]));
+  // Results and costs reference jobs rather than leads; phone sessions live in
+  // the separate Control DB. Return counts only, scoped on both join keys.
+  const related=await Promise.all([
+   db.prepare('SELECT COUNT(*) AS n FROM scripted_call_results r JOIN calling_jobs j ON j.tenant_id=r.tenant_id AND j.id=r.job_id WHERE j.tenant_id=? AND j.lead_id=?').bind(tid,leadId).first(),
+   db.prepare('SELECT COUNT(*) AS n FROM verified_provider_call_costs r JOIN calling_jobs j ON j.tenant_id=r.tenant_id AND j.id=r.job_id WHERE j.tenant_id=? AND j.lead_id=?').bind(tid,leadId).first(),
+   db.prepare('SELECT COUNT(*) AS n FROM crm_audit_events WHERE tenant_id=? AND target_id=?').bind(tid,leadId).first(),
+   control.prepare('SELECT COUNT(*) AS n FROM scripted_phone_pilots WHERE tenant_id=? AND lead_id=?').bind(tid,leadId).first()
+  ]);
+  for(const [i,name] of ['scriptedCallResults','verifiedProviderCosts','directLeadAuditEvents','phoneSessions'].entries())dependentRecords[name]=Number(related[i]?.n||0);
   return json({
    tenantId:tid,leadId,
    mode:'read_only_deletion_dry_run',executionAllowed:false,

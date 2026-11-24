@@ -43,3 +43,27 @@ test('monetary capacity limits actual Plivo duration and missing configuration f
  assert.equal(out.state,'submitted');
  }finally{f.close()}
 });
+
+
+test('synthetic burst across 32 tenants cannot exceed shared funding; duplicate settlements stay exact',async()=>{
+ const f=fixture();try{
+  const ids=Array.from({length:32},(_,i)=>'77777777-7777-4777-8777-'+String(i+1).padStart(12,'0'));
+  for(const [i,id] of ids.entries()){
+   f.c.db.prepare("INSERT INTO tenants(id,slug,display_name,plan_code,storage_mode,status,created_at,updated_at) VALUES(?,?,?,'starter','shared','active',?,?)").run(id,'burst-'+i,'Synthetic '+i,at,at);fund(f,id);
+  }
+  const cfg={plivo:{currency:'USD',capMicros:960,pulseMicros:30},sarvam:{currency:'INR',capMicros:3200,pulseMicros:100}};
+  const jobs=ids.map((tenantId,i)=>({tenantId,job:'88888888-8888-4888-8888-'+String(i+1).padStart(12,'0')}));
+  const result=await Promise.all(jobs.map(j=>reserveBudgetedMinutes(f.env.CONTROL_DB,{...j,maxSeconds:60,globalCap:960,config:cfg})));
+  const accepted=jobs.filter((_,i)=>result[i].ok);assert.equal(accepted.length,16);
+  assert.equal((await providerBudgetPosition(f.env.CONTROL_DB,cfg)).remainingSeconds,0);
+  for(const [i,j] of accepted.entries()){
+   const evidence={...j,billedSeconds:30,kind:'verified_cdr',evidenceRef:'synthetic-burst-'+i};
+   const both=await Promise.all([closeMinuteHold(f.env.CONTROL_DB,evidence),closeMinuteHold(f.env.CONTROL_DB,evidence)]);
+   assert.ok(both.every(x=>x.ok));assert.equal(both.filter(x=>!x.replayed).length,1);
+   assert.equal((await minutePosition(f.env.CONTROL_DB,j.tenantId)).usedSeconds,30);
+  }
+  assert.equal(f.c.db.prepare("SELECT SUM(charged_seconds) AS n FROM tenant_minute_holds").get().n,480);
+  // No monetary release is inferred from shorter billed time before exact provider reconciliation.
+  assert.equal((await providerBudgetPosition(f.env.CONTROL_DB,cfg)).remainingSeconds,0);
+ }finally{f.close()}
+});
