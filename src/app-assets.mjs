@@ -810,7 +810,7 @@ function manualMinuteLedger(main,tenantId,admin,onBalance=()=>{},registerRefresh
  const reset=btn('Clear pending adjustment & refresh',()=>{if(busy)return;if(pending&&!confirm('Check transaction history before creating another adjustment. Clear this pending request?'))return;pending=null;offset=0;load().catch(asError)},true);
  if(admin)form.append(div('formrow',lab('Adjustment',mode),lab('Whole calling minutes',minutes),lab('Audit reason',reason)),div('formrow',submit,reset));
  async function reverseCall(h){
-  if(!admin||busy||balance===null||pending)return;
+  if(!admin||busy||balance===null||pending||purchasePending)return;
   const auditReason=prompt('Reason / evidence reference for returning '+formatSeconds(h.chargedSeconds)+' to this client (at least 10 characters).');
   if(auditReason===null)return;
   if(auditReason.trim().length<10||auditReason.trim().length>200){notice('Enter a valid audit reason.',true);return}
@@ -821,7 +821,7 @@ function manualMinuteLedger(main,tenantId,admin,onBalance=()=>{},registerRefresh
   finally{busy=false;submit.disabled=balance===null}
  }
  async function load(){
-  const id=++seq;refresh.disabled=prev.disabled=next.disabled=submit.disabled=true;
+  const id=++seq;refresh.disabled=prev.disabled=next.disabled=submit.disabled=purchase.disabled=true;
   try{const d=await api('/v1/human/credits/minute-ledger?'+new URLSearchParams({tenantId,offset:String(offset)}));if(id!==seq)return;balance=d.allocatedSeconds;uncommitted=d.uncommittedSeconds;onBalance(d);
    const metric=(name,value)=>div('card metric',node('span',{class:'muted',text:name}),node('strong',{text:formatSeconds(value)}));
    body.replaceChildren(div('metrics',metric('Net allocated',balance),metric('Reserved',d.heldSeconds),metric('Used',d.usedSeconds),metric('Uncommitted',d.uncommittedSeconds),metric('Funding-checked minutes',d.spendableSeconds)),
@@ -830,7 +830,7 @@ function manualMinuteLedger(main,tenantId,admin,onBalance=()=>{},registerRefresh
     title('Call credit history','h3'),table(['Created (IST)','Call reference','Status','Reserved','Charged','Returned','Closed (IST)',...(admin?['Action']:[])],(d.callTransactions||[]).map(h=>[formatIst(h.createdAt),h.jobId,h.state,formatSeconds(h.reservedSeconds),formatSeconds(h.chargedSeconds),formatSeconds(h.reversedSeconds),h.closedAt?formatIst(h.closedAt):'—',...(admin?[h.state==='settled'&&h.chargedSeconds>0&&!h.reversedSeconds?btn('Reverse charge',()=>reverseCall(h),true):'—']:[])])));
    prev.disabled=offset===0;next.disabled=!d.hasMore;
   }catch(e){if(id===seq){balance=null;uncommitted=null;onBalance(null);body.replaceChildren(node('p',{class:'err',text:'Credit ledger unavailable. Refresh to retry.'}))}throw e}
-  finally{if(id===seq){refresh.disabled=false;submit.disabled=busy||balance===null}}
+  finally{if(id===seq){refresh.disabled=false;submit.disabled=busy||balance===null||Boolean(purchasePending);purchase.disabled=busy||balance===null||Boolean(pending)}}
  }
  panel.append(body,form,div('formrow',refresh,prev,next));main.append(panel);
  const refreshVisible=()=>{if(!refresh.disabled&&!busy&&!pending&&!purchasePending)return load().catch(asError)};

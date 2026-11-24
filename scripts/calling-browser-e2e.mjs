@@ -299,6 +299,17 @@ try{
  assert.equal(f.c.db.prepare("SELECT amount_micros FROM provider_financial_journal WHERE evidence_ref='browser-receipt-1'").get().amount_micros,12500000);
  await adminPage.getByRole('combobox',{name:'Minute wallet company'}).selectOption(tid);
  await adminPage.getByText('Connected time',{exact:true}).waitFor();
+ const ledger=adminPage.locator('.minute-wallet').filter({has:adminPage.getByRole('heading',{name:'Calling credit ledger',exact:true})});
+ await ledger.getByText('100m 00s',{exact:true}).first().waitFor();
+ await ledger.getByLabel('Received INR',{exact:true}).fill('1000.00');
+ await ledger.getByLabel('Purchased calling minutes',{exact:true}).fill('500');
+ await ledger.getByLabel('Payment receipt reference',{exact:true}).fill('browser-client-purchase-500');
+ adminPage.once('dialog',d=>d.accept());
+ await ledger.getByRole('button',{name:'Record payment & allocate credits',exact:true}).click();
+ await ledger.getByRole('row',{name:/BROWSER-CLIENT-PURCHASE-500/}).waitFor();
+ assert.equal(f.c.db.prepare("SELECT paid_paise FROM tenant_credit_purchases WHERE receipt_ref='BROWSER-CLIENT-PURCHASE-500'").get().paid_paise,100000);
+ assert.equal(f.c.db.prepare("SELECT balance_seconds FROM tenant_minute_ledger WHERE tenant_id=? ORDER BY sequence DESC LIMIT 1").get(tid).balance_seconds,36000);
+ await ledger.getByText('600m 00s',{exact:true}).first().waitFor();
  await adminPage.getByRole('heading',{name:'Historical budget transaction history',exact:true}).waitFor();
  await adminPage.getByRole('heading',{name:'All credit transactions',exact:true}).waitFor();
  await adminPage.getByRole('combobox',{name:'Transaction type',exact:true}).selectOption('settled');
