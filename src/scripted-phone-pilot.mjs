@@ -399,14 +399,23 @@ async function completePilot(env,row,now){
 }
 
 async function recordingAnswer(config,env,row,params,fetcher){
- if(!ID.test(params.get('RecordingID')||''))return null;
+ if(!ID.test(params.get('RecordingID')||''))return {text:null,reason:'recording_id_missing'};
  const recording=params.get('RecordingID');
- // Fetch a fixed, credentialed Plivo URL. The callback's RecordUrl is never fetched.
- const response=await fetcher('https://media.plivo.com/v1/Account/'+config.authId+'/Recording/'+recording+'.mp3',{
-  headers:{Authorization:config.authorization},redirect:'manual',signal:AbortSignal.timeout(5000)
- });
- if(!response.ok||!supportsAnswerAudio(answerContentType(response.headers)))throw Error('recording_unavailable');
- return transcribeScriptedAnswer(env.AI,await readBoundedBytes(response,ANSWER_MAX_BYTES),row.language);
+ // Fetch only the fixed credentialed URL, never a callback-supplied URL.
+ let response,bytes;
+ try{
+  response=await fetcher('https://media.plivo.com/v1/Account/'+config.authId+'/Recording/'+recording+'.mp3',{
+   headers:{Authorization:config.authorization},redirect:'manual',signal:AbortSignal.timeout(5000)
+  });
+ }catch{return {text:null,reason:'recording_fetch_failed'}}
+ if(!response.ok)return {text:null,reason:'recording_http_'+(Number.isInteger(response.status)?response.status:'unknown')};
+ if(!supportsAnswerAudio(answerContentType(response.headers)))return {text:null,reason:'recording_type_invalid'};
+ try{bytes=await readBoundedBytes(response,ANSWER_MAX_BYTES)}
+ catch{return {text:null,reason:'recording_body_invalid'}}
+ try{
+  const text=await transcribeScriptedAnswer(env.AI,bytes,row.language);
+  return {text,reason:text?'recognized':'speech_empty'};
+ }catch{return {text:null,reason:'speech_service_failed'}}
 }
 
 export async function handleScriptedPhoneCallback(req,env,{now=Date.now(),fetcher=fetch}={}){
@@ -483,13 +492,16 @@ export async function handleScriptedPhoneCallback(req,env,{now=Date.now(),fetche
   const lock=await control.prepare("UPDATE scripted_phone_pilots SET phase='transcribing' WHERE id=? AND phase='question' AND turn=?")
    .bind(id,turn).run();
   if(lock.meta.changes!==1)return error('answer_processing',503);
-  let text;
-  try{text=await recordingAnswer(config,env,row,params,fetcher)}
-  catch{
-   await control.prepare("UPDATE scripted_phone_pilots SET phase='needs_review' WHERE id=? AND phase='transcribing' AND turn=?").bind(id,turn).run();
-   return responseFor(config,{...row,phase:'needs_review'});
-  }
-  const result=advanceFixedVoicePreview(JSON.parse(row.survey_json),{transcript:text||'repeat',now});
+  const prior=JSON.parse(row.survey_json);
+  const answer=await recordingAnswer(config,env,row,params,fetcher);
+  // Transport, empty audio and STT errors use the SAME bounded retry budget
+  // as unclear speech. Never invent an answer or repeat a paid outbound call.
+  const result=advanceFixedVoicePreview(prior,{transcript:answer.text||'repeat',now});
+  // No transcript, recording URL, identifiers, phone numbers or provider secrets.
+  console.info('AR3D scripted answer outcome',JSON.stringify({
+   reason:answer.reason,action:result.action,questionIndex:prior.index,
+   attempt:prior.attempts+1,scope:row.job_id?'campaign':'internal'
+  }));
   if(row.job_id&&result.state.status==='opted_out'){
    await control.prepare("UPDATE scripted_phone_pilots SET phase='suppressing' WHERE id=? AND phase='transcribing'").bind(id).run();
    return await finishCampaignOptOut(env,row,now);
