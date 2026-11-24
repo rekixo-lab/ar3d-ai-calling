@@ -364,3 +364,37 @@ export async function advanceContextualVoice(ai,current,{transcript,confidence=1
  }catch{return {result:base,interpreter:'contextual_unavailable'}}
  finally{if(timer!==undefined)clearTimeout(timer)}
 }
+
+
+// One-turn, field-scoped memory of an explicit incomplete quantity. Never
+// persist raw utterances. Missing units must be stated in the next answer;
+// never infer or combine amounts from different questions or sessions.
+export async function advanceInternalVoice(ai,current,args,memory=null){
+ const {transcript,confidence=1,now=Date.now()}=args;
+ const field=FIELDS[current.index],input=cleaned(transcript);
+ const supported=field==='budgetInr'||(field==='size'&&current.answers.propertyType==='plot');
+ const direct=advanceFixedVoicePreview(current,{transcript,confidence,now});
+ if(!supported||direct.action==='opt_out_requested'||confidence<.7||AGAIN.test(input)||NOT_HEARD.test(input)||MISUNDERSTOOD.test(input))
+  return {...await advanceContextualVoice(ai,current,args),pendingQuantity:null};
+ if(['next_question','completed'].includes(direct.action))
+  return {result:direct,interpreter:'direct',pendingQuantity:null};
+ const value=quantityText(input);
+ if(memory&&memory.field===field&&memory.turn===current.turns&&Number.isFinite(memory.amount)&&memory.amount>0){
+  const unit=field==='size'?value.match(AREA_UNIT):null;
+  const exactUnit=field==='size'?unit&&unit.index===0: /^(?:लाख|करोड़|करोड|हजार|हज़ार|lakh|lac|crore|thousand)$/iu.test(value);
+  if(exactUnit){
+   const combined=advanceFixedVoicePreview(current,{transcript:String(memory.amount)+' '+value,confidence,now});
+   if(['next_question','completed'].includes(combined.action))return {result:combined,interpreter:'split_answer',pendingQuantity:null};
+  }
+ }
+ const amount=spokenQuantity(value);
+ // Budget scale must be missing, not already stated. A bare numeric budget
+ // above the normal INR minimum is already a valid direct answer.
+ const hasScale=value.split(/\s+/).some(x=>Object.hasOwn(SPOKEN_SCALES,x));
+ const canRemember=Number.isFinite(amount)&&amount>0&&amount<=100000000&&
+  (field==='size'||(!hasScale&&amount<10000));
+ if(canRemember&&direct.action==='repeat'){
+  return {result:direct,interpreter:'awaiting_unit',pendingQuantity:{field,amount,turn:direct.state.turns}};
+ }
+ return {...await advanceContextualVoice(ai,current,args),pendingQuantity:null};
+}
