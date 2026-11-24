@@ -129,3 +129,17 @@ test('non-Latin company name receives a deterministic valid slug',async()=>{
  assert.match(result,/^client-[a-f0-9]{16}$/);
  assert.equal(result,await clientSlug('श्री रियल एस्टेट'));
 });
+
+test('initial manual minutes are atomically allocated with new client invitation; no legacy INR conversion',async()=>{const f=fixture();try{
+ const payload={displayName:'Minute Builder',email:'minute@example.test',mobile:'9000000022',initialMinutes:1000};
+ assert.equal((await post(f,payload)).status,403);
+ const now=Date.now();f.c.db.prepare("UPDATE human_sessions SET created_at=?,expires_at=? WHERE user_id='admin'").run(new Date(now).toISOString(),now+3600000);
+ assert.equal((await post(f,{...payload,initialCreditInr:500})).status,400);
+ assert.equal((await post(f,{...payload,initialMinutes:-1})).status,400);
+ assert.equal((await post(f,{...payload,displayName:'Demo',tenantId:tid})).status,409);
+ const res=await post(f,payload);assert.equal(res.status,201,await res.clone().text());const data=await res.json();
+ assert.equal(data.initialAllocatedSeconds,60000);assert.equal(f.c.db.prepare('SELECT balance_seconds AS n FROM tenant_minute_ledger WHERE tenant_id=?').get(data.id).n,60000);
+ assert.equal(f.c.db.prepare('SELECT COUNT(*) AS n FROM tenant_credit_budgets WHERE tenant_id=?').get(data.id).n,0);
+ assert.equal((await post(f,payload)).status,409);assert.equal(f.c.db.prepare('SELECT COUNT(*) AS n FROM tenant_minute_ledger WHERE tenant_id=?').get(data.id).n,1);
+ assert.equal(f.c.db.prepare('SELECT COUNT(*) AS n FROM human_invitations WHERE tenant_id=?').get(data.id).n,1);
+}finally{f.close()}});
