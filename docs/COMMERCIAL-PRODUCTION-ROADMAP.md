@@ -30,3 +30,8 @@ Both workspaces: navy #14243c sidebar, selected #294b77, blue #2658bc accents, w
 - [ ] Production backups, isolated restore drill, retention/PII deletion, security and load/soak tests, alerts, runbook.
 - [ ] Authenticated live role/action acceptance and verified release report.
 Each item remains open until its specific evidence exists. Green CI and deploy are necessary, not proof of real payment or customer calling. Record PRs, CI and acceptance evidence against this checklist.
+
+## Urgent voice quality acceptance (owner requested)
+- Internal pre-consented tests: direct question after short AI/recording notice, no keypad. The operator must have actual recipient consent before dialing. Legacy and customer campaign consent gates remain unchanged.
+- Improve short-answer capture and bounded media availability retry; show reason and accepted question count. Verify on actual Hindi and English calls; do not assume synthetic tests prove recognition or enable live campaigns.
+- Natural recorded direct opening may replace synthesized notice only after reviewing that it preserves notice. Evaluate streaming/ASR separately if batch recording still fails; verify provider charges and language before enabling.

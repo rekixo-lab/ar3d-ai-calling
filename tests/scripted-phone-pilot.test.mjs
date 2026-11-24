@@ -439,7 +439,7 @@ test('recording and STT failures play repeat cue, bounded at three attempts, wit
     }
     assert.match(url,/^https:\/\/media\.plivo\.com\//);
     reads++;
-    if(mode==='http'||(mode==='recover'&&reads===1))return new Response('not ready',{status:404});
+    if(mode==='http'||(mode==='recover'&&reads<=2))return new Response('not ready',{status:404});
     if(mode==='network')throw Error('synthetic network error');
     if(mode==='type')return new Response('{}',{headers:{'Content-Type':'application/json'}});
     if(mode==='empty_body')return new Response(null,{headers:{'Content-Type':'audio/mpeg'}});
@@ -599,4 +599,41 @@ test('signed incomplete campaign call preserves accepted answers for review with
    assert.equal((await route(f,'results',{tenantId:tid},{id:'foreign'},'GET')).status,403);
   }finally{f.close()}
  }
+});
+
+test('preconsented internal test skips keypad, announces recording and retries temporary media availability',async()=>{
+ const f=fixture();try{
+  const env={...f.env,PLIVO_AUTH_ID:'syntheticAuth',PLIVO_AUTH_TOKEN:token,
+   AR3D_SCRIPTED_PILOT_ENABLED:'enabled',AR3D_PLIVO_RECORDING_AUTH:'confirmed',
+   AR3D_SCRIPTED_PILOT_ORIGIN:origin,AR3D_PLIVO_CALLER_NUMBER:'+918000000000',
+   AR3D_SCRIPTED_PILOT_VERIFIED_NUMBER:internalNumber,AR3D_SCRIPTED_PILOT_TENANT_ID:tid,
+   AR3D_SCRIPTED_PILOT_LEAD_ID:lead,
+   RECORDINGS:{head:async()=>({size:4}),get:async()=>({size:4,body:new Uint8Array(4)})},
+   AI:{async run(_model,options){assert.equal(options.vad_filter,false);return {text:'प्लॉट चाहिए'}}}
+  };
+  let hook,reads=0;
+  const fetcher=async(url,opts)=>{
+   if(url.startsWith('https://api.plivo.com/')){
+    hook=JSON.parse(opts.body).answer_url.replace(/\/answer$/,'');
+    return Response.json({request_uuid:requestId},{status:202});
+   }
+   assert.equal(opts.redirect,'manual');assert.match(url,/^https:\/\/media\.plivo\.com\//);
+   reads++;return reads===1?new Response('not ready',{status:404}):new Response('RIFF',{headers:{'Content-Type':'audio/wav'}});
+  };
+  const start=await handleScriptedPhoneAdmin(new Request(origin+'/v1/human/scripted-phone-pilot',{
+   method:'POST',headers:{Origin:origin},body:JSON.stringify({language:'hi',confirm:'CALL_ONE_PRECONSENTED_INTERNAL_NUMBER'})
+  }),env,admin,{now,fetcher});assert.equal(start.status,202);
+  const cb=(step,params)=>handleScriptedPhoneCallback(signed(hook+'/'+step,{CallUUID:callId,...params}),env,{now,fetcher});
+  const details={ALegRequestUUID:requestId,From:'918000000000',To:'919000000001',Direction:'outbound'};
+  const opening=await (await cb('answer',details)).text();
+  assert.match(opening,/जवाब रिकॉर्ड किए जाएंगे/);assert.doesNotMatch(opening,/GetDigits|opening\.mp3/);
+  assert.match(opening,/propertyType\.mp3.*Record.*maxLength="16".*timeout="6"/);
+  assert.match(await (await cb('turn/0',{RecordingID:'record-id-00'})).text(),/location\.mp3/);
+  assert.equal(reads,2);
+  const state=JSON.parse(f.c.db.prepare('SELECT survey_json FROM scripted_phone_pilots').get().survey_json);
+  assert.equal(state.answers.propertyType,'plot');assert.equal(state.phoneMeta.lastAudioOutcome,'recognized');
+  const status=await (await handleScriptedPhoneAdmin(new Request(origin+'/v1/human/scripted-phone-pilot'),env,admin,{now,fetcher})).json();
+  assert.equal(status.recent[0].question_index,1);assert.equal(status.recent[0].last_audio_outcome,'recognized');
+  assert.equal((await cb('hangup',{Duration:'30'})).status,204);
+ }finally{f.close()}
 });
