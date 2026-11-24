@@ -356,6 +356,8 @@ function dashboard(){
  const account=div('sidebar-footer',div('account',div('avatar',node('span',{text:state.me.email.slice(0,2).toUpperCase()})),
   div('account-copy',node('strong',{text:state.me.email}))),
   btn('Sign out',logout,true));
+ const sidebarWallet=node('section',{class:'sidebar-wallet',id:'client-sidebar-wallet','aria-label':'Remaining calling minutes',hidden:true});
+ if(!admin)account.prepend(sidebarWallet);
  const brand=div('brand',div('brand-mark',icon('phone')),div('',node('strong',{text:'AR3D'}),node('small',{text:'AI Calling'})));
  root.append(div('layout',node('aside',{class:'sidebar'},[brand,nav,account]),main));
  function openView(key,{focus=false,resetScroll=false}={}){
@@ -427,17 +429,57 @@ function actionNotice(label,count){
  if(!Number.isSafeInteger(count)||count<0)return node('p',{class:'note',text:label+': unavailable'});
  return node('p',{class:count?'banner err':'note',role:'status',text:label+': '+count});
 }
+// Provider cash and client minute ledger are deliberately independent.
+function providerBalancePanel(openView){
+ const plivo=overviewMetric('Plivo cash credits','Not checked','phone');
+ const value=plivo.querySelector('strong');
+ const status=node('p',{class:'muted',role:'status',text:'Provider-reported value; currency not independently verified.'});
+ const refresh=btn('Refresh Plivo balance',load,true);
+ plivo.append(status,refresh);
+ const sarvam=overviewMetric('Sarvam AI credits','Not available via API','spark');
+ sarvam.append(node('p',{class:'muted',text:'Check your organisation’s Credits Left in Sarvam Settings → Billing. No estimated balance is displayed.'}),
+  node('a',{class:'provider-link',href:'https://dashboard.sarvam.ai/',target:'_blank',rel:'noopener noreferrer',text:'Open Sarvam dashboard'}));
+ const clients=overviewMetric('Client allocated minutes','Loading…','users');
+ const clientRemaining=node('p',{class:'muted',text:'Uncommitted: Loading…'});
+ clients.append(clientRemaining,btn('Manage client credits',()=>openView('wallet',{focus:true,resetScroll:true}),true));
+ function setClients(position){
+  const fmt=v=>Number.isSafeInteger(v)&&v>=0?formatSeconds(v):'Unavailable';
+  clients.querySelector('strong').textContent=fmt(position?.allocatedSeconds);
+  clientRemaining.textContent='Uncommitted: '+fmt(position?.uncommittedSeconds);
+ }
+ async function load(){
+  if(refresh.disabled)return;
+  refresh.disabled=true;value.textContent='Checking…';status.textContent='Reading provider account only.';
+  try{
+   const d=await api('/v1/human/credits/provider');
+   if(!plivo.isConnected)return;
+   if(d.available===true&&typeof d.cashCredits==='string'&&/^\d{1,10}(?:\.\d{1,8})?$/.test(d.cashCredits)){
+    value.textContent=d.cashCredits;
+    status.textContent=(d.accountType==='developer'?'Trial account · not verified live funds. ':'Provider-reported · currency unverified. ')+(d.checkedAt?'Checked '+formatIst(d.checkedAt):'');
+   }else{value.textContent='Unavailable';status.textContent='Provider balance could not be verified. Refresh to retry.';}
+  }catch{if(plivo.isConnected){value.textContent='Unavailable';status.textContent='Check current MFA and provider access.';}}
+  finally{refresh.disabled=false}
+ }
+ const panel=node('section',{class:'card provider-balances','aria-label':'Provider balances'},[
+  title('Provider balances','h3'),div('provider-grid',plivo,sarvam,clients),
+  node('p',{class:'muted',text:'Provider credits are separate from client calling minutes. No payment or calling action is performed.'})
+ ]);
+ return {panel,load,setClients};
+}
 async function adminDashboard(main,openView){
  const panel=div('card',title('Business overview')),body=div('stack');
  const refresh=btn('Refresh dashboard',load,true);
  panel.append(div('row between',node('p',{class:'muted',text:'Recorded credits and calls. No online payment collection.'}),refresh),body);
- main.append(panel);
+ const providers=providerBalancePanel(openView);
+ main.append(providers.panel,panel);
  async function load(){
   refresh.disabled=true;
+  providers.load();
   body.replaceChildren(node('p',{class:'muted',text:'Loading verified records…'}));
   try{
    const d=await api('/v1/human/credits/admin-dashboard');
    const p=d.position;
+   providers.setClients(p);
    body.replaceChildren(div('overview-grid',
     overviewMetric('Client companies',safeCount(d.clients.total),'users'),
     overviewMetric('Active companies',safeCount(d.clients.active),'users'),
@@ -457,7 +499,7 @@ async function adminDashboard(main,openView){
     title('Recent credit adjustments','h3'),
     table(['Date (IST)','Company','Adjustment','Minutes','Balance'],d.transactions.map(t=>[formatIst(t.createdAt),t.company,t.kind,String(t.deltaSeconds/60),formatSeconds(t.balanceSeconds)])),
     node('p',{class:'note',text:'Uncommitted credits are ledger balances, not carrier funds or authorization to dial. External payments and revenue are not recorded here.'}));
-  }catch(e){body.replaceChildren(node('p',{class:'err',text:'Dashboard unavailable. Refresh after signing in with current MFA.'}));}
+  }catch(e){providers.setClients(null);body.replaceChildren(node('p',{class:'err',text:'Dashboard unavailable. Refresh after signing in with current MFA.'}));}
   finally{refresh.disabled=false}
  }
  await load();
@@ -631,7 +673,7 @@ async function adminMinuteWallet(main){
  creditWalletOperator(main);
  await find();
 }
-function manualMinuteLedger(main,tenantId,admin){
+function manualMinuteLedger(main,tenantId,admin,onBalance=()=>{}){
  const panel=div('card minute-wallet',title('Calling credit ledger')),body=div('stack'),form=div('stack');
  const minutes=input('manualMinutes','number','Minutes'),reason=input('manualReason','text','Reason / external reference');
  minutes.min='1';minutes.max='16666666';minutes.step='1';reason.maxLength=200;
@@ -667,14 +709,14 @@ function manualMinuteLedger(main,tenantId,admin){
  }
  async function load(){
   const id=++seq;refresh.disabled=prev.disabled=next.disabled=submit.disabled=true;
-  try{const d=await api('/v1/human/credits/minute-ledger?'+new URLSearchParams({tenantId,offset:String(offset)}));if(id!==seq)return;balance=d.allocatedSeconds;uncommitted=d.uncommittedSeconds;
+  try{const d=await api('/v1/human/credits/minute-ledger?'+new URLSearchParams({tenantId,offset:String(offset)}));if(id!==seq)return;balance=d.allocatedSeconds;uncommitted=d.uncommittedSeconds;onBalance(d);
    const metric=(name,value)=>div('card metric',node('span',{class:'muted',text:name}),node('strong',{text:formatSeconds(value)}));
    body.replaceChildren(div('metrics',metric('Net allocated',balance),metric('Reserved',d.heldSeconds),metric('Used',d.usedSeconds),metric('Uncommitted',d.uncommittedSeconds),metric('Funding-checked minutes',d.spendableSeconds)),
     node('p',{class:'note',text:'Funding-checked minutes are a current snapshot, not a reservation or permission for a specific customer. Independent telecom clearance and dispatch limits still apply. No online payments.'}),
     title('Credit adjustments','h3'),table(['Date (IST)','Transaction ID','Type','Change (min)','Before','After',...(admin?['Actor','Reason']:[])],d.transactions.map(t=>[formatIst(t.createdAt),t.transactionId,t.kind,(t.deltaSeconds>0?'+':'')+String(t.deltaSeconds/60),formatSeconds(t.previousSeconds),formatSeconds(t.balanceSeconds),...(admin?[t.actor,t.reason]:[])])),
     title('Call credit history','h3'),table(['Created (IST)','Call reference','Status','Reserved','Charged','Returned','Closed (IST)',...(admin?['Action']:[])],(d.callTransactions||[]).map(h=>[formatIst(h.createdAt),h.jobId,h.state,formatSeconds(h.reservedSeconds),formatSeconds(h.chargedSeconds),formatSeconds(h.reversedSeconds),h.closedAt?formatIst(h.closedAt):'—',...(admin?[h.state==='settled'&&h.chargedSeconds>0&&!h.reversedSeconds?btn('Reverse charge',()=>reverseCall(h),true):'—']:[])])));
    prev.disabled=offset===0;next.disabled=!d.hasMore;
-  }catch(e){if(id===seq){balance=null;uncommitted=null;body.replaceChildren(node('p',{class:'err',text:'Credit ledger unavailable. Refresh to retry.'}))}throw e}
+  }catch(e){if(id===seq){balance=null;uncommitted=null;onBalance(null);body.replaceChildren(node('p',{class:'err',text:'Credit ledger unavailable. Refresh to retry.'}))}throw e}
   finally{if(id===seq){refresh.disabled=false;submit.disabled=busy||balance===null}}
  }
  panel.append(body,form,div('formrow',refresh,prev,next));main.append(panel);return load().catch(asError);
@@ -1173,6 +1215,8 @@ function clientDashboardOverview(data,onRefresh){
 async function renderClient(id,content){
  const version=(content.renderVersion||0)+1;
  content.renderVersion=version;
+ const sidebarWallet=root.querySelector('#client-sidebar-wallet');
+ if(sidebarWallet){sidebarWallet.hidden=true;sidebarWallet.replaceChildren();}
  state.clientSetTab=null;
  const roleLabel=root.querySelector('.workspace-role');
  if(roleLabel)roleLabel.textContent='Client workspace';
@@ -1197,16 +1241,40 @@ async function renderClient(id,content){
   if(!current())return;
   campaignMetric.querySelector('strong').textContent=safeCount(report.jobs?.completed);
  }).catch(()=>{if(current())campaignMetric.querySelector('strong').textContent='Unavailable'});
+ let syncCredit=()=>{};
  if(d.role==='client_admin'){
   const creditRows=[['Funding-checked','spendableSeconds','wallet'],['Uncommitted','uncommittedSeconds','wallet'],['Net allocated','allocatedSeconds','wallet'],['Reserved','heldSeconds','clock'],['Used','usedSeconds','receipt']];
   const creditMetrics=creditRows.map(([label,key,symbol])=>({key,metric:overviewMetric(label,'Loading…',symbol)}));
   grid.append(...creditMetrics.map(x=>x.metric));
   overview.append(node('p',{class:'note',text:'Credits are manually allocated by your administrator. Uncommitted balance does not itself authorize calls.'}),
    div('overview-actions',btn('Credit history',()=>content.openView('wallet',{focus:true,resetScroll:true}),true),btn('Import customers',()=>content.openView('customers',{focus:true,resetScroll:true}),true),btn('Campaigns',()=>content.openView('calling',{focus:true,resetScroll:true}),true)));
-  api('/v1/human/credits/minute-ledger?tenantId='+encodeURIComponent(id)).then(w=>{
+  const remaining=node('strong',{class:'sidebar-credit-value',text:'Loading…'});
+  const available=node('p',{class:'muted',text:'Funding-checked: Loading…'});
+  const refresh=btn('Refresh balance',refreshBalance,true);
+  let balanceVersion=0;
+  syncCredit=w=>{
    if(!current())return;
-   for(const {key,metric} of creditMetrics)metric.querySelector('strong').textContent=Number.isSafeInteger(w[key])?formatSeconds(w[key]):'Unavailable';
-  }).catch(()=>{if(current())for(const {metric} of creditMetrics)metric.querySelector('strong').textContent='Unavailable'});
+   balanceVersion++;
+   const fmt=v=>Number.isSafeInteger(v)&&v>=0?formatSeconds(v):'Unavailable';
+   for(const {key,metric} of creditMetrics)metric.querySelector('strong').textContent=fmt(w?.[key]);
+   remaining.textContent=fmt(w?.uncommittedSeconds);
+   available.textContent='Funding-checked: '+fmt(w?.spendableSeconds);
+  };
+  async function refreshBalance(){
+   const seq=++balanceVersion;
+   refresh.disabled=true;
+   try{
+    const w=await api('/v1/human/credits/minute-ledger?tenantId='+encodeURIComponent(id));
+    if(current()&&seq===balanceVersion)syncCredit(w);
+   }catch{if(current()&&seq===balanceVersion)syncCredit(null);}
+   finally{refresh.disabled=false}
+  }
+  if(sidebarWallet){
+   sidebarWallet.replaceChildren(div('sidebar-credit-label',icon('wallet'),node('span',{text:'Remaining calling minutes'})),
+    remaining,available,div('sidebar-credit-actions',btn('Wallet',()=>content.openView('wallet',{focus:true,resetScroll:true}),true),refresh));
+   sidebarWallet.hidden=false;
+  }
+  refreshBalance();
  }
  const sections=Object.fromEntries(['customers','ai-test','calling','results','wallet','company'].map(key=>[
   key,node('section',{class:'workspace-section',id:key,hidden:true})
@@ -1233,7 +1301,7 @@ async function renderClient(id,content){
     });
    }
   },
-  wallet:section=>{if(d.role==='client_admin'){manualMinuteLedger(section,id,false);return minuteUsagePanel(section,id,false)}section.append(node('p',{class:'note',text:'Wallet and transaction details require Client Admin access.'}))},
+  wallet:section=>{if(d.role==='client_admin'){manualMinuteLedger(section,id,false,syncCredit);return minuteUsagePanel(section,id,false)}section.append(node('p',{class:'note',text:'Wallet and transaction details require Client Admin access.'}))},
   company:section=>clientCompanySummary(id,section,d.role,d.tenant.name)
  };
  content.replaceChildren(overview,...Object.values(sections));

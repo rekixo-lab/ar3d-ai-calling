@@ -305,6 +305,30 @@ h2,h3{gap:8px;line-height:1.35;overflow-wrap:anywhere;}
  .metric-symbol,.client-metrics .metric .metric-symbol{width:21px;height:21px;}
  .navitem{padding-inline:6px;}
 }
+/* Compact, separate provider account balances and selected-client wallet. */
+.provider-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,230px),1fr));gap:10px;margin-bottom:12px;}
+.provider-grid .metric{gap:8px;}
+.provider-grid .metric strong{font-size:clamp(17px,2vw,22px);}
+.provider-grid .muted{font-size:12px;line-height:1.4;}
+.provider-grid .btn{margin-top:auto;}
+.provider-link{font-size:13px;display:inline-flex;min-height:42px;align-items:center;margin-top:auto;text-underline-offset:3px;}
+.provider-balances>.btn{margin-top:10px;}
+.sidebar-wallet{min-width:0;border:1px solid var(--line);background:#212121;padding:10px;border-radius:10px;display:grid;gap:5px;}
+.sidebar-credit-label{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--muted);line-height:1.3;}
+.sidebar-credit-label .icon{width:15px;height:15px;color:#9fc1ff;}
+.sidebar-credit-value{font-size:19px;line-height:1.25;font-variant-numeric:tabular-nums;overflow-wrap:anywhere;}
+.sidebar-wallet .muted{font-size:11px;}
+.sidebar-credit-actions{display:flex;flex-wrap:wrap;gap:4px;}
+.sidebar-footer .sidebar-credit-actions .btn{border:1px solid var(--line);padding:5px 7px;min-height:34px;font-size:11px;white-space:normal;}
+.sidebar-credit-actions .btn .icon{width:13px;height:13px;}
+@media(max-width:650px){
+ .sidebar-wallet{flex:1 0 100%;grid-template-columns:minmax(0,1fr) auto;gap:5px 8px;}
+ .sidebar-footer{flex-wrap:wrap;}
+ .sidebar-credit-value{grid-column:2;grid-row:1;text-align:right;font-size:17px;}
+ .sidebar-credit-actions{grid-column:1/-1;}
+ .sidebar-footer .sidebar-credit-actions .btn{min-height:44px;}
+ .sidebar-wallet .muted{grid-column:1/-1;}
+}
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{transition:none!important;animation:none!important;scroll-behavior:auto!important;}}
 `;
 
