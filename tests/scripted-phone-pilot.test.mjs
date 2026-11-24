@@ -809,3 +809,42 @@ test('signed regional RecordUrl fast path downloads one answer and exposes safe 
   assert.equal(status.recent[0].media_host,'aps1.media.plivo.com');
  }finally{f.close()}
 });
+
+
+test('Internal live callback asks for missing unit and remembers only normalized quantity',async()=>{
+ const f=fixture();try{
+  const spoken=['प्लॉट','कोरबा','अमलीडीह','एक हजार','वर्ग फीट','पच्चीस','लाख','बाद में'];
+  const env={...f.env,PLIVO_AUTH_ID:'syntheticAuth',PLIVO_AUTH_TOKEN:token,
+   AR3D_SCRIPTED_PILOT_ENABLED:'enabled',AR3D_PLIVO_RECORDING_AUTH:'confirmed',
+   AR3D_SCRIPTED_PILOT_ORIGIN:origin,AR3D_PLIVO_CALLER_NUMBER:'+918000000000',
+   AR3D_SCRIPTED_PILOT_VERIFIED_NUMBER:internalNumber,AR3D_SCRIPTED_PILOT_TENANT_ID:tid,
+   AR3D_SCRIPTED_PILOT_LEAD_ID:lead,RECORDINGS:{head:async()=>({size:4}),get:async()=>null},
+   AI:{async run(model){assert.match(model,/whisper/);return {text:spoken.shift()}}}};
+  let hook;
+  const fetcher=async(url,opts)=>{
+   if(url.endsWith('/Call/')){hook=JSON.parse(opts.body).answer_url.replace(/\/answer$/,'');return Response.json({request_uuid:requestId},{status:202})}
+   return new Response('RIFF',{headers:{'Content-Type':'audio/wav'}});
+  };
+  const start=await handleScriptedPhoneAdmin(new Request(origin+'/v1/human/scripted-phone-pilot',{
+   method:'POST',headers:{Origin:origin},body:JSON.stringify({language:'hi',confirm:'CALL_ONE_PRECONSENTED_INTERNAL_NUMBER'})
+  }),env,admin,{now,fetcher});assert.equal(start.status,202);
+  const cb=(step,params)=>handleScriptedPhoneCallback(signed(hook+'/'+step,{CallUUID:callId,...params}),env,{now,fetcher});
+  await cb('answer',{ALegRequestUUID:requestId,From:'918000000000',To:'919000000001',Direction:'outbound'});
+  for(let i=0;i<8;i++){
+   const xml=await (await cb('turn/'+i,{RecordingID:'record-id-0'+i})).text();
+   if(i===3){
+    assert.match(xml,/वर्ग फुट है या वर्ग गज/);assert.doesNotMatch(xml,/size-plot\.mp3/);
+    const saved=JSON.parse(f.c.db.prepare('SELECT survey_json FROM scripted_phone_pilots').get().survey_json);
+    assert.deepEqual(saved.phoneMeta.pendingQuantity,{field:'size',amount:1000,turn:4});
+    assert.equal(saved.answers.size,undefined);
+   }
+   if(i===4)assert.match(xml,/budgetInr\.mp3/);
+   if(i===5)assert.match(xml,/हजार, लाख या करोड़/);
+   if(i===6)assert.match(xml,/interest\.mp3/);
+   if(i===7)assert.match(xml,/closing\.mp3/);
+  }
+  const state=JSON.parse(f.c.db.prepare('SELECT survey_json FROM scripted_phone_pilots').get().survey_json);
+  assert.equal(state.answers.size,'1000 वर्ग फुट');assert.equal(state.answers.budgetInr,2500000);
+  assert.equal(state.phoneMeta.pendingQuantity,null);assert.equal(spoken.length,0);
+ }finally{f.close()}
+});

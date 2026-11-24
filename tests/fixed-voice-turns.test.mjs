@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import vm from 'node:vm';
 import worker from '../src/index.mjs';
 import {js} from '../src/app-assets.mjs';
-import {beginFixedVoicePreview,advanceFixedVoicePreview,advanceContextualVoice,CONTEXTUAL_MODEL}
+import {beginFixedVoicePreview,advanceFixedVoicePreview,advanceContextualVoice,advanceInternalVoice,CONTEXTUAL_MODEL}
   from '../src/fixed-voice-turns.mjs';
 
 const origin='https://calling.example.test',cookie='ar3d_calling_session='+'a'.repeat(64);
@@ -330,4 +330,28 @@ test('Context-aware adapter validates one grounded field, rejects invented evide
  assert.equal((await advanceContextualVoice(blocked,s,{transcript:'कुछ अच्छा',confidence:.4,now:stamp})).result.action,'repeat');
  const timeout=await advanceContextualVoice({run:()=>new Promise(()=>{})},s,{transcript:'कुछ अच्छा',now:stamp,timeoutMs:1});
  assert.equal(timeout.interpreter,'contextual_unavailable');assert.equal(timeout.result.action,'repeat');
+});
+
+
+test('Split numeric answers retain one scoped quantity, then accept an explicit unit',async()=>{
+ const s=beginFixedVoicePreview({now:stamp}).state;
+ let size=s;for(const x of ['प्लॉट','कोरबा','पुराना बस स्टैंड'])size=turn(size,x).state;
+ const ai={run:async()=>{assert.fail('split numeric answer should not need model')}};
+ const part=await advanceInternalVoice(ai,size,{transcript:'एक हजार',now:stamp});
+ assert.equal(part.interpreter,'awaiting_unit');assert.equal(part.result.state.index,3);
+ assert.deepEqual(part.pendingQuantity,{field:'size',amount:1000,turn:part.result.state.turns});
+ const end=await advanceInternalVoice(ai,part.result.state,{transcript:'वर्ग फीट',now:stamp},part.pendingQuantity);
+ assert.equal(end.interpreter,'split_answer');assert.equal(end.result.state.answers.size,'1000 वर्ग फुट');assert.equal(end.pendingQuantity,null);
+ const budget=await advanceInternalVoice(ai,end.result.state,{transcript:'पच्चीस',now:stamp});
+ assert.equal(budget.interpreter,'awaiting_unit');assert.equal(budget.pendingQuantity.amount,25);
+ const complete=await advanceInternalVoice(ai,budget.result.state,{transcript:'लाख',now:stamp},budget.pendingQuantity);
+ assert.equal(complete.result.state.answers.budgetInr,2500000);assert.equal(complete.pendingQuantity,null);
+ const wrong=await advanceInternalVoice(null,part.result.state,{transcript:'वर्ग फीट',now:stamp},{...part.pendingQuantity,turn:0});
+ assert.equal(wrong.result.action,'repeat');assert.equal(wrong.pendingQuantity,null);
+ const stop=await advanceInternalVoice(ai,part.result.state,{transcript:'कॉल मत करना',now:stamp},part.pendingQuantity);
+ assert.equal(stop.result.action,'opt_out_requested');assert.equal(stop.pendingQuantity,null);
+ const replacement=await advanceInternalVoice(ai,part.result.state,{transcript:'बारह सौ वर्ग फीट',now:stamp},part.pendingQuantity);
+ assert.equal(replacement.result.state.answers.size,'1200 वर्ग फुट');assert.equal(replacement.pendingQuantity,null);
+ const low=await advanceInternalVoice(ai,part.result.state,{transcript:'वर्ग फीट',confidence:.4,now:stamp},part.pendingQuantity);
+ assert.equal(low.result.action,'repeat');assert.equal(low.pendingQuantity,null);
 });
