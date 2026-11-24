@@ -1,4 +1,5 @@
 import {inspectScriptedPromptPack,inspectInternalPilotLead} from './scripted-phone-pilot.mjs';
+import {fundingCap} from './minute-holds.mjs';
 // Super Admin, current-MFA only. This endpoint is strictly read-only:
 // it never calls Plivo, creates secrets, changes CRM consent, or enables dialing.
 // Public descriptions are intentionally code-backed/explicitly unverified.
@@ -27,7 +28,7 @@ export function buildPlivoReadinessSnapshot(env){
   ['pilotLeadId',uuid(env?.AR3D_SCRIPTED_PILOT_LEAD_ID),'Internal pilot CRM lead ID is configured'],
   ['workersAi',typeof env?.AI?.run==='function','Legacy Workers AI test binding exists'],
   ['sarvamSpeech',typeof env?.SARVAM_API_KEY==='string'&&Boolean(env.SARVAM_API_KEY.trim()),'Sarvam speech credential is configured (presence only)'],
-  ['fundingReview',env?.AR3D_FUNDED_CAMPAIGN_DISPATCH==='approved'&&typeof env?.AR3D_FUNDED_CUMULATIVE_SECONDS==='string'&&/^\d{1,12}$/.test(env.AR3D_FUNDED_CUMULATIVE_SECONDS),'Operator funding envelope is configured; not verified provider funds'],
+  ['fundingReview',env?.AR3D_FUNDED_CAMPAIGN_DISPATCH==='approved'&&fundingCap(env)!==null,'Separate reviewed Plivo, Sarvam and combined capacity ceilings configured; not live provider funds'],
   ['privateRecordings',typeof env?.RECORDINGS?.get==='function'&&
     typeof env?.RECORDINGS?.head==='function','Private R2 recording/prompt binding exists'],
   ['customerDispatchSwitch',env?.AR3D_SCRIPTED_CAMPAIGNS_ENABLED==='enabled','Customer campaign switch is enabled']

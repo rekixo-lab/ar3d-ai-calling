@@ -529,7 +529,8 @@ async function adminDashboard(main,openView){
      countChart('Ended calls · recorded counts',[['Internal tests',d.internal.ended],['Campaign calls',d.campaign.ended]])),
     title('Funding review','h3'),
     div('overview-grid',overviewMetric('Reviewed cumulative capacity',formatSeconds(d.funding?.capSeconds),'wallet'),overviewMetric('Remaining funded capacity',formatSeconds(d.funding?.remainingFundedSeconds),'wallet'),overviewMetric('Unbacked allocations',formatSeconds(d.funding?.unbackedAllocationSeconds),'receipt')),
-    node('p',{class:'note',text:'Operator-reviewed ceiling, not a live provider balance. Unconfigured capacity blocks new campaigns.'}),
+    div('overview-grid',overviewMetric('Plivo reviewed ceiling',formatSeconds(d.funding?.reviewedProviderCeilings?.plivo),'phone'),overviewMetric('Sarvam reviewed ceiling',formatSeconds(d.funding?.reviewedProviderCeilings?.sarvam),'spark')),
+    node('p',{class:'note',text:'Independent reviewed lifetime capacity ceilings, not live cash balances. Either missing ceiling or exhausted capacity blocks new campaigns.'}),
     title('Recent credit adjustments','h3'),
     table(['Date (IST)','Company','Adjustment','Minutes','Balance'],d.transactions.map(t=>[formatIst(t.createdAt),t.company,t.kind,String(t.deltaSeconds/60),formatSeconds(t.balanceSeconds)])),
     node('p',{class:'note',text:'Uncommitted credits are ledger balances, not carrier funds or authorization to dial. External payments and revenue are not recorded here.'}));
@@ -633,23 +634,29 @@ function minuteUsagePanel(main,tenantId,admin){
   try{
    const d=await api('/v1/human/credits/minute-usage?'+new URLSearchParams({tenantId,offset:String(offset)}));
    if(seq!==version||!card.isConnected)return;
+   const headers=['Updated (IST)','Customer (CRM)','Call reference','Status','Connected','Provider billed','Wallet reserved','Wallet deducted','Returned','Net deducted','Settlement'];
+   const dataRow=r=>[formatIst(r.updatedAt),r.customerName||'Unavailable',r.jobId,r.state,formatSeconds(r.connectedSeconds),formatSeconds(r.billedSeconds),formatSeconds(r.reservedSeconds),formatSeconds(r.chargedSeconds),formatSeconds(r.returnedSeconds),formatSeconds(r.netDebitedSeconds)];
+   const settlementLabel=r=>r.walletState==='held'?'Held · pending settlement':r.walletState==='settled'?'Settled':r.walletState==='released'?'Released':'No ledger entry';
    const rows=d.records.map(r=>{
     const observed=r.verifiedAt!==null;
-    const action=admin&&(!observed||r.settlementPending)?btn(observed?'Retry settlement':'Verify CDR',async()=>{
+    const action=admin&&r.hasProviderCall&&(!observed||r.settlementPending)?btn(observed?'Retry settlement':'Verify CDR',async()=>{
      if(!confirm('Verify the final Plivo CDR and settle its held billed minutes if eligible? No new call.'))return;
      try{const result=await api('/v1/human/plivo-cost-reconcile','POST',{tenantId,jobId:r.jobId});notice(result.notice||'Provider CDR checked.');await load()}catch(e){asError(e)}
-    },true):observed?'Verified':'Pending verification';
-    return [formatIst(r.updatedAt),r.state,formatSeconds(r.connectedSeconds),formatSeconds(r.billedSeconds),action];
+    },true):settlementLabel(r);
+    return [...dataRow(r),div('stack',node('span',{text:settlementLabel(r)}),...(typeof action==='string'?[]:[action]))];
    });
    body.replaceChildren(div('cards wallet-metrics',
     metric('Connected time',formatSeconds(d.connectedSeconds),d.connectedSeconds+' exact seconds · verified calls'),
     metric('Provider billed time',formatSeconds(d.billedSeconds),d.billedSeconds+' exact billed seconds'),
     ...(admin?[metric('Historical planned budget','₹'+(d.plannedPaise/100).toFixed(2),'Not a spendable wallet')]:[]),
+    metric('Net wallet deductions',formatSeconds(d.debitedSeconds),'Settled charges less returned credits'),
+    metric('Returned credits',formatSeconds(d.returnedSeconds),'Recorded charge reversals'),
     metric('Verified calls',String(d.verifiedCalls),'Final provider records'),
     metric('Awaiting CDR',String(d.pendingCalls),'Not included in verified totals')),
     node('p',{class:'note',text:'Connected and billed durations are separate. A provider may bill in increments. A matched held call can settle billed seconds after verification. No online payments or calling approval from this report.'}),
     ...(admin&&d.internal?[node('p',{class:'muted',text:'Internal tests (not client charges): '+d.internal.calls+' calls · '+formatSeconds(d.internal.connectedSeconds)+' signed hangup time.'})]:[]),
-    title('Call usage records','h3'),table(['Updated','Status','Connected','Provider billed','CDR'],rows),
+    title('Call usage records','h3'),table(headers,rows),
+    btn('Export call statement (CSV)',()=>downloadReportCsv('ar3d-call-statement-'+offset+'.csv',headers,d.records.map(r=>[...dataRow(r),settlementLabel(r)])),true),
     ...(admin?[title('Historical budget transaction history','h3'),table(['Date (IST)','Reference','Type','Change (₹)','Before (₹)','After (₹)','Actor','Reason'],
      d.transactions.map(t=>[formatIst(t.createdAt),t.transactionId,t.type==='allocation'?'Planned allocation':t.type==='recovery'?'Planned recovery':'Unchanged',
       (t.deltaPaise>0?'+':'')+(t.deltaPaise/100).toFixed(2),(t.previousPaise/100).toFixed(2),(t.newPaise/100).toFixed(2),...(admin?[t.actor,t.reason]:[])])),

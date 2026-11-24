@@ -37,3 +37,10 @@ test('shared funded capacity is enforced atomically across tenant wallets',async
  const p=await fundingPosition(db,180);assert.equal(p.remainingFundedSeconds,60);assert.equal(p.unbackedAllocationSeconds,420);
  assert.equal(fundingCap({}),null);assert.equal(fundingCap({AR3D_FUNDED_CUMULATIVE_SECONDS:'-1'}),null);
 }finally{f.close()}});
+
+test('reviewed independent ceilings fail closed and affordable duration never rounds upward',async()=>{
+ const {fundingCap,affordableCallSeconds}=await import('../src/minute-holds.mjs');
+ const env={AR3D_FUNDED_CUMULATIVE_SECONDS:'1000',AR3D_PLIVO_FUNDED_CUMULATIVE_SECONDS:'900',AR3D_SARVAM_FUNDED_CUMULATIVE_SECONDS:'600'};
+ assert.equal(fundingCap(env),600);assert.equal(fundingCap({...env,AR3D_SARVAM_FUNDED_CUMULATIVE_SECONDS:undefined}),null);
+ for(const [m,c,p,want] of [[180,29,1000,0],[180,119,1000,90],[181,1000,1000,180],[180,1000,59,30],[180,1000,null,0],[180,-1,1000,0]])assert.equal(affordableCallSeconds(m,c,p),want);
+});

@@ -1,5 +1,5 @@
 import {resolveCrmDb} from './core.mjs';
-import {minutePosition,reserveMinutes,closeMinuteHold,fundingCap,fundingPosition} from './minute-holds.mjs';
+import {minutePosition,reserveMinutes,closeMinuteHold,fundingCap,fundingPosition,affordableCallSeconds,BILLING_PULSE_SECONDS} from './minute-holds.mjs';
 import {SCRIPTED_CALLING_POLICY,approvedCampaignPhone,reserveCampaignQuestionnaire,scriptedPromptsReady,submitScriptedPhone} from './scripted-phone-pilot.mjs';
 
 export const CAMPAIGN_CRON='* * * * *';
@@ -31,7 +31,7 @@ export const fundedDispatchApproved=env=>env.AR3D_FUNDED_CAMPAIGN_DISPATCH==='ap
 export const creditOnlyCallingApproved=env=>fundedDispatchApproved(env)&&env.AR3D_CREDIT_ONLY_CALLING==='approved';
 export async function scriptedCampaignConfiguration(env){
  const carrier=Boolean(await approvedCampaignPhone(env)),funded=fundedDispatchApproved(env);
- const missing=[...(!carrier?['Plivo setup, a completed internal pilot and campaign authorization']:[]),...(!funded?['Verified nontrial provider funding and manual credit dispatch approval']:[])];
+ const missing=[...(!carrier?['Plivo setup, a completed internal pilot and campaign authorization']:[]),...(!funded?['Separate reviewed Plivo and Sarvam funding ceilings, combined ceiling and manual dispatch approval']:[])];
  return {ready:carrier&&funded,missing,creditOnly:carrier&&creditOnlyCallingApproved(env)};
 }
 // A definitive provider rejection is the only automatic no-submission release.
@@ -160,9 +160,10 @@ export async function tickScriptedTenant(env,db,tid,config,{apiFetch=fetch,now=D
  }
  if(!await scriptedPromptsReady(env,job.language,tid))return {state:'prompts_incomplete'};
  const position=await minutePosition(env.CONTROL_DB,tid),cap=fundingCap(env);
- const needed=Math.ceil(policy.max_seconds/30)*30;
- if(position.uncommittedSeconds<needed)return {state:'insufficient_credits'};
- if((await fundingPosition(env.CONTROL_DB,cap)).remainingFundedSeconds<needed)return {state:'provider_funding_exhausted'};
+ if(position.uncommittedSeconds<BILLING_PULSE_SECONDS)return {state:'insufficient_credits'};
+ const funding=await fundingPosition(env.CONTROL_DB,cap);
+ const needed=affordableCallSeconds(policy.max_seconds,position.uncommittedSeconds,funding.remainingFundedSeconds);
+ if(needed<BILLING_PULSE_SECONDS)return {state:'provider_funding_exhausted'};
  const dayStart=new Date(Math.floor((now+330*60000)/86400000)*86400000-330*60000).toISOString();
  // D1 serializes this ONE reservation statement, including quotas and uniqueness.
  const reserved=await db.prepare("UPDATE calling_jobs SET state='reserved',reserved_at=?,updated_at=?,account_sid=?,caller_id=?,flow_id=?,destination=? WHERE tenant_id=? AND id=? AND state='queued' AND EXISTS(SELECT 1 FROM calling_runs r WHERE r.tenant_id=calling_jobs.tenant_id AND r.id=calling_jobs.run_id AND r.state='running') AND EXISTS(SELECT 1 FROM calling_policies p WHERE p.tenant_id=? AND p.enabled=1 AND p.expires_at>? AND p.updated_at=? AND p.flow_id=?) AND EXISTS(SELECT 1 FROM calling_clearances v JOIN leads l ON l.tenant_id=v.tenant_id AND l.id=v.lead_id WHERE v.tenant_id=? AND v.lead_id=? AND v.purpose=? AND v.expires_at>? AND v.reviewed_at>=? AND v.reviewed_at>COALESCE((SELECT MAX(h.reserved_at) FROM calling_jobs h WHERE h.tenant_id=v.tenant_id AND h.lead_id=v.lead_id),'') AND l.consent_status!='denied' AND l.dnd_status!='blocked' AND l.mobile_e164=? AND l.updated_at=? AND NOT EXISTS(SELECT 1 FROM lead_opt_out_events o WHERE o.tenant_id=l.tenant_id AND o.lead_id=l.id)) AND NOT EXISTS(SELECT 1 FROM calling_jobs x WHERE x.tenant_id=? AND x.state IN('reserved','submitted','unknown')) AND (?=1 OR (SELECT COUNT(*) FROM calling_jobs x WHERE x.tenant_id=? AND x.reserved_at>=?)<?)")
@@ -172,7 +173,7 @@ export async function tickScriptedTenant(env,db,tid,config,{apiFetch=fetch,now=D
   // CRM and Control are separate D1 databases. Claim CRM first, then reserve
   // credits before creating any provider session. A crash locks the attempt
   // for review; never retry a provider POST or silently release a hold.
-  const hold=await reserveMinutes(env.CONTROL_DB,{tenantId:tid,job:job.id,maxSeconds:policy.max_seconds,now,globalCap:cap});
+  const hold=await reserveMinutes(env.CONTROL_DB,{tenantId:tid,job:job.id,maxSeconds:needed,now,globalCap:cap});
   if(!hold.ok||hold.replayed){
    if(!hold.ok&&hold.state==='insufficient_or_unavailable'){
     await updateJob(db,job,'failed',at,{error:'credit_reservation_unavailable'});
@@ -181,7 +182,7 @@ export async function tickScriptedTenant(env,db,tid,config,{apiFetch=fetch,now=D
    return {state:'locked'};
   }
   const id=await reserveCampaignQuestionnaire(env.CONTROL_DB,config,job,now);
-  const outcome=await submitScriptedPhone(env.CONTROL_DB,config,id,job.destination,policy.max_seconds,apiFetch);
+  const outcome=await submitScriptedPhone(env.CONTROL_DB,config,id,job.destination,needed,apiFetch);
   if(outcome==='rejected'){
    const rejected=await env.CONTROL_DB.prepare('SELECT id,phase,provider_call_id,provider_request_id FROM scripted_phone_pilots WHERE tenant_id=? AND job_id=? AND id=?').bind(tid,job.id,id).first();
    await releaseRejectedHold(env,job,rejected,now);

@@ -5,7 +5,7 @@ import {requireMembership,mutationOriginAllowed} from './human-auth.mjs';
 import {parseJsonBody,resolveCrmDb} from './core.mjs';
 import {estimateProductionCost} from './production-cost-plan.mjs';
 import {costObservation,readInternalPlivoCdr} from './cost-intelligence.mjs';
-import {minutePosition,fundingCap,fundingPosition} from './minute-holds.mjs';
+import {minutePosition,fundingCap,fundingPosition,affordableCallSeconds,providerFundingCaps} from './minute-holds.mjs';
 import {scriptedCampaignConfiguration} from './scripted-campaign-dispatch.mjs';
 
 const base='/v1/human/credits';
@@ -310,7 +310,7 @@ export async function handleCreditWalletRequest(req,env,user,{fetcher=fetch}={})
     db.prepare("SELECT COALESCE(SUM(CASE WHEN job_id IS NULL THEN 1 ELSE 0 END),0) AS internalEnded,COALESCE(SUM(CASE WHEN job_id IS NOT NULL THEN 1 ELSE 0 END),0) AS campaignEnded FROM scripted_phone_pilots WHERE hangup_at IS NOT NULL").first(),
     db.prepare("SELECT l.created_at AS createdAt,t.display_name AS company,CASE WHEN l.id LIKE 'call-reversal:%' THEN 'call_reversal' ELSE l.kind END AS kind,l.delta_seconds AS deltaSeconds,l.balance_seconds AS balanceSeconds FROM tenant_minute_ledger l JOIN tenants t ON t.id=l.tenant_id ORDER BY l.sequence DESC LIMIT 10").all(),fundingPosition(db,fundingCap(env))
    ]);
-   return json({clients,funding,position:{...position,uncommittedSeconds:position.allocatedSeconds-position.heldSeconds-position.usedSeconds},internal:{ended:sessions.internalEnded},campaign:{ended:sessions.campaignEnded},transactions:transactions.results,providerRequests:0,externalPaymentsRecorded:false,dispatchEnabledByDashboard:false});
+   return json({clients,funding:{...funding,reviewedProviderCeilings:providerFundingCaps(env)},position:{...position,uncommittedSeconds:position.allocatedSeconds-position.heldSeconds-position.usedSeconds},internal:{ended:sessions.internalEnded},campaign:{ended:sessions.campaignEnded},transactions:transactions.results,providerRequests:0,externalPaymentsRecorded:false,dispatchEnabledByDashboard:false});
   }
   if(path==='reverse-call-charge'){
    if(req.method!=='POST')return fail('method not allowed',405);
@@ -365,7 +365,7 @@ export async function handleCreditWalletRequest(req,env,user,{fetcher=fetch}={})
     if(configuration.ready&&t.status==='active'){
      const member=isAdmin?await db.prepare('SELECT id AS tenant_id,storage_mode,dedicated_binding FROM tenants WHERE id=?').bind(tid).first():t;
      const policy=await resolveCrmDb(env,member).prepare('SELECT max_seconds FROM calling_policies WHERE tenant_id=? AND enabled=1 AND expires_at>?').bind(tid,new Date().toISOString()).first();
-     if(policy){const f=await fundingPosition(db,fundingCap(env));spendableSeconds=Math.max(0,Math.min(position.uncommittedSeconds,f.remainingFundedSeconds));dispatchEnabled=spendableSeconds>=Math.ceil(policy.max_seconds/30)*30;}
+     if(policy){const f=await fundingPosition(db,fundingCap(env));spendableSeconds=Math.max(0,Math.min(position.uncommittedSeconds,f.remainingFundedSeconds));dispatchEnabled=affordableCallSeconds(policy.max_seconds,position.uncommittedSeconds,f.remainingFundedSeconds)>0;}
     }
     return json({tenantId:tid,...position,spendableSeconds,dispatchEnabled,offset:Number(offset),hasMore:rows.length>50||holds.length>50,
      transactions:rows.slice(0,50).map(({currentBalance,...row})=>row),callTransactions:holds.slice(0,50),status:spendableSeconds===null?'allocation_only':'funding_checked'});
@@ -465,31 +465,44 @@ export async function handleCreditWalletRequest(req,env,user,{fetcher=fetch}={})
    }else t=await requireMembership(db,user,tid,true);
    if(!t)return fail(admin?'tenant not found':'forbidden',admin?404:403);
    const crm=resolveCrmDb(env,t),offset=Number(offsetText);
-   const [plan,usage,pending,history,records,internal]=await Promise.all([
+   const [plan,usage,pending,history,records,internal,settled]=await Promise.all([
     budget(db,tid),
     crm.prepare('SELECT COUNT(*) AS verifiedCalls,COALESCE(SUM(call_seconds),0) AS connectedSeconds,COALESCE(SUM(billed_seconds),0) AS billedSeconds FROM verified_provider_call_costs WHERE tenant_id=?').bind(tid).first(),
     crm.prepare(`SELECT COUNT(*) AS pendingCalls FROM calling_jobs j
      WHERE j.tenant_id=? AND j.state IN('completed','failed') AND j.provider_call_sid IS NOT NULL
      AND NOT EXISTS(SELECT 1 FROM verified_provider_call_costs v WHERE v.tenant_id=j.tenant_id AND v.job_id=j.id)`).bind(tid).first(),
     db.prepare('SELECT id AS transactionId,previous_paise AS previousPaise,new_paise AS newPaise,created_at AS createdAt'+(admin?',actor,reason':'')+' FROM tenant_credit_audit WHERE tenant_id=? ORDER BY created_at DESC,id DESC LIMIT 51 OFFSET ?').bind(tid,offset).all(),
-    crm.prepare(`SELECT j.id AS jobId,j.updated_at AS updatedAt,j.state,v.call_seconds AS connectedSeconds,
+    crm.prepare(`SELECT j.id AS jobId,j.updated_at AS updatedAt,j.state,l.name AS customerName,
+      CASE WHEN j.provider_call_sid IS NOT NULL THEN 1 ELSE 0 END AS hasProviderCall,v.call_seconds AS connectedSeconds,
       v.billed_seconds AS billedSeconds,v.verified_at AS verifiedAt
       FROM calling_jobs j LEFT JOIN verified_provider_call_costs v ON v.tenant_id=j.tenant_id AND v.job_id=j.id
-      WHERE j.tenant_id=? AND j.state IN('completed','failed') AND j.provider_call_sid IS NOT NULL
+      LEFT JOIN leads l ON l.tenant_id=j.tenant_id AND l.id=j.lead_id
+      WHERE j.tenant_id=? AND j.state IN('completed','failed')
       ORDER BY j.updated_at DESC,j.id DESC LIMIT 51 OFFSET ?`).bind(tid,offset).all(),
     admin?db.prepare(`SELECT COUNT(*) AS calls,COALESCE(SUM(duration_seconds),0) AS connectedSeconds
-     FROM scripted_phone_pilots WHERE tenant_id=? AND job_id IS NULL AND hangup_at IS NOT NULL`).bind(tid).first():Promise.resolve(null)
+     FROM scripted_phone_pilots WHERE tenant_id=? AND job_id IS NULL AND hangup_at IS NOT NULL`).bind(tid).first():Promise.resolve(null),
+    db.prepare(`SELECT COALESCE(SUM(h.charged_seconds),0) AS grossSeconds,COALESCE(SUM(r.delta_seconds),0) AS returnedSeconds
+     FROM tenant_minute_holds h LEFT JOIN tenant_minute_ledger r ON r.tenant_id=h.tenant_id AND r.id='call-reversal:'||h.tenant_id||':'||h.job_id
+     WHERE h.tenant_id=? AND h.state='settled'`).bind(tid).first()
    ]);
    const page=records.results.slice(0,50),jobIds=page.map(x=>x.jobId);
-   const holds=jobIds.length?(await db.prepare("SELECT job_id AS jobId FROM tenant_minute_holds WHERE tenant_id=? AND state='held' AND job_id IN (SELECT value FROM json_each(?))").bind(tid,JSON.stringify(jobIds)).all()).results:[];
-   const heldIds=new Set(holds.map(h=>h.jobId));
+   const holds=jobIds.length?(await db.prepare(`SELECT h.job_id AS jobId,h.state,h.reserved_seconds AS reservedSeconds,h.charged_seconds AS chargedSeconds,COALESCE(r.delta_seconds,0) AS returnedSeconds
+    FROM tenant_minute_holds h LEFT JOIN tenant_minute_ledger r ON r.tenant_id=h.tenant_id AND r.id='call-reversal:'||h.tenant_id||':'||h.job_id
+    WHERE h.tenant_id=? AND h.job_id IN (SELECT value FROM json_each(?))`).bind(tid,JSON.stringify(jobIds)).all()).results:[];
+   const byJob=new Map(holds.map(h=>[h.jobId,h]));
    return json({tenantId:tid,plannedPaise:Number(plan?.plannedPaise||0),spendableSeconds:null,
-    debitedSeconds:null,verifiedCalls:Number(usage.verifiedCalls),connectedSeconds:Number(usage.connectedSeconds),
+    debitedSeconds:settled.grossSeconds-settled.returnedSeconds,grossDebitedSeconds:settled.grossSeconds,returnedSeconds:settled.returnedSeconds,verifiedCalls:Number(usage.verifiedCalls),connectedSeconds:Number(usage.connectedSeconds),
     billedSeconds:Number(usage.billedSeconds),pendingCalls:Number(pending.pendingCalls),
     internal:internal?{calls:Number(internal.calls),connectedSeconds:Number(internal.connectedSeconds)}:null,
     transactions:history.results.slice(0,50).map(x=>({...x,deltaPaise:x.newPaise-x.previousPaise,
      type:x.newPaise>x.previousPaise?'allocation':x.newPaise<x.previousPaise?'recovery':'unchanged'})),
-    records:page.map(x=>({...x,settlementPending:heldIds.has(x.jobId)})),offset,hasMore:history.results.length>50||records.results.length>50,
+    records:page.map(x=>{
+     const h=byJob.get(x.jobId);
+     return {...x,hasProviderCall:Boolean(x.hasProviderCall),settlementPending:h?.state==='held',
+      walletState:h?.state||'no_ledger',reservedSeconds:h?.reservedSeconds??null,
+      chargedSeconds:h?.chargedSeconds??null,returnedSeconds:h?.returnedSeconds??null,
+      netDebitedSeconds:h?.chargedSeconds!=null?h.chargedSeconds-h.returnedSeconds:null};
+    }),offset,hasMore:history.results.length>50||records.results.length>50,
     status:'observation_only',notice:'Verified provider seconds and historical INR plan records. Check the minute ledger for actual holds and settlements. No online payments.'});
   }
   if(path!=='tenant')return null;
