@@ -586,3 +586,24 @@ test('Plivo usage summary checks account, date, currency and complete-window tot
  assert.equal(f.c.db.prepare('SELECT COUNT(*) AS n FROM tenant_minute_ledger').get().n,0);
  }finally{f.close()}
 });
+
+test('provider fault review requires fresh MFA and exact event; no client grants or funds',async()=>{
+ const f=fixture();try{
+ const {recordProviderFault}=await import('../src/provider-safety.mjs');
+ await recordProviderFault(f.env.CONTROL_DB,'sarvam',402,'synthetic-stt-402');
+ const sequence=f.c.db.prepare('SELECT sequence FROM provider_safety_events').get().sequence;
+ const d={provider:'sarvam',expectedSequence:sequence,evidenceRef:'Verified receipt ABC123'};
+ assert.equal((await route(f,'provider-safety',admin,'POST',d)).status,403);
+ freshMfa(f);
+ assert.equal((await route(f,'provider-safety',client)).status,403);
+ assert.equal((await route(f,'provider-safety',client,'POST',d)).status,403);
+ assert.equal((await route(f,'provider-safety',admin,'POST',{...d,expectedSequence:sequence+1})).status,409);
+ assert.equal((await route(f,'provider-safety',admin,'POST',d)).status,200);
+ assert.equal((await route(f,'provider-safety',admin,'POST',d)).status,409);
+ const result=await (await route(f,'provider-safety',admin)).json();
+ assert.equal(result.providers.find(x=>x.provider==='sarvam').blocked,false);
+ assert.equal(result.dispatchEnabledByReview,false);
+ assert.equal(f.c.db.prepare('SELECT COUNT(*) AS n FROM tenant_minute_ledger').get().n,0);
+ assert.equal(f.c.db.prepare('SELECT COUNT(*) AS n FROM provider_financial_journal').get().n,0);
+ }finally{f.close()}
+});

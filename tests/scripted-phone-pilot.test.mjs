@@ -965,3 +965,26 @@ test('Sarvam campaign requires explicit engine disclosure, consent and verified 
   const survey=JSON.parse(row.survey_json);assert.equal(survey.answers.propertyType,'house');assert.equal(survey.phoneMeta.engine,'sarvam');assert.equal(survey.phoneMeta.llmRequests,0);
  }finally{f.close()}
 });
+
+test('signed Sarvam campaign STT 402 blocks subsequent commercial calls and preserves current hold',async()=>{
+ const f=fixture();try{
+ await setup(f);const env=f.env;
+ env.AR3D_CAMPAIGN_SPEECH_ENGINE='sarvam';env.SARVAM_API_KEY='synthetic-key';env.AR3D_CAMPAIGN_SARVAM_DISCLOSURE='approved';
+ f.c.db.prepare("UPDATE scripted_phone_pilots SET survey_json=? WHERE job_id IS NULL").run(JSON.stringify({phoneMeta:{engine:'sarvam'}}));
+ const config=await approvedCampaignPhone(env);assert.equal(config.engine,'sarvam');
+ let hook,requests=0;
+ const start=await tickScriptedTenant(env,f.r.wrap,tid,config,{now,apiFetch:async(_url,opts)=>{hook=JSON.parse(opts.body).answer_url.replace(/\/answer$/,'');return accepted()}});
+ assert.equal(start.state,'submitted');
+ const callback=(step,params)=>handleScriptedPhoneCallback(signed(hook+'/'+step,{CallUUID:callId,...params},env.PLIVO_AUTH_TOKEN),env,{now,fetcher:async(url)=>{
+  if(url==='https://api.sarvam.ai/speech-to-text'){requests++;return Response.json({error:{code:'insufficient_quota_error'}},{status:402});}
+  assert.match(url,/plivo\.com/);return new Response('RIFF',{headers:{'Content-Type':'audio/wav'}});
+ }});
+ await callback('answer',{ALegRequestUUID:'synthetic-plivo-request-123',To:internalNumber,From:config.caller,Direction:'outbound'});
+ await callback('consent',{Digits:'1'});
+ await callback('turn/0',{RecordingID:'record-id-00',RecordingDurationMs:'2000'});
+ assert.equal(requests,1);
+ assert.equal(f.c.db.prepare('SELECT phase FROM scripted_phone_pilots WHERE job_id IS NOT NULL').get().phase,'needs_review');
+ assert.equal(f.c.db.prepare("SELECT code FROM provider_safety_events WHERE provider='sarvam'").get().code,'http_402');
+ assert.equal(f.c.db.prepare('SELECT state FROM tenant_minute_holds').get().state,'held');
+ }finally{f.close()}
+});
