@@ -71,6 +71,11 @@ h2 > .icon, h3 > .icon { color: #3963a6; }
 .company-context { margin: -6px 0 16px; color: #405575; font-weight: 650; }
 .company-switch { width: min(100%, 360px); margin-bottom: 16px; }
 .client-summary { border-top: 3px solid #3975d4; }
+.wallet-metrics { grid-template-columns: repeat(auto-fit,minmax(156px,1fr)); }
+.wallet-metrics .metric strong { font-variant-numeric: tabular-nums; font-size: 23px; overflow-wrap:anywhere; }
+.wallet-metrics .metric p { font-size: 12px; margin-top: 5px; }
+.minute-wallet { margin-top: 18px; }
+.minute-wallet h3 { margin-top: 12px; }
 .client-summary .row { min-width: 0; }
 .client-company-name { display: block; color: #284268; font-size: 16px; overflow-wrap: anywhere; }
 .client-metrics { margin-top: 17px; margin-bottom: 11px; }
