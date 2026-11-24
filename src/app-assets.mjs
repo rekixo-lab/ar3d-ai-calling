@@ -136,6 +136,13 @@ function scriptedPhonePilotPanel(){
   const status=node('p',{class:'note',role:'status',text:'Checking pilot configuration…'});
   const results=div('stack'),prepared=div('stack');
   const device=node('select',{class:'field','aria-label':'Internal test number'});
+  const engine=node('select',{class:'field','aria-label':'Speech recognition engine'},[
+    node('option',{value:'deepgram_stream',text:'Deepgram Nova-3 · live stream (pilot)'}),
+    node('option',{value:'whisper',text:'Whisper · recorded answers'}),
+    node('option',{value:'sarvam',disabled:'disabled',text:'Sarvam · integration pending'})
+  ]);
+  engine.value=state.internalSpeechEngine||'deepgram_stream';
+  engine.addEventListener('change',()=>{state.internalSpeechEngine=engine.value;updateAvailability()});
   const mobile=input('internalTestMobile','tel','10-digit Indian mobile');mobile.maxLength=13;
   const enroll=btn('Add test number',async()=>{
     const raw=mobile.value.trim().replace(/\s/g,'');
@@ -162,7 +169,7 @@ function scriptedPhonePilotPanel(){
   function updateAvailability(){
     const available=config?.availability;
     const seconds=Math.max(0,Math.ceil((deadline-Date.now())/1000));
-    call.disabled=busy||refreshing||!config?.configured||available?.ready!==true||!device.value;
+    call.disabled=busy||refreshing||!config?.configured||available?.ready!==true||!device.value||!config?.engines?.includes(engine.value);
     enroll.disabled=busy||refreshing||!config?.enrollmentEnabled||(config?.devices?.length||0)>=5;
     cooldown.textContent=!config?.configured?'':available?.reason==='awaiting_signed_hangup'?
       'Waiting for signed hangup from Plivo. Do not redial an unconfirmed call.':
@@ -183,10 +190,10 @@ function scriptedPhonePilotPanel(){
   }
   const call=btn('Call the verified internal number once',async()=>{
     const selected=config?.devices?.find(x=>x.leadId===device.value);
-    if(busy||refreshing||!selected||config?.availability?.ready!==true||!window.confirm('Place one internal pilot call to the selected test number ending '+selected.destinationLast4+'? Confirm the actual recipient has already explicitly agreed to this AI test and recording of their answers. A brief recording notice is played, then the first question starts without pressing 1. This uses phone credits.'))return;
+    if(busy||refreshing||!selected||config?.availability?.ready!==true||!window.confirm('Place one internal pilot call to the selected test number ending '+selected.destinationLast4+'? Confirm the actual recipient has explicitly agreed to this AI test and the selected speech processing service, including recording for Whisper or live transcription for Deepgram. A brief recording/processing notice is played, then the first question starts without pressing 1. Selected recognition: '+engine.options[engine.selectedIndex].textContent+'. Telephony and AI usage may be charged.'))return;
     busy=true;updateAvailability();
     try{
-      await api('/v1/human/scripted-phone-pilot','POST',{language:language.value,leadId:selected.leadId,confirm:'CALL_ONE_PRECONSENTED_INTERNAL_NUMBER'});
+      await api('/v1/human/scripted-phone-pilot','POST',{language:language.value,leadId:selected.leadId,engine:engine.value,confirm:'CALL_ONE_PRECONSENTED_INTERNAL_NUMBER'});
       notice('Pilot submitted. Waiting for signed hangup.');
     }catch(err){asError(err)}
     finally{try{await refresh()}catch(err){asError(err)}busy=false;updateAvailability()}
@@ -205,13 +212,13 @@ function scriptedPhonePilotPanel(){
     enrollment.hidden=!config.configured;
     prepare.hidden=!!config.configured;
 
-    results.replaceChildren(...(config.recent?.length?[table(['Started','Test number','Language','Status','Provider call reference','Attempts processed','Questions accepted','Audio result','Signed hangup','Seconds'],
-      config.recent.map(x=>[formatIst(x.created_at),x.destinationLast4?'••••'+x.destinationLast4:'—',x.language,x.phase,x.provider_call_reference?'Received':'Not received',x.turn??'—',x.question_index??'—',x.last_audio_outcome?x.last_audio_outcome.replaceAll('_',' '):'—',x.signed_hangup?'Received':'Not received',x.duration_seconds??'—']))]:[]));
+    results.replaceChildren(...(config.recent?.length?[table(['Started','Test number','Language','Speech engine','Status','Provider call reference','Attempts processed','Questions accepted','Audio result','Signed hangup','Seconds'],
+      config.recent.map(x=>[formatIst(x.created_at),x.destinationLast4?'••••'+x.destinationLast4:'—',x.language,x.engine==='deepgram_stream'?'Deepgram live':'Whisper',x.phase,x.provider_call_reference?'Received':'Not received',x.turn??'—',x.question_index??'—',x.last_audio_outcome?x.last_audio_outcome.replaceAll('_',' '):'—',x.signed_hangup?'Received':'Not received',x.duration_seconds??'—']))]:[]));
     }catch(err){config=null;status.textContent='Could not verify internal call availability. Refresh status to retry.';throw err}
     finally{refreshing=false;updateAvailability();scheduleCheck()}
   }
   enrollment.hidden=true;device.addEventListener('change',updateAvailability);
-  card.append(status,prepare,prepared,enrollment,div('formrow',lab('Internal test number',device),lab('Recorded prompt language',language),call,
+  card.append(status,prepare,prepared,enrollment,div('formrow',lab('Internal test number',device),lab('Recorded prompt language',language),lab('Speech recognition engine',engine),call,
     btn('Refresh fixed-question pilot status',()=>refresh().catch(asError),true)),cooldown,results);
   refresh().catch(()=>{status.textContent='Pilot status requires a current MFA Super Admin session.'});
   return card;

@@ -637,3 +637,46 @@ test('preconsented internal test skips keypad, announces recording and retries t
   assert.equal((await cb('hangup',{Duration:'30'})).status,204);
  }finally{f.close()}
 });
+
+test('streaming pilot XML and one-time authenticated turn claim preserve existing questionnaire',async()=>{
+ const f=fixture();try{
+  const env={...f.env,PLIVO_AUTH_ID:'syntheticAuth',PLIVO_AUTH_TOKEN:token,
+   AR3D_SCRIPTED_PILOT_ENABLED:'enabled',AR3D_PLIVO_RECORDING_AUTH:'confirmed',
+   AR3D_SCRIPTED_PILOT_ORIGIN:origin,AR3D_PLIVO_CALLER_NUMBER:'+918000000000',
+   AR3D_SCRIPTED_PILOT_VERIFIED_NUMBER:internalNumber,AR3D_SCRIPTED_PILOT_TENANT_ID:tid,
+   AR3D_SCRIPTED_PILOT_LEAD_ID:lead,
+   RECORDINGS:{head:async()=>({size:4}),get:async()=>({size:4,body:new Uint8Array(4)})},
+   AI:{async run(){assert.fail('no model or recording request until stream starts')}}
+  };
+  let hook,bridge;
+  const fetcher=async(url,opts)=>{
+   assert.match(url,/api\.plivo\.com/);hook=JSON.parse(opts.body).answer_url.replace(/\/answer$/,'');
+   return Response.json({request_uuid:requestId},{status:202});
+  };
+  const start=await handleScriptedPhoneAdmin(new Request(origin+'/v1/human/scripted-phone-pilot',{
+   method:'POST',headers:{Origin:origin},body:JSON.stringify({language:'hi',engine:'deepgram_stream',confirm:'CALL_ONE_PRECONSENTED_INTERNAL_NUMBER'})
+  }),env,admin,{now,fetcher});assert.equal(start.status,202);
+  const cb=(step,params)=>handleScriptedPhoneCallback(signed(hook+'/'+step,{CallUUID:callId,...params}),env,{now,fetcher});
+  const opening=await (await cb('answer',{ALegRequestUUID:requestId,From:'918000000000',To:'919000000001',Direction:'outbound'})).text();
+  assert.match(opening,/propertyType\.mp3.*<Stream/);assert.doesNotMatch(opening,/<Record |<GetDigits/);
+  assert.match(opening,/audio\/x-mulaw;rate=8000/);assert.match(opening,/stream-next\/0/);
+  const url=opening.match(/>(wss:[^<]+)<\/Stream>/)[1].replace(/^wss:/,'https:');
+  const claim=(uri)=>handleScriptedPhoneCallback(new Request(uri,{headers:{Upgrade:'websocket'}}),env,{now,fetcher,streamUpgrade:args=>{bridge=args;return new Response('synthetic upgrade')}});
+  assert.equal((await claim(url.replace(/token=.+/,'token='+'0'.repeat(64)))).status,403);
+  assert.equal((await claim(url)).status,200);
+  assert.equal((await claim(url)).status,403);
+  assert.equal(bridge.callId,callId);
+  assert.equal((await cb('turn/0',{RecordingID:'record-id-00'})).status,200);
+  // Use current simulated time for the injected callback's server clock.
+  const previous=Date.now;Date.now=()=>now;
+  try{await bridge.onAnswer({text:'प्लॉट',reason:'recognized',confidence:.95})}finally{Date.now=previous}
+  const next=await (await cb('stream-next/0',{})).text();assert.match(next,/location\.mp3.*<Stream/);
+  assert.match(next,/stream-next\/1/);
+  assert.equal((await claim(url)).status,403);
+  assert.match(await (await cb('stream-next/1',{})).text(),/location\.mp3/);
+  const row=JSON.parse(f.c.db.prepare('SELECT survey_json FROM scripted_phone_pilots').get().survey_json);
+  assert.equal(row.answers.propertyType,'plot');assert.equal(row.attempts,1);
+  assert.equal(row.phoneMeta.lastAudioOutcome,'stream_disconnected');
+  assert.equal((await cb('hangup',{Duration:'30'})).status,204);
+ }finally{f.close()}
+});
