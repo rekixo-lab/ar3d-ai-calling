@@ -2,7 +2,7 @@
 
 [Open the client dashboard](https://aicalling.ar3dstudio.in/app). After account activation, clients use their email and password on this page.
 
-AR3D runs the property questionnaire, validates answers and saves them to the tenant's CRM. Cloudflare Workers runs the application, D1 stores tenant and customer records, private R2 stores question prompts, and Workers AI converts short spoken answers to text. Plivo handles the telephone connection.
+AR3D runs the property questionnaire, validates answers and saves them to the tenant's CRM. Cloudflare Workers runs the application, D1 stores tenant and customer records, private R2 stores question prompts, and Sarvam Saaras v4 converts short spoken answers to text. Plivo handles the telephone connection.
 
 ## Workflow
 

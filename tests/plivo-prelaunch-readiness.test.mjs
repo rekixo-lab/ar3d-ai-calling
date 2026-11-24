@@ -47,7 +47,6 @@ test('MFA Super Admin sees nonsecret configuration checks and honest launch bloc
    AR3D_SCRIPTED_CAMPAIGNS_ENABLED:'enabled',
    SARVAM_API_KEY:'synthetic-sarvam-credential-123',
    AR3D_FUNDED_CAMPAIGN_DISPATCH:'approved',AR3D_FUNDED_CUMULATIVE_SECONDS:'123456789',AR3D_PLIVO_FUNDED_CUMULATIVE_SECONDS:'123456789',AR3D_SARVAM_FUNDED_CUMULATIVE_SECONDS:'123456789',AR3D_PLIVO_BUDGET_CURRENCY:'USD',AR3D_PLIVO_BUDGET_CEILING_MICROS:'600000000',AR3D_PLIVO_BUDGET_PULSE_MICROS:'10000',AR3D_SARVAM_BUDGET_CURRENCY:'INR',AR3D_SARVAM_BUDGET_CEILING_MICROS:'6000000000',AR3D_SARVAM_BUDGET_PULSE_MICROS:'100000',
-   AI:{run:async()=>assert.fail('Never call transcription from readiness')},
    RECORDINGS:{get:async()=>assert.fail('Never read audio bytes'),head:async key=>{
     assert.match(key,/^scripted-phone-pilot\/(?:hi|en)\/[A-Za-z-]+\.mp3$/);
     audioHeads.push(key);
@@ -69,7 +68,7 @@ test('MFA Super Admin sees nonsecret configuration checks and honest launch bloc
   assert.equal(data.scriptedCallingImplemented,true);
   assert.deepEqual(data.internalLead,{state:'lead_unavailable',ready:false});
   assert.equal(data.setupActions.find(x=>x.id==='recipient_match').ready,false);
-  assert.equal(data.environment.length,14);
+  assert.equal(data.environment.length,13);
   assert.ok(data.environment.every(x=>x.configured));
   assert.equal(audioHeads.length,24,'11 essential clips plus optional retry per language');
   assert.deepEqual(data.audioPacks.map(pack=>[pack.language,pack.requiredTotal,pack.requiredReady,
@@ -110,7 +109,7 @@ test('Readiness pure function cannot be coerced into a live or KYC-approved stat
  const evil={PLIVO_AUTH_ID:'VALIDAUTHID',PLIVO_AUTH_TOKEN:'X'.repeat(40),
   AR3D_PLIVO_CALLER_NUMBER:'+919999999999',
   AR3D_PLIVO_RECORDING_AUTH:'confirmed',AR3D_SCRIPTED_PILOT_ENABLED:'enabled',
-  AR3D_SCRIPTED_CAMPAIGNS_ENABLED:'enabled',AI:{run(){}},
+  AR3D_SCRIPTED_CAMPAIGNS_ENABLED:'enabled',SARVAM_API_KEY:'synthetic-key',
   RECORDINGS:{get(){},head(){}}};
  const report=buildPlivoReadinessSnapshot(evil);
  assert.equal(report.canClaimProductionReady,false);

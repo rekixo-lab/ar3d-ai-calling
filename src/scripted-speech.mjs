@@ -1,7 +1,6 @@
-// One short answer at a time. Audio is forwarded to Workers AI and discarded.
+// One short answer at a time. Audio is forwarded only to Sarvam and discarded.
 export const ANSWER_MAX_BYTES=524288;
-const MODEL='@cf/openai/whisper-large-v3-turbo';
-const AUDIO_TYPES=new Set(['audio/webm','audio/ogg','audio/wav','audio/x-wav','audio/mpeg','audio/mp4']);
+const AUDIO_TYPES=new Set(['audio/wav','audio/x-wav','audio/mpeg']);
 
 export function answerContentType(headers){
  return headers.get('content-type')?.split(';')[0].trim().toLowerCase();
@@ -25,46 +24,17 @@ export async function readBoundedBytes(message,max){
 
 export function supportsAnswerAudio(type){return AUDIO_TYPES.has(type)}
 
-export async function transcribeScriptedAnswer(ai,bytes,language,{vadFilter=true,initialPrompt=null}={}){
- if(!ai?.run)throw Error('speech_not_configured');
- if(!bytes.length||bytes.length>ANSWER_MAX_BYTES||!['hi','en'].includes(language))
-  throw Error('invalid_audio');
- let binary='';
- for(let i=0;i<bytes.length;i+=8192)binary+=String.fromCharCode(...bytes.subarray(i,i+8192));
- const result=await ai.run(MODEL,{audio:btoa(binary),task:'transcribe',language,vad_filter:vadFilter,...(typeof initialPrompt==='string'&&initialPrompt.length<=200?{initial_prompt:initialPrompt}:{})});
- const text=typeof result?.text==='string'?result.text.trim().replace(/\s+/g,' '):'';
- return text&&text.length<=220?text:null;
-}
-
-// Recorded-audio Nova-3 via the existing Workers AI binding. No new account or
-// streaming socket required. Keep the actual container MIME type; no raw PCM
-// encoding override. Do not log audio, recognition results or provider errors.
-export async function transcribeNovaRecordedAnswer(ai,bytes,language,contentType){
- if(!ai?.run||!bytes.length||bytes.length>ANSWER_MAX_BYTES||!['hi','en'].includes(language)||!supportsAnswerAudio(contentType))throw Error('invalid_audio');
- // Cloudflare's documented binary stream input, not Whisper's base64 JSON.
- const raw=await ai.run('@cf/deepgram/nova-3',{audio:{body:new Blob([bytes],{type:contentType}).stream(),contentType},language});
- const alt=raw?.results?.channels?.[0]?.alternatives?.[0];
- if(typeof alt?.transcript!=='string')throw Error('invalid_nova_response');
- const text=alt.transcript.trim().replace(/\s+/g,' ');
- const confidence=typeof alt.confidence==='number'&&Number.isFinite(alt.confidence)&&alt.confidence>=0&&alt.confidence<=1?alt.confidence:null;
- return {text:text&&text.length<=220?text:null,confidence};
-}
-
-// Only fixed categories and numeric Workers AI error codes. Never return raw
+// Only fixed error categories. Never return raw
 // provider error strings (which may contain speech or account information).
 export function speechFailureCode(error){
- if(error?.message==='invalid_nova_response')return 'invalid_response_shape';
  if(error?.message==='invalid_audio')return 'invalid_audio';
  if(['sarvam_not_configured','sarvam_invalid_response'].includes(error?.message))return error.message;
  if(typeof error?.message==='string'&&/^sarvam_http_[345]\d{2}$/.test(error.message))return error.message;
  if(['TimeoutError','AbortError'].includes(error?.name))return 'timeout';
- const match=typeof error?.message==='string'?error.message.match(/^(?:AiError:\s*)?(\d{4}):/):null;
- const code=Number.isInteger(error?.code)?error.code:match?Number(match[1]):null;
- return code>=1000&&code<=9999?'workers_ai_'+code:'provider_error_unclassified';
+ return 'provider_error_unclassified';
 }
 
-// Explicitly consented internal replay to a separate provider only. This is
-// not an automatic live-call fallback. The credential is a Worker secret.
+// Single speech provider. The credential remains a Worker secret.
 export async function transcribeSarvamRecordedAnswer(key,bytes,language,contentType,fetcher=fetch){
  if(typeof key!=='string'||!key.trim()||key.length>512)throw Error('sarvam_not_configured');
  if(!bytes.length||bytes.length>ANSWER_MAX_BYTES||!['hi','en'].includes(language)||!['audio/mpeg','audio/wav','audio/x-wav'].includes(contentType))throw Error('invalid_audio');

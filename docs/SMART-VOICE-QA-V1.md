@@ -5,7 +5,7 @@
 Build the smallest reliable, consent-gated, *fixed-question* Hindi/English real-estate phone assistant on the existing AR3D stack. **Do not train or buy a large general-purpose LLM** for v1. The assistant asks the reviewed questions, captures short spoken replies, understands a bounded set of answers, asks again when the audio/content is unclear, and sends only validated outcomes to the CRM.
 
 - **AR3D-owned:** CRM, customer imports, review dashboard, company isolation, consent gates, seven-question state machine, answer parsing, replay protection, retries and human-review outcome.
-- **External dependencies:** Plivo for authorized Indian telephone connections; Cloudflare Workers/Workers AI for backend and short speech-to-text; private R2 for reviewed Hindi/English prerecorded MP3 prompts; D1 for CRM records.
+- **External dependencies:** Plivo for authorized Indian telephone connections; Cloudflare Workers for backend and Sarvam Saaras v4 for short speech-to-text; private R2 for reviewed Hindi/English prerecorded MP3 prompts; D1 for CRM records.
 - **Not in v1:** general ChatGPT-like conversation, large-model training, open-ended sales promises, unsolicited calls, autonomous booking, realtime barge-in or unlimited background dialogue. Natural two-way streaming is a separate later upgrade.
 - **Cost:** software logic is ours; provider telephone minutes and potentially Cloudflare AI usage are not guaranteed free. Never suggest free real phone calling.
 

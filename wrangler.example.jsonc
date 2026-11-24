@@ -7,7 +7,6 @@
   "vars": {
     "AR3D_PLIVO_CALLER_NUMBER": "+918065491333"
   },
-  "ai": { "binding": "AI" },
   "d1_databases": [
     {
       "binding": "CONTROL_DB",

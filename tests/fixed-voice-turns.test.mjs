@@ -145,7 +145,7 @@ test('Browser client offers sequential voice demo with opt-in microphone and sta
   assert.match(js,/Start 7-question voice preview/);
   assert.match(js,/Next fixed question/);
   assert.match(js,/Speak current question/);
-  assert.match(js,/Record answer for Cloudflare/);
+  assert.match(js,/Record answer with Sarvam/);
   assert.match(js,/voice-preview\/transcribe/);
   assert.match(js,/Save Reviewed Answers to CRM/);
   assert.match(js,/customer dial|No live call|No phone call/i);
