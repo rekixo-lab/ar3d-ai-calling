@@ -457,3 +457,16 @@ test('common Hindi fractional budgets and punctuated corrections stay determinis
  const multi=await advanceInternalVoice(ai,beginFixedVoicePreview({now:stamp}).state,{transcript:'घर; शहर कोरबा; एरिया बस स्टैंड; साइज 3BHK; मेरा बजट 25 लाख',now:stamp});
  assert.equal(multi.interpreter,'labelled_multi_answer');assert.equal(multi.result.state.answers.budgetInr,2500000);
 });
+
+
+test('natural short BHK answers, numeric budget dash ranges and explicit location wrappers',()=>{
+ let s=beginFixedVoicePreview({now:stamp}).state;
+ s=turn(s,'घर').state;
+ const city=turn(s,'मैं रायपुर में घर देख रहा हूं');assert.equal(city.state.answers.location,'रायपुर');
+ assert.equal(turn(s,'रायपुर बजट 20 लाख').action,'repeat');
+ s=turn(city.state,'शंकर नगर').state;
+ assert.equal(turn(s,'तीन').state.answers.size,'3BHK');assert.equal(turn(s,'3 या 4').action,'repeat');
+ s=turn(s,'तीन').state;
+ for(const text of ['20-25 लाख','20 – 25 lakh']){const r=turn(s,text);assert.equal(r.state.answers.budgetMinInr,2000000);assert.equal(r.state.answers.budgetInr,2500000);}
+ assert.equal(turn(s,'25-20 लाख').action,'repeat');assert.equal(turn(s,'20-25').action,'repeat');
+});

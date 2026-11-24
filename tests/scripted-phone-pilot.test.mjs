@@ -813,6 +813,7 @@ test('consented Sarvam internal call uses one STT per turn, direct parser and no
   const report=await (await verify(admin)).json();
   assert.equal(report.crmVerified,true);assert.equal(report.answers.budgetInr,2000000);assert.equal(report.storedAnswers.budgetInr,2000000);
   assert.equal(report.connectedSeconds,73);assert.equal(report.usage.llmRequests,0);assert.equal(report.usage.sttAudioMs,15000);
+  assert.equal(report.voiceTiming.samples,6);assert.ok(Number.isSafeInteger(report.voiceTiming.totalP95Ms));assert.equal(report.voiceTiming.basis,'successful_recorded_answer_processing_only');
   assert.equal(report.phoneCallsStarted,0);assert.equal(report.crmChanged,false);assert.equal(stt,6);
   assert.deepEqual(f.r.db.prepare('SELECT * FROM leads WHERE id=?').get(lead),before);
  }finally{f.close()}

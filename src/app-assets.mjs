@@ -179,6 +179,7 @@ function scriptedPhonePilotPanel(){
     verifiedReport.replaceChildren(table(['Call verification','Result'],[['Started',formatIst(d.startedAt)],['Test device','••••'+d.destinationLast4],['Status',d.phase],['Signed hangup',d.signedHangup?'Received':'Missing'],['CRM save verified',d.crmVerified?'Yes':'No'],['Same call saved in CRM',d.crmSameSession?'Yes':'No'],['Answers match',d.answersMatch?'Yes':'No'],['CRM columns match',d.crmColumnsMatch?'Yes':'No'],['Connected seconds',d.connectedSeconds],['Attempts',d.attempts],['Questions accepted',d.questionsAccepted]]),
      table(['Field','Call answer','Saved CRM answer'],Object.entries(d.answers).map(([k,v])=>[k,v??'—',d.storedAnswers?.[k]??'—'])),
      table(['Recorded usage (not invoice)','Value'],Object.entries(d.usage).map(([k,v])=>[k,v??'Unknown'])),
+     ...(d.voiceTiming?[table(['Answer processing (ms; not end-to-end)','Samples / timing'],[['Samples',d.voiceTiming.samples],['Media download p95',d.voiceTiming.mediaP95Ms??'Unknown'],['Recognition p95',d.voiceTiming.recognitionP95Ms??'Unknown'],['Interpretation p95',d.voiceTiming.interpretationP95Ms??'Unknown'],['Total processing p50',d.voiceTiming.totalP50Ms??'Unknown'],['Total processing p95',d.voiceTiming.totalP95Ms??'Unknown']])]:[]),
      node('p',{class:'muted',text:'Read-only check of the latest signed-ended internal Sarvam call and its exact test lead. Does not compare to what the recipient actually said; check the displayed values yourself. No new call, AI request, or CRM write.'}),btn('Clear result',()=>verifiedReport.replaceChildren(),true));
    }catch(e){asError(e)}finally{verifyResult.disabled=false}
   },true);
@@ -659,8 +660,8 @@ function adminTransactionExplorer(main){
  const card=div('card',title('All credit transactions')),body=div('stack');
  const kind=node('select',{class:'field','aria-label':'Transaction type'},[['all','All transactions'],['allocation','Allocations'],['purchase','Paid purchases'],['recovery','Recoveries'],['call_reversal','Returned minutes'],['reserved','Pending holds'],['settled','Settled calls'],['released','Released holds']].map(([value,text])=>node('option',{value,text})));
  let offset=0,version=0,rows=[];
- const headers=['Created (IST)','Company','Reference','Type','Adjustment seconds','Allocated balance seconds','Reserved seconds','Charged seconds','Closed (IST)'];
- const values=x=>[formatIst(x.createdAt),x.company,x.reference,x.kind,x.deltaSeconds,x.allocatedBalanceSeconds,x.reservedSeconds,x.chargedSeconds,x.closedAt?formatIst(x.closedAt):null];
+ const headers=['Created (IST)','Company','Reference','Type','Adjustment seconds','Allocated balance seconds','Reserved seconds','Charged seconds','Closed (IST)','Recorded payment INR','External receipt','Recorded by'];
+ const values=x=>[formatIst(x.createdAt),x.company,x.reference,x.kind,x.deltaSeconds,x.allocatedBalanceSeconds,x.reservedSeconds,x.chargedSeconds,x.closedAt?formatIst(x.closedAt):null,Number.isSafeInteger(x.paidPaise)?(x.paidPaise/100).toFixed(2):null,x.receiptRef??null,x.recordedBy??null];
  const prev=btn('Previous',()=>{offset=Math.max(0,offset-50);load()},true),next=btn('Next',()=>{offset+=50;load()},true),refresh=btn('Refresh transactions',()=>load(),true);
  const exportBtn=btn('Export this page (CSV)',()=>downloadReportCsv('ar3d-credit-transactions-'+offset+'.csv',headers,rows.map(values)),true);
  async function load(){
@@ -672,7 +673,7 @@ function adminTransactionExplorer(main){
   finally{if(seq===version)refresh.disabled=false}
  }
  kind.addEventListener('change',()=>{offset=0;load()});
- card.append(node('p',{class:'note',text:'Cross-company minute ledger and reservation history. Original charges and returned minutes remain separate. No external payment or revenue entries.'}),div('formrow',lab('Transaction type',kind),refresh,exportBtn),body,div('formrow',prev,next));main.append(card);load();
+ card.append(node('p',{class:'note',text:'Cross-company minute ledger and reservation history. Paid purchases show recorded external payment, receipt reference and recording operator; the date is entry time. Bank receipt, payment channel and earned revenue are not independently verified. Original charges and returned minutes remain separate.'}),div('formrow',lab('Transaction type',kind),refresh,exportBtn),body,div('formrow',prev,next));main.append(card);load();
 }
 function providerUsageOverview(main){
  const card=div('card',title('Plivo account spend')),body=div('stack',node('p',{class:'muted',text:'Not checked. Select a completed UTC date window and read the provider summary.'}));

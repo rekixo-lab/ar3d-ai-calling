@@ -4,6 +4,7 @@ import {mutationOriginAllowed} from './human-auth.mjs';
 import {beginFixedVoicePreview,advanceFixedVoicePreview,advanceContextualVoice,advanceInternalVoice} from './fixed-voice-turns.mjs';
 import {normalizePropertySurvey,surveyToCrm} from './fixed-property-survey.mjs';
 import {createSarvamContextualAdapter} from './sarvam-contextual.mjs';
+import {addVoiceTiming,summarizeVoiceTiming} from './voice-timing.mjs';
 import {providerFaultBlocked,recordProviderFault} from './provider-safety.mjs';
 import {ANSWER_MAX_BYTES,answerContentType,readBoundedBytes,supportsAnswerAudio,speechFailureCode,transcribeSarvamRecordedAnswer} from './scripted-speech.mjs';
 
@@ -513,7 +514,7 @@ async function verifyLatestSarvamResult(env,config){
   crmSameSession:sameSession,answersMatch:matches,crmColumnsMatch,crmVerified:row.phase==='completed'&&matches&&crmColumnsMatch,
   usage:{sttAudioMs:metric('sttAudioMs'),sttDurationUnknown:metric('sttDurationUnknown'),llmRequests:metric('llmRequests'),
    llmInputTokens:metric('llmInputTokens'),llmOutputTokens:metric('llmOutputTokens'),llmUsageUnknown:metric('llmUsageUnknown'),
-   lastRecognitionMs:metric('recognitionMs'),lastInterpretationMs:metric('interpretationMs')}};
+   lastRecognitionMs:metric('recognitionMs'),lastInterpretationMs:metric('interpretationMs')},voiceTiming:summarizeVoiceTiming(m.voiceTiming)};
 }
 
 async function saveVerifiedPilot(env,row,now){
@@ -710,6 +711,7 @@ function recordingDurationMs(params){
  return null;
 }
 async function recordingAnswer(config,env,row,params,fetcher){
+ const mediaStarted=Date.now();
  if(!ID.test(params.get('RecordingID')||''))return {text:null,reason:'recording_id_missing'};
  const recording=params.get('RecordingID');
  // The signed callback has already been verified and bound to this call.
@@ -750,7 +752,7 @@ async function recordingAnswer(config,env,row,params,fetcher){
  try{
   const started=Date.now();
   const text=(await transcribeSarvamRecordedAnswer(env.SARVAM_API_KEY,bytes,row.language,answerContentType(response.headers),fetcher)).text;
-  return {text,reason:text?'recognized':'speech_empty',recognitionMs:Date.now()-started,audioMs:recordingDurationMs(params),audioBytes:bytes.length,sttConnected:true,mediaHost:new URL(mediaUrl).hostname};
+  return {text,reason:text?'recognized':'speech_empty',mediaFetchMs:Math.max(0,started-mediaStarted),recognitionMs:Date.now()-started,audioMs:recordingDurationMs(params),audioBytes:bytes.length,sttConnected:true,mediaHost:new URL(mediaUrl).hostname};
  }catch(e){return {text:null,reason:'speech_service_failed',failureCode:speechFailureCode(e),audioMs:recordingDurationMs(params),audioBytes:bytes.length,sttConnected:false,mediaHost:new URL(mediaUrl).hostname}}
 }
 
@@ -777,7 +779,9 @@ async function applyPhoneAnswer(config,env,row,answer,now,fetcher=fetch){
   const {result,interpreter,pendingQuantity=null}=(internalDirect(row)||isSarvam(row))&&answer.reason==='recognized'&&answer.text?
    await advanceInternalVoice(adapter,prior,args,phoneMeta.pendingQuantity):{result:advanceFixedVoicePreview(prior,args),interpreter:'direct'};
   if(adapter&&[401,402,403].includes(adapter.failureStatus))await recordProviderFault(control,'sarvam',adapter.failureStatus,'llm:'+id+':'+turn,now);
-  const aiMetrics=isSarvam(row)?{...(phoneMeta.costMeterVersion===1?{sttRoundedSeconds:(phoneMeta.sttRoundedSeconds||0)+(answer.sttConnected&&Number.isSafeInteger(answer.audioMs)?Math.ceil(answer.audioMs/1000):0)}:{}),interpretationMs:Date.now()-interpretationStarted,llmRequests:(phoneMeta.llmRequests||0)+(adapter?.requests||0),llmInputTokens:(phoneMeta.llmInputTokens||0)+(adapter?.usage?.inputTokens||0),llmOutputTokens:(phoneMeta.llmOutputTokens||0)+(adapter?.usage?.outputTokens||0),llmUsageUnknown:(phoneMeta.llmUsageUnknown||0)+(adapter?.requests&&!adapter.usage?1:0),sttAudioMs:(phoneMeta.sttAudioMs||0)+(answer.sttConnected?answer.audioMs||0:0),sttDurationUnknown:(phoneMeta.sttDurationUnknown||0)+(answer.sttConnected&&answer.audioMs==null?1:0)}:{};
+  const interpretationMs=Math.max(0,Date.now()-interpretationStarted);
+  const voiceTiming=addVoiceTiming(phoneMeta.voiceTiming,{mediaMs:answer.mediaFetchMs,recognitionMs:answer.recognitionMs,interpretationMs});
+  const aiMetrics=isSarvam(row)?{voiceTiming,...(phoneMeta.costMeterVersion===1?{sttRoundedSeconds:(phoneMeta.sttRoundedSeconds||0)+(answer.sttConnected&&Number.isSafeInteger(answer.audioMs)?Math.ceil(answer.audioMs/1000):0)}:{}),interpretationMs,llmRequests:(phoneMeta.llmRequests||0)+(adapter?.requests||0),llmInputTokens:(phoneMeta.llmInputTokens||0)+(adapter?.usage?.inputTokens||0),llmOutputTokens:(phoneMeta.llmOutputTokens||0)+(adapter?.usage?.outputTokens||0),llmUsageUnknown:(phoneMeta.llmUsageUnknown||0)+(adapter?.requests&&!adapter.usage?1:0),sttAudioMs:(phoneMeta.sttAudioMs||0)+(answer.sttConnected?answer.audioMs||0:0),sttDurationUnknown:(phoneMeta.sttDurationUnknown||0)+(answer.sttConnected&&answer.audioMs==null?1:0)}:{};
 
   // No transcript, recording URL, identifiers, phone numbers or provider secrets.
   console.info('AR3D scripted answer outcome',JSON.stringify({
