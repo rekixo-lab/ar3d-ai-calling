@@ -156,11 +156,11 @@ function scriptedPhonePilotPanel(){
   },true);
   const device=node('select',{class:'field','aria-label':'Internal test number'});
   const engine=node('select',{class:'field','aria-label':'Speech recognition engine'},[
-    node('option',{value:'deepgram_stream',text:'Deepgram Nova-3 · live stream (pilot)'}),
+    node('option',{value:'deepgram_stream',text:'Deepgram Nova-3 · experimental (connection unverified)'}),
     node('option',{value:'whisper',text:'Whisper · recorded answers'}),
     node('option',{value:'sarvam',disabled:'disabled',text:'Sarvam · integration pending'})
   ]);
-  engine.value=state.internalSpeechEngine||'deepgram_stream';
+  engine.value=state.internalSpeechEngine||'whisper';
   engine.addEventListener('change',()=>{state.internalSpeechEngine=engine.value;updateAvailability()});
   const mobile=input('internalTestMobile','tel','10-digit Indian mobile');mobile.maxLength=13;
   const enroll=btn('Add test number',async()=>{
