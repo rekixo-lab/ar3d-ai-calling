@@ -233,9 +233,55 @@ export async function submitScriptedPhone(control,config,id,destination,maxSecon
  }
 }
 
+// Explicit operator action only, never called by deploy, scheduler or GET.
+async function prepareInternalTestLead(req,env,user,now){
+ if(req.method!=='POST')return error('method_not_allowed',405);
+ const url=new URL(req.url);
+ if(url.search||!mutationOriginAllowed(req)||url.origin!==env.AR3D_SCRIPTED_PILOT_ORIGIN)
+  return error('pilot_origin_mismatch',403);
+ if(env.AR3D_SCRIPTED_PILOT_ENABLED==='enabled'||env.AR3D_SCRIPTED_CAMPAIGNS_ENABLED==='enabled')
+  return error('disable_calling_before_preparing_internal_lead',409);
+ let data;
+ try{data=parseJsonBody(new TextDecoder('utf-8',{fatal:true}).decode(await readBoundedBytes(req,1024)),1024)}
+ catch{return error('invalid_pilot_request',400)}
+ if(Object.keys(data).join(',')!=='confirm'||data.confirm!=='PREPARE_INTERNAL_TEST_LEAD_NO_CALL')
+  return error('explicit_internal_lead_confirmation_required',400);
+ const tenantId=env.AR3D_SCRIPTED_PILOT_TENANT_ID,mobile=env.AR3D_SCRIPTED_PILOT_VERIFIED_NUMBER;
+ if(!UUID.test(tenantId||'')||!MOBILE.test(mobile||''))
+  return error('internal_tenant_or_mobile_not_configured',409);
+ // Restrict this privileged setup to the designated internal company.
+ const tenant=await env.CONTROL_DB.prepare(`SELECT id,storage_mode,dedicated_binding FROM tenants
+  WHERE id=? AND display_name='AR3D Internal' AND status IN('trial','active')`).bind(tenantId).first();
+ if(!tenant)return error('internal_tenant_unavailable',409);
+ const db=resolveCrmDb(env,tenant),id=crypto.randomUUID(),date=iso(now),name='AR3D Internal Test';
+ // Atomic insert + audit, idempotent on tenant/mobile, no consent or DND changes.
+ const result=await db.batch([
+  db.prepare(`INSERT INTO leads(tenant_id,id,name,mobile_e164,source_type,consent_status,dnd_status,created_at,updated_at)
+   VALUES(?,?,?,?,'other','unknown','unknown',?,?)
+   ON CONFLICT(tenant_id,mobile_e164) DO NOTHING`).bind(tenantId,id,name,mobile,date,date),
+  db.prepare(`INSERT INTO crm_audit_events(tenant_id,id,actor,action,target_id,created_at)
+   SELECT tenant_id,?,'human:'||?,'lead.created',id,? FROM leads
+   WHERE tenant_id=? AND id=? AND changes()=1`).bind(crypto.randomUUID(),user.id,date,tenantId,id)
+ ]);
+ const created=result[0]?.meta?.changes===1;
+ if(created&&result[1]?.meta?.changes!==1)throw Error('internal_lead_audit_unconfirmed');
+ const row=await db.prepare('SELECT id,name,source_type FROM leads WHERE tenant_id=? AND mobile_e164=?')
+  .bind(tenantId,mobile).first();
+ if(!row||row.name!==name||row.source_type!=='other')
+  return error('existing_non_test_customer_not_modified',409);
+ if(!await eligiblePilotLead(db,{tenant:tenantId,lead:row.id,destination:mobile}))
+  return error('internal_lead_locally_blocked',409);
+ return json({leadId:row.id,created,destinationLast4:mobile.slice(-4)},created?201:200);
+}
+
 export async function handleScriptedPhoneAdmin(req,env,user,{now=Date.now(),fetcher=fetch}={}){
- if(new URL(req.url).pathname!==ADMIN)return null;
+ const path=new URL(req.url).pathname;
+ if(path!==ADMIN&&path!==ADMIN+'/prepare-lead')return null;
  if(user?.globalRole!=='super_admin'||!await currentMfa(env.CONTROL_DB,user,now))return error('current_super_admin_mfa_required',403);
+ if(path===ADMIN+'/prepare-lead'){
+  try{return await prepareInternalTestLead(req,env,user,now)}
+  catch{return error('internal_lead_setup_unavailable',503)}
+ }
  if(!['GET','POST'].includes(req.method))return error('method_not_allowed',405);
  const config=configuration(env);
  try{
