@@ -8,6 +8,7 @@ import {costObservation,readInternalPlivoCdr} from './cost-intelligence.mjs';
 import {minutePosition,fundingCap,fundingPosition,affordableCallSeconds,providerFundingCaps} from './minute-holds.mjs';
 import {scriptedCampaignConfiguration} from './scripted-campaign-dispatch.mjs';
 import {providerSafety,reviewProviderFault} from './provider-safety.mjs';
+import {moneyBudgetConfig,providerBudgetPosition} from './provider-cost-reservations.mjs';
 
 const base='/v1/human/credits';
 const uuid=/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
@@ -394,7 +395,7 @@ export async function handleCreditWalletRequest(req,env,user,{fetcher=fetch}={})
     COALESCE(SUM(CASE WHEN p.id IS NOT NULL AND p.hangup_at IS NULL THEN 1 ELSE 0 END),0) AS awaitingHangup,
     COALESCE(SUM(CASE WHEN p.hangup_at IS NOT NULL THEN 1 ELSE 0 END),0) AS endedAwaitingReview,
     MIN(h.created_at) AS oldestHeldAt FROM tenant_minute_holds h LEFT JOIN scripted_phone_pilots p ON p.tenant_id=h.tenant_id AND p.job_id=h.job_id WHERE h.state='held'`).first();
-   return json({clients,purchases,providerSafety:await providerSafety(db),settlementQueue:{...settlementQueue,automaticApproved:env.AR3D_AUTO_CDR_SETTLEMENT==='approved'},funding:{...funding,reviewedProviderCeilings:providerFundingCaps(env)},position:{...position,uncommittedSeconds:position.allocatedSeconds-position.heldSeconds-position.usedSeconds},internal:{ended:sessions.internalEnded},campaign:{ended:sessions.campaignEnded},transactions:transactions.results,providerRequests:0,externalPaymentsRecorded:purchases.count>0,dispatchEnabledByDashboard:false});
+   return json({clients,purchases,providerBudget:await providerBudgetPosition(db,moneyBudgetConfig(env)),providerSafety:await providerSafety(db),settlementQueue:{...settlementQueue,automaticApproved:env.AR3D_AUTO_CDR_SETTLEMENT==='approved'},funding:{...funding,reviewedProviderCeilings:providerFundingCaps(env)},position:{...position,uncommittedSeconds:position.allocatedSeconds-position.heldSeconds-position.usedSeconds},internal:{ended:sessions.internalEnded},campaign:{ended:sessions.campaignEnded},transactions:transactions.results,providerRequests:0,externalPaymentsRecorded:purchases.count>0,dispatchEnabledByDashboard:false});
   }
   if(path==='reverse-call-charge'){
    if(req.method!=='POST')return fail('method not allowed',405);
@@ -477,7 +478,7 @@ export async function handleCreditWalletRequest(req,env,user,{fetcher=fetch}={})
     if(configuration.ready&&t.status==='active'){
      const member=isAdmin?await db.prepare('SELECT id AS tenant_id,storage_mode,dedicated_binding FROM tenants WHERE id=?').bind(tid).first():t;
      const policy=await resolveCrmDb(env,member).prepare('SELECT max_seconds FROM calling_policies WHERE tenant_id=? AND enabled=1 AND expires_at>?').bind(tid,new Date().toISOString()).first();
-     if(policy){const f=await fundingPosition(db,fundingCap(env));spendableSeconds=Math.max(0,Math.min(position.uncommittedSeconds,f.remainingFundedSeconds));dispatchEnabled=affordableCallSeconds(policy.max_seconds,position.uncommittedSeconds,f.remainingFundedSeconds)>0;}
+     if(policy){const f=await fundingPosition(db,fundingCap(env)),m=await providerBudgetPosition(db,moneyBudgetConfig(env));const capacity=Math.min(f.remainingFundedSeconds,m.remainingSeconds);spendableSeconds=Math.max(0,Math.min(position.uncommittedSeconds,capacity));dispatchEnabled=affordableCallSeconds(policy.max_seconds,position.uncommittedSeconds,capacity)>0;}
     }
     return json({tenantId:tid,...position,spendableSeconds,dispatchEnabled,offset:Number(offset),hasMore:rows.length>50||holds.length>50,
      transactions:rows.slice(0,50).map(({currentBalance,...row})=>row),callTransactions:holds.slice(0,50),status:spendableSeconds===null?'allocation_only':'funding_checked'});
