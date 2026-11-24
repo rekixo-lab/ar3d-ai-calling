@@ -139,7 +139,8 @@ function isStreaming(row){return internalDirect(row)&&JSON.parse(row.survey_json
 function internalDirect(row){return !row.job_id&&JSON.parse(row.survey_json).phoneMeta?.mode==='direct_preconsented'}
 const speak=(language,text)=>'<Speak voice="'+(language==='hi'?'Polly.Aditi':'WOMAN')+'" language="'+(language==='hi'?'hi-IN':'en-US')+'">'+escapeXml(text)+'</Speak>';
 function directOpening(row){
- if(isStreaming(row))return speak(row.language,row.language==='hi'?'नमस्कार, मैं ए आर थ्री डी की ए आई सहायक हूँ। आपके जवाब ए आई से समझे और टेक्स्ट में दर्ज किए जाएंगे। अगर आप बात नहीं करना चाहते, तो मना कर सकते हैं।':'Hello, I am the AR3D AI assistant. Your speech will be processed and your answers saved as text. You can decline at any time.');
+ // Only the explicitly pre-informed internal streaming test uses the short greeting.
+ if(isStreaming(row))return speak(row.language,row.language==='hi'?'नमस्कार, मैं ए आर थ्री डी की ए आई असिस्टेंट हूँ।':'Hello, I am the AR3D AI assistant.');
  return speak(row.language,row.language==='hi'?'नमस्कार, मैं ए आर थ्री डी की ए आई सहायक हूँ। आपके जवाब रिकॉर्ड किए जाएंगे। अगर आप बात नहीं करना चाहते, तो मना कर सकते हैं।':'Hello, I am the AR3D AI assistant. Your answers will be recorded. You can decline at any time.');
 }
 
@@ -162,11 +163,13 @@ function responseFor(config,row,{repeatCue=false,directOpeningCue=false,liveToke
   const prefix=(directOpeningCue?directOpening(row):'')+retry+audio(prompt);
   if(liveToken){
    const ws=callback(config,row.id,'stream/'+row.turn).replace(/^https:/,'wss:')+'?token='+liveToken;
-   return xml(prefix+'<Stream audioTrack="inbound" keepCallAlive="true" bidirectional="false" contentType="audio/x-mulaw;rate=8000" streamTimeout="24">'+escapeXml(ws)+'</Stream><Redirect method="GET">'+escapeXml(callback(config,row.id,'stream-next/'+row.turn))+'</Redirect>');
+   return xml(prefix+'<Stream audioTrack="inbound" keepCallAlive="true" bidirectional="false" contentType="audio/x-mulaw;rate=8000" streamTimeout="30">'+escapeXml(ws)+'</Stream><Redirect method="GET">'+escapeXml(callback(config,row.id,'stream-next/'+row.turn))+'</Redirect>');
   }
   return xml(prefix+'<Record action="'+escapeXml(callback(config,row.id,'turn/'+row.turn))+
    '" method="GET" fileFormat="mp3" maxLength="16" timeout="6" finishOnKey="#" playBeep="true"/><Hangup/>');
  }
+ if(row.phase==='needs_review'&&isStreaming(row)&&JSON.parse(row.survey_json).phoneMeta?.technicalFailure===true)
+  return xml(speak(row.language,row.language==='hi'?'माफ कीजिए, अभी हमारी तकनीकी सेवा में समस्या है। हम बाद में संपर्क करेंगे।':'Sorry, our speech service is currently unavailable. We will follow up later.')+'<Hangup/>');
  if(row.phase==='completed'||row.phase==='needs_review')
   return xml(audio(row.phase==='completed'?'closing':'review')+'<Hangup/>');
  return end();
@@ -410,6 +413,8 @@ export async function handleScriptedPhoneAdmin(req,env,user,{now=Date.now(),fetc
     CASE WHEN json_valid(survey_json) THEN json_extract(survey_json,'$.index') END AS question_index,
     CASE WHEN json_valid(survey_json) THEN COALESCE(json_extract(survey_json,'$.phoneMeta.engine'),'whisper') END AS engine,
     CASE WHEN json_valid(survey_json) THEN json_extract(survey_json,'$.phoneMeta.lastAudioOutcome') END AS last_audio_outcome,
+    CASE WHEN json_valid(survey_json) THEN json_extract(survey_json,'$.phoneMeta.audioMs') END AS audio_ms,
+    CASE WHEN json_valid(survey_json) THEN json_extract(survey_json,'$.phoneMeta.sttConnected') END AS stt_connected,
     hangup_at IS NOT NULL AS signed_hangup,
     provider_call_id IS NOT NULL AS provider_call_reference FROM scripted_phone_pilots
     WHERE tenant_id=? AND job_id IS NULL ORDER BY created_at DESC LIMIT 5`).bind(config.tenant).all();
@@ -551,6 +556,14 @@ async function recordingAnswer(config,env,row,params,fetcher){
 async function applyPhoneAnswer(config,env,row,answer,now){
  const control=env.CONTROL_DB,id=row.id,turn=row.turn;
   const {phoneMeta={},...prior}=JSON.parse(row.survey_json);
+  // A broken media/ASR path is not an unintelligible customer response.
+  // Never loop the apology when no actual listening opportunity was provided.
+  const streamMetrics=isStreaming(row)?{audioMs:Number.isSafeInteger(answer.audioMs)?Math.min(18000,Math.max(0,answer.audioMs)):0,streamStarted:answer.streamStarted===true,sttConnected:answer.sttConnected===true}:{};
+  if(isStreaming(row)&&answer.reason.startsWith('stream_')){
+   const survey_json=JSON.stringify({...prior,phoneMeta:{...phoneMeta,...streamMetrics,lastAudioOutcome:answer.reason,technicalFailure:true}});
+   const changed=await control.prepare("UPDATE scripted_phone_pilots SET phase='needs_review',survey_json=? WHERE id=? AND phase='transcribing' AND turn=?").bind(survey_json,id,turn).run();
+   return changed.meta.changes===1?responseFor(config,{...row,phase:'needs_review',survey_json}):end();
+  }
   // Transport, empty audio and STT errors use the SAME bounded retry budget
   // as unclear speech. Never invent an answer or repeat a paid outbound call.
   const result=advanceFixedVoicePreview(prior,{transcript:answer.text||'repeat',confidence:answer.confidence??1,now});
@@ -564,7 +577,7 @@ async function applyPhoneAnswer(config,env,row,answer,now){
    return await finishCampaignOptOut(env,row,now);
   }
   const phase={active:'question',completed:'finishing',opted_out:'declined',needs_review:'needs_review'}[result.state.status];
-  const survey_json=JSON.stringify({...result.state,phoneMeta:{...phoneMeta,lastAudioOutcome:answer.reason==='recognized'&&result.action==='repeat'?'speech_unrecognized':answer.reason==='recognized'&&result.action==='human_review'?'speech_unrecognized':answer.reason}});
+  const survey_json=JSON.stringify({...result.state,phoneMeta:{...phoneMeta,...streamMetrics,lastAudioOutcome:answer.reason==='recognized'&&result.action==='repeat'?'speech_unrecognized':answer.reason==='recognized'&&result.action==='human_review'?'speech_unrecognized':answer.reason}});
   const changed=await control.prepare(`UPDATE scripted_phone_pilots SET phase=CASE WHEN ?='question' AND hangup_at IS NOT NULL THEN 'ended' ELSE ? END,
    survey_json=?,turn=turn+1 WHERE id=? AND phase='transcribing' AND turn=?`)
    .bind(phase,phase,survey_json,id,turn).run();
@@ -668,7 +681,7 @@ export async function handleScriptedPhoneCallback(req,env,{now=Date.now(),fetche
     const lock=await control.prepare("UPDATE scripted_phone_pilots SET phase='transcribing' WHERE id=? AND phase='question' AND turn=? AND hangup_at IS NULL").bind(id,row.turn).run();
     if(lock.meta.changes!==1)return end();
    }else if(row.phase!=='transcribing')return end();
-   return applyPhoneAnswer(config,env,row,{text:null,reason:'stream_disconnected'},now);
+   return applyPhoneAnswer(config,env,row,{text:null,reason:row.phase==='question'?'stream_start_missing':'stream_disconnected'},now);
   }
   if(isStreaming(row)||step!=='turn'||!/^\d{1,2}$/.test(arg||''))return end();
   const turn=Number(arg);
