@@ -31,6 +31,11 @@ try{
  const context=await browser.newContext({viewport});await context.addCookies([{name:COOKIE,value:token,url:origin}]);
  const page=await context.newPage(),errors=[];lastPage=page;page.setDefaultTimeout(10000);page.on('pageerror',e=>errors.push(e.message));
  await page.goto(origin+'/app');
+ const sidebar=page.locator('#client-sidebar-wallet');
+ await sidebar.locator('.sidebar-credit-value').getByText('100m 00s',{exact:true}).waitFor();
+ assert.equal(await page.locator('.provider-balances').count(),0);
+ await sidebar.getByRole('button',{name:'Refresh balance'}).click();
+ await sidebar.locator('.sidebar-credit-value').getByText('100m 00s',{exact:true}).waitFor();
  // AI Testing uses an authenticated browser preview, never live phone or CRM.
  const aiLeadCount=f.r.db.prepare('SELECT COUNT(*) AS n FROM leads').get().n;
  const aiCallsBefore=f.r.db.prepare('SELECT COUNT(*) AS n FROM calls').get().n;
@@ -217,6 +222,7 @@ try{
  await multiPage.locator('.company-switch select').selectOption(otherTenant);
  await multiPage.locator('.workspace-role').getByText('Client Admin',{exact:true}).waitFor();
  await overview.getByText('Secondary Builder',{exact:true}).waitFor();
+ await multiPage.locator('#client-sidebar-wallet .sidebar-credit-value').getByText('0m 00s',{exact:true}).waitFor();
  await multiPage.getByText('Secondary-only buyer',{exact:true}).waitFor();
  assert.equal(await multiPage.getByText('Fictional buyer',{exact:true}).count(),0);
  assert.equal(await multiPage.locator('input[type=file]').count(),1);
@@ -235,6 +241,8 @@ try{
  await multiPage.locator('.company-switch select').selectOption(tid);
  await multiPage.locator('.workspace-role').getByText('Client viewer',{exact:true}).waitFor();
  await overview.getByText('Demo',{exact:true}).waitFor();
+ assert.ok(await multiPage.locator('#client-sidebar-wallet').isHidden());
+ assert.equal(await multiPage.locator('#client-sidebar-wallet').innerText(),'');
  await multiPage.getByText('Fictional buyer',{exact:true}).waitFor();
  assert.equal(await multiPage.getByText('Secondary-only buyer',{exact:true}).count(),0);
  assert.equal(await multiPage.locator('input[type=file]').count(),0);
@@ -246,6 +254,20 @@ try{
  const adminToken=await newSession(f.env.CONTROL_DB,'admin');await adminContext.addCookies([{name:COOKIE,value:adminToken,url:origin}]);
  const adminPage=await adminContext.newPage();lastPage=adminPage;adminPage.setDefaultTimeout(10000);
  await adminPage.goto(origin+'/app');
+ await adminPage.getByRole('heading',{name:'Client directory'}).waitFor();
+ // Stub only the external account result; actual authorization is covered in route tests.
+ await adminPage.route('**/v1/human/credits/provider',r=>r.fulfill({json:{available:true,cashCredits:'12.34',accountType:'developer',checkedAt:new Date().toISOString()}}));
+ await adminPage.getByRole('link',{name:'Dashboard',exact:true}).click();
+ const providers=adminPage.getByRole('region',{name:'Provider balances'});
+ await providers.getByText('12.34',{exact:true}).waitFor();
+ await providers.getByText('Not available via API',{exact:true}).waitFor();
+ await providers.getByText(/Trial account/).waitFor();
+ assert.equal(await adminPage.locator('#client-sidebar-wallet').count(),0);
+ await adminPage.unroute('**/v1/human/credits/provider');
+ await adminPage.route('**/v1/human/credits/provider',r=>r.fulfill({json:{available:false}}));
+ await providers.getByRole('button',{name:'Refresh Plivo balance'}).click();
+ await providers.getByText('Unavailable',{exact:true}).waitFor();
+ await adminPage.getByRole('link',{name:'Clients',exact:true}).click();
  await adminPage.getByRole('heading',{name:'Client directory'}).waitFor();
  await adminPage.screenshot({path:'artifacts/calling-admin-clients.png',fullPage:true});
  await adminPage.getByRole('link',{name:'Minutes & Wallet',exact:true}).click();
