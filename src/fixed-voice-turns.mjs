@@ -52,14 +52,75 @@ function parseProperty(str){
   if(variants.length!==1)throw Error('unclear property type; repeat or review');
   return variants[0][0];
 }
+// Parse an entire explicit quantity, not a substring of a price, range or
+// another number. Hindi ASR often writes spoken numerals as words, including
+// "बारह सौ", and varies between फीट/फुट or English equivalents.
+const SPOKEN_NUMBERS=Object.freeze({...HINDI_NUMBERS,
+  'शून्य':0,'छह':6,'छः':6,'छे':6,'सात':7,'आठ':8,'नौ':9,
+  'ग्यारह':11,'बारह':12,'तेरह':13,'चौदह':14,'सोलह':16,'सत्रह':17,'अठारह':18,'उन्नीस':19,
+  'इक्कीस':21,'बाईस':22,'बाइस':22,'तेईस':23,'चौबीस':24,'छब्बीस':26,'सत्ताईस':27,'अट्ठाईस':28,'उनतीस':29,
+  'इकतीस':31,'बत्तीस':32,'तैंतीस':33,'चौंतीस':34,'छत्तीस':36,'सैंतीस':37,'अड़तीस':38,'उनतालीस':39,
+  'इकतालीस':41,'बयालीस':42,'तैंतालीस':43,'चवालीस':44,'छियालीस':46,'सैंतालीस':47,'अड़तालीस':48,'उनचास':49,
+  'इक्यावन':51,'बावन':52,'तिरपन':53,'चौवन':54,'पचपन':55,'छप्पन':56,'सत्तावन':57,'अट्ठावन':58,'उनसठ':59,
+  'इकसठ':61,'बासठ':62,'तिरसठ':63,'चौंसठ':64,'पैंसठ':65,'छियासठ':66,'सड़सठ':67,'अड़सठ':68,'उनहत्तर':69,
+  'इकहत्तर':71,'बहत्तर':72,'तिहत्तर':73,'चौहत्तर':74,'पचहत्तर':75,'छिहत्तर':76,'सतहत्तर':77,'अठहत्तर':78,'उनासी':79,
+  'इक्यासी':81,'बयासी':82,'तिरासी':83,'चौरासी':84,'पचासी':85,'छियासी':86,'सत्तासी':87,'अट्ठासी':88,'नवासी':89,
+  'इक्यानवे':91,'बानवे':92,'तिरानवे':93,'चौरानवे':94,'पचानवे':95,'छियानवे':96,'सत्तानवे':97,'अट्ठानवे':98,'निन्यानवे':99,
+  zero:0,one:1,two:2,three:3,four:4,five:5,six:6,seven:7,eight:8,nine:9,ten:10,
+  eleven:11,twelve:12,thirteen:13,fourteen:14,fifteen:15,sixteen:16,seventeen:17,eighteen:18,nineteen:19,
+  twenty:20,thirty:30,forty:40,fifty:50,sixty:60,seventy:70,eighty:80,ninety:90,
+  ek:1,do:2,teen:3, char:4,paanch:5,panch:5,chhe:6,saat:7,aath:8,nau:9,das:10,gyarah:11,barah:12,terah:13,chaudah:14,pandrah:15,solah:16,bees:20,pachis:25,pachees:25,tees:30,chalis:40,pachas:50,
+  'वन':1,'टू':2,'थ्री':3,'फोर':4,'फाइव':5,'टेन':10,'ट्वेल्व':12,'ट्वेंटी':20,'थर्टी':30,'फोर्टी':40,'फिफ्टी':50
+});
+const SPOKEN_SCALES=Object.freeze({'सौ':100,'हजार':1000,'हज़ार':1000,'लाख':100000,'करोड़':10000000,'करोड':10000000,hundred:100,thousand:1000,lakh:100000,lac:100000,crore:10000000,sau:100,hazar:1000,hazaar:1000,'हंड्रेड':100,'थाउजेंड':1000,'थाउज़ेंड':1000,'थाउजंड':1000});
+function quantityText(value){
+  return digits(value.normalize('NFC')).toLowerCase().trim().replace(/[।.!?]+$/u,'').trim()
+    .replace(/^(?:(?:जी|हाँ|हां|मुझे|हमको|हमें|लगभग|करीब|about|around|approximately|i (?:want|need))\s+)+/iu,'')
+    .replace(/\s+(?:(?:का|की)\s+प्लॉट\s+)?(?:चाहिए|चाहिये|लेना है|का चाहिए|का प्लॉट|please)$/iu,'').trim();
+}
+function spokenQuantity(value){
+  const s=value.trim().replace(/(?<=\d),(?=\d{2,3}(?:,|\b))/g,'');
+  if(/^\d+(?:\.\d+)?$/.test(s))return Number(s);
+  const tokens=s.split(/\s+/);
+  let total=0,group=null,lastScale=Infinity,previousWord=false;
+  for(const token of tokens){
+    if(Object.hasOwn(SPOKEN_SCALES,token)){
+      const scale=SPOKEN_SCALES[token];
+      if(scale>=lastScale||group===0||group===null)return null;
+      total+=group*scale;group=null;lastScale=scale;previousWord=false;continue;
+    }
+    const n=/^\d+$/.test(token)?Number(token):Object.hasOwn(SPOKEN_NUMBERS,token)?SPOKEN_NUMBERS[token]:null;
+    if(n===null||!Number.isSafeInteger(n)||n<0)return null;
+    if(group===null){group=n;previousWord=/^(?:twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety)$/.test(token)}
+    else if(previousWord&&n>0&&n<10){group+=n;previousWord=false}
+    else return null;
+  }
+  if(group!==null&&group>=lastScale)return null;
+  const result=total+(group??0);
+  return Number.isSafeInteger(result)&&result>0?result:null;
+}
+const AREA_UNIT=/(वर्ग\s*(?:फुट|फीट|फीट्|फिट)|स्क्वेयर\s*(?:फुट|फीट|फिट)|स्क्वायर\s*(?:फुट|फीट|फिट)|square\s*(?:feet|foot)|sq\.?\s*(?:ft\.?|feet|foot)|sqft|sq\s*feet|वर्ग\s*गज|square\s*yards?|sq\.?\s*yds?|गज|yards?|फीट|फुट|फिट|feet|foot|ft\.?)$/iu;
+
+function unclearPlotSize(){throw Error('unclear plot dimensions; say one size and its units explicitly')}
 function parseSize(str,propertyType){
   if(propertyType==='plot'){
-    // A spoken number alone has ambiguous units: do not invent square feet.
-    const value=digits(str).replace(/\s+/g,' ').trim();
-    if(!/(?:\d+\s*(?:x|×|by)\s*\d+|\d+\s*(?:sq\.?\s*ft|sqft|square feet|वर्ग ?फुट|गज|yards?|ft|feet))/iu.test(value)||
-       value.length>80)
-      throw Error('unclear plot dimensions; say units explicitly');
-    return value;
+    const value=quantityText(str);
+    if(value.length>120)return unclearPlotSize();
+    // Dimensions preserve both numbers; never turn a range into one area.
+    const dimension=value.match(/^(.+?)\s*(?:×|x|\bby\b|बाय|गुणा)\s*(.+?)(?:\s*(?:फुट|फीट|feet|foot|ft))?$/iu);
+    if(dimension){
+      const a=spokenQuantity(dimension[1]),b=spokenQuantity(dimension[2]);
+      if(Number.isFinite(a)&&a>0&&a<=100000&&Number.isFinite(b)&&b>0&&b<=100000)
+        return a+' x '+b+( /(?:फुट|फीट|feet|foot|ft)$/iu.test(value)?' ft':'');
+      return unclearPlotSize();
+    }
+    const unit=value.match(AREA_UNIT);
+    if(!unit)return unclearPlotSize();
+    const n=spokenQuantity(value.slice(0,unit.index).trim());
+    if(!Number.isFinite(n)||n<=0||n>100000000)return unclearPlotSize();
+    const unitText=unit[0];
+    if(/(?:गज|yard|yd)/iu.test(unitText))return n+' वर्ग गज';
+    return n+' वर्ग फुट';
   }
   const word=str.match(/(?:^|[\s,।])(?:एक|दो|तीन|चार|पांच|पाँच)(?=\s*(?:बीएचके|bhk|bedroom))/iu);
   let n=null;
