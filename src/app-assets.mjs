@@ -1276,8 +1276,8 @@ function campaignResultsPanel(tenantId,content,role){
     node('p',{class:'muted',text:total?(offset+1)+'–'+(offset+results.length)+' of '+total+' customers':'Campaign call attempts will appear here.'}),
     table(['Customer','Campaign','Outcome','CRM','Answers','Plivo charge'],results.map(r=>[
      r.name,r.campaign,outcomes[r.outcome]||outcomes[r.state]||r.state,
-     r.answers?(r.savedToLead?'Saved to lead':'Lead needs review'):'—',
-     r.answers?btn('View answers',()=>showAnswers(r),true):'—',
+     r.answers?(r.partial?'Partial · review needed':r.savedToLead?'Saved to lead':'Lead needs review'):'—',
+     r.answers?btn(r.partial?'View partial answers':'View answers',()=>showAnswers(r),true):'—',
      role==='client_admin'&&['completed','failed'].includes(r.state)?
       btn('Check charge',()=>checkCharge(r),true):'—'
     ]))
@@ -1303,8 +1303,10 @@ function campaignResultsPanel(tenantId,content,role){
    ['Budget',answerBudget(q.budgetInr)],['Interest',({interested:'Interested',later:'Follow up later',not_interested:'Not interested'})[q.interest]],
    ['Preferred visit date',q.visitDate]
   ];
-  answer.replaceChildren(div('row between',title(result.name+' — call answers','h3'),
-   btn('Close answers',()=>{answer.hidden=true;trigger?.focus()},true)),node('dl',{class:'answer-fields'},
+  answer.replaceChildren(div('row between',title(result.name+(result.partial?' — partial call answers':' — call answers'),'h3'),
+   btn('Close answers',()=>{answer.hidden=true;trigger?.focus()},true)),
+   ...(result.partial?[node('p',{class:'note',text:'Incomplete conversation. Only accepted answers are shown; the main customer profile was not changed. Review before following up.'})]:[]),
+   node('dl',{class:'answer-fields'},
    fields.map(([label,value])=>div('',node('dt',{text:label}),node('dd',{text:value||'—'})))));
   answer.hidden=false;
   answer.tabIndex=-1;
