@@ -30,3 +30,5 @@
 Cloudflare **production** D1 backup/restore trial with verified test accounts and a human operator; agreed privacy retention/deletion policy; a complete dependency inventory and approved mutation logic; R2/provider recording inventory; independent security review; India Plivo KYC, permitted traffic and verified consent/DND remain separate call-launch blockers.
 
 Client dashboard behavior is unchanged. This privacy work is for AR3D operators; it does not add extra forms to the client calling flow.
+
+The read-only inventory additionally includes direct lead notes, staff assignments, intent proposals, job-linked survey results and verified cost observations, direct lead-target audit events, and Control D1 phone sessions. Indirect audit targets, provider/R2 objects, export copies and backups still require operator inventory. No erasure or retention policy is implied.

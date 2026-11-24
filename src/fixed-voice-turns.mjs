@@ -154,7 +154,16 @@ function parseBudget(str){
   // One amount, not a range or an unrelated number. Decimal scales (3.5
   // crore) and ordinary compound Hindi numbers are both supported.
   const decimal=input.match(/^(\d+(?:\.\d+)?)\s*(crore|करोड़|करोड|lakh|lac|लाख|thousand|हजार|हज़ार)$/iu);
-  const rupees=decimal?Math.round(Number(decimal[1])*SPOKEN_SCALES[decimal[2].toLowerCase()]):spokenQuantity(input);
+  // Hindi fractional amounts are common in phone speech. Require an explicit
+  // scale; do not invent units or choose an alternative amount.
+  const fraction=input.match(/^(?:(डेढ़|डेढ|ढाई)|(सवा|साढ़े|साढे|पौने)\s+([\p{L}\p{M}0-9]+))\s+(लाख|करोड़|करोड|हजार|हज़ार)$/u);
+  let fractionalRupees=null;
+  if(fraction){
+    const whole=fraction[1]?0:spokenQuantity(fraction[3]);
+    const n=fraction[1]?(fraction[1]==='ढाई'?2.5:1.5):whole===null?null:whole+(fraction[2]==='सवा'?.25:fraction[2]==='पौने'?-.25:.5);
+    if(n!==null&&n>0)fractionalRupees=Math.round(n*SPOKEN_SCALES[fraction[4]]);
+  }
+  const rupees=decimal?Math.round(Number(decimal[1])*SPOKEN_SCALES[decimal[2].toLowerCase()]):fractionalRupees??spokenQuantity(input);
   if(!Number.isSafeInteger(rupees)||rupees<10000||rupees>1000000000000)
     throw Error('unclear rupee budget; repeat or review');
   return rupees;
@@ -446,13 +455,13 @@ const LABELLED_FIELDS=[
  ['location',/^(?:शहर|लोकेशन|city|location)\s*[:：]?\s+(.+)$/iu],
  ['area',/^(?:एरिया|इलाका|area|neighborhood)\s*[:：]?\s+(.+)$/iu],
  ['size',/^(?:साइज|साइज़|size|माप)\s*[:：]?\s+(.+)$/iu],
- ['budgetInr',/^(?:बजट|budget)\s*[:：]?\s+(.+)$/iu],
+ ['budgetInr',/^(?:(?:मेरा|हमारा|my)\s+)?(?:बजट|budget)(?:\s*[:：]\s*|\s+)(.+)$/iu],
  ['interest',/^(?:रुचि|interest)\s*[:：]?\s+(.+)$/iu],
  ['visitDate',/^(?:विजिट(?: तारीख)?|तारीख|visit date)\s*[:：]?\s+(.+)$/iu]
 ];
 function advanceLabelledFields(current,input,confidence,now){
  if(confidence<.7||STOP.test(input)||AGAIN.test(input)||NOT_HEARD.test(input)||MISUNDERSTOOD.test(input))return null;
- const clauses=input.split(/\s*[;；।]\s*|,\s+|\s+(?:और|and)\s+(?=(?:प्रॉपर्टी|property|टाइप|शहर|लोकेशन|city|location|एरिया|इलाका|area|neighborhood|साइज|साइज़|size|माप|बजट|budget|रुचि|interest|विजिट|तारीख|visit date)\s)/iu).filter(Boolean);
+ const clauses=input.split(/\s*[;；।]\s*|,\s+(?!\d)|,\s*(?=(?:बजट|budget|शहर|city|लोकेशन|location|एरिया|area|साइज|size)\b|(?:मेरा|हमारा|my)\s+(?:बजट|budget))|\s+(?:और|and)\s+(?=(?:प्रॉपर्टी|property|टाइप|शहर|लोकेशन|city|location|एरिया|इलाका|area|neighborhood|साइज|साइज़|size|माप|बजट|budget|(?:मेरा|हमारा|my)\s+(?:बजट|budget)|रुचि|interest|विजिट|तारीख|visit date)\s)/iu).map(x=>x.trim()).filter(Boolean);
  if(clauses.length<2||clauses.length>7)return null;
  const labels=clauses.map(clause=>{
   const matched=LABELLED_FIELDS.map(([field,re])=>({field,match:clause.match(re)})).filter(x=>x.match);
@@ -482,7 +491,7 @@ function advanceLabelledFields(current,input,confidence,now){
 // to this call and leave the current question outstanding.
 function advanceExplicitCorrection(current,input,confidence,now){
  const prefix=input.match(/^(?:सुधार(?: कीजिए)?|correction|actually|नहीं|नही)\s*[:：,।]?\s+/iu);
- const phrase=prefix?input.slice(prefix[0].length):input;
+ const phrase=(prefix?input.slice(prefix[0].length):input).replace(/[।.!?]+$/u,'').trim();
  const labels=LABELLED_FIELDS.map(([field,re])=>({field,match:phrase.match(re)})).filter(x=>x.match);
  if(labels.length!==1)return null;
  const {field,match}=labels[0];

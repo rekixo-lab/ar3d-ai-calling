@@ -440,3 +440,20 @@ test('ambiguous alternative visit days and times never silently choose the first
  for(const text of ['घर','कोरबा','बस स्टैंड','3BHK','30 लाख','हाँ'])state=turn(state,text).state;
  for(const text of ['2027-01-12 सुबह 10 बजे या 11 बजे','2027-01-12 or 2027-01-13','2027-01-12 10:00 और 11:00','2027-01-12 रात 12 बजे'])assert.equal(turn(state,text).action,'repeat',text);
 });
+
+
+test('common Hindi fractional budgets and punctuated corrections stay deterministic',async()=>{
+ let state=beginFixedVoicePreview({now:stamp}).state;
+ for(const text of ['घर','कोरबा','बस स्टैंड','3BHK'])state=turn(state,text).state;
+ for(const [text,value] of [['डेढ़ करोड़',15000000],['ढाई लाख',250000],['साढ़े बीस लाख',2050000],['सवा दो करोड़',22500000],['पौने तीन लाख',275000]]){
+  const r=turn(state,text);assert.equal(r.state.answers.budgetInr,value,text);
+ }
+ assert.equal(turn(state,'साढ़े बीस').action,'repeat');
+ assert.equal(turn(state,'ढाई लाख या तीन लाख').action,'repeat');
+ state=turn(state,'30 लाख').state;
+ const ai={run:()=>assert.fail('explicit correction must not need LLM')};
+ const r=await advanceInternalVoice(ai,state,{transcript:'सुधार मेरा बजट:25 लाख।',now:stamp});
+ assert.equal(r.interpreter,'explicit_correction');assert.equal(r.result.state.answers.budgetInr,2500000);assert.equal(r.result.currentField,'interest');
+ const multi=await advanceInternalVoice(ai,beginFixedVoicePreview({now:stamp}).state,{transcript:'घर; शहर कोरबा; एरिया बस स्टैंड; साइज 3BHK; मेरा बजट 25 लाख',now:stamp});
+ assert.equal(multi.interpreter,'labelled_multi_answer');assert.equal(multi.result.state.answers.budgetInr,2500000);
+});

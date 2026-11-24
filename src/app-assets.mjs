@@ -783,7 +783,9 @@ function clientFinancialOverview(main){
   finally{if(id===seq)refresh.disabled=false;}
  }
  card.append(node('p',{class:'note',text:'Super Admin only. Outstanding credits include holds. Remaining prepaid value uses FIFO only for purchase-only ledgers; manual adjustments require review. Provider amounts are exact attributed entries in native currency and may be incomplete. Indicative contribution is consumed paid value less complete INR provider expenses, before taxes, refunds and overhead—not verified profit or recognized revenue. No assumed FX.'}),div('formrow',refresh,prev,next),body);
- main.append(card);load();foregroundRefresh(card,15000,load,()=>!card.closest('[hidden]'));
+ // This is a cumulative, potentially expensive financial report. Fetch on open
+ // and explicit refresh/page changes instead of polling every 15 seconds.
+ main.append(card);load();
 }
 async function adminMinuteWallet(main){
  const card=div('card',title('Client minute management')),company=node('select',{class:'field','aria-label':'Minute wallet company'}),
