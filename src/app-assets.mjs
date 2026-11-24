@@ -545,11 +545,11 @@ async function adminDashboard(main,openView){
      overviewMetric('Missing session · review',safeCount(d.settlementQueue?.missingSession),'alert')),
     node('p',{class:'note',text:'Oldest hold: '+formatIst(d.settlementQueue?.oldestHeldAt)+' · Automatic CDR settlement: '+(d.settlementQueue?.automaticApproved?'operator approved':'not approved')+'. Uncertain calls retain reserved credits until verified; never release by age alone.'}),
     title('Provider monetary reservations','h3'),
-    ...(d.providerBudget?.configured?[table(['Provider','Currency','Reviewed budget','Committed maximum','Remaining','Status'],d.providerBudget.accounts.map(a=>{
+    ...(d.providerBudget?.configured?[table(['Provider','Currency','Reviewed budget','Committed / actual','Remaining','Status'],d.providerBudget.accounts.map(a=>{
       const fmt=n=>Number.isSafeInteger(n)?(n/1000000).toFixed(6):'Unavailable';
       return [a.provider,a.currency,fmt(a.capMicros),fmt(a.committedMicros),fmt(a.remainingMicros),a.low===null?'Review required':a.low?'Low budget':'Available budget'];
     })),node('p',{class:'note',text:d.providerBudget.ready?'Reviewed budget available · capacity '+formatSeconds(d.providerBudget.remainingSeconds):'New calls blocked by monetary budget: '+d.providerBudget.reason})]:[node('p',{class:'note',text:'Reviewed provider monetary budgets not configured. Commercial calls blocked.'})]),
-    node('p',{class:'muted',text:'Conservative monetary commitments, not actual provider balances or verified expenses. Settled calls retain their maximum until invoice reconciliation; only verified no-submission releases the budget.'}),
+    node('p',{class:'muted',text:'Conservative commitments plus attributed per-call expenses, not live provider balances. Settled calls keep their maximum until evidence is reconciled. An overrun blocks new commercial calls.'}),
     title('Funding review','h3'),
     div('overview-grid',overviewMetric('Reviewed cumulative capacity',formatSeconds(d.funding?.capSeconds),'wallet'),overviewMetric('Remaining funded capacity',formatSeconds(d.funding?.remainingFundedSeconds),'wallet'),overviewMetric('Unbacked allocations',formatSeconds(d.funding?.unbackedAllocationSeconds),'receipt')),
     div('overview-grid',overviewMetric('Plivo reviewed ceiling',formatSeconds(d.funding?.reviewedProviderCeilings?.plivo),'phone'),overviewMetric('Sarvam reviewed ceiling',formatSeconds(d.funding?.reviewedProviderCeilings?.sarvam),'spark')),
@@ -779,6 +779,32 @@ function providerFinancialJournal(main){
   div('formrow',lab('Evidence reference',reference),lab('Reason',reason)),div('formrow',save,refresh),body,div('formrow',prev,next));main.append(card);load();
  foregroundRefresh(card,15000,load,()=>!card.closest('[hidden]')&&!busy);
 }
+function providerCostReconciliation(main,tenantId){
+ const card=div('card',title('Provider expense reconciliation')),body=div('stack');let offset=0,seq=0,busy=false;
+ const fmt=(c,n)=>Number.isSafeInteger(n)?c+' '+(n/1000000).toFixed(6):'Not reconciled';
+ const refresh=btn('Refresh expense attribution',load,true),prev=btn('Previous expense records',()=>{offset=Math.max(0,offset-50);load()},true),next=btn('Next expense records',()=>{offset+=50;load()},true);
+ async function attribute(row,provider,zeroCost){
+  if(busy)return;
+  const evidenceRef=prompt(zeroCost?'Enter unique provider evidence of zero charge (not an estimate).':'Enter the exact evidence reference of a per-call expense already recorded in the provider journal.');
+  if(!evidenceRef||!confirm('Confirm this provider evidence belongs to this exact call. Do not use an aggregate invoice. Client credits will not change.'))return;
+  busy=true;
+  try{await api('/v1/human/credits/provider-cost-reconciliation','POST',{tenantId,jobId:row.jobId,provider,evidenceRef:evidenceRef.trim(),zeroCost});await load();}catch(e){asError(e)}finally{busy=false;}
+ }
+ async function load(){
+  const id=++seq;refresh.disabled=prev.disabled=next.disabled=true;
+  try{
+   const d=await api('/v1/human/credits/provider-cost-reconciliation?'+new URLSearchParams({tenantId,offset:String(offset)}));
+   if(id!==seq||!card.isConnected)return;
+   const cell=(r,p)=>div('stack',node('span',{text:'Reserved '+fmt(r[p+'Currency'],r[p+'Reserved'])}),node('span',{text:'Actual '+fmt(r[p+'Currency'],r[p+'Actual'])}),
+    ...(r[p+'Evidence']?[node('span',{class:'muted',text:r[p+'Evidence']})]:r.state==='settled'?[btn('Link '+p+' expense',()=>attribute(r,p,false),true),btn('Record '+p+' zero charge',()=>attribute(r,p,true),true)]:[]));
+   body.replaceChildren(node('p',{class:'muted',text:'Attributed totals: '+(d.totals.map(t=>t.provider+' '+fmt(t.currency,t.actualMicros)).join(' · ')||'None recorded')}),
+    table(['Date (IST)','Call reference','State','Plivo','Sarvam'],d.rows.map(r=>[formatIst(r.createdAt),r.jobId,r.state,cell(r,'plivo'),cell(r,'sarvam')])));
+   prev.disabled=offset===0;next.disabled=!d.hasMore;
+  }catch(e){if(id===seq)body.replaceChildren(node('p',{class:'err',text:'Provider attribution unavailable.'}));}
+  finally{if(id===seq)refresh.disabled=false;}
+ }
+ card.append(node('p',{class:'note',text:'Super Admin only. Link exact verified per-call expense evidence; aggregate invoices cannot be allocated here. Zero cost requires explicit evidence. Provider overruns stop future calls. This does not change client credits.'}),div('formrow',refresh,prev,next),body);main.append(card);load();
+}
 async function adminMinuteWallet(main){
  const card=div('card',title('Client minute management')),company=node('select',{class:'field','aria-label':'Minute wallet company'}),
   search=input('walletSearch','search','Find company by name or email'),detail=div('stack');
@@ -794,7 +820,7 @@ async function adminMinuteWallet(main){
   if(d.tenants.some(t=>t.id===previous))company.value=previous;
   await select();
  };
- async function select(){detail.replaceChildren();if(company.value){const selected=company.value;const credits=div('stack'),costs=div('stack'),minutes=div('stack');detail.append(credits,costs,minutes);manualMinuteLedger(credits,selected,true);callCostIntelligence(costs,selected);await minuteUsagePanel(minutes,selected,true)}}
+ async function select(){detail.replaceChildren();if(company.value){const selected=company.value;const credits=div('stack'),costs=div('stack'),minutes=div('stack');detail.append(credits,costs,minutes);manualMinuteLedger(credits,selected,true);callCostIntelligence(costs,selected);providerCostReconciliation(costs,selected);await minuteUsagePanel(minutes,selected,true)}}
  company.addEventListener('change',()=>select().catch(asError));
  card.append(div('formrow',lab('Search clients',search),btn('Find company',()=>find().catch(asError),true)),
   lab('Client company',company),detail);main.append(card);

@@ -9,6 +9,7 @@ import {minutePosition,fundingCap,fundingPosition,affordableCallSeconds,provider
 import {scriptedCampaignConfiguration} from './scripted-campaign-dispatch.mjs';
 import {providerSafety,reviewProviderFault} from './provider-safety.mjs';
 import {moneyBudgetConfig,providerBudgetPosition} from './provider-cost-reservations.mjs';
+import {validReconciliation,reconcileProviderCost,providerCostRows} from './provider-cost-reconciliation.mjs';
 
 const base='/v1/human/credits';
 const uuid=/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
@@ -317,6 +318,19 @@ export async function handleCreditWalletRequest(req,env,user,{fetcher=fetch}={})
    if(!d||Object.keys(d).sort().join(',')!=='evidenceRef,expectedSequence,provider')return fail('invalid provider review');
    const ok=await reviewProviderFault(db,{...d,actor:user.id});
    return ok?json({reviewed:true,dispatchEnabledByReview:false}):fail('fault changed or evidence already used; refresh',409);
+  }
+  if(path==='provider-cost-reconciliation'){
+   if(!await currentMfa(env,user))return fail('current MFA Super Admin required',403);
+   if(req.method==='GET'){
+    const keys=[...url.searchParams.keys()],tid=url.searchParams.get('tenantId'),offset=url.searchParams.get('offset')||'0';
+    if(!uuid.test(tid||'')||keys.some(k=>!['tenantId','offset'].includes(k)||url.searchParams.getAll(k).length!==1)||!/^\d{1,6}$/.test(offset))return fail('invalid reconciliation query');
+    return json(await providerCostRows(db,tid,Number(offset)));
+   }
+   if(!mutationOriginAllowed(req)||url.search)return fail('same origin required',403);
+   const d=await boundedBody(req);
+   if(!validReconciliation(d))return fail('invalid reconciliation');
+   const result=await reconcileProviderCost(db,d,user.id);
+   return result.ok?json({...result,clientDebits:0,dispatchEnabledByReconciliation:false},result.replayed?200:201):fail('settled matching reservation and unused expense evidence required',409);
   }
   if(path==='provider-journal'){
    if(!await currentMfa(env,user))return fail('current MFA Super Admin required',403);

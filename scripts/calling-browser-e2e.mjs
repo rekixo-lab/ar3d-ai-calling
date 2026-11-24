@@ -314,6 +314,22 @@ try{
  assert.equal(f.c.db.prepare("SELECT paid_paise FROM tenant_credit_purchases WHERE receipt_ref='BROWSER-CLIENT-PURCHASE-500'").get().paid_paise,100000);
  assert.equal(f.c.db.prepare("SELECT balance_seconds FROM tenant_minute_ledger WHERE tenant_id=? ORDER BY sequence DESC LIMIT 1").get(tid).balance_seconds,36000);
  await ledger.getByText('600m 00s',{exact:true}).first().waitFor();
+ // Real browser reconciliation against an isolated, synthetic settled hold.
+ const costJob='98765432-aaaa-4aaa-8aaa-111111111111',costAt=new Date().toISOString();
+ f.c.db.prepare("INSERT INTO provider_cost_reservations(tenant_id,job_id,reserved_seconds,plivo_currency,plivo_micros,sarvam_currency,sarvam_micros,created_at) VALUES(?,?,60,'USD',60000,'INR',200000,?)").run(tid,costJob,costAt);
+ f.c.db.prepare("UPDATE tenant_minute_holds SET state='settled',charged_seconds=30,evidence_ref='browser-cdr',closed_at=? WHERE tenant_id=? AND job_id=?").run(costAt,tid,costJob);
+ f.c.db.prepare("INSERT INTO provider_financial_journal(id,provider,currency,kind,amount_micros,evidence_ref,reason,actor,created_at) VALUES('browser-cost','plivo','USD','expense',20000,'browser-cdr-line','Synthetic per-call evidence','admin',?)").run(costAt);
+ await adminPage.getByRole('heading',{name:'Provider expense reconciliation',exact:true}).waitFor();
+ await adminPage.getByRole('button',{name:'Refresh expense attribution',exact:true}).click();
+ const costRow=adminPage.getByRole('row',{name:new RegExp(costJob)});
+ await costRow.getByRole('button',{name:'Link plivo expense',exact:true}).waitFor();
+ const confirmCost=async d=>{if(d.type()==='prompt')await d.accept('browser-cdr-line');else await d.accept();};
+ adminPage.on('dialog',confirmCost);
+ try{await costRow.getByRole('button',{name:'Link plivo expense',exact:true}).click();await costRow.getByText('Actual USD 0.020000',{exact:true}).waitFor();}
+ finally{adminPage.off('dialog',confirmCost)}
+ assert.equal(f.c.db.prepare("SELECT actual_micros FROM provider_cost_reconciliations WHERE job_id=? AND provider='plivo'").get(costJob).actual_micros,20000);
+ assert.equal(f.c.db.prepare("SELECT charged_seconds FROM tenant_minute_holds WHERE job_id=?").get(costJob).charged_seconds,30);
+
  await adminPage.getByRole('heading',{name:'Historical budget transaction history',exact:true}).waitFor();
  await adminPage.getByRole('heading',{name:'All credit transactions',exact:true}).waitFor();
  await adminPage.getByRole('combobox',{name:'Transaction type',exact:true}).selectOption('settled');

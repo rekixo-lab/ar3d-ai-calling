@@ -12,12 +12,15 @@ export function moneyBudgetConfig(env){
  }
  return config;
 }
-// Full reserved amount remains committed even after settlement until invoice
-// reconciliation is implemented. Only verified no-submission releases it.
-const statsSql=`SELECT COALESCE(SUM(CASE WHEN h.state<>'released' THEN r.plivo_micros ELSE 0 END),0) AS plivo,
- COALESCE(SUM(CASE WHEN h.state<>'released' THEN r.sarvam_micros ELSE 0 END),0) AS sarvam,
+// Keep the full reservation until exact per-call expense evidence is linked.
+// No-submission releases it; reconciliation replaces each provider's reserve
+// with its evidenced amount, including overruns and explicit zero amounts.
+const statsSql=`SELECT COALESCE(SUM(CASE WHEN h.state<>'released' THEN COALESCE(p.actual_micros,r.plivo_micros) ELSE 0 END),0) AS plivo,
+ COALESCE(SUM(CASE WHEN h.state<>'released' THEN COALESCE(s.actual_micros,r.sarvam_micros) ELSE 0 END),0) AS sarvam,
  COALESCE(SUM(CASE WHEN r.plivo_currency<>? OR r.sarvam_currency<>? THEN 1 ELSE 0 END),0) AS mismatch
- FROM provider_cost_reservations r JOIN tenant_minute_holds h ON h.tenant_id=r.tenant_id AND h.job_id=r.job_id`;
+ FROM provider_cost_reservations r JOIN tenant_minute_holds h ON h.tenant_id=r.tenant_id AND h.job_id=r.job_id
+ LEFT JOIN provider_cost_reconciliations p ON p.tenant_id=r.tenant_id AND p.job_id=r.job_id AND p.provider='plivo'
+ LEFT JOIN provider_cost_reconciliations s ON s.tenant_id=r.tenant_id AND s.job_id=r.job_id AND s.provider='sarvam'`;
 const legacySql="SELECT COUNT(*) AS n FROM tenant_minute_holds h WHERE h.state='held' AND NOT EXISTS(SELECT 1 FROM provider_cost_reservations r WHERE r.tenant_id=h.tenant_id AND r.job_id=h.job_id)";
 export async function providerBudgetPosition(db,config){
  if(!config)return {configured:false,ready:false,remainingSeconds:0,reason:'reviewed_money_budgets_missing',accounts:[]};
@@ -43,8 +46,8 @@ export async function reserveBudgetedMinutes(db,{tenantId,job,maxSeconds,now=Dat
  AND NOT EXISTS(SELECT 1 FROM tenant_minute_holds h WHERE h.state='held' AND NOT EXISTS(SELECT 1 FROM provider_cost_reservations r WHERE r.tenant_id=h.tenant_id AND r.job_id=h.job_id))
  AND NOT EXISTS(SELECT 1 FROM provider_safety_events e WHERE kind='blocked' AND sequence=(SELECT MAX(sequence) FROM provider_safety_events WHERE provider=e.provider))
  AND NOT EXISTS(SELECT 1 FROM provider_cost_reservations WHERE plivo_currency<>? OR sarvam_currency<>?)
- AND ?>=?+COALESCE((SELECT SUM(r.plivo_micros) FROM provider_cost_reservations r JOIN tenant_minute_holds h ON h.tenant_id=r.tenant_id AND h.job_id=r.job_id WHERE h.state<>'released'),0)
- AND ?>=?+COALESCE((SELECT SUM(r.sarvam_micros) FROM provider_cost_reservations r JOIN tenant_minute_holds h ON h.tenant_id=r.tenant_id AND h.job_id=r.job_id WHERE h.state<>'released'),0)`)
+ AND ?>=?+COALESCE((SELECT SUM(COALESCE(c.actual_micros,r.plivo_micros)) FROM provider_cost_reservations r JOIN tenant_minute_holds h ON h.tenant_id=r.tenant_id AND h.job_id=r.job_id LEFT JOIN provider_cost_reconciliations c ON c.tenant_id=r.tenant_id AND c.job_id=r.job_id AND c.provider='plivo' WHERE h.state<>'released'),0)
+ AND ?>=?+COALESCE((SELECT SUM(COALESCE(c.actual_micros,r.sarvam_micros)) FROM provider_cost_reservations r JOIN tenant_minute_holds h ON h.tenant_id=r.tenant_id AND h.job_id=r.job_id LEFT JOIN provider_cost_reconciliations c ON c.tenant_id=r.tenant_id AND c.job_id=r.job_id AND c.provider='sarvam' WHERE h.state<>'released'),0)`)
  .bind(job,maxSeconds,p.currency,pm,s.currency,sm,new Date(now).toISOString(),tenantId,tenantId,job,maxSeconds,globalCap,maxSeconds,p.currency,s.currency,p.capMicros,pm,s.capMicros,sm).run();
  return out.meta.changes===1?{ok:true,replayed:false,state:'held'}:{ok:false,replayed:false,state:'insufficient_or_unavailable'};
 }
