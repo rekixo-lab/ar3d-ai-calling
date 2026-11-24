@@ -34,8 +34,9 @@ export function inCallingWindow(now){
  return minutes>=9*60&&minutes<20*60; // explicit India-only product window
 }
 
-async function updateJob(db,job,state,at,{error=null,phase=null,call=null,duration=null}={}){
+async function updateJob(db,job,state,at,{error=null,phase=null,call=null,duration=null,before=[]}={}){
  await db.batch([
+  ...before,
   db.prepare(`INSERT INTO crm_audit_events(tenant_id,id,actor,action,target_id,created_at)
    SELECT tenant_id,?,'scripted_campaign',?,id,? FROM calling_jobs
    WHERE tenant_id=? AND id=? AND state IN('reserved','submitted','unknown') AND state!=?`)
@@ -47,9 +48,44 @@ async function updateJob(db,job,state,at,{error=null,phase=null,call=null,durati
  ]);
 }
 
+// Save accepted partial answers only after a signed terminal hangup. The
+// control row is the server-owned questionnaire, not a client transcript.
+// A review snapshot is immutable and never edits the lead or grants consent.
+function partialResultStatements(db,job,row,at){
+ if(!['ended','needs_review'].includes(row.phase)||!row.provider_call_id||
+    !Number.isSafeInteger(row.hangup_at)||row.lead_id!==job.lead_id||
+    row.destination!==job.destination)return [];
+ let survey;try{survey=JSON.parse(row.survey_json)}catch{return []}
+ if(!survey||survey.version!==1||!['active','needs_review'].includes(survey.status)||
+    !Number.isSafeInteger(survey.index)||survey.index<1||survey.index>6||
+    !survey.answers||typeof survey.answers!=='object'||Array.isArray(survey.answers))return [];
+ const fields=['propertyType','location','area','size','budgetInr','interest'];
+ const keys=fields.slice(0,survey.index),answers=survey.answers;
+ if(Object.keys(answers).length!==keys.length||!keys.every(k=>Object.hasOwn(answers,k)))return [];
+ if(!['plot','flat','house'].includes(answers.propertyType))return [];
+ for(const k of ['location','area','size']){
+  if(Object.hasOwn(answers,k)&&(typeof answers[k]!=='string'||answers[k].length<2||
+     answers[k].length>(k==='size'?80:120)||/[\u0000-\u001f\u007f]/u.test(answers[k])))return [];
+ }
+ if(Object.hasOwn(answers,'budgetInr')&&(!Number.isSafeInteger(answers.budgetInr)||
+    answers.budgetInr<10000||answers.budgetInr>1000000000000))return [];
+ if(Object.hasOwn(answers,'interest')&&answers.interest!=='interested')return [];
+ const snapshot=JSON.stringify({...Object.fromEntries(keys.map(k=>[k,answers[k]])),__partial:true});
+ return [
+  db.prepare(`INSERT INTO scripted_call_results(tenant_id,job_id,session_id,answers_json,saved_to_lead,captured_at)
+   SELECT j.tenant_id,j.id,?,?,0,? FROM calling_jobs j JOIN leads l ON l.tenant_id=j.tenant_id AND l.id=j.lead_id
+   WHERE j.tenant_id=? AND j.id=? AND j.state IN('reserved','submitted','unknown')
+   AND l.id=? AND l.mobile_e164=? AND l.consent_status!='denied' AND l.dnd_status!='blocked'
+   AND NOT EXISTS(SELECT 1 FROM lead_opt_out_events o WHERE o.tenant_id=l.tenant_id AND o.lead_id=l.id)
+   ON CONFLICT(tenant_id,job_id) DO NOTHING`).bind(row.id,snapshot,at,job.tenant_id,job.id,row.lead_id,row.destination),
+  db.prepare(`INSERT INTO crm_audit_events(tenant_id,id,actor,action,target_id,created_at)
+   SELECT ?,?,'scripted_campaign','calling.partial_result_saved',?,? WHERE changes()=1`)
+   .bind(job.tenant_id,crypto.randomUUID(),job.id,at)
+ ];
+}
 async function reconcile(env,db,job,now,at){
  if(job.flow_id!==SCRIPTED_CALLING_POLICY)return {state:'legacy_job_locked'};
- const row=await env.CONTROL_DB.prepare(`SELECT phase,expires_at,hangup_at,provider_call_id,duration_seconds
+ const row=await env.CONTROL_DB.prepare(`SELECT id,lead_id,destination,survey_json,phase,expires_at,hangup_at,provider_call_id,duration_seconds
   FROM scripted_phone_pilots WHERE tenant_id=? AND job_id=?`).bind(job.tenant_id,job.id).first();
  if(row?.phase==='rejected'){
   await updateJob(db,job,'failed',at,{error:'plivo_rejected',phase:row.phase});
@@ -58,7 +94,7 @@ async function reconcile(env,db,job,now,at){
  if(row?.hangup_at!==null&&['completed','declined','ended','needs_review'].includes(row?.phase)){
   await updateJob(db,job,row.phase==='completed'?'completed':'failed',at,{
    error:row.phase==='completed'?null:'questionnaire_'+row.phase,phase:row.phase,
-   call:row.provider_call_id,duration:row.duration_seconds});
+   call:row.provider_call_id,duration:row.duration_seconds,before:partialResultStatements(db,job,row,at)});
   return {state:'reconciled'};
  }
  if(job.state!=='unknown'&&now>= (row?.expires_at??Date.parse(job.reserved_at)+600000)){
