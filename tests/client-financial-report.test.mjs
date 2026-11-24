@@ -55,3 +55,21 @@ test('foreign-currency expense cannot become INR contribution and manual allocat
  r=(await clientFinancialReport(f.env.CONTROL_DB)).rows[0];assert.equal(r.outstandingSeconds,120);assert.equal(r.remainingPrepaidValuePaise,null);
  }finally{f.close()}
 });
+
+test('recorded collections use inclusive India dates, exact receipts and unpaginated totals, MFA only',async()=>{
+ const f=fixture();try{
+ const now=Date.now();f.c.db.prepare("UPDATE human_sessions SET created_at=?,expires_at=? WHERE user_id='admin'").run(new Date(now).toISOString(),now+3600000);
+ const buy=(i,date)=>f.c.db.prepare("INSERT INTO tenant_credit_purchases(id,tenant_id,receipt_ref,paid_paise,purchased_seconds,previous_seconds,actor,created_at) VALUES(?,?,?,?,?,?,'admin',?)").run('receipt-'+i,tid,'ext-'+i,100,60,i*60,date);
+ buy(0,'2026-11-23T18:29:59.999Z');
+ for(let i=1;i<=51;i++)buy(i,'2026-11-23T18:30:00.000Z');
+ buy(52,'2026-11-24T18:30:00.000Z');
+ const url='https://app.example.invalid/v1/human/credits/recorded-collections?from=2026-11-24&to=2026-11-24';
+ const req=(suffix='',user=admin)=>handleCreditWalletRequest(new Request(url+suffix),f.env,user);
+ assert.equal((await req('',client)).status,403);
+ const a=await (await req()).json();assert.equal(a.receipts,51);assert.equal(a.totalPaise,5100);assert.equal(a.totalSeconds,3060);assert.equal(a.rows.length,50);assert.equal(a.hasMore,true);
+ const b=await (await req('&offset=50')).json();assert.equal(b.rows.length,1);assert.equal(b.totalPaise,5100);assert.equal(b.hasMore,false);
+ const c=await (await req('&offset=100')).json();assert.equal(c.rows.length,0);assert.equal(c.receipts,51);
+ assert.equal((await req('&from=2026-11-23')).status,400);
+ for(const q of ['from=2026-02-30&to=2026-03-01','from=2025-01-01&to=2026-11-24','from=2026-11-25&to=2026-11-24'])assert.equal((await handleCreditWalletRequest(new Request(url.split('?')[0]+'?'+q),f.env,admin)).status,400);
+ }finally{f.close()}
+});

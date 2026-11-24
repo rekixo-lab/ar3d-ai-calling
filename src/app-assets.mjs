@@ -676,6 +676,32 @@ function adminTransactionExplorer(main){
  kind.addEventListener('change',()=>{offset=0;load()});
  card.append(node('p',{class:'note',text:'Cross-company minute ledger and reservation history. Paid purchases show recorded external payment, receipt reference and recording operator; the date is entry time. Bank receipt, payment channel and earned revenue are not independently verified. Original charges and returned minutes remain separate.'}),div('formrow',lab('Transaction type',kind),refresh,exportBtn),body,div('formrow',prev,next));main.append(card);load();
 }
+function recordedCollectionsPanel(main){
+ const card=div('card',title('Recorded collections by date')),body=div('stack');
+ const today=new Date(Date.now()+330*60000).toISOString().slice(0,10);
+ const from=input('collectionFrom','date','From'),to=input('collectionTo','date','To');
+ from.value=today.slice(0,8)+'01';to.value=today;
+ let offset=0,seq=0,rows=[],loadedWindow=null;
+ const headers=['Recorded (IST)','Company','Amount INR','Purchased minutes','External receipt','Recorded by'];
+ const values=r=>[formatIst(r.recordedAt),r.company,(r.paidPaise/100).toFixed(2),r.purchasedSeconds/60,r.receiptRef,r.recordedBy];
+ const refresh=btn('Load collections',()=>{offset=0;load()},true),prev=btn('Previous receipts',()=>{offset=Math.max(0,offset-50);load()},true),next=btn('Next receipts',()=>{offset+=50;load()},true);
+ const csv=btn('Export receipt page (CSV)',()=>{if(loadedWindow)downloadReportCsv('ar3d-collections-'+loadedWindow.from+'-'+loadedWindow.to+'-'+offset+'.csv',headers,rows.map(values))},true);
+ function invalidate(){seq++;offset=0;rows=[];loadedWindow=null;prev.disabled=next.disabled=csv.disabled=true;refresh.disabled=false;body.replaceChildren(node('p',{class:'muted',text:'Date range changed. Load collections to refresh.'}))}
+ async function load(){
+  const version=++seq;prev.disabled=next.disabled=refresh.disabled=csv.disabled=true;rows=[];loadedWindow=null;
+  body.replaceChildren(node('p',{class:'muted',text:'Loading recorded collections…'}));
+  try{
+   const d=await api('/v1/human/credits/recorded-collections?'+new URLSearchParams({from:from.value,to:to.value,offset:String(offset)}));
+   if(version!==seq||!card.isConnected)return;
+   rows=d.rows;loadedWindow={from:d.from,to:d.to};
+   body.replaceChildren(div('overview-grid',overviewMetric('Recorded collections (INR)','₹'+(d.totalPaise/100).toFixed(2),'wallet'),overviewMetric('Receipts',String(d.receipts),'receipt'),overviewMetric('Purchased minutes',formatSeconds(d.totalSeconds),'clock')),node('p',{class:'muted',text:d.from+' to '+d.to+' inclusive (IST entry dates) · updated '+formatIst(d.asOf)}),table(headers,rows.map(values)));
+   prev.disabled=offset===0;next.disabled=!d.hasMore;csv.disabled=!rows.length;
+  }catch{if(version===seq)body.replaceChildren(node('p',{class:'err',text:'Collections unavailable. Use a valid date range of up to 366 days.'}))}
+  finally{if(version===seq)refresh.disabled=false}
+ }
+ from.addEventListener('change',invalidate);to.addEventListener('change',invalidate);
+ card.append(node('p',{class:'note',text:'Recorded external receipts only; includes inactive companies. Date means when the operator recorded the receipt, not a verified bank payment date. No earned revenue or estimated costs.'}),div('formrow',lab('From (IST)',from),lab('To (IST)',to),refresh,csv),body,div('formrow',prev,next));main.append(card);invalidate();
+}
 function providerUsageOverview(main){
  const card=div('card',title('Plivo account spend')),body=div('stack',node('p',{class:'muted',text:'Not checked. Select a completed UTC date window and read the provider summary.'}));
  const period=node('select',{class:'field','aria-label':'Spend reporting window'},[['7','Last 7 completed UTC days'],['30','Last 30 completed UTC days']].map(([value,text])=>node('option',{value,text})));
@@ -812,6 +838,7 @@ async function adminMinuteWallet(main){
  providerUsageOverview(main);
  providerFinancialJournal(main);
  adminTransactionExplorer(main);
+ recordedCollectionsPanel(main);
  productionCostPlanner(main);
  creditWalletOperator(main);
  await find();

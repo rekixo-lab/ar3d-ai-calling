@@ -11,6 +11,7 @@ import {providerSafety,reviewProviderFault} from './provider-safety.mjs';
 import {moneyBudgetConfig,providerBudgetPosition} from './provider-cost-reservations.mjs';
 import {validReconciliation,reconcileProviderCost,providerCostRows} from './provider-cost-reconciliation.mjs';
 import {clientFinancialReport} from './client-financial-report.mjs';
+import {parseCollectionWindow,recordedCollections} from './recorded-collections.mjs';
 
 const base='/v1/human/credits';
 const uuid=/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
@@ -388,6 +389,16 @@ export async function handleCreditWalletRequest(req,env,user,{fetcher=fetch}={})
     SELECT e.*,t.display_name AS company FROM entries e JOIN tenants t ON t.id=e.tenantId
     WHERE (?='all' OR e.kind=?) ORDER BY e.createdAt DESC,e.tenantId,e.reference LIMIT 51 OFFSET ?`).bind(tid,tid,tid,tid,kind,kind,Number(offset)).all()).results;
    return json({transactions:rows.slice(0,50),offset:Number(offset),hasMore:rows.length>50,providerRequests:0});
+  }
+  if(path==='recorded-collections'){
+   if(req.method!=='GET')return fail('method not allowed',405);
+   if(!await currentMfa(env,user))return fail('current MFA Super Admin required',403);
+   const keys=[...url.searchParams.keys()],tid=url.searchParams.get('tenantId');
+   if(keys.some(k=>!['tenantId','from','to','offset'].includes(k)||url.searchParams.getAll(k).length!==1)||(tid!==null&&!uuid.test(tid)))return fail('invalid collections filter',400);
+   const window=parseCollectionWindow(url.searchParams.get('from'),url.searchParams.get('to'));
+   const offset=url.searchParams.get('offset')||'0';
+   if(!window||!/^\d{1,6}$/.test(offset))return fail('valid IST date range (maximum 366 days) required',400);
+   return json(await recordedCollections(db,{...window,tenantId:tid,offset:Number(offset)}));
   }
   if(path==='client-financial-report'){
    if(req.method!=='GET')return fail('method not allowed',405);
