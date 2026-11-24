@@ -663,7 +663,7 @@ test('streaming pilot XML and one-time authenticated turn claim preserve existin
   assert.match(opening,/audio\/x-mulaw;rate=8000/);assert.match(opening,/stream-next\/0/);
   const url=opening.match(/>(wss:[^<]+)<\/Stream>/)[1].replace(/^wss:/,'https:');
   const claim=(uri)=>handleScriptedPhoneCallback(new Request(uri,{headers:{Upgrade:'websocket'}}),env,{now,fetcher,streamUpgrade:args=>{bridge=args;return new Response('synthetic upgrade')}});
-  assert.equal((await claim(url.replace(/token=.+/,'token='+'0'.repeat(64)))).status,403);
+  assert.equal((await claim(url.replace(/[a-f0-9]{64}$/,'0'.repeat(64)))).status,403);
   assert.equal((await claim(url)).status,200);
   assert.equal((await claim(url)).status,403);
   assert.equal(bridge.callId,callId);
@@ -679,5 +679,31 @@ test('streaming pilot XML and one-time authenticated turn claim preserve existin
   assert.equal(row.answers.propertyType,'plot');assert.equal(row.attempts,0);
   assert.equal(row.phoneMeta.lastAudioOutcome,'stream_start_missing');assert.equal(row.phoneMeta.technicalFailure,true);
   assert.equal((await cb('hangup',{Duration:'30'})).status,204);
+ }finally{f.close()}
+});
+
+test('read-only internal media diagnostics scopes requests to signed ended calls and returns no IDs or URLs',async()=>{
+ const f=fixture();try{
+  const env={...f.env,PLIVO_AUTH_ID:'syntheticAuth',PLIVO_AUTH_TOKEN:token,
+   AR3D_SCRIPTED_PILOT_ENABLED:'enabled',AR3D_PLIVO_RECORDING_AUTH:'confirmed',
+   AR3D_SCRIPTED_PILOT_ORIGIN:origin,AR3D_PLIVO_CALLER_NUMBER:'+918000000000',
+   AR3D_SCRIPTED_PILOT_VERIFIED_NUMBER:internalNumber,AR3D_SCRIPTED_PILOT_TENANT_ID:tid,
+   AR3D_SCRIPTED_PILOT_LEAD_ID:lead,RECORDINGS:{head:async()=>({size:4}),get:async()=>null},
+   AI:{async run(){assert.fail('no STT')}}};
+  const ids=[callId,'34111111-2222-3333-4444-555555555555'];
+  for(let i=0;i<2;i++)f.c.db.prepare("INSERT INTO scripted_phone_pilots(id,tenant_id,lead_id,lead_updated_at,actor_id,language,destination,caller,rate_slot,expires_at,phase,provider_call_id,survey_json,created_at,provider_account_id,hangup_at) VALUES(?,?,?,?,?,?,?,?,?,?,'ended',?,?,?,?,?)")
+   .run(crypto.randomUUID(),tid,lead,new Date(now).toISOString(),admin.id,'hi',internalNumber,env.AR3D_PLIVO_CALLER_NUMBER,i,now+600000,ids[i],JSON.stringify({phoneMeta:{engine:i?'whisper':'deepgram_stream'}}),new Date(now+i).toISOString(),env.PLIVO_AUTH_ID,now);
+  const req=new Request(origin+'/v1/human/scripted-phone-pilot/media-diagnostics');let reads=0;
+  const fetcher=async(url,opts)=>{
+   reads++;assert.equal(opts.method,'GET');assert.equal(opts.redirect,'manual');
+   if(url.includes('/Stream/')){assert.ok(url.includes(ids[0]));return Response.json({objects:[{call_uuid:ids[0],end_time:'2026-11-20',service_url:'wss://private.invalid/token'}]})}
+   assert.ok(url.includes('call_uuid='+ids[1]));return Response.json({objects:[{call_uuid:ids[1],recording_duration_ms:'6000',recording_url:'https://private.invalid/audio'},{call_uuid:'other',recording_duration_ms:'9999'}]});
+  };
+  assert.equal((await handleScriptedPhoneAdmin(req,env,client,{now,fetcher})).status,403);
+  assert.equal(reads,0);
+  const r=await handleScriptedPhoneAdmin(req,env,admin,{now,fetcher});assert.equal(r.status,200);
+  const data=await r.json();assert.equal(data.streams.count,1);assert.equal(data.recordings.durationMs,6000);
+  assert.equal(data.recordings.count,1);assert.equal(data.phoneCallsStarted,0);assert.equal(reads,2);
+  assert.doesNotMatch(JSON.stringify(data),/private|34111111|14111111/);
  }finally{f.close()}
 });
