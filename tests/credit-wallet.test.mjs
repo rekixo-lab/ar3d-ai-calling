@@ -509,3 +509,20 @@ test('one full compensating call reversal is MFA protected, tenant scoped and im
  assert.equal(ledger.transactions[0].kind,'call_reversal');assert.equal(ledger.callTransactions[0].reversedSeconds,60);
  assert.equal(f.c.db.prepare("SELECT charged_seconds FROM tenant_minute_holds WHERE job_id=?").get(job).charged_seconds,60);
 }finally{f.close()}});
+
+
+test('global transaction explorer is current-MFA only and separates adjustments from call charges',async()=>{const f=fixture();try{
+ freshMfa(f);
+ const {reserveMinutes,closeMinuteHold}=await import('../src/minute-holds.mjs');
+ const grant={tenantId:tid,transactionId:'44444444-4444-4444-8444-444444444444',deltaSeconds:300,expectedBalanceSeconds:0,reason:'Manual synthetic allocation'};
+ assert.equal((await route(f,'minute-ledger',admin,'POST',grant)).status,201);
+ const job='a'.repeat(32);await reserveMinutes(f.env.CONTROL_DB,{tenantId:tid,job,maxSeconds:120});
+ const noFetch=()=>{throw Error('unexpected provider call')};
+ assert.equal((await route(f,'admin-transactions',client)).status,403);
+ let d=await (await route(f,'admin-transactions?kind=reserved',admin,'GET',undefined,{fetcher:noFetch})).json();
+ assert.equal(d.transactions.length,1);assert.equal(d.transactions[0].reservedSeconds,120);assert.equal(d.transactions[0].chargedSeconds,null);
+ await closeMinuteHold(f.env.CONTROL_DB,{tenantId:tid,job,billedSeconds:60,kind:'verified_cdr',evidenceRef:'synthetic'});
+ d=await (await route(f,'admin-transactions?kind=all',admin)).json();assert.equal(d.transactions.length,2);assert.equal(d.transactions.find(x=>x.kind==='settled').chargedSeconds,60);assert.equal(d.providerRequests,0);
+ assert.equal((await route(f,'admin-transactions?kind=bogus')).status,400);
+ assert.equal((await (await route(f,'admin-transactions?tenantId=99999999-9999-4999-8999-999999999999')).json()).transactions.length,0);
+}finally{f.close()}});
