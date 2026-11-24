@@ -13,6 +13,7 @@ test('provider journals are MFA-only, immutable, currency-scoped, and retry safe
  assert.equal((await (await req(admin,a)).json()).replayed,true);
  assert.equal((await req(admin,{...b,amountMicros:3})).status,409);
  assert.equal((await req(admin,{...b,id:c.id})).status,409);
+ assert.equal((await req(admin,entry(5,'plivo','INR','expense',160000000,'cdr-1'))).status,409);
  assert.equal((await req(admin,entry(4,'sarvam','INR','opening',1,'opening-late'))).status,409);
  const data=await (await req(admin)).json();
  assert.equal(data.accounts.find(x=>x.provider==='plivo').recordedNetMicros,8000000);

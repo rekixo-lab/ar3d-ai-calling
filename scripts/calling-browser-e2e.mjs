@@ -288,6 +288,15 @@ try{
  await adminPage.getByRole('heading',{name:'Client directory'}).waitFor();
  await adminPage.screenshot({path:'artifacts/calling-admin-clients.png',fullPage:true});
  await adminPage.getByRole('link',{name:'Minutes & Wallet',exact:true}).click();
+ await adminPage.getByRole('heading',{name:'Provider financial journal',exact:true}).waitFor();
+ await adminPage.getByText('No provider transactions recorded. Actual balance unknown.',{exact:true}).waitFor();
+ await adminPage.locator('[name="providerJournalAmount"],#providerJournalAmount').first().fill('12.50');
+ await adminPage.locator('[name="providerJournalReference"],#providerJournalReference').first().fill('browser-receipt-1');
+ await adminPage.locator('[name="providerJournalReason"],#providerJournalReason').first().fill('Synthetic browser receipt evidence');
+ adminPage.once('dialog',d=>d.accept());
+ await adminPage.getByRole('button',{name:'Record provider transaction',exact:true}).click();
+ await adminPage.getByRole('row',{name:/browser-receipt-1/}).waitFor();
+ assert.equal(f.c.db.prepare("SELECT amount_micros FROM provider_financial_journal WHERE evidence_ref='browser-receipt-1'").get().amount_micros,12500000);
  await adminPage.getByRole('combobox',{name:'Minute wallet company'}).selectOption(tid);
  await adminPage.getByText('Connected time',{exact:true}).waitFor();
  await adminPage.getByRole('heading',{name:'Historical budget transaction history',exact:true}).waitFor();

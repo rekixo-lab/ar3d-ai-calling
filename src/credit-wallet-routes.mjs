@@ -299,7 +299,7 @@ export async function handleCreditWalletRequest(req,env,user,{fetcher=fetch}={})
       typeof d.evidenceRef!=='string'||!/^[A-Za-z0-9][A-Za-z0-9 ._:/-]{3,119}$/.test(d.evidenceRef)||
       typeof d.reason!=='string'||d.reason.trim().length<10||d.reason.trim().length>200||/[\u0000-\u001f]/u.test(d.reason))return fail('invalid journal entry');
    const reason=d.reason.trim();
-   const lookup=()=>db.prepare('SELECT * FROM provider_financial_journal WHERE id=? OR (provider=? AND currency=? AND evidence_ref=?) LIMIT 2').bind(d.id,d.provider,d.currency,d.evidenceRef).all();
+   const lookup=()=>db.prepare('SELECT * FROM provider_financial_journal WHERE id=? OR (provider=? AND evidence_ref=?) LIMIT 2').bind(d.id,d.provider,d.evidenceRef).all();
    const replay=rows=>rows.length===1&&rows[0].id===d.id&&rows[0].provider===d.provider&&rows[0].currency===d.currency&&rows[0].kind===d.kind&&rows[0].amount_micros===d.amountMicros&&rows[0].evidence_ref===d.evidenceRef&&rows[0].reason===reason&&rows[0].actor===user.id;
    const old=(await lookup()).results;
    if(old.length)return replay(old)?json({id:d.id,replayed:true}):fail('duplicate evidence or conflicting entry',409);
