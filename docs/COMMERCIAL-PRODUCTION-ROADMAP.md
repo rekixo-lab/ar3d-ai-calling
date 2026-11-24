@@ -1,7 +1,7 @@
 # AR3D AI Calling — commercial production roadmap
 Owner-approved implementation sequence (2026-11-24). Scope only this repository, Worker and isolated Calling D1/R2. Do not enable real customer campaigns or paid billing merely because code is merged. No fabricated balances or successful call results.
 ## Design contract
-Both workspaces: navy #14243c sidebar, selected #294b77, blue #2658bc accents, white cards, #f2f5f9 canvas, consistent outlined icons, readable tables, responsive desktop/tablet/mobile, accessible controls, honest empty/error/loading states. Preserve existing routes and tenant boundaries. Keep advanced diagnostics separate from daily workflow. Use INR only when independently verified; display seconds and IST.
+Owner amendment 2026-11-24: both workspaces use chat-inspired dark reference styling: charcoal canvas, #212121 cards, subtle neutral borders, blue accent, compact system sans typography, outlined icons, restrained reduced-motion-aware animations, readable responsive tables, accessible controls, honest empty/error/loading states. Preserve existing routes and tenant boundaries. Keep advanced diagnostics separate from daily workflow. Use INR only when independently verified; display seconds and IST.
 ## Phase 1 — reliability and CRM
 - [x] Verify compact campaign job IDs for Check charge / Verify CDR (PR #156, CI 45323227387, production 45323433020; synthetic provider evidence only).
 - [ ] Real recording transport/STT diagnosis and complete Hindi/English acceptance, signed hangup and CRM save.
@@ -22,9 +22,9 @@ Both workspaces: navy #14243c sidebar, selected #294b77, blue #2658bc accents, w
 - [ ] Client Dashboard with balance, customers, interested leads, calls, visits; Upload Excel/Add Customer/Start campaign/CRM; minutes and history.
 - [ ] All actions backed by real APIs; no placeholder metrics as facts; consolidate selectors and hide irrelevant diagnostics.
 - [ ] Mobile/tablet/desktop and permission E2E; loading, retry, error, and empty states.
-## Phase 5 — payments
-- [ ] Owner-approved gateway merchant setup, packages and verified order/capture/webhook ledger, replay prevention.
-- [ ] Purchase history, invoice/tax policy, refund and reconciliation; no live collection before sign-off.
+## Phase 5 — external payment / manual credit allocation (no payment gateway)
+- [ ] Boss handles payments externally; Super Admin allocates minutes on creation and later top-ups, with audited references and reversals.
+- [ ] No checkout, payment selection, payment gateway integration or in-app payment collection. Transaction history records credits, not unverified revenue.
 ## Phase 6 — commercial release
 - [ ] Provider-authorized traffic, current consent/DND, scope, account/number and completed real call acceptance.
 - [ ] Production backups, isolated restore drill, retention/PII deletion, security and load/soak tests, alerts, runbook.
@@ -46,3 +46,5 @@ Operator's live saved-answer probe: metadata HTTP 200, aps1.media.plivo.com medi
 
 ## Contextual internal conversation pilot
 Retain fast deterministic interpretation for short explicit responses, support spoken Indian-number budgets and affirmatives/refusals. For internal direct-consented tests only, a bounded Workers AI Llama 3.3 70B contextual fallback uses the current question, property type, India date and utterance; no phone/name, tool execution, campaign approval or CRM authority. Require exact evidence quote and canonical answer validated by the same state machine. Timeout/invalid output falls back safely. The model is not yet proven live; customer campaign flow remains deterministic, disabled until independently approved. Multi-slot/out-of-order capture, semantic confirmation, audio interruption/barge-in and open-ended customer FAQ still need separate acceptance and engineering.
+
+Superseding implementation sequence: see approved-hindi-production-architecture.md owner amendment for nine stages. Stage 1 increment is read-only per-call cost intelligence, no client debit or campaign enablement.

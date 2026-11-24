@@ -4,6 +4,7 @@
 import {requireMembership} from './human-auth.mjs';
 import {parseJsonBody,resolveCrmDb} from './core.mjs';
 import {estimateProductionCost} from './production-cost-plan.mjs';
+import {costObservation,readInternalPlivoCdr} from './cost-intelligence.mjs';
 
 const base='/v1/human/credits';
 const uuid=/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
@@ -270,6 +271,27 @@ export async function handleCreditWalletRequest(req,env,user,{fetcher=fetch}={})
  if(!env.CONTROL_DB)return fail('database unavailable',503);
  const db=env.CONTROL_DB,path=url.pathname.slice(base.length+1);
  try{
+  if(path==='call-costs'||path==='internal-call-cdr'){
+   if(req.method!=='GET')return fail('method not allowed',405);
+   if(!await currentMfa(env,user))return fail('current MFA Super Admin required',403);
+   const keys=[...url.searchParams.keys()],tid=url.searchParams.get('tenantId'),id=url.searchParams.get('sessionId'),offset=url.searchParams.get('offset')||'0';
+   const allowed=path==='call-costs'?['tenantId','offset']:['tenantId','sessionId'];
+   if(keys.some(k=>!allowed.includes(k)||url.searchParams.getAll(k).length!==1)||!uuid.test(tid||'')||
+      (path==='call-costs'?!/^\d{1,6}$/.test(offset):!uuid.test(id||'')))return fail('invalid cost query',400);
+   const t=await db.prepare('SELECT id AS tenant_id,storage_mode,dedicated_binding FROM tenants WHERE id=?').bind(tid).first();
+   if(!t)return fail('tenant not found',404);
+   if(path==='internal-call-cdr'){
+    const row=await db.prepare('SELECT * FROM scripted_phone_pilots WHERE tenant_id=? AND id=? AND job_id IS NULL AND hangup_at IS NOT NULL AND provider_call_id IS NOT NULL').bind(tid,id).first();
+    if(!row)return fail('signed ended internal call not found',404);
+    try{return json({record:costObservation(row,await readInternalPlivoCdr(env,row,fetcher)),status:'read_only',clientCreditsDebited:false})}
+    catch{return fail('provider CDR unavailable or mismatched',503)}
+   }
+   const rows=(await db.prepare('SELECT id,job_id,phase,survey_json,created_at,duration_seconds FROM scripted_phone_pilots WHERE tenant_id=? AND hangup_at IS NOT NULL ORDER BY created_at DESC,id DESC LIMIT 51 OFFSET ?').bind(tid,Number(offset)).all()).results;
+   const page=rows.slice(0,50),jobs=page.filter(x=>x.job_id).map(x=>x.job_id);
+   const verified=jobs.length?(await resolveCrmDb(env,t).prepare('SELECT job_id,reported_amount AS reportedAmount,billed_seconds AS billedSeconds FROM verified_provider_call_costs WHERE tenant_id=? AND job_id IN (SELECT value FROM json_each(?))').bind(tid,JSON.stringify(jobs)).all()).results:[];
+   const byJob=new Map(verified.map(x=>[x.job_id,x]));
+   return json({records:page.map(x=>costObservation(x,byJob.get(x.job_id))),offset:Number(offset),hasMore:rows.length>50,status:'observation_only',clientCreditsDebited:false,providerRequests:0});
+  }
   if(path==='production-cost-plan'){
    if(req.method!=='GET')return fail('method not allowed',405);
    if(!await currentMfa(env,user))return fail('current MFA Super Admin required',403);

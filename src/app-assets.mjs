@@ -514,13 +514,41 @@ async function adminMinuteWallet(main){
   if(d.tenants.some(t=>t.id===previous))company.value=previous;
   await select();
  };
- async function select(){detail.replaceChildren();if(company.value)await minuteUsagePanel(detail,company.value,true)}
+ async function select(){detail.replaceChildren();if(company.value){const selected=company.value;const costs=div('stack'),minutes=div('stack');detail.append(costs,minutes);callCostIntelligence(costs,selected);await minuteUsagePanel(minutes,selected,true)}}
  company.addEventListener('change',()=>select().catch(asError));
  card.append(div('formrow',lab('Search clients',search),btn('Find company',()=>find().catch(asError),true)),
   lab('Client company',company),detail);main.append(card);
  productionCostPlanner(main);
  creditWalletOperator(main);
  await find();
+}
+function callCostIntelligence(main,tenantId){
+ const panel=div('card',title('Call Cost Intelligence')),result=div('stack');let offset=0,seq=0,records=[];
+ const cash=n=>n===null||n===undefined?'Unavailable':'₹'+(n/1000000).toFixed(4);
+ const prev=btn('Previous',()=>{offset=Math.max(0,offset-50);load().catch(asError)},true),next=btn('Next',()=>{offset+=50;load().catch(asError)},true),refresh=btn('Refresh costs',()=>load().catch(asError),true);
+ function row(x){
+  const observed=div('stack');
+  function show(y){observed.replaceChildren(node('span',{text:y.providerCdr?y.providerCdr.reportedAmount+' · '+y.providerCdr.billedSeconds+' billed sec · currency unverified':'Not checked'}))}
+  show(x);
+  if(x.scope==='internal'&&!x.providerCdr)observed.append(btn('Check Plivo CDR',async()=>{
+   const b=observed.querySelector('button');if(b)b.disabled=true;
+   try{const d=await api('/v1/human/credits/internal-call-cdr?'+new URLSearchParams({tenantId,sessionId:x.id}));Object.assign(x,d.record);render()}
+   catch(e){asError(e);if(b)b.disabled=false}
+  },true));
+  return [formatIst(x.startedAt),x.scope,x.engine,x.status,x.connectedSeconds,x.plannedBilledSeconds,observed,
+   cash(x.estimatedMicroInr.plivo),x.sttAudioMs===null?'Unknown':(x.sttAudioMs/1000).toFixed(2),x.sttEstimatedRoundedSeconds??'Unknown',
+   cash(x.estimatedMicroInr.stt),x.llmRequests??'Unknown',x.llmInputTokens??'Unknown',x.llmOutputTokens??'Unknown',cash(x.estimatedMicroInr.llmBudget),cash(x.estimatedMicroInr.total)];
+ }
+ function render(){result.replaceChildren(table(['Started (IST)','Scope','Engine','Status','Connected sec','Planned billed sec','Provider CDR','Plivo estimate','STT audio sec','Rounded STT sec (model)','STT estimate','LLM requests','Input tokens','Output tokens','LLM allowance','Total estimate'],records.map(row)))}
+ async function load(){const id=++seq;refresh.disabled=prev.disabled=next.disabled=true;
+  try{const d=await api('/v1/human/credits/call-costs?'+new URLSearchParams({tenantId,offset:String(offset)}));if(id!==seq)return;
+   records=d.records;render();
+   prev.disabled=offset===0;next.disabled=!d.hasMore;
+  }catch(e){if(id===seq)result.replaceChildren(node('p',{class:'err',text:'Call costs unavailable. Refresh to retry.'}));throw e}
+  finally{if(id===seq)refresh.disabled=false}
+ }
+ panel.append(node('p',{class:'note',text:'Super Admin only. Internal tests are not customer charges. Estimates use the approved tariff model; older audio lacks per-request rounding, LLM allowance is not an invoice, and missing data is not zero. Raw CDR currency is unverified. No revenue, margin, payment or client debit is inferred.'}),div('formrow',refresh,prev,next),result);
+ main.append(panel);load().catch(asError);
 }
 function productionCostPlanner(main){
  const panel=div('card',title('Production cost planner'));

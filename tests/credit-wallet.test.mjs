@@ -415,3 +415,26 @@ test('production cost plan is admin-only, exact and does not change credits or c
   assert.equal(f.c.db.prepare('SELECT COUNT(*) AS n FROM tenant_credit_audit').get().n,0);
  }finally{f.close()}
 });
+
+test('cost intelligence is MFA-only, scoped and never charges credits; raw CDR remains unverified currency',async()=>{
+ const f=fixture();try{
+  freshMfa(f);
+  const id='77777777-7777-4777-8777-777777777777',call='88888888-8888-4888-8888-888888888888',auth='TESTACCOUNT123',caller='+918000000000';
+  f.env.PLIVO_AUTH_ID=auth;f.env.PLIVO_AUTH_TOKEN='SYNTHETICAUTHTOKEN123';
+  f.c.db.prepare(`INSERT INTO scripted_phone_pilots(id,tenant_id,lead_id,lead_updated_at,actor_id,language,destination,caller,rate_slot,expires_at,phase,provider_call_id,provider_account_id,survey_json,created_at,hangup_at,duration_seconds)
+  VALUES(?,?,?,'2026-11-24','admin','hi','+919000000001',?,1,9999999999999,'completed',?,?,?,'2026-11-24T08:00:00Z',999,145)`).run(id,tid,'33333333-3333-4333-8333-333333333333',caller,call,auth,JSON.stringify({phoneMeta:{engine:'sarvam',sttAudioMs:71160,sttDurationUnknown:0,llmRequests:6,llmInputTokens:1448,llmOutputTokens:238,llmUsageUnknown:0}}));
+  const path='call-costs?tenantId='+tid;
+  assert.equal((await route(f,path,client)).status,403);
+  const res=await route(f,path);assert.equal(res.status,200,await res.clone().text());
+  const d=await res.json(),x=d.records[0];assert.equal(x.scope,'internal');assert.equal(x.plannedBilledSeconds,150);assert.equal(x.estimatedMicroInr.plivo,950000);assert.equal(x.estimatedMicroInr.stt,581140);assert.equal(x.sttBasis,'aggregate_audio_unrounded');assert.equal(x.providerCdr,null);assert.equal(x.clientCharge,null);
+  assert.doesNotMatch(JSON.stringify(d),/919000000001|TESTACCOUNT123/);
+  let requests=0;
+  const fetcher=async(url,o)=>{requests++;assert.equal(url,'https://api.plivo.com/v1/Account/'+auth+'/Call/'+call+'/');assert.equal(o.method,'GET');return Response.json({call_uuid:call,call_direction:'outbound',from_number:caller,to_number:'919000000001',billed_duration:150,call_duration:145,total_amount:'0.9496'})};
+  const cdrPath='internal-call-cdr?tenantId='+tid+'&sessionId='+id;
+  assert.equal((await route(f,cdrPath,client,'GET',undefined,{fetcher})).status,403);assert.equal(requests,0);
+  const c=await (await route(f,cdrPath,admin,'GET',undefined,{fetcher})).json();
+  assert.equal(c.record.providerCdr.reportedAmount,'0.9496');assert.equal(c.record.providerCdr.currencyStatus,'unverified');assert.equal(c.clientCreditsDebited,false);assert.equal(requests,1);
+  assert.equal((await route(f,cdrPath,admin,'GET',undefined,{fetcher:async()=>Response.json({call_uuid:'wrong'})})).status,503);
+  assert.equal(f.c.db.prepare('SELECT COUNT(*) AS n FROM tenant_credit_audit').get().n,0);
+ }finally{f.close()}
+});
