@@ -408,8 +408,8 @@ export async function handleScriptedPhoneAdmin(req,env,user,{now=Date.now(),fetc
   if(req.method!=='POST'||!config||!mutationOriginAllowed(req)||new URL(req.url).origin!==config.origin||new URL(req.url).search)return error('invalid_recording_probe_request',400);
   try{
    const data=parseJsonBody(new TextDecoder('utf-8',{fatal:true}).decode(await readBoundedBytes(req,512)),512);
-   if(Object.keys(data).join(',')!=='confirm'||!['REPROCESS_ONE_CONSENTED_INTERNAL_RECORDING','SHOW_ONE_CONSENTED_INTERNAL_FIRST_ANSWER'].includes(data.confirm))return error('explicit_recording_probe_confirmation_required',400);
-   return json(await probeInternalRecording(env,config,fetcher,{showFirstAnswer:data.confirm==='SHOW_ONE_CONSENTED_INTERNAL_FIRST_ANSWER',now}));
+   if(Object.keys(data).join(',')!=='confirm'||!['REPROCESS_ONE_CONSENTED_INTERNAL_RECORDING','SHOW_ONE_CONSENTED_INTERNAL_FIRST_ANSWER','SHOW_ONE_CONSENTED_INTERNAL_LAST_ANSWER'].includes(data.confirm))return error('explicit_recording_probe_confirmation_required',400);
+   return json(await probeInternalRecording(env,config,fetcher,{showFirstAnswer:data.confirm==='SHOW_ONE_CONSENTED_INTERNAL_FIRST_ANSWER',showLastAnswer:data.confirm==='SHOW_ONE_CONSENTED_INTERNAL_LAST_ANSWER',now}));
   }catch{return error('recording_probe_unavailable',503)}
  }
  if(path===ADMIN+'/media-diagnostics'){
@@ -589,10 +589,10 @@ function verifiedRecordingUrl(config,row,recording,body){
 // No recording or transcript is retained, logged or written to CRM.
 // A separate explicit consent confirmation permits displaying one first-answer
 // transcript to the current-MFA operator only; default probe returns no text.
-async function probeInternalRecording(env,config,fetcher,{showFirstAnswer=false,now=Date.now()}={}){
+async function probeInternalRecording(env,config,fetcher,{showFirstAnswer=false,showLastAnswer=false,now=Date.now()}={}){
  const result={phoneCallsStarted:0,crmChanged:false,metadataHttp:null,mediaHost:null,mediaHttp:null,bytes:0,stt:'not_started'};
  const row=await env.CONTROL_DB.prepare(
-  "SELECT provider_call_id,lead_id,destination,language,CASE WHEN json_valid(survey_json) THEN json_extract(survey_json,'$.index') END AS question_index FROM scripted_phone_pilots WHERE tenant_id=? AND job_id IS NULL AND provider_account_id=? AND caller=? AND hangup_at IS NOT NULL AND provider_call_id IS NOT NULL AND turn>0 AND CASE WHEN json_valid(survey_json) THEN COALESCE(json_extract(survey_json,'$.phoneMeta.engine'),'whisper')='whisper' ELSE 0 END ORDER BY created_at DESC LIMIT 1")
+  "SELECT provider_call_id,lead_id,destination,language,survey_json,CASE WHEN json_valid(survey_json) THEN json_extract(survey_json,'$.index') END AS question_index FROM scripted_phone_pilots WHERE tenant_id=? AND job_id IS NULL AND provider_account_id=? AND caller=? AND hangup_at IS NOT NULL AND provider_call_id IS NOT NULL AND turn>0 AND CASE WHEN json_valid(survey_json) THEN COALESCE(json_extract(survey_json,'$.phoneMeta.engine'),'whisper')='whisper' ELSE 0 END ORDER BY created_at DESC LIMIT 1")
   .bind(config.tenant,config.authId,config.caller).first();
  if(!row||!ID.test(row.provider_call_id)||!['hi','en'].includes(row.language))return {...result,state:'no_matching_recorded_call'};
  if(showFirstAnswer&&row.question_index!==0)return {...result,state:'first_question_not_confirmed'};
@@ -604,7 +604,8 @@ async function probeInternalRecording(env,config,fetcher,{showFirstAnswer=false,
  const candidates=metadata.body.objects.filter(x=>x?.call_uuid===row.provider_call_id&&ID.test(x.recording_id||'')&&Number(x.recording_duration_ms)>0&&Number(x.recording_duration_ms)<=20000)
   .sort((a,b)=>Number(a.recording_start_ms||0)-Number(b.recording_start_ms||0));
  if(!candidates.length)return {...result,state:'no_matching_short_recording'};
- const recording=candidates[0],url=verifiedRecordingUrl(config,row,recording.recording_id,recording);
+ if(showLastAnswer&&(![0,1,2,3,4,5,6].includes(row.question_index)||!candidates.every(x=>Number(x.recording_start_ms)>0)||new Set(candidates.map(x=>Number(x.recording_start_ms))).size!==candidates.length))return {...result,state:'last_answer_order_unverified'};
+ const recording=showLastAnswer?candidates.at(-1):candidates[0],url=verifiedRecordingUrl(config,row,recording.recording_id,recording);
  if(!url)return {...result,state:'recording_url_not_allowlisted'};
  result.mediaHost=new URL(url).hostname;
  let bytes;
@@ -618,6 +619,12 @@ async function probeInternalRecording(env,config,fetcher,{showFirstAnswer=false,
  try{
   const text=await transcribeScriptedAnswer(env.AI,bytes,row.language,{vadFilter:false});
   const output={...result,state:'media_downloaded',stt:text?'text_received':'empty_text'};
+  if(showLastAnswer&&text){
+   const {phoneMeta,...previous}=JSON.parse(row.survey_json);
+   const replayState={...previous,status:'active',attempts:0,turns:0,startedAt:now};
+   const replay=advanceFixedVoicePreview(replayState,{transcript:text,now});
+   return {...output,transcript:text,question:FIELDS[row.question_index],parserAction:replay.action,normalizedAnswer:replay.state.answers[FIELDS[row.question_index]]??null};
+  }
   if(showFirstAnswer&&text){
    const replay=advanceFixedVoicePreview(beginFixedVoicePreview({language:row.language,now}).state,{transcript:text,now});
    return {...output,transcript:text,parserAction:replay.action,propertyType:replay.state.answers.propertyType??null};
@@ -636,6 +643,14 @@ async function resolveRecordedAnswerUrl(config,row,recording,fetcher){
  // The list can lag immediately after the recording callback.
  const one=await providerMetadata(config,'Recording/'+recording+'/',fetcher);
  return verifiedRecordingUrl(config,row,recording,one.body);
+}
+function answerSpeechContext(row){
+ // Topic-only hint, no example amounts, to reduce language/number errors
+ // without priming the recognizer to invent a specific answer.
+ const field=FIELDS[JSON.parse(row.survey_json).index];
+ const topics={size:'property area, measurement units and bedrooms',budgetInr:'Indian rupee budget, lakh and crore',propertyType:'real estate property type',location:'Indian city names',area:'Indian neighborhood names',interest:'property viewing interest',visitDate:'site visit date'};
+ const hindi={size:'प्रॉपर्टी का क्षेत्रफल, माप की इकाई, बीएचके।',budgetInr:'भारतीय रुपये में बजट, लाख और करोड़।',propertyType:'प्रॉपर्टी का प्रकार।',location:'भारत के शहरों के नाम।',area:'शहर का इलाका।',interest:'प्रॉपर्टी देखने में रुचि।',visitDate:'साइट विजिट की तारीख।'};
+ return row.language==='hi'?hindi[field]:topics[field];
 }
 function recordingDurationMs(params){
  const raw=params.get('RecordingDurationMs');
@@ -681,7 +696,7 @@ async function recordingAnswer(config,env,row,params,fetcher){
  try{bytes=await readBoundedBytes(response,ANSWER_MAX_BYTES)}
  catch{return {text:null,reason:'recording_body_invalid'}}
  try{
-  const text=await transcribeScriptedAnswer(env.AI,bytes,row.language,{vadFilter:false});
+  const text=await transcribeScriptedAnswer(env.AI,bytes,row.language,{vadFilter:false,initialPrompt:internalDirect(row)?answerSpeechContext(row):null});
   return {text,reason:text?'recognized':'speech_empty',audioMs:recordingDurationMs(params),audioBytes:bytes.length,sttConnected:true,mediaHost:new URL(mediaUrl).hostname};
  }catch{return {text:null,reason:'speech_service_failed',audioMs:recordingDurationMs(params),audioBytes:bytes.length,sttConnected:false,mediaHost:new URL(mediaUrl).hostname}}
 }

@@ -777,6 +777,8 @@ test('saved recording probe is no-dial, current-MFA and explicit-consent only; r
   f.c.db.prepare("UPDATE scripted_phone_pilots SET survey_json=?").run(JSON.stringify({index:1,phoneMeta:{engine:'whisper'}}));
   const blocked=await (await handleScriptedPhoneAdmin(req('SHOW_ONE_CONSENTED_INTERNAL_FIRST_ANSWER'),env,admin,{now,fetcher})).json();
   assert.equal(blocked.state,'first_question_not_confirmed');assert.equal(blocked.transcript,undefined);assert.equal(calls,6);
+  const last=await (await handleScriptedPhoneAdmin(req('SHOW_ONE_CONSENTED_INTERNAL_LAST_ANSWER'),env,admin,{now,fetcher})).json();
+  assert.equal(last.state,'last_answer_order_unverified');assert.equal(last.transcript,undefined);assert.equal(calls,7);
   assert.deepEqual(f.r.db.prepare('SELECT * FROM leads WHERE id=?').get(lead),before);
  }finally{f.close()}
 });
