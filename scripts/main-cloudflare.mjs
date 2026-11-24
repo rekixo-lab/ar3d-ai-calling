@@ -15,7 +15,7 @@ export const REQUIRED_TABLES = Object.freeze({
   CONTROL_DB: Object.freeze([
     'tenants','tenant_keys','project_links','tenant_numbers','tenant_audit_events',
     'human_users','tenant_memberships','human_sessions','human_invitations',
-    'human_login_limits','human_bootstrap_claim','human_ip_login_limits','human_mfa_settings','human_mfa_challenges','human_mfa_recovery_codes','provider_event_inbox','calling_script_bindings','calling_script_versions','company_profile_versions','calling_agent_publications','shared_voice_gateway','voice_call_routes','client_account_contacts','company_change_requests','scripted_phone_pilots','tenant_credit_budgets','tenant_credit_audit','tenant_minute_ledger','tenant_minute_holds','provider_financial_journal',
+    'human_login_limits','human_bootstrap_claim','human_ip_login_limits','human_mfa_settings','human_mfa_challenges','human_mfa_recovery_codes','provider_event_inbox','calling_script_bindings','calling_script_versions','company_profile_versions','calling_agent_publications','shared_voice_gateway','voice_call_routes','client_account_contacts','company_change_requests','scripted_phone_pilots','tenant_credit_budgets','tenant_credit_audit','tenant_minute_ledger','tenant_minute_holds','provider_financial_journal','tenant_credit_purchases',
   ]),
   CRM_DB: Object.freeze([
     'leads','agents','calls','site_visits','crm_audit_events',
@@ -40,6 +40,7 @@ export const REQUIRED_COLUMNS = Object.freeze({
     tenant_credit_budgets: Object.freeze(['tenant_id','planned_paise','updated_by','updated_at']),
     tenant_credit_audit: Object.freeze(['id','tenant_id','actor','previous_paise','new_paise','reason','created_at']),
     tenant_minute_ledger: Object.freeze(['sequence','id','tenant_id','kind','delta_seconds','previous_seconds','balance_seconds','actor','reason','created_at']),
+    tenant_credit_purchases: Object.freeze(['sequence','id','tenant_id','receipt_ref','paid_paise','purchased_seconds','previous_seconds','actor','created_at']),
     provider_financial_journal: Object.freeze(['sequence','id','provider','currency','kind','amount_micros','evidence_ref','reason','actor','created_at']),
     tenant_minute_holds: Object.freeze(['tenant_id','job_id','reserved_seconds','created_at','state','charged_seconds','evidence_ref','closed_at']),
     calling_script_bindings: Object.freeze(['tenant_id','bot_id','assistant_id','source_version']),
@@ -160,6 +161,15 @@ export const REQUIRED_PROVIDER_JOURNAL_TRIGGERS=Object.freeze({
  trg_provider_journal_no_delete:['before delete on provider_financial_journal','raise(abort'],
  trg_provider_journal_opening_first:['before insert on provider_financial_journal','new.kind','raise(abort']
 });
+export const REQUIRED_PURCHASE_TRIGGERS=Object.freeze({
+ trg_credit_purchase_no_update:['before update on tenant_credit_purchases','raise(abort'],
+ trg_credit_purchase_no_delete:['before delete on tenant_credit_purchases','raise(abort'],
+ trg_credit_purchase_allocate:['after insert on tenant_credit_purchases','insert into tenant_minute_ledger','new.purchased_seconds','new.previous_seconds','raise(abort']
+});
+export function checkPurchaseTriggers(records){
+ const map=new Map(records.map(r=>[r.name,String(r.sql||'').toLowerCase().replace(/\s+/g,' ')]));
+ for(const [name,parts] of Object.entries(REQUIRED_PURCHASE_TRIGGERS))if(parts.some(p=>!map.get(name)?.includes(p)))throw Error('Credit purchase safety trigger missing or invalid: '+name);
+}
 export function checkProviderJournalTriggers(records){
  const map=new Map(records.map(r=>[r.name,String(r.sql||'').toLowerCase().replace(/\s+/g,' ')]));
  for(const [name,parts] of Object.entries(REQUIRED_PROVIDER_JOURNAL_TRIGGERS))if(parts.some(p=>!map.get(name)?.includes(p)))throw Error('Provider journal safety trigger missing or invalid: '+name);
@@ -197,6 +207,7 @@ export function checkTables(tables, binding, mode) {
     return 'fresh';
   }
   const missing = expected.filter(name => !present.has(name));
+  if(mode==='preflight'&&binding==='CONTROL_DB'&&missing.length===1&&missing[0]==='tenant_credit_purchases')return 'control_credit_purchase_upgrade';
   if(mode==='preflight'&&binding==='CONTROL_DB'&&missing.length===1&&missing[0]==='provider_financial_journal')return 'control_provider_journal_upgrade';
   if(mode==='preflight'&&binding==='CONTROL_DB'&&missing.length===1&&missing[0]==='tenant_minute_holds')return 'control_minute_holds_upgrade';
   if(mode==='preflight'&&binding==='CONTROL_DB'&&missing.length===1&&missing[0]==='tenant_minute_ledger')return 'control_minute_ledger_upgrade';
@@ -272,7 +283,7 @@ export async function inspectCloudflare({ credentials, mode, apiFetch = fetch, t
     if (['control_client_accounts_upgrade','control_publication_upgrade','control_profile_upgrade',
          'control_script_upgrade','crm_dispatch_upgrade','ready','crm_call_intent_upgrade',
          'crm_scripted_results_upgrade','control_company_change_upgrade',
-         'control_scripted_pilot_upgrade','control_credit_upgrade','control_minute_ledger_upgrade','control_minute_holds_upgrade','control_provider_journal_upgrade','crm_staff_upgrade','crm_cdr_upgrade','crm_staff_cdr_upgrade'].includes(state)) {
+         'control_scripted_pilot_upgrade','control_credit_upgrade','control_minute_ledger_upgrade','control_minute_holds_upgrade','control_provider_journal_upgrade','control_credit_purchase_upgrade','crm_staff_upgrade','crm_cdr_upgrade','crm_staff_cdr_upgrade'].includes(state)) {
       if (binding === 'CRM_DB') {
         const triggers = await query(id, "SELECT name,sql FROM sqlite_master WHERE type='trigger' AND name LIKE 'trg_%'");
         checkSafetyTriggers(triggers,{allowCallIntentUpgrade:state === 'crm_call_intent_upgrade'});
@@ -289,7 +300,12 @@ export async function inspectCloudflare({ credentials, mode, apiFetch = fetch, t
         const triggers=await query(id,"SELECT name,sql FROM sqlite_master WHERE type='trigger' AND name LIKE 'trg_provider_journal_%'");
         checkProviderJournalTriggers(triggers);
       }
+      if(binding==='CONTROL_DB'&&names.includes('tenant_credit_purchases')){
+        const triggers=await query(id,"SELECT name,sql FROM sqlite_master WHERE type='trigger' AND name LIKE 'trg_credit_purchase_%'");
+        checkPurchaseTriggers(triggers);
+      }
       for (const table of Object.keys(REQUIRED_COLUMNS[binding])) {
+        if(state==='control_credit_purchase_upgrade'&&table==='tenant_credit_purchases')continue;
         if(state==='control_provider_journal_upgrade'&&table==='provider_financial_journal')continue;
         if(state==='control_client_accounts_upgrade'&&table==='client_account_contacts')continue;
         if(state==='control_credit_upgrade'&&['tenant_credit_budgets','tenant_credit_audit'].includes(table))continue;
@@ -331,6 +347,7 @@ export function verifiedSchemaState(modes) {
   if(modes?.CONTROL_DB==='control_credit_upgrade'&&modes?.CRM_DB==='crm_staff_upgrade')return 'credit_staff_upgrade';
   if(modes?.CONTROL_DB==='control_credit_upgrade'&&modes?.CRM_DB==='ready')return 'control_credit_upgrade';
   if(modes?.CONTROL_DB==='control_minute_ledger_upgrade'&&modes?.CRM_DB==='ready')return 'control_minute_ledger_upgrade';
+  if(modes?.CONTROL_DB==='control_credit_purchase_upgrade'&&modes?.CRM_DB==='ready')return 'control_credit_purchase_upgrade';
   if(modes?.CONTROL_DB==='control_provider_journal_upgrade'&&modes?.CRM_DB==='ready')return 'control_provider_journal_upgrade';
   if(modes?.CONTROL_DB==='control_minute_holds_upgrade'&&modes?.CRM_DB==='ready')return 'control_minute_holds_upgrade';
   if(modes?.CONTROL_DB==='ready'&&modes?.CRM_DB==='crm_staff_upgrade')return 'crm_staff_upgrade';
