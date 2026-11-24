@@ -94,6 +94,8 @@ test('Plivo balance is only Super Admin MFA, account type/currency are never inf
   assert.equal(d.verifiedInr,false);assert.equal(seen,1);
   assert.ok(!JSON.stringify(d).includes('TESTACCOUNT123'));
   assert.ok(!JSON.stringify(d).includes('SYNTHETICAUTHTOKEN123'));
+  const wrong=await route(f,'provider',admin,'GET',undefined,{fetcher:async()=>Response.json({auth_id:'OTHERACCOUNT123',cash_credits:'123.00'})});
+  assert.equal((await wrong.json()).reason,'provider_account_identity_mismatch');
   const outage=await route(f,'provider',admin,'GET',undefined,{fetcher:async()=>{throw Error('synthetic provider secret')}})
   assert.equal((await outage.json()).available,false);
   const noKeys=await route({...f,env:{...f.env,PLIVO_AUTH_TOKEN:undefined}},'provider',admin);

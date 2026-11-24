@@ -38,6 +38,18 @@ try{
  assert.equal(await page.locator('.provider-balances').count(),0);
  await sidebar.getByRole('button',{name:'Refresh balance'}).click();
  await sidebar.locator('.sidebar-credit-value').getByText('100m 00s',{exact:true}).waitFor();
+ if(viewport.width===1440){
+  // Verify a real ledger change crosses the foreground refresh boundary.
+  const add=f.c.db.prepare("INSERT INTO tenant_minute_ledger(id,tenant_id,kind,delta_seconds,previous_seconds,balance_seconds,actor,reason,created_at) VALUES(?,?,?,?,?,?,'admin','Synthetic browser refresh check',?)");
+  add.run('browser-live-allocation',tid,'allocation',60,6000,6060,new Date().toISOString());
+  await sidebar.locator('.sidebar-credit-value').getByText('101m 00s',{exact:true}).waitFor({timeout:25000});
+  await page.locator('.client-summary').getByText('101m 00s',{exact:true}).first().waitFor();
+  await sidebar.getByRole('button',{name:'Wallet',exact:true}).click();
+  await page.getByRole('heading',{name:'Calling credit ledger',exact:true}).waitFor();
+  add.run('browser-live-recovery',tid,'recovery',-60,6060,6000,new Date().toISOString());
+  await sidebar.locator('.sidebar-credit-value').getByText('100m 00s',{exact:true}).waitFor({timeout:25000});
+  await page.locator('.minute-wallet').first().getByText('100m 00s',{exact:true}).first().waitFor();
+ }
  // AI Testing uses an authenticated browser preview, never live phone or CRM.
  const aiLeadCount=f.r.db.prepare('SELECT COUNT(*) AS n FROM leads').get().n;
  const aiCallsBefore=f.r.db.prepare('SELECT COUNT(*) AS n FROM calls').get().n;

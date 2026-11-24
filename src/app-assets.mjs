@@ -433,13 +433,15 @@ function actionNotice(label,count){
 // Foreground-only UI refresh. No scheduler, background API polling or writes.
 // Each view owns one timer, released on detach/tenant switch.
 function foregroundRefresh(element,ms,task,active=()=>true){
- let timer=null,stopped=false;
+ let timer=null,stopped=false,running=false;
  function stop(){stopped=true;clearTimeout(timer);document.removeEventListener('visibilitychange',wake);}
  function schedule(){if(stopped)return;clearTimeout(timer);timer=setTimeout(tick,ms);}
  async function tick(){
+  if(stopped||running)return;
   if(!element.isConnected){stop();return;}
-  if(!document.hidden&&active())try{await task()}catch{}
-  schedule();
+  running=true;
+  try{if(!document.hidden&&active())await task()}catch{}
+  finally{running=false;schedule();}
  }
  function wake(){if(!document.hidden){clearTimeout(timer);tick();}}
  document.addEventListener('visibilitychange',wake);
@@ -485,7 +487,7 @@ function providerBalancePanel(openView){
  }
  const panel=node('section',{class:'card provider-balances','aria-label':'Provider balances'},[
   title('Provider balances','h3'),div('provider-grid',plivo,sarvam,clients),
-  node('p',{class:'muted',text:'Provider credits are separate from client calling minutes. No payment or calling action is performed.'})
+  node('p',{class:'muted',text:'Plivo refreshes every 60 seconds while open; client totals every 15 seconds. Provider credits are separate from client calling minutes.'})
  ]);
  return {panel,load,setClients};
 }
@@ -748,7 +750,11 @@ function manualMinuteLedger(main,tenantId,admin,onBalance=()=>{},registerRefresh
   }catch(e){if(id===seq){balance=null;uncommitted=null;onBalance(null);body.replaceChildren(node('p',{class:'err',text:'Credit ledger unavailable. Refresh to retry.'}))}throw e}
   finally{if(id===seq){refresh.disabled=false;submit.disabled=busy||balance===null}}
  }
- panel.append(body,form,div('formrow',refresh,prev,next));main.append(panel);registerRefresh(()=>{if(!refresh.disabled)return load().catch(asError)});return load().catch(asError);
+ panel.append(body,form,div('formrow',refresh,prev,next));main.append(panel);
+ const refreshVisible=()=>{if(!refresh.disabled&&!busy&&!pending)return load().catch(asError)};
+ registerRefresh(refreshVisible);
+ if(admin)foregroundRefresh(panel,15000,refreshVisible,()=>!panel.closest('[hidden]'));
+ return load().catch(asError);
 }
 function callCostIntelligence(main,tenantId){
  const panel=div('card',title('Call Cost Intelligence')),result=div('stack');let offset=0,seq=0,records=[];
