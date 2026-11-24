@@ -694,6 +694,49 @@ function adminTransactionExplorer(main){
  kind.addEventListener('change',()=>{offset=0;load()});
  card.append(node('p',{class:'note',text:'Cross-company minute ledger and reservation history. Original charges and returned minutes remain separate. No external payment or revenue entries.'}),div('formrow',lab('Transaction type',kind),refresh,exportBtn),body,div('formrow',prev,next));main.append(card);load();
 }
+function providerFinancialJournal(main){
+ const card=div('card',title('Provider financial journal')),body=div('stack');
+ const provider=node('select',{class:'field'},['plivo','sarvam'].map(v=>node('option',{value:v,text:v==='plivo'?'Plivo':'Sarvam'})));
+ const currency=node('select',{class:'field'},['INR','USD'].map(v=>node('option',{value:v,text:v})));
+ const kind=node('select',{class:'field'},[['topup','Recharge / top-up'],['expense','Verified expense'],['refund','Provider refund'],['opening','Opening balance']].map(([value,text])=>node('option',{value,text})));
+ const amount=input('providerJournalAmount','text','Amount'),reference=input('providerJournalReference','text','Invoice / payment reference'),reason=input('providerJournalReason','text','Evidence and reason');
+ amount.inputMode='decimal';reference.maxLength=120;reason.maxLength=200;
+ let offset=0,pending=null,busy=false,seq=0;
+ const fmt=(n,c)=>Number.isSafeInteger(n)?(n/1000000).toLocaleString('en-IN',{style:'currency',currency:c,minimumFractionDigits:2,maximumFractionDigits:6}):'Unavailable';
+ const refresh=btn('Refresh journal',load,true),prev=btn('Previous',()=>{offset=Math.max(0,offset-50);load()},true),next=btn('Next',()=>{offset+=50;load()},true);
+ const save=btn('Record provider transaction',async()=>{
+  if(busy)return;
+  if(!pending){
+   const raw=amount.value.trim();
+   if(!/^\d{1,7}(?:\.\d{1,6})?$/.test(raw)){notice('Enter a valid amount with up to six decimals.');return;}
+   const [whole,fraction='']=raw.split('.'),micros=Number(whole)*1000000+Number(fraction.padEnd(6,'0'));
+   if(!Number.isSafeInteger(micros)||micros<1||micros>1000000000000){notice('Amount out of range.');return;}
+   if(!confirm('Record this evidence-based transaction? This does not recharge a provider or enable calling.'))return;
+   pending={id:crypto.randomUUID(),provider:provider.value,currency:currency.value,kind:kind.value,amountMicros:micros,evidenceRef:reference.value.trim(),reason:reason.value.trim()};
+  }
+  busy=true;save.disabled=true;
+  try{await api('/v1/human/credits/provider-journal','POST',pending);pending=null;amount.value=reference.value=reason.value='';offset=0;await load();}
+  catch(e){asError(e);if(e.status===400||e.status===409)pending=null;}
+  finally{busy=false;save.disabled=false;}
+ });
+ async function load(){
+  if(refresh.disabled)return;
+  const v=++seq;refresh.disabled=true;prev.disabled=next.disabled=true;
+  try{
+   const d=await api('/v1/human/credits/provider-journal?offset='+offset);
+   if(v!==seq||!card.isConnected)return;
+   body.replaceChildren(
+    d.accounts.length?table(['Provider','Currency','Opening','Recharges','Expenses','Refunds','Recorded net'],d.accounts.map(x=>[x.provider,x.currency,fmt(x.openingMicros,x.currency),fmt(x.topupMicros,x.currency),fmt(x.expenseMicros,x.currency),fmt(x.refundMicros,x.currency),fmt(x.recordedNetMicros,x.currency)])):node('p',{class:'muted',text:'No provider transactions recorded. Actual balance unknown.'}),
+    table(['Date (IST)','Provider','Type','Amount','Reference','Reason'],d.entries.map(x=>[formatIst(x.createdAt),x.provider,x.kind,fmt(x.amountMicros,x.currency),x.evidenceRef,x.reason])));
+   prev.disabled=offset===0;next.disabled=!d.hasMore;
+  }catch(e){body.replaceChildren(node('p',{class:'err',text:'Provider journal unavailable.'}));}
+  finally{refresh.disabled=false}
+ }
+ card.append(node('p',{class:'note',text:'Record real external receipts and invoices only. Recorded net is not the live provider balance; never enter the same funds in two currencies. No payment or call action.'}),
+  div('formrow',lab('Provider',provider),lab('Currency',currency),lab('Transaction type',kind),lab('Amount',amount)),
+  div('formrow',lab('Evidence reference',reference),lab('Reason',reason)),div('formrow',save,refresh),body,div('formrow',prev,next));main.append(card);load();
+ foregroundRefresh(card,15000,load,()=>!card.closest('[hidden]')&&!busy);
+}
 async function adminMinuteWallet(main){
  const card=div('card',title('Client minute management')),company=node('select',{class:'field','aria-label':'Minute wallet company'}),
   search=input('walletSearch','search','Find company by name or email'),detail=div('stack');
@@ -713,6 +756,7 @@ async function adminMinuteWallet(main){
  company.addEventListener('change',()=>select().catch(asError));
  card.append(div('formrow',lab('Search clients',search),btn('Find company',()=>find().catch(asError),true)),
   lab('Client company',company),detail);main.append(card);
+ providerFinancialJournal(main);
  adminTransactionExplorer(main);
  productionCostPlanner(main);
  creditWalletOperator(main);

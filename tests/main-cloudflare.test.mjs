@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  REQUIRED_COLUMNS, REQUIRED_TABLES, REQUIRED_SAFETY_TRIGGERS, REQUIRED_MINUTE_LEDGER_TRIGGERS, REQUIRED_HOLD_TRIGGERS, checkHoldTriggers, checkMinuteLedgerTriggers, getCredentials, makeMainConfig, checkTables, checkColumns, checkSafetyTriggers, inspectCloudflare, verifiedSchemaState,
+  REQUIRED_COLUMNS, REQUIRED_TABLES, REQUIRED_SAFETY_TRIGGERS, REQUIRED_MINUTE_LEDGER_TRIGGERS, REQUIRED_HOLD_TRIGGERS, REQUIRED_PROVIDER_JOURNAL_TRIGGERS, checkProviderJournalTriggers, checkHoldTriggers, checkMinuteLedgerTriggers, getCredentials, makeMainConfig, checkTables, checkColumns, checkSafetyTriggers, inspectCloudflare, verifiedSchemaState,
 } from '../scripts/main-cloudflare.mjs';
 
 test('new CDR cost observation is additive only and guarded by exact Calling CRM state',async()=>{
@@ -146,7 +146,7 @@ test('ready requires every required migration table', () => {
   assert.throws(() => checkColumns(['tenant_id','consent_status'],'CRM_DB','leads'), /missing columns/);
 });
 
-const mockTriggers=Object.entries({...REQUIRED_SAFETY_TRIGGERS,...REQUIRED_MINUTE_LEDGER_TRIGGERS,...REQUIRED_HOLD_TRIGGERS}).map(([name,parts])=>
+const mockTriggers=Object.entries({...REQUIRED_SAFETY_TRIGGERS,...REQUIRED_MINUTE_LEDGER_TRIGGERS,...REQUIRED_HOLD_TRIGGERS,...REQUIRED_PROVIDER_JOURNAL_TRIGGERS}).map(([name,parts])=>
   ({name,sql:'CREATE TRIGGER '+name+' '+parts.join(' ')+' BEGIN SELECT RAISE(ABORT, "deny"); END'}));
 function cloudflareMock({ controlTables=[],crmTables=[],controlName='ar3d-calling-control',crmName='ar3d-calling-shared-crm',leadColumns=['tenant_id','consent_status','dnd_status','interest_status','followup_at','customer_segment','plot_size_preference','visit_date_preference'],bucketName='ar3d-calling-recordings',triggers=mockTriggers }={}) {
   return async (url,opts) => {
@@ -177,6 +177,7 @@ function cloudflareMock({ controlTables=[],crmTables=[],controlName='ar3d-callin
         else if(sql.includes('tenant_credit_budgets')) rows=REQUIRED_COLUMNS.CONTROL_DB.tenant_credit_budgets.map(name=>({name}));
         else if(sql.includes('tenant_credit_audit')) rows=REQUIRED_COLUMNS.CONTROL_DB.tenant_credit_audit.map(name=>({name}));
         else if(sql.includes('tenant_minute_ledger')) rows=REQUIRED_COLUMNS.CONTROL_DB.tenant_minute_ledger.map(name=>({name}));
+        else if(sql.includes('provider_financial_journal')) rows=REQUIRED_COLUMNS.CONTROL_DB.provider_financial_journal.map(name=>({name}));
         else if(sql.includes('tenant_minute_holds')) rows=REQUIRED_COLUMNS.CONTROL_DB.tenant_minute_holds.map(name=>({name}));
         else if(sql.includes('lead_staff_assignments')) rows=REQUIRED_COLUMNS.CRM_DB.lead_staff_assignments.map(name=>({name}));
         else if(sql.includes('verified_provider_call_costs')) rows=REQUIRED_COLUMNS.CRM_DB.verified_provider_call_costs.map(name=>({name}));
@@ -341,3 +342,13 @@ test('minute ledger upgrade requires exact prior schema and ready CRM',()=>{cons
 test('minute ledger triggers required on complete schema',()=>{const rows=mockTriggers.filter(x=>Object.hasOwn(REQUIRED_MINUTE_LEDGER_TRIGGERS,x.name));checkMinuteLedgerTriggers(rows);assert.throws(()=>checkMinuteLedgerTriggers(rows.slice(1)),/Minute ledger safety trigger/);});
 
 test('exact hold migration and mandatory triggers',()=>{const old=REQUIRED_TABLES.CONTROL_DB.filter(t=>t!=='tenant_minute_holds');assert.equal(checkTables(old,'CONTROL_DB','preflight'),'control_minute_holds_upgrade');assert.equal(verifiedSchemaState({CONTROL_DB:'control_minute_holds_upgrade',CRM_DB:'ready'}),'control_minute_holds_upgrade');assert.throws(()=>checkTables(old,'CONTROL_DB','ready'),/tenant_minute_holds/);const rows=mockTriggers.filter(x=>Object.hasOwn(REQUIRED_HOLD_TRIGGERS,x.name));checkHoldTriggers(rows);assert.throws(()=>checkHoldTriggers(rows.slice(1)),/Minute hold safety trigger/)});
+
+test('provider journal additive upgrade and immutable trigger verification',async()=>{
+ const old=REQUIRED_TABLES.CONTROL_DB.filter(x=>x!=='provider_financial_journal');
+ assert.equal(checkTables(old,'CONTROL_DB','preflight'),'control_provider_journal_upgrade');
+ assert.equal(verifiedSchemaState({CONTROL_DB:'control_provider_journal_upgrade',CRM_DB:'ready'}),'control_provider_journal_upgrade');
+ assert.throws(()=>checkTables(old,'CONTROL_DB','ready'),/missing tables/);
+ assert.throws(()=>checkProviderJournalTriggers([]),/Provider journal safety trigger/);
+ const r=await inspectCloudflare({credentials:getCredentials(env),mode:'preflight',template,apiFetch:cloudflareMock({controlTables:old,crmTables:REQUIRED_TABLES.CRM_DB})});
+ assert.equal(r.modes.CONTROL_DB,'control_provider_journal_upgrade');
+});
