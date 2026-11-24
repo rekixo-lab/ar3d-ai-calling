@@ -477,28 +477,43 @@ function advanceLabelledFields(current,input,confidence,now){
  }
  return {result:last,interpreter:'labelled_multi_answer',pendingQuantity:null};
 }
-// Only explicitly labelled corrections of already accepted numeric fields.
-// No implied changes to property type, geographic dependencies, or consent.
+// A single explicitly labelled answer refers to its own field, never the
+// currently asked field by accident. Safe prior-field corrections are local
+// to this call and leave the current question outstanding.
 function advanceExplicitCorrection(current,input,confidence,now){
  const prefix=input.match(/^(?:सुधार(?: कीजिए)?|correction|actually|नहीं|नही)\s*[:：,।]?\s+/iu);
- if(!prefix)return null;
- const phrase=input.slice(prefix[0].length);
+ const phrase=prefix?input.slice(prefix[0].length):input;
  const labels=LABELLED_FIELDS.map(([field,re])=>({field,match:phrase.match(re)})).filter(x=>x.match);
  if(labels.length!==1)return null;
  const {field,match}=labels[0];
  const index=FIELDS.indexOf(field);
- if(index>=current.index)return null; // current question uses normal parser
+ // Multi-field statements are handled atomically by the labelled planner.
+ if(/[;；।]|,\s+|\s+(?:और|and)\s+(?=(?:प्रॉपर्टी|property|टाइप|शहर|लोकेशन|city|location|एरिया|इलाका|area|neighborhood|साइज|साइज़|size|माप|बजट|budget|रुचि|interest|विजिट|तारीख|visit date)\s)/iu.test(phrase))return null;
  const repeat=()=>({result:advanceFixedVoicePreview(current,{transcript:'repeat',confidence,now}),interpreter:'correction_unclear',pendingQuantity:null});
- if(confidence<.7||STOP.test(input)||NOT_HEARD.test(input)||MISUNDERSTOOD.test(input)||
-    !['budgetInr','size'].includes(field)||!Object.hasOwn(current.answers,field)||/[;；।]/u.test(match[1]))return repeat();
+ if(confidence<.7||STOP.test(input)||NOT_HEARD.test(input)||MISUNDERSTOOD.test(input))return repeat();
+ if(index>current.index)return repeat(); // never store an early answer as another field
+ if(index===current.index){
+  const result=advanceFixedVoicePreview(current,{transcript:match[1],confidence,now});
+  return {result,interpreter:'labelled_current_answer',pendingQuantity:null};
+ }
+ if(!['budgetInr','size','area','location'].includes(field)||!Object.hasOwn(current.answers,field))return repeat();
  try{
   const out={...current,answers:{...current.answers},turns:current.turns+1,attempts:0};
   if(out.turns>MAX_TURNS)return repeat();
   if(field==='size')out.answers.size=parseSize(match[1],out.answers.propertyType);
-  else{
+  else if(field==='budgetInr'){
    const range=parseBudgetRange(match[1]);
    out.answers.budgetInr=range?range.upper:parseBudget(match[1]);
    if(range)out.answers.budgetMinInr=range.lower;else delete out.answers.budgetMinInr;
+  }else{
+   const place=smallText(match[1],field);
+   // A different city invalidates the already collected neighborhood. Do
+   // not silently carry the old area to the new city; require staff review.
+   if(field==='location'&&Object.hasOwn(out.answers,'area')&&place!==out.answers.location){
+    out.status='needs_review';
+    return {result:response(out,'human_review','City changed after neighborhood was collected; confirm both before saving.'),interpreter:'location_dependency_review',pendingQuantity:null};
+   }
+   out.answers[field]=place;
   }
   validate(out,now);
   return {result:response(out,'next_question'),interpreter:'explicit_correction',pendingQuantity:null};
