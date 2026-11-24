@@ -211,12 +211,14 @@ export async function reserveCampaignQuestionnaire(control,config,job,now){
 }
 
 export async function submitScriptedPhone(control,config,id,destination,maxSeconds,fetcher){
+ // ring_timeout stops unanswered ringing; hangup_on_ring schedules a hangup
+ // from the start of ringing even if the recipient has answered (6000).
  try{
   const response=await fetcher('https://api.plivo.com/v1/Account/'+config.authId+'/Call/',{
    method:'POST',redirect:'manual',signal:AbortSignal.timeout(8000),
    headers:{Authorization:config.authorization,'Content-Type':'application/json'},body:JSON.stringify({
     from:config.caller,to:destination,answer_url:callback(config,id,'answer'),answer_method:'GET',
-    hangup_url:callback(config,id,'hangup'),hangup_method:'GET',time_limit:maxSeconds,hangup_on_ring:25
+    hangup_url:callback(config,id,'hangup'),hangup_method:'GET',time_limit:maxSeconds,ring_timeout:25
    })
   });
   if([400,401,403,404,422,429].includes(response.status)){
