@@ -190,7 +190,7 @@ function scriptedPhonePilotPanel(){
   }
   const call=btn('Call the verified internal number once',async()=>{
     const selected=config?.devices?.find(x=>x.leadId===device.value);
-    if(busy||refreshing||!selected||config?.availability?.ready!==true||!window.confirm('Place one internal pilot call to the selected test number ending '+selected.destinationLast4+'? Confirm the actual recipient has explicitly agreed to this AI test and the selected speech processing service, including recording for Whisper or live transcription for Deepgram. A brief recording/processing notice is played, then the first question starts without pressing 1. Selected recognition: '+engine.options[engine.selectedIndex].textContent+'. Telephony and AI usage may be charged.'))return;
+    if(busy||refreshing||!selected||config?.availability?.ready!==true||!window.confirm('Place one internal pilot call to the selected test number ending '+selected.destinationLast4+'? Confirm the actual recipient has been informed BEFORE this call about AI processing, text retention and their right to decline, and has explicitly agreed to the selected speech processing service (including recording for Whisper). Deepgram starts with a short introduction; Whisper also plays a recording notice. No keypad required. Selected recognition: '+engine.options[engine.selectedIndex].textContent+'. Telephony and AI usage may be charged.'))return;
     busy=true;updateAvailability();
     try{
       await api('/v1/human/scripted-phone-pilot','POST',{language:language.value,leadId:selected.leadId,engine:engine.value,confirm:'CALL_ONE_PRECONSENTED_INTERNAL_NUMBER'});
@@ -212,8 +212,8 @@ function scriptedPhonePilotPanel(){
     enrollment.hidden=!config.configured;
     prepare.hidden=!!config.configured;
 
-    results.replaceChildren(...(config.recent?.length?[table(['Started','Test number','Language','Speech engine','Status','Provider call reference','Attempts processed','Questions accepted','Audio result','Signed hangup','Seconds'],
-      config.recent.map(x=>[formatIst(x.created_at),x.destinationLast4?'••••'+x.destinationLast4:'—',x.language,x.engine==='deepgram_stream'?'Deepgram live':'Whisper',x.phase,x.provider_call_reference?'Received':'Not received',x.turn??'—',x.question_index??'—',x.last_audio_outcome?x.last_audio_outcome.replaceAll('_',' '):'—',x.signed_hangup?'Received':'Not received',x.duration_seconds??'—']))]:[]));
+    results.replaceChildren(...(config.recent?.length?[table(['Started','Test number','Language','Speech engine','Status','Provider call reference','Attempts processed','Questions accepted','Audio result','Audio received (ms)','STT connected','Signed hangup','Seconds'],
+      config.recent.map(x=>[formatIst(x.created_at),x.destinationLast4?'••••'+x.destinationLast4:'—',x.language,x.engine==='deepgram_stream'?'Deepgram live':'Whisper',x.phase,x.provider_call_reference?'Received':'Not received',x.turn??'—',x.question_index??'—',x.last_audio_outcome?x.last_audio_outcome.replaceAll('_',' '):'—',x.audio_ms??'—',x.stt_connected==null?'—':x.stt_connected?'Yes':'No',x.signed_hangup?'Received':'Not received',x.duration_seconds??'—']))]:[]));
     }catch(err){config=null;status.textContent='Could not verify internal call availability. Refresh status to retry.';throw err}
     finally{refreshing=false;updateAvailability();scheduleCheck()}
   }
