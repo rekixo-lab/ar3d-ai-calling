@@ -1473,12 +1473,12 @@ function campaignResultsPanel(tenantId,content,role){
    answer.hidden=true;
    output.replaceChildren(
     node('p',{class:'muted',text:total?(offset+1)+'–'+(offset+results.length)+' of '+total+' customers':'Campaign call attempts will appear here.'}),
-    table(['Customer','Campaign','Outcome','CRM','Answers','Plivo charge'],results.map(r=>[
+    table(['Customer','Campaign','Outcome','CRM','Answers','Calling credits'],results.map(r=>[
      r.name,r.campaign,outcomes[r.outcome]||outcomes[r.state]||r.state,
      r.answers?(r.partial?'Partial · review needed':r.savedToLead?'Saved to lead':'Lead needs review'):'—',
      r.answers?btn(r.partial?'View partial answers':'View answers',()=>showAnswers(r),true):'—',
      role==='client_admin'&&['completed','failed'].includes(r.state)?
-      btn('Check charge',()=>checkCharge(r),true):'—'
+      btn('Check credits',()=>checkCharge(r),true):'—'
     ]))
    );
    back.disabled=offset===0;next.disabled=offset+results.length>=total;
@@ -1488,12 +1488,13 @@ function campaignResultsPanel(tenantId,content,role){
   try{
    const query=new URLSearchParams({tenantId,jobId:result.id});
    const bill=await api('/v1/human/plivo-cdr?'+query);
-   const nodeText='Plivo reports '+bill.providerReportedAmount+
-    ' (currency not verified), billed '+bill.billedSeconds+
-    ' seconds. Check the minute ledger for actual settled usage.';
+   const nodeText=bill.settlementStatus==='settled'?'Charged: '+formatSeconds(bill.chargedSeconds):
+    bill.settlementStatus==='released'?'Reservation released; no minutes charged.':
+    bill.settlementStatus==='held'?'Reserved: '+formatSeconds(bill.reservedSeconds)+' · awaiting settlement.':
+    'No calling credit transaction recorded for this attempt.';
    chargeInfo.replaceChildren(node('p',{class:'note',text:nodeText}));
   }catch(err){chargeInfo.replaceChildren(node('p',{class:'note',
-   text:'This call has no verified provider bill available here. Check minute history for settlement status.'}));asError(err)}
+   text:'Call credit history is unavailable. Refresh to retry.'}));asError(err)}
  }
  function showAnswers(result){
   const trigger=document.activeElement,q=result.answers;
