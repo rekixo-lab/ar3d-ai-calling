@@ -574,7 +574,7 @@ function manualMinuteLedger(main,tenantId,admin){
    pending={tenantId,transactionId:crypto.randomUUID(),deltaSeconds:delta,expectedBalanceSeconds:balance,reason:reason.value.trim()};
   }
   busy=true;submit.disabled=true;
-  try{await api('/v1/human/credits/minute-ledger','POST',pending);pending=null;minutes.value='';reason.value='';offset=0;await load();notice('Credit adjustment recorded. Calling remains disabled by this ledger.')}
+  try{await api('/v1/human/credits/minute-ledger','POST',pending);pending=null;minutes.value='';reason.value='';offset=0;await load();notice('Credit adjustment recorded. This adjustment does not authorize calling.')}
   catch(e){asError(e);notice('Adjustment not confirmed. Retry the same transaction or refresh after checking history.',true)}
   finally{busy=false;submit.disabled=balance===null}
  });
@@ -585,7 +585,7 @@ function manualMinuteLedger(main,tenantId,admin){
   try{const d=await api('/v1/human/credits/minute-ledger?'+new URLSearchParams({tenantId,offset:String(offset)}));if(id!==seq)return;balance=d.allocatedSeconds;uncommitted=d.uncommittedSeconds;
    const metric=(name,value)=>div('card metric',node('span',{class:'muted',text:name}),node('strong',{text:formatSeconds(value)}));
    body.replaceChildren(div('metrics',metric('Net allocated',balance),metric('Reserved',d.heldSeconds),metric('Used',d.usedSeconds),metric('Uncommitted',d.uncommittedSeconds)),
-    node('p',{class:'note',text:'Allocation only — not yet spendable. No online payments.'}),
+    node('p',{class:'note',text:'Net allocation, holds and settled usage. Calling requires independent funding and telecom approval. No online payments.'}),
     title('Credit adjustments','h3'),table(['Date (IST)','Transaction ID','Type','Change (min)','Before','After',...(admin?['Actor','Reason']:[])],d.transactions.map(t=>[formatIst(t.createdAt),t.transactionId,t.kind,(t.deltaSeconds>0?'+':'')+String(t.deltaSeconds/60),formatSeconds(t.previousSeconds),formatSeconds(t.balanceSeconds),...(admin?[t.actor,t.reason]:[])])),
     title('Call credit history','h3'),table(['Created (IST)','Call reference','Status','Reserved','Charged','Closed (IST)'],(d.callTransactions||[]).map(h=>[formatIst(h.createdAt),h.jobId,h.state,formatSeconds(h.reservedSeconds),formatSeconds(h.chargedSeconds),h.closedAt?formatIst(h.closedAt):'—'])));
    prev.disabled=offset===0;next.disabled=!d.hasMore;
@@ -647,28 +647,12 @@ function productionCostPlanner(main){
  main.append(panel);calculate().catch(asError);
 }
 function creditWalletOperator(main){
- const panel=node('details',{class:'card'},node('summary',{text:'Provider balance & provisional budget adjustments'}));
+ const panel=node('details',{class:'card'},node('summary',{text:'Advanced provider diagnostics & legacy plan history'}));
  const area=div('stack'),provider=div(''),connection=div(''),usage=div(''),total=div(''),clientStatus=div('');
  const company=node('select',{class:'field','aria-label':'Client credit company'});
  const packages=[0,100,200,300,400,500];
- const budget=node('select',{class:'field','aria-label':'Planned client credit package'},
+ const budget=node('select',{class:'field','aria-label':'Historical planned client credit package',disabled:'disabled'},
   packages.map(n=>node('option',{value:String(n),text:n?String(n)+' credits · ₹'+n+' planned':'No credits · ₹0'})));
- const reason=input('creditReason','text','Reason for changing planned credit');
- reason.maxLength=200;reason.value='AR3D provisional client credit package update';
- const save=btn('Set planned credit',async()=>{
-  if(!company.value)return;
-  if(!confirm('Set the selected client planned credit to ₹'+budget.value+'? This does NOT transfer Plivo funds or activate calls.'))return;
-  save.disabled=true;
-  try{
-   const n=Number(budget.value);
-   if(!packages.includes(n))throw Error('Choose 100, 200, 300, 400 or 500 planned credits');
-   const d=await api('/v1/human/credits/tenant','POST',{
-    tenantId:company.value,totalInr:n,expectedCurrentInr:current,reason:reason.value
-   });
-   notice('Client planned credit saved: ₹'+d.plannedInr+'. No Plivo funds transferred.');
-   await reload();
-  }catch(e){asError(e)}finally{save.disabled=false}
- });
  let current=0,opened=false;
  const loadProvider=async()=>{
   const d=await api('/v1/human/credits/provider');
@@ -759,12 +743,12 @@ function creditWalletOperator(main){
  }
  company.addEventListener('change',()=>reload().catch(asError));
  area.append(node('p',{class:'muted',
-  text:'These are planning limits only. No money moves to a Plivo subaccount; calling remains disabled until approved funding, minutes reconciliation and telecom checks.'}),
+  text:'Legacy plans are read-only history, not calling credits. Use the minute ledger for allocations and recoveries. Provider funding and telecom approval remain separate.'}),
   btn('Refresh Plivo API balance',()=>loadProvider().catch(asError),true),provider,
   btn('Check Plivo API & rented numbers',()=>loadConnection().catch(asError),true),connection,
   btn('View last 7 days Plivo voice usage',()=>loadUsage().catch(asError),true),usage,total,
   div('formrow',lab('Client company',company),lab('Total planned credit (₹)',budget)),
-  lab('Audit reason',reason),save,clientStatus);
+  clientStatus);
  panel.append(area);main.append(panel);
  panel.addEventListener('toggle',()=>{if(panel.open)open().catch(err=>{opened=false;asError(err)})});
  document.addEventListener('client-created',()=>{opened=false;if(panel.open)open().catch(asError)});
@@ -1506,10 +1490,10 @@ function campaignResultsPanel(tenantId,content,role){
    const bill=await api('/v1/human/plivo-cdr?'+query);
    const nodeText='Plivo reports '+bill.providerReportedAmount+
     ' (currency not verified), billed '+bill.billedSeconds+
-    ' seconds. No planned credits deducted.';
+    ' seconds. Check the minute ledger for actual settled usage.';
    chargeInfo.replaceChildren(node('p',{class:'note',text:nodeText}));
   }catch(err){chargeInfo.replaceChildren(node('p',{class:'note',
-   text:'This call has no verified provider bill yet. No credits were deducted.'}));asError(err)}
+   text:'This call has no verified provider bill available here. Check minute history for settlement status.'}));asError(err)}
  }
  function showAnswers(result){
   const trigger=document.activeElement,q=result.answers;

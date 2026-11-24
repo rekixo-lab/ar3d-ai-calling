@@ -1,4 +1,4 @@
-// Internal primitives only. No route, cron or provider submission uses these yet.
+// Internal primitives used by gated campaign dispatch and matched CDR settlement.
 // A caller must independently establish provider funding and dispatch permission.
 const uuid=/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
 const jobId=/^(?:[a-f0-9]{32}|[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})$/i;
@@ -27,7 +27,7 @@ export async function reserveMinutes(db,{tenantId,job,maxSeconds,now=Date.now()}
  const current=await find(db,tenantId,job);
  return current?{ok:current.state==='held'&&current.reserved_seconds===seconds,replayed:true,state:current.state}:{ok:false,replayed:false,state:'insufficient_or_unavailable'};
 }
-// Evidence must be validated by the future provider reconciliation adapter.
+// Evidence must be validated by the provider reconciliation adapter.
 // Uncertain submission, absent CDR, or charge beyond reserve must stay held.
 export async function closeMinuteHold(db,{tenantId,job,billedSeconds,evidenceRef,kind,now=Date.now()}){
  identity(tenantId,job);

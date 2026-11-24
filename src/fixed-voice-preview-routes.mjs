@@ -1,6 +1,6 @@
 // Authenticated browser-only preview of seven fixed Hindi/English questions.
 // Transcripts are NOT trusted provider transcripts and never touch D1/R2.
-import {beginFixedVoicePreview,advanceFixedVoicePreview} from './fixed-voice-turns.mjs';
+import {beginFixedVoicePreview,advanceInternalVoice} from './fixed-voice-turns.mjs';
 import {parseJsonBody} from './core.mjs';
 import {requireMembership} from './human-auth.mjs';
 import {ANSWER_MAX_BYTES,answerContentType,readBoundedBytes,supportsAnswerAudio,transcribeScriptedAnswer} from './scripted-speech.mjs';
@@ -55,9 +55,9 @@ export async function handleFixedVoicePreviewRequest(req,env,user){
     if(value.action==='turn'){
       if(Object.keys(value).some(k=>!['action','state','transcript','confidence'].includes(k)))
         throw Error('invalid voice preview turn');
-      return reply(advanceFixedVoicePreview(value.state,{
+      return reply((await advanceInternalVoice(null,value.state,{
         transcript:value.transcript,confidence:value.confidence??1
-      }));
+      })).result);
     }
     throw Error('invalid voice preview action');
   }catch{

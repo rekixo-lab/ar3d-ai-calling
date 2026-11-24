@@ -430,7 +430,7 @@ export async function handleCreditWalletRequest(req,env,user,{fetcher=fetch}={})
     transactions:history.results.slice(0,50).map(x=>({...x,deltaPaise:x.newPaise-x.previousPaise,
      type:x.newPaise>x.previousPaise?'allocation':x.newPaise<x.previousPaise?'recovery':'unchanged'})),
     records:page.map(x=>({...x,settlementPending:heldIds.has(x.jobId)})),offset,hasMore:history.results.length>50||records.results.length>50,
-    status:'observation_only',notice:'Verified provider seconds and provisional budget history only. No paid minutes, automatic deductions or payments.'});
+    status:'observation_only',notice:'Verified provider seconds and historical INR plan records. Check the minute ledger for actual holds and settlements. No online payments.'});
   }
   if(path!=='tenant')return null;
   if(req.method==='GET'){
