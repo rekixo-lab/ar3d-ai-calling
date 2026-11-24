@@ -77,7 +77,7 @@ export async function handlePlivoCostReconcile(req,env,user,{fetcher=fetch}={}){
    const response=await fetcher(
     'https://api.plivo.com/v1/Account/'+encodeURIComponent(auth)+
     '/Call/'+encodeURIComponent(job.callUuid)+'/',{
-     method:'GET',redirect:'error',signal:AbortSignal.timeout(5000),
+     method:'GET',redirect:'manual',signal:AbortSignal.timeout(5000),
      headers:{Authorization:'Basic '+btoa(auth+':'+token),Accept:'application/json'}
     });
    if(!response.ok||!response.headers.get('content-type')?.toLowerCase().includes('json')||
