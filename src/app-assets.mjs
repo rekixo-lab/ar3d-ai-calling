@@ -1305,7 +1305,7 @@ function campaignResultsPanel(tenantId,content,role){
   ];
   answer.replaceChildren(div('row between',title(result.name+(result.partial?' — partial call answers':' — call answers'),'h3'),
    btn('Close answers',()=>{answer.hidden=true;trigger?.focus()},true)),
-   result.partial?node('p',{class:'note',text:'Incomplete conversation. Only accepted answers are shown; the main customer profile was not changed. Review before following up.'}):null,
+   ...(result.partial?[node('p',{class:'note',text:'Incomplete conversation. Only accepted answers are shown; the main customer profile was not changed. Review before following up.'})]:[]),
    node('dl',{class:'answer-fields'},
    fields.map(([label,value])=>div('',node('dt',{text:label}),node('dd',{text:value||'—'})))));
   answer.hidden=false;
