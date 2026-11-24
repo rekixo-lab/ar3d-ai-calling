@@ -334,16 +334,44 @@ function creditWalletOperator(main){
  };
  const loadConnection=async()=>{
   const d=await api('/v1/human/credits/provider-check');
-  const result=d.credentialsVerified?'Plivo API authenticated':'Plivo API connection not verified';
-  const count=d.numberListAvailable?
-   ' · rented numbers listed: '+d.listedNumberCount+
-   (d.totalNumberCount!==null?' of '+d.totalNumberCount:''):' · number list not available';
-  const caller=d.configuredCallerPresent===true?' · configured caller found in provider list':
-   d.configuredCallerPresent===false?' · configured caller not in provider list':' · caller ownership not verified';
+  const messages={
+   plivo_auth_id_missing:'Cloudflare Secret PLIVO_AUTH_ID is missing from the running Worker.',
+   plivo_auth_token_missing:'Cloudflare Secret PLIVO_AUTH_TOKEN is missing from the running Worker.',
+   plivo_auth_id_format_invalid:'PLIVO_AUTH_ID has an invalid format. Re-enter the exact Plivo Auth ID without spaces.',
+   plivo_auth_token_format_invalid:'PLIVO_AUTH_TOKEN has an invalid format. Re-enter the Auth Token as a Worker Secret without spaces.',
+   plivo_account_unauthorized:'Plivo rejected the account login (401). Check the Auth ID and Auth Token belong to the same Plivo account, then save the Secrets again.',
+   plivo_account_forbidden:'Plivo refused this account API request (403). Check API access/account restrictions in Plivo.',
+   plivo_account_not_found:'Plivo account not found (404). Confirm the Auth ID belongs to the selected Plivo organization.',
+   plivo_account_rate_limited:'Plivo is rate-limiting account access (429). Retry later; do not rotate tokens without a reason.',
+   plivo_account_http_error:'Plivo Account API returned an unsuccessful HTTP status. Check Plivo status and Worker logs.',
+   plivo_account_timeout:'Plivo Account API timed out. Check network connectivity and retry.',
+   plivo_account_network_error:'Cloudflare Worker could not reach the Plivo Account API. Check Worker logs and network.',
+   plivo_account_invalid_response:'Plivo Account API returned a response we could not validate. Check the provider status and JSON response shape.',
+   plivo_account_identity_mismatch:'Plivo returned a different Auth ID than this Worker. Check the connected organization and Secret pair.'
+  };
+  const reason=d.reason||'unknown';
+  const authStatus=d.credentialsVerified?
+   'Plivo API authenticated':
+   'Plivo API connection NOT verified · '+(messages[reason]||'Unknown connection issue.');
+  const http=d.credentialsVerified?'':d.httpStatus?' · HTTP '+d.httpStatus:'';
+  const numberStatus=d.credentialsVerified?
+   d.configuredCallerPresent===true?
+    'Configured caller ••••1333 found in your Plivo account'+
+      (d.callerVerifiedBy==='account_number_detail'?' (individual-number lookup)':' (number list)'):
+   d.numberListAvailable?
+    'Rented-number list available, but configured caller ownership not confirmed':
+    'Rented-number list not available':
+   'Number check cannot run until Plivo account authentication succeeds';
+  const details=d.credentialsVerified&&d.numberListReason?
+   ' · Number-list check: '+d.numberListReason+
+    (d.numberListHttpStatus?' (HTTP '+d.numberListHttpStatus+')':''):
+   '';
+  const safety=' This diagnostic never enables campaigns or overrides calling permissions.';
   connection.replaceChildren(
-   node('p',{class:'note',role:'status',text:result+count+caller+'. KYC and outbound route still require provider approval.'}),
-   ...(Array.isArray(d.listedNumbers)?d.listedNumbers.map(n=>
-    node('p',{class:'muted',text:n.maskedNumber+(n.inIndia?' · India':'')+(n.voiceEnabled?' · Voice enabled':' · Voice not verified')})):[]
+   node('p',{class:'note',role:'status',text:authStatus+http+' · '+numberStatus+details+'.'+safety}),
+   ...(d.credentialsVerified&&Array.isArray(d.listedNumbers)?d.listedNumbers.map(n=>
+    node('p',{class:'muted',text:n.maskedNumber+(n.inIndia?' · India':'')+
+     (n.voiceEnabled?' · Voice enabled':' · Voice not independently verified')})):[]
    )
   );
  };
