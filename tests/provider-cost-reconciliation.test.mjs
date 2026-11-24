@@ -1,0 +1,46 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {fixture,tid,at,admin,client} from './helpers/calling-fixture.mjs';
+import {reserveBudgetedMinutes,providerBudgetPosition} from '../src/provider-cost-reservations.mjs';
+import {closeMinuteHold,minutePosition} from '../src/minute-holds.mjs';
+import {providerSafety} from '../src/provider-safety.mjs';
+import {handleCreditWalletRequest} from '../src/credit-wallet-routes.mjs';
+const one='11111111-aaaa-4aaa-8aaa-111111111111',two='11111111-aaaa-4aaa-8aaa-222222222222',three='11111111-aaaa-4aaa-8aaa-333333333333';
+const config={plivo:{currency:'USD',capMicros:150,pulseMicros:30},sarvam:{currency:'INR',capMicros:1000,pulseMicros:100}};
+test('per-call evidence atomically reconciles budgets once, preserves client debits and blocks on actual overrun',async()=>{
+ const f=fixture();try{
+ const now=Date.now();f.c.db.prepare("UPDATE human_sessions SET created_at=?,expires_at=? WHERE user_id='admin'").run(new Date(now).toISOString(),now+3600000);
+ f.c.db.prepare("INSERT INTO tenant_minute_ledger(id,tenant_id,kind,delta_seconds,previous_seconds,balance_seconds,actor,reason,created_at) VALUES('fund',?,'allocation',600,0,600,'admin','Synthetic allocation',?)").run(tid,at);
+ const reserve=job=>reserveBudgetedMinutes(f.env.CONTROL_DB,{tenantId:tid,job,maxSeconds:60,globalCap:600,config});
+ const settle=job=>closeMinuteHold(f.env.CONTROL_DB,{tenantId:tid,job,billedSeconds:30,kind:'verified_cdr',evidenceRef:'test-cdr-'+job});
+ const req=(path,user,body)=>handleCreditWalletRequest(new Request('https://app.example.invalid/v1/human/credits/'+path,{method:body?'POST':'GET',headers:{origin:'https://app.example.invalid','content-type':'application/json'},...(body?{body:JSON.stringify(body)}:{})}),f.env,user);
+ const post=(job,provider,evidenceRef,zeroCost=false,user=admin)=>req('provider-cost-reconciliation',user,{tenantId:tid,jobId:job,provider,evidenceRef,zeroCost});
+ const journal=(id,provider,currency,amount,ref)=>f.c.db.prepare("INSERT INTO provider_financial_journal(id,provider,currency,kind,amount_micros,evidence_ref,reason,actor,created_at) VALUES(?,?,?,'expense',?,?,'Synthetic per-call expense','admin',?)").run(id,provider,currency,amount,ref,at);
+ assert.equal((await reserve(one)).ok,true);assert.equal((await reserve(two)).ok,true);
+ journal('a','plivo','USD',20,'cdr-line-001');journal('b','sarvam','INR',300,'ai-line-002');journal('c','plivo','INR',20,'wrong-currency');
+ assert.equal((await post(one,'plivo','cdr-line-001')).status,409);
+ assert.equal((await settle(one)).ok,true);assert.equal((await settle(two)).ok,true);
+ assert.equal((await post(one,'plivo','cdr-line-001',false,client)).status,403);
+ assert.equal((await post(one,'plivo','wrong-currency')).status,409);
+ assert.equal((await post(one,'plivo','cdr-line-001',true)).status,409);
+ assert.equal((await post(one,'plivo','cdr-line-001')).status,201);
+ assert.equal((await post(one,'plivo','cdr-line-001')).status,200);
+ assert.equal((await post(two,'plivo','cdr-line-001')).status,409);
+ assert.equal((await post(two,'plivo','CDR-LINE-001',true)).status,409);
+ assert.equal((await post(one,'sarvam','zero-ai-001',true)).status,201);
+ assert.throws(()=>journal('d','sarvam','INR',10,'ZERO-AI-001'),/zero-cost evidence/);
+ let p=await providerBudgetPosition(f.env.CONTROL_DB,config);assert.equal(p.accounts[0].remainingMicros,70);assert.equal(p.accounts[1].remainingMicros,800);
+ assert.equal((await reserve(three)).ok,true);
+ assert.equal((await post(two,'sarvam','ai-line-002')).status,201);
+ assert.equal((await providerSafety(f.env.CONTROL_DB)).find(x=>x.provider==='sarvam').blocked,true);
+ assert.equal((await minutePosition(f.env.CONTROL_DB,tid)).usedSeconds,60);
+ assert.equal((await minutePosition(f.env.CONTROL_DB,tid)).heldSeconds,60);
+ assert.equal((await req('provider-cost-reconciliation?tenantId='+tid,client)).status,403);
+ const data=await (await req('provider-cost-reconciliation?tenantId='+tid,admin)).json();
+ assert.equal(data.rows.find(x=>x.jobId===one).sarvamActual,0);
+ assert.equal(data.totals.find(x=>x.provider==='plivo').actualMicros,20);
+ assert.equal(data.totals.find(x=>x.provider==='sarvam').actualMicros,300);
+ assert.throws(()=>f.c.db.exec('DELETE FROM provider_cost_reconciliations'),/immutable/);
+ assert.throws(()=>f.c.db.exec('UPDATE provider_cost_reconciliations SET actual_micros=1'),/immutable/);
+ }finally{f.close()}
+});
