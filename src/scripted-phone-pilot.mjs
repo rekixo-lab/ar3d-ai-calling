@@ -105,6 +105,28 @@ async function pilotCrm(env,tenantId){
  return tenant?resolveCrmDb(env,tenant):null;
 }
 
+// Reuse the dispatch eligibility predicate for the no-dial readiness check.
+async function eligiblePilotLead(crm,config){
+ return crm.prepare(`SELECT updated_at FROM leads WHERE tenant_id=? AND id=? AND mobile_e164=?
+  AND consent_status!='denied' AND dnd_status!='blocked'
+  AND NOT EXISTS(SELECT 1 FROM lead_opt_out_events o WHERE o.tenant_id=leads.tenant_id AND o.lead_id=leads.id)`)
+  .bind(config.tenant,config.lead,config.destination).first();
+}
+
+// No identifiers, records, or phone numbers are returned. No switch needed.
+export async function inspectInternalPilotLead(env){
+ const config={tenant:env.AR3D_SCRIPTED_PILOT_TENANT_ID,
+  lead:env.AR3D_SCRIPTED_PILOT_LEAD_ID,destination:env.AR3D_SCRIPTED_PILOT_VERIFIED_NUMBER};
+ if(!UUID.test(config.tenant||'')||!UUID.test(config.lead||'')||!MOBILE.test(config.destination||''))
+  return {state:'configuration_missing',ready:false};
+ try{
+  const crm=await pilotCrm(env,config.tenant);
+  if(!crm)return {state:'tenant_unavailable',ready:false};
+  const lead=await eligiblePilotLead(crm,config);
+  return lead?{state:'matched',ready:true}:{state:'lead_unavailable',ready:false};
+ }catch{return {state:'check_unavailable',ready:false}}
+}
+
 function callback(config,id,step){return config.origin+HOOK+'/'+id+'/'+step}
 const play=url=>'<Play>'+escapeXml(url)+'</Play>';
 
@@ -154,10 +176,7 @@ async function startPilot(req,env,user,config,now,fetcher){
     !['hi','en'].includes(data.language))return error('explicit_pilot_confirmation_required',400);
  const control=env.CONTROL_DB,crm=await pilotCrm(env,config.tenant);
  if(!crm)return error('pilot_client_unavailable',409);
- const lead=await crm.prepare(`SELECT updated_at FROM leads WHERE tenant_id=? AND id=? AND mobile_e164=?
-  AND consent_status!='denied' AND dnd_status!='blocked'
-  AND NOT EXISTS(SELECT 1 FROM lead_opt_out_events o WHERE o.tenant_id=leads.tenant_id AND o.lead_id=leads.id)`)
-  .bind(config.tenant,config.lead,config.destination).first();
+ const lead=await eligiblePilotLead(crm,config);
  if(!lead)return error('verified_internal_lead_unavailable',409);
  if(!await scriptedPromptsReady(env,data.language))
   return error('pilot_prompt_recordings_incomplete',409);
