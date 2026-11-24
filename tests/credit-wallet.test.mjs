@@ -90,7 +90,7 @@ test('Plivo balance is only Super Admin MFA, account type/currency are never inf
   assert.equal(result.status,200);
   const d=await result.json();
   assert.equal(d.cashCredits,'1000.00');assert.equal(d.accountType,'developer');
-  assert.equal(d.cashCreditsCurrency,'unverified_for_India_account');
+  assert.equal(d.cashCreditsCurrency,'USD');
   assert.equal(d.verifiedInr,false);assert.equal(seen,1);
   assert.ok(!JSON.stringify(d).includes('TESTACCOUNT123'));
   assert.ok(!JSON.stringify(d).includes('SYNTHETICAUTHTOKEN123'));

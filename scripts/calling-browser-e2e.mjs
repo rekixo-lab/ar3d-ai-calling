@@ -258,10 +258,11 @@ try{
  await adminPage.goto(origin+'/app');
  await adminPage.getByRole('heading',{name:'Client directory'}).waitFor();
  // Stub only the external account result; actual authorization is covered in route tests.
- await adminPage.route('**/v1/human/credits/provider',r=>r.fulfill({json:{available:true,cashCredits:'12.34',accountType:'developer',checkedAt:new Date().toISOString()}}));
+ await adminPage.route('**/v1/human/credits/provider',r=>r.fulfill({json:{available:true,cashCredits:'12.34',cashCreditsCurrency:'USD',accountType:'developer',checkedAt:new Date().toISOString()}}));
  await adminPage.getByRole('link',{name:'Dashboard',exact:true}).click();
  const providers=adminPage.getByRole('region',{name:'Provider balances'});
- await providers.getByText('12.34',{exact:true}).waitFor();
+ await providers.getByText('$12.34',{exact:true}).waitFor();
+ await providers.getByText(/Approx. ₹987.20/).waitFor();
  await providers.getByText('Not available via API',{exact:true}).waitFor();
  await providers.getByText('Client allocated minutes',{exact:true}).waitFor();
  await providers.getByText('100m 00s',{exact:true}).waitFor();
