@@ -473,9 +473,9 @@ function minuteUsagePanel(main,tenantId,admin){
    if(seq!==version||!card.isConnected)return;
    const rows=d.records.map(r=>{
     const observed=r.verifiedAt!==null;
-    const action=admin&&!observed?btn('Verify CDR',async()=>{
-     if(!confirm('Read this final call record from Plivo and record its exact seconds? No debit or new call.'))return;
-     try{await api('/v1/human/plivo-cost-reconcile','POST',{tenantId,jobId:r.jobId});notice('Provider CDR verified; no debit applied.');await load()}catch(e){asError(e)}
+    const action=admin&&(!observed||r.settlementPending)?btn(observed?'Retry settlement':'Verify CDR',async()=>{
+     if(!confirm('Verify the final Plivo CDR and settle its held billed minutes if eligible? No new call.'))return;
+     try{const result=await api('/v1/human/plivo-cost-reconcile','POST',{tenantId,jobId:r.jobId});notice(result.notice||'Provider CDR checked.');await load()}catch(e){asError(e)}
     },true):observed?'Verified':'Pending verification';
     return [formatIst(r.updatedAt),r.state,formatSeconds(r.connectedSeconds),formatSeconds(r.billedSeconds),action];
    });
@@ -486,7 +486,7 @@ function minuteUsagePanel(main,tenantId,admin){
     metric('Verified calls',String(d.verifiedCalls),'Final provider records'),
     metric('Awaiting CDR',String(d.pendingCalls),'Not included in verified totals'),
     metric('Available minutes','Not active','No paid credit or deductions')),
-    node('p',{class:'note',text:'Connected and billed durations are separate. A provider may bill in increments. No automatic wallet debits, payment or calling approval is active.'}),
+    node('p',{class:'note',text:'Connected and billed durations are separate. A provider may bill in increments. A matched held call can settle billed seconds after verification. No online payments or calling approval from this report.'}),
     ...(admin&&d.internal?[node('p',{class:'muted',text:'Internal tests (not client charges): '+d.internal.calls+' calls · '+formatSeconds(d.internal.connectedSeconds)+' signed hangup time.'})]:[]),
     title('Call usage records','h3'),table(['Updated','Status','Connected','Provider billed','CDR'],rows),
     title('Budget transaction history','h3'),table(['Date (IST)','Reference','Type','Change (₹)','Before (₹)','After (₹)',...(admin?['Actor','Reason']:[])],

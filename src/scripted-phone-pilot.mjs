@@ -89,12 +89,17 @@ export async function approvedCampaignPhone(env){
  if(env.AR3D_SCRIPTED_CAMPAIGNS_ENABLED!=='enabled')return null;
  const config=configuration(env);
  if(!config)return null;
+ // Campaign speech changes require separate operator review of disclosure
+ // and the selected engine's signed-ended internal acceptance evidence.
+ const engine=env.AR3D_CAMPAIGN_SPEECH_ENGINE||'whisper';
+ if(!['whisper','sarvam'].includes(engine)||
+    (engine==='sarvam'&&(!sarvamConfigured(env)||env.AR3D_CAMPAIGN_SARVAM_DISCLOSURE!=='approved')))return null;
  const verified=await env.CONTROL_DB.prepare(`SELECT id FROM scripted_phone_pilots
    WHERE job_id IS NULL AND phase='completed' AND hangup_at IS NOT NULL AND provider_account_id=?
    AND caller=? AND destination=? AND tenant_id=? AND lead_id=?
-   AND CASE WHEN json_valid(survey_json) THEN COALESCE(json_extract(survey_json,'$.phoneMeta.engine'),'whisper')='whisper' ELSE 0 END LIMIT 1`)
-  .bind(config.authId,config.caller,config.destination,config.tenant,config.lead).first();
- return verified?phoneConfiguration(env):null;
+   AND CASE WHEN json_valid(survey_json) THEN COALESCE(json_extract(survey_json,'$.phoneMeta.engine'),'whisper')=? ELSE 0 END LIMIT 1`)
+  .bind(config.authId,config.caller,config.destination,config.tenant,config.lead,engine).first();
+ return verified?{...phoneConfiguration(env),engine}:null;
 }
 
 async function currentMfa(db,user,now){
@@ -139,7 +144,7 @@ const streamingEngine='deepgram_stream',sarvamEngine='sarvam';
 const sarvamConfirm='CALL_ONE_PRECONSENTED_INTERNAL_SARVAM_NUMBER';
 const friendlyConfirm='CALL_ONE_INTERNAL_SARVAM_WITH_PRIOR_RECORDING_NOTICE';
 const sarvamConfigured=env=>typeof env.SARVAM_API_KEY==='string'&&!!env.SARVAM_API_KEY.trim()&&env.SARVAM_API_KEY.length<=512;
-function isSarvam(row){return internalDirect(row)&&JSON.parse(row.survey_json).phoneMeta?.engine===sarvamEngine}
+function isSarvam(row){const m=JSON.parse(row.survey_json).phoneMeta;return m?.engine===sarvamEngine&&(internalDirect(row)||Boolean(row.job_id&&m.mode==='campaign_consent'))}
 function isStreaming(row){return internalDirect(row)&&JSON.parse(row.survey_json).phoneMeta?.engine===streamingEngine}
 function internalDirect(row){return !row.job_id&&JSON.parse(row.survey_json).phoneMeta?.mode==='direct_preconsented'}
 const speak=(language,text)=>'<Speak voice="'+(language==='hi'?'Polly.Aditi':'WOMAN')+'" language="'+(language==='hi'?'hi-IN':'en-US')+'">'+escapeXml(text)+'</Speak>';
@@ -168,7 +173,7 @@ function responseFor(config,row,{repeatCue=false,directOpeningCue=false,liveToke
   if(!PROMPTS.includes(prompt))return end();
   // A distinct URL per attempt makes a retried callback safe to recognize.
   const retry=state.attempts>0?(repeatCue?audio('repeat'):speak(row.language,row.language==='hi'?'माफ कीजिए, कृपया दोबारा बताइए।':'Sorry, please say that again.')):'';
-  const pending=internalDirect(row)&&state.phoneMeta?.pendingQuantity;
+  const pending=(internalDirect(row)||isSarvam(row))&&state.phoneMeta?.pendingQuantity;
   const clarification=pending&&pending.turn===state.turns&&pending.field===field?
    speak(row.language,field==='size'?(row.language==='hi'?'कृपया बताइए, यह वर्ग फुट है या वर्ग गज?':'Is that in square feet or square yards?'):(row.language==='hi'?'कृपया बताइए, हजार, लाख या करोड़?':'Is that thousands, lakhs or crores?')):null;
   const prefix=(directOpeningCue?directOpening(row):'')+(clarification||retry+audio(prompt));
@@ -178,7 +183,7 @@ function responseFor(config,row,{repeatCue=false,directOpeningCue=false,liveToke
   }
   // Shorter turn capture for the pre-consented internal pilot only. Preserve
   // independently approved customer campaign and legacy consent behavior.
-  const quick=internalDirect(row);
+  const quick=internalDirect(row)||isSarvam(row);
   return xml(prefix+'<Record action="'+escapeXml(callback(config,row.id,'turn/'+row.turn))+
    '" method="GET" fileFormat="mp3" maxLength="'+(quick?'12':'16')+'" timeout="'+(quick?'3':'6')+'" finishOnKey="#" playBeep="true"/><Hangup/>');
  }
@@ -327,6 +332,8 @@ async function startPilot(req,env,user,config,now,fetcher){
 
 export async function reserveCampaignQuestionnaire(control,config,job,now){
  const id=crypto.randomUUID(),survey=beginFixedVoicePreview({language:job.language,now}).state;
+ // Still starts in keypad consent, never a direct/preconsented greeting.
+ if(config.engine==='sarvam')survey.phoneMeta={mode:'campaign_consent',engine:'sarvam',costMeterVersion:1,sttRoundedSeconds:0,sttFailedRequests:0};
  const inserted=await control.prepare(`INSERT INTO scripted_phone_pilots
    (id,tenant_id,lead_id,lead_updated_at,actor_id,language,destination,caller,expires_at,phase,survey_json,
     created_at,provider_account_id,job_id)
@@ -819,9 +826,9 @@ async function applyPhoneAnswer(config,env,row,answer,now,fetcher=fetch){
   const args={transcript:answer.text||'repeat',confidence:answer.confidence??1,now};
   // One STT request per recorded answer; only unclear text may use one LLM.
   // No automatic cross-provider retry. Missing key during a call fails closed.
-  const adapter=isSarvam(row)&&sarvamConfigured(env)?createSarvamContextualAdapter(env.SARVAM_API_KEY,fetcher):null;
+  const adapter=isSarvam(row)&&internalDirect(row)&&sarvamConfigured(env)?createSarvamContextualAdapter(env.SARVAM_API_KEY,fetcher):null;
   const interpretationStarted=Date.now();
-  const {result,interpreter,pendingQuantity=null}=internalDirect(row)&&answer.reason==='recognized'&&answer.text?
+  const {result,interpreter,pendingQuantity=null}=(internalDirect(row)||isSarvam(row))&&answer.reason==='recognized'&&answer.text?
    await advanceInternalVoice(isSarvam(row)?adapter:env.AI,prior,args,phoneMeta.pendingQuantity):{result:advanceFixedVoicePreview(prior,args),interpreter:'direct'};
   const aiMetrics=isSarvam(row)?{...(phoneMeta.costMeterVersion===1?{sttRoundedSeconds:(phoneMeta.sttRoundedSeconds||0)+(answer.sttConnected&&Number.isSafeInteger(answer.audioMs)?Math.ceil(answer.audioMs/1000):0)}:{}),interpretationMs:Date.now()-interpretationStarted,llmRequests:(phoneMeta.llmRequests||0)+(adapter?.requests||0),llmInputTokens:(phoneMeta.llmInputTokens||0)+(adapter?.usage?.inputTokens||0),llmOutputTokens:(phoneMeta.llmOutputTokens||0)+(adapter?.usage?.outputTokens||0),llmUsageUnknown:(phoneMeta.llmUsageUnknown||0)+(adapter?.requests&&!adapter.usage?1:0),sttAudioMs:(phoneMeta.sttAudioMs||0)+(answer.sttConnected?answer.audioMs||0:0),sttDurationUnknown:(phoneMeta.sttDurationUnknown||0)+(answer.sttConnected&&answer.audioMs==null?1:0)}:{};
 
@@ -891,7 +898,7 @@ export async function handleScriptedPhoneCallback(req,env,{now=Date.now(),fetche
    const target=await selectDevice(env,operator,row.lead_id);
    if(!target||row.destination!==target.destination)return end();
   }
-  if(row.job_id&&step==='answer'&&env.AR3D_SCRIPTED_CAMPAIGNS_ENABLED!=='enabled')return end();
+  if(row.job_id&&step==='answer'&&(env.AR3D_SCRIPTED_CAMPAIGNS_ENABLED!=='enabled'||(isSarvam(row)&&(!sarvamConfigured(env)||env.AR3D_CAMPAIGN_SARVAM_DISCLOSURE!=='approved'))))return end();
   if(step==='answer'&&!arg){
    if(!ID.test(requestId||'')||params.get('Direction')!=='outbound'||
       normalizePhone(params.get('To'))!==normalizePhone(row.destination)||

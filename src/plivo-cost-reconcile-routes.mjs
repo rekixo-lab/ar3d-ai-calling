@@ -1,6 +1,6 @@
 // Current-MFA Super Admin may record a verified Plivo CDR for one completed
-// Calling job, exactly once. This NEVER debits client credits or authorizes
-// new calls. Trial/India currency and fundability remain independently gated.
+// Calling job, exactly once. A matched held call may settle billed seconds;
+// this never authorizes new calls or asserts currency/funding.
 import {mutationOriginAllowed} from './human-auth.mjs';
 import {resolveCrmDb} from './core.mjs';
 import {closeMinuteHold} from './minute-holds.mjs';
@@ -53,7 +53,7 @@ async function settleObservedCall(env,job,tid,jid,cdr){
  AND phase IN ('completed','declined','ended','needs_review')`).bind(tid,jid,job.accountSid,job.callUuid,job.caller,job.destination).first();
  if(!session||cdr.billed_duration%30!==0)return {state:'needs_review',clientCreditsDebited:false};
  const result=await closeMinuteHold(env.CONTROL_DB,{tenantId:tid,job:jid,billedSeconds:cdr.billed_duration,kind:'verified_cdr',evidenceRef:'plivo-cdr:'+job.callUuid});
- return {state:result.ok?'settled':result.state,clientCreditsDebited:result.ok&&cdr.billed_duration>0,replayed:result.replayed===true};
+ return {state:result.ok?'settled':result.state,clientCreditsDebited:result.ok&&cdr.billed_duration>0&&result.replayed!==true,chargedSeconds:result.ok?cdr.billed_duration:null,replayed:result.replayed===true};
 }
 export async function handlePlivoCostReconcile(req,env,user,{fetcher=fetch}={}){
  const url=new URL(req.url);
