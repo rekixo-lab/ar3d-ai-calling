@@ -134,7 +134,11 @@ function responseFor(config,row,{repeatCue=false}={}){
  const audio=name=>play(callback(config,row.id,'audio/'+name+'.mp3'));
  if(row.phase==='consent'){
   const action=escapeXml(callback(config,row.id,'consent'));
-  return xml('<GetDigits action="'+action+'" method="GET" numDigits="1" retries="1" timeout="7">'+audio('opening')+'</GetDigits><Hangup/>');
+  // Internal acceptance: allow time to hear the complete recorded notice and
+  // use the keypad. A missing/invalid digit still never authorizes recording.
+  // Keep the existing independently approved customer campaign behavior.
+  const wait=row.job_id?'7':'25',retries=row.job_id?'1':'2';
+  return xml('<GetDigits action="'+action+'" method="GET" numDigits="1" retries="'+retries+'" timeout="'+wait+'">'+audio('opening')+'</GetDigits><Hangup/>');
  }
  if(row.phase==='question'){
   const state=JSON.parse(row.survey_json),field=FIELDS[state.index];
@@ -289,7 +293,8 @@ export async function handleScriptedPhoneAdmin(req,env,user,{now=Date.now(),fetc
   if(!config)return json({configured:false});
   const recent=await env.CONTROL_DB.prepare(`SELECT id,
     CASE WHEN phase='requested' AND provider_request_id IS NOT NULL THEN 'submitted' ELSE phase END AS phase,
-    language,created_at FROM scripted_phone_pilots
+    language,created_at,turn,duration_seconds,hangup_at IS NOT NULL AS signed_hangup,
+    provider_call_id IS NOT NULL AS signed_answer FROM scripted_phone_pilots
     WHERE tenant_id=? AND lead_id=? AND job_id IS NULL ORDER BY created_at DESC LIMIT 5`).bind(config.tenant,config.lead).all();
   return json({configured:true,destinationLast4:config.destination.slice(-4),recent:recent.results});
  }catch{return error('scripted_phone_pilot_unavailable',503)}
