@@ -51,23 +51,23 @@ test('CSV fails closed for malformed input, duplicate numbers and invalid moneta
   ])assert.throws(()=>parseLeadCsv(source));
 });
 
-test('100 unique customers per CSV accepted; 101 rejected before preview or commit',async()=>{
- assert.equal(MAX_CSV_ROWS,100);
- const rows=Array.from({length:101},(_,i)=>'Buyer '+(i+1)+','+String(9000000000+i));
+test('1000 unique customers per CSV accepted; 1001 rejected before preview or commit',async()=>{
+ assert.equal(MAX_CSV_ROWS,1000);
+ const rows=Array.from({length:1001},(_,i)=>'Buyer '+(i+1)+','+String(9000000000+i));
  const make=n=>'Name,Mobile\n'+rows.slice(0,n).join('\n');
- const valid=parseLeadCsv(make(100));
- assert.equal(valid.length,100);
- assert.throws(()=>parseLeadCsv(make(101)),/maximum 100/);
+ const valid=parseLeadCsv(make(1000));
+ assert.equal(valid.length,1000);
+ assert.throws(()=>parseLeadCsv(make(1001)),/maximum 1000/);
  const e=fakeEnvironment();
  for(const route of ['preview','commit']){
-  const res=await worker.fetch(request('/v1/human/import/'+route,'POST',{tenantId,csv:make(101)}),e.env);
+  const res=await worker.fetch(request('/v1/human/import/'+route,'POST',{tenantId,csv:make(1001)}),e.env);
   assert.equal(res.status,400);
  }
  assert.ok(!e.log.some(entry=>entry.sql.includes('INSERT INTO leads')),
   'oversized campaigns cannot write customer records');
 });
 
-test('CSV max bytes is enforced',()=>assert.throws(()=>parseLeadCsv('x'.repeat(160001))));
+test('CSV max bytes is enforced',()=>assert.throws(()=>parseLeadCsv('x'.repeat(512001))));
 test('Import endpoints require session, same-origin, and tenant write membership',async()=>{
   const {env}=fakeEnvironment(null);
   const write=request('/v1/human/import/commit','POST',{tenantId,csv});
@@ -127,6 +127,6 @@ test('Invalid followup datetime, visit in past and oversize CSV rejected',async(
   assert.equal(badDate.status,400);
   const oldVisit=await worker.fetch(request('/v1/human/visits','POST',{tenantId,leadId,scheduledAt:'2020-01-01T10:00:00+05:30'}),env);
   assert.equal(oldVisit.status,400);
-  const huge=await worker.fetch(request('/v1/human/import/preview','POST',{tenantId,csv:'A'.repeat(161000)}),env);
+  const huge=await worker.fetch(request('/v1/human/import/preview','POST',{tenantId,csv:'A'.repeat(513000)}),env);
   assert.equal(huge.status,400);
 });

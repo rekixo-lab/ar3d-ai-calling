@@ -461,3 +461,25 @@ test('manual minute ledger is append-only, idempotent, nonnegative and tenant sc
   assert.equal(f.c.db.prepare('SELECT COUNT(*) AS n FROM tenant_credit_audit').get().n,0);
  }finally{f.close()}
 });
+
+test('ledger view separates allocated held and settled seconds and refuses recovery of commitments',async()=>{const f=fixture();try{freshMfa(f);const {reserveMinutes,closeMinuteHold}=await import('../src/minute-holds.mjs');const d={tenantId:tid,transactionId:'11111111-2222-4333-8444-555555555555',deltaSeconds:300,expectedBalanceSeconds:0,reason:'Manual allocation test'};assert.equal((await route(f,'minute-ledger',admin,'POST',d)).status,201);const job='a'.repeat(32),other='b'.repeat(32);assert.equal((await reserveMinutes(f.env.CONTROL_DB,{tenantId:tid,job,maxSeconds:90})).ok,true);assert.equal((await reserveMinutes(f.env.CONTROL_DB,{tenantId:tid,job:other,maxSeconds:60})).ok,true);assert.equal((await closeMinuteHold(f.env.CONTROL_DB,{tenantId:tid,job:other,billedSeconds:30,evidenceRef:'synthetic-cdr',kind:'verified_cdr'})).ok,true);const view=await (await route(f,'minute-ledger?tenantId='+tid,client)).json();assert.equal(view.allocatedSeconds,300);assert.equal(view.heldSeconds,90);assert.equal(view.usedSeconds,30);assert.equal(view.uncommittedSeconds,180);assert.equal(view.spendableSeconds,null);assert.equal(view.callTransactions.length,2);assert.doesNotMatch(JSON.stringify(view),/synthetic-cdr/);assert.equal((await route(f,'minute-ledger',admin,'POST',{...d,transactionId:'22222222-2222-4333-8444-555555555555',deltaSeconds:-240,expectedBalanceSeconds:300})).status,409);assert.equal((await route(f,'minute-ledger',admin,'POST',{...d,transactionId:'33333333-2222-4333-8444-555555555555',deltaSeconds:-180,expectedBalanceSeconds:300})).status,201)}finally{f.close()}});
+
+
+test('admin dashboard reports actual balances, is MFA-only and never queries carrier',async()=>{
+ const f=fixture();
+ try{
+  const noFetch=()=>{throw Error('unexpected carrier request')};
+  assert.equal((await route(f,'admin-dashboard',client,'GET',undefined,{fetcher:noFetch})).status,403);
+  assert.equal((await route(f,'admin-dashboard')).status,403);
+  freshMfa(f);
+  const grant=await route(f,'minute-ledger',admin,'POST',{tenantId:tid,transactionId:'44444444-4444-4444-8444-444444444444',deltaSeconds:600,expectedBalanceSeconds:0,reason:'Manual synthetic allocation'});
+  assert.equal(grant.status,201);
+  const r=await route(f,'admin-dashboard',admin,'GET',undefined,{fetcher:noFetch});
+  assert.equal(r.status,200,await r.clone().text());const d=await r.json();
+  assert.deepEqual(d.clients,{total:1,active:1});
+  assert.deepEqual(d.position,{allocatedSeconds:600,heldSeconds:0,usedSeconds:0,uncommittedSeconds:600});
+  assert.equal(d.transactions.length,1);assert.equal(d.transactions[0].company,'Demo');
+  assert.equal(d.providerRequests,0);assert.equal(d.externalPaymentsRecorded,false);assert.equal(d.dispatchEnabledByDashboard,false);
+  assert.equal((await route(f,'admin-dashboard?tenantId='+tid)).status,400);
+ }finally{f.close()}
+});

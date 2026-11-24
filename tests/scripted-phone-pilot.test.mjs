@@ -939,3 +939,29 @@ test('consented Sarvam internal call uses one STT per turn, direct parser and no
   assert.deepEqual(f.r.db.prepare('SELECT * FROM leads WHERE id=?').get(lead),before);
  }finally{f.close()}
 });
+
+test('Sarvam campaign requires explicit engine disclosure, consent and verified matching pilot',async()=>{
+ const f=fixture();try{
+  await setup(f);const env=f.env;
+  env.AR3D_CAMPAIGN_SPEECH_ENGINE='sarvam';env.SARVAM_API_KEY='synthetic-key';
+  assert.equal(await approvedCampaignPhone(env),null);
+  env.AR3D_CAMPAIGN_SARVAM_DISCLOSURE='approved';
+  assert.equal(await approvedCampaignPhone(env),null);
+  f.c.db.prepare("UPDATE scripted_phone_pilots SET survey_json=? WHERE job_id IS NULL").run(JSON.stringify({phoneMeta:{engine:'sarvam'}}));
+  const config=await approvedCampaignPhone(env);assert.equal(config.engine,'sarvam');
+  let hook,requests=0;
+  env.AI.run=()=>assert.fail('no legacy STT or LLM');
+  const start=await tickScriptedTenant(env,f.r.wrap,tid,config,{now,apiFetch:async(_url,opts)=>{hook=JSON.parse(opts.body).answer_url.replace(/\/answer$/,'');return accepted()}});
+  assert.equal(start.state,'submitted');
+  const callback=(step,params)=>handleScriptedPhoneCallback(signed(hook+'/'+step,{CallUUID:callId,...params},env.PLIVO_AUTH_TOKEN),env,{now,fetcher:async(url,opts)=>{
+   if(url==='https://api.sarvam.ai/speech-to-text'){requests++;assert.equal(opts.body.get('model'),'saaras:v4');return Response.json({transcript:'घर'});}
+   assert.match(url,/plivo\.com/);return new Response('RIFF',{headers:{'Content-Type':'audio/wav'}});
+  }});
+  assert.match(await (await callback('answer',{ALegRequestUUID:'synthetic-plivo-request-123',To:internalNumber,From:config.caller,Direction:'outbound'})).text(),/GetDigits/);
+  await callback('turn/0',{RecordingID:'record-id-00'});assert.equal(requests,0);
+  assert.match(await (await callback('consent',{Digits:'1'})).text(),/Record/);
+  await callback('turn/0',{RecordingID:'record-id-00',RecordingDurationMs:'2000'});assert.equal(requests,1);
+  const row=f.c.db.prepare('SELECT survey_json FROM scripted_phone_pilots WHERE job_id IS NOT NULL').get();
+  const survey=JSON.parse(row.survey_json);assert.equal(survey.answers.propertyType,'house');assert.equal(survey.phoneMeta.engine,'sarvam');assert.equal(survey.phoneMeta.llmRequests,0);
+ }finally{f.close()}
+});

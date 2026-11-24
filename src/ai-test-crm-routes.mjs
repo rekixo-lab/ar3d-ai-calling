@@ -6,7 +6,7 @@
 // No provider/telephony/STT calls; no consent, DND, phone or booking mutations.
 import {requireMembership} from './human-auth.mjs';
 import {resolveCrmDb,parseJsonBody} from './core.mjs';
-import {beginFixedVoicePreview,advanceFixedVoicePreview} from './fixed-voice-turns.mjs';
+import {beginFixedVoicePreview,advanceInternalVoice} from './fixed-voice-turns.mjs';
 import {normalizePropertySurvey,surveyToCrm} from './fixed-property-survey.mjs';
 
 const PATH='/v1/human/ai-test-crm',MAX_BODY=8192;
@@ -75,7 +75,7 @@ async function save(env,user,context,result,access){
  const a=result.state.answers;
  const survey=normalizePropertySurvey({
   propertyType:a.propertyType,location:a.location,area:a.area||null,
-  size:a.size,budgetInr:a.budgetInr??null,interest:a.interest,
+  size:a.size,budgetInr:a.budgetInr??null,...(a.budgetMinInr!==undefined?{budgetMinInr:a.budgetMinInr}:{}),interest:a.interest,
   visitDate:a.visitDate||null,visitAt:null
  });
  const crm=surveyToCrm(survey);
@@ -104,7 +104,7 @@ async function save(env,user,context,result,access){
      prior.propertySurvey.channel!=='auto_ai_test_browser'))||
     prior.scriptedCallPilot)
   return fail('Verified customer qualification exists. Review and update manually; simulation was not saved.',409);
- if(original.budgetMinInr!==null&&original.budgetMinInr!==undefined&&
+ if(crm.budgetMinInr===undefined&&original.budgetMinInr!==null&&original.budgetMinInr!==undefined&&
     crm.budgetMaxInr!==null&&Number(original.budgetMinInr)>crm.budgetMaxInr)
   return fail('Test budget conflicts with the customer minimum. Review manually; no changes saved.',409);
  const at=new Date(Math.max(Date.now(),Date.parse(original.updatedAt)+1)).toISOString();
@@ -119,12 +119,12 @@ async function save(env,user,context,result,access){
  // the compare-and-set UPDATE return zero, without adding any audit event.
  const rows=await db.batch([
   db.prepare(`UPDATE leads SET preferred_location=?,plot_size_preference=?,
-     budget_max_inr=?,interest_status=?,visit_date_preference=?,
+     budget_min_inr=COALESCE(?,budget_min_inr),budget_max_inr=?,interest_status=?,visit_date_preference=?,
      requirements_json=?,updated_at=?
      WHERE tenant_id=? AND id=? AND updated_at=?
        AND interest_status!='converted' AND consent_status!='denied' AND dnd_status!='blocked'
        AND NOT EXISTS(SELECT 1 FROM lead_opt_out_events o WHERE o.tenant_id=leads.tenant_id AND o.lead_id=leads.id)`).bind(
-    crm.preferredLocation,crm.plotSizePreference,crm.budgetMaxInr,
+    crm.preferredLocation,crm.plotSizePreference,crm.budgetMinInr??null,crm.budgetMaxInr,
     crm.interestStatus,crm.visitDatePreference,serial,at,
     tid,context.leadId,context.expectedUpdatedAt),
   db.prepare(`INSERT INTO crm_audit_events(tenant_id,id,actor,action,target_id,created_at)
@@ -170,7 +170,7 @@ export async function handleAiTestCrmRequest(req,env,user){
    if(!access)return fail('forbidden',403);
    if(!await check(key,user,data.context,data.state,data.proof))
      return fail('invalid or forged AI test state',403);
-   const result=advanceFixedVoicePreview(data.state,{
+   const {result}=await advanceInternalVoice(null,data.state,{
     transcript:data.transcript,confidence:data.confidence??1
    });
    if(result.state.status==='completed'){

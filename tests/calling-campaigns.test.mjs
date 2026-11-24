@@ -112,3 +112,29 @@ test('an uncertain dial stays locked until a Super Admin verifies and closes the
   await tickTenant(f.env,f.r.wrap,tid,{now,apiFetch:()=>assert.fail('never redial the closed attempt')});
  }finally{f.close()}
 });
+
+test('dispatch refuses absent funding approval or insufficient credits without provider POST',async()=>{
+ for(const mode of ['approval','balance']){
+  const f=fixture();try{await setup(f);
+   if(mode==='approval')delete f.env.AR3D_FUNDED_CAMPAIGN_DISPATCH;
+   else f.c.db.prepare("INSERT INTO tenant_minute_ledger(id,tenant_id,kind,delta_seconds,previous_seconds,balance_seconds,actor,reason,created_at) VALUES('recovery',?,'recovery',-6000,6000,0,'admin','Synthetic full recovery',?)").run(tid,at);
+   const result=await tickTenant(f.env,f.r.wrap,tid,{now,apiFetch:()=>assert.fail('no provider call')});
+   assert.equal(result.state,mode==='approval'?'funding_approval_required':'insufficient_credits');
+   assert.equal(f.r.db.prepare('SELECT state FROM calling_jobs').get().state,'queued');
+   assert.equal(f.c.db.prepare('SELECT COUNT(*) AS n FROM tenant_minute_holds').get().n,0);
+  }finally{f.close()}
+ }
+});
+test('provider POST is preceded by held minutes; definite rejection releases and unknown remains held',async()=>{
+ for(const reject of [true,false]){
+  const f=fixture();try{await setup(f);
+   await tickTenant(f.env,f.r.wrap,tid,{now,apiFetch:async()=>{
+    const hold=f.c.db.prepare('SELECT state,reserved_seconds FROM tenant_minute_holds').get();
+    assert.equal(hold.state,'held');assert.equal(hold.reserved_seconds,180);
+    if(reject)return new Response('',{status:400});throw Error('ambiguous');
+   }});
+   const hold=f.c.db.prepare('SELECT state,charged_seconds FROM tenant_minute_holds').get();
+   assert.equal(hold.state,reject?'released':'held');assert.equal(hold.charged_seconds,reject?0:null);
+  }finally{f.close()}
+ }
+});

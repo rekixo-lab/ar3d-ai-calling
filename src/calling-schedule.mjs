@@ -1,5 +1,6 @@
 import {AUTH_MAINTENANCE_CRON,pruneExpiredAuth} from './auth-maintenance.mjs';
 import {CAMPAIGN_CRON,runScriptedCampaignCron} from './scripted-campaign-dispatch.mjs';
+import {runAutomaticMinuteSettlement} from './plivo-cost-reconcile-routes.mjs';
 
 export async function handleCallingCron(controller,env){
  const cron=controller?.cron,now=controller?.scheduledTime??Date.now();
@@ -12,5 +13,7 @@ export async function handleCallingCron(controller,env){
  // Every invocation remains fail-closed on invalid schedule timestamps.
  if(!Number.isSafeInteger(now)||now<0)throw Error('invalid Calling Worker schedule time');
  const maintenance=Math.floor(now/60000)%60===0?await pruneExpiredAuth(env,{now}):undefined;
- return {...await runScriptedCampaignCron(env,{now}),maintenance};
+ const campaign=await runScriptedCampaignCron(env,{now});
+ const settlement=env.AR3D_AUTO_CDR_SETTLEMENT==='approved'?await runAutomaticMinuteSettlement(env,{now}):undefined;
+ return {...campaign,maintenance,...(settlement?{settlement}:{})};
 }

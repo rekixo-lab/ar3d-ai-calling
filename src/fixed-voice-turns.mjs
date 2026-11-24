@@ -127,16 +127,17 @@ function parseSize(str,propertyType){
     if(/(?:गज|yard|yd)/iu.test(unitText))return n+' वर्ग गज';
     return n+' वर्ग फुट';
   }
-  const word=str.match(/(?:^|[\s,।])(?:एक|दो|तीन|चार|पांच|पाँच)(?=\s*(?:बीएचके|bhk|bedroom))/iu);
-  let n=null;
-  if(word)n=HINDI_NUMBERS[word[0].trim()];
-  const match=str.match(/([1-5])\s*(?:BHK|बीएचके|bedrooms?)/iu);
-  if(match){if(n!==null&&n!==Number(match[1]))throw Error('conflicting BHK sizes');n=Number(match[1])}
-  if(n===null)throw Error('unclear BHK; repeat or review');
+  // Require one entire explicit quantity, not a trailing digit of 15 BHK
+  // or a second competing number. Preserve exact larger bedroom counts.
+  const value=quantityText(str).replace(/\s+(?:का|की)\s+(?:घर|फ्लैट|मकान|house|flat)$/iu,'').replace(/\s+(?:है|होना चाहिए)$/u,'').trim();
+  const match=value.match(/^(.+?)\s*(?:BHK|बीएचके|बी\s*एच\s*के|bedrooms?)\s*(\+|plus|या अधिक)?$/iu);
+  const n=match?spokenQuantity(match[1]):null;
+  if(!Number.isInteger(n)||n<1||n>20||match[2]&&n!==5)throw Error('unclear BHK; repeat or review');
   return n===5?'5BHK+':n+'BHK';
 }
 function parseBudget(str){
-  const input=quantityText(str).replace(/^(?:₹|rs\.?\s*|inr\s*)/iu,'').replace(/\s*(?:रुपये|रुपए|रूपये|रु\.?|rupees?|inr|तक|max(?:imum)?)$/iu,'').trim();
+  const phrase=str.replace(/^(?:(?:मेरा|हमारा|मेरे पास|my)\s+)?(?:बजट|budget)\s*[:：]?\s*/iu,'').replace(/\s+(?:है|रहेगा|is my budget)$/iu,'');
+  const input=quantityText(phrase).replace(/^(?:₹|rs\.?\s*|inr\s*)/iu,'').replace(/\s*(?:रुपये|रुपए|रूपये|रु\.?|rupees?|inr|तक|max(?:imum)?)$/iu,'').trim();
   // One amount, not a range or an unrelated number. Decimal scales (3.5
   // crore) and ordinary compound Hindi numbers are both supported.
   const decimal=input.match(/^(\d+(?:\.\d+)?)\s*(crore|करोड़|करोड|lakh|lac|लाख|thousand|हजार|हज़ार)$/iu);
@@ -144,6 +145,22 @@ function parseBudget(str){
   if(!Number.isSafeInteger(rupees)||rupees<10000||rupees>1000000000000)
     throw Error('unclear rupee budget; repeat or review');
   return rupees;
+}
+// Explicit range grammar: two amounts joined by "से"/"to", or a shared
+// scale on the right (20 से 30 लाख). Never treat "या"/"or" as a range.
+function parseBudgetRange(str){
+ const text=quantityText(str.replace(/^(?:(?:मेरा|हमारा|my)\s+)?(?:बजट|budget)\s*[:：]?\s*/iu,'').replace(/\s+(?:है|रहेगा)$/u,''));
+ const pair=text.match(/^(.+?)\s+(?:से|to)\s+(.+)$/iu);
+ if(!pair)return null;
+ const upper=parseBudget(pair[2]);let lower;
+ try{lower=parseBudget(pair[1])}catch{
+  const scale=pair[2].match(/\s+(लाख|करोड़|करोड|हजार|हज़ार|lakh|lac|crore|thousand)(?:\s+(?:रुपये|रुपए|rupees?|तक))?$/iu);
+  const n=spokenQuantity(pair[1]);
+  if(!scale||!Number.isFinite(n)||n<=0||n>=10000)throw Error('unclear budget range');
+  lower=parseBudget(pair[1]+' '+scale[1]);
+ }
+ if(lower>upper)throw Error('conflicting budget range');
+ return {lower,upper};
 }
 function parseInterest(str){
   const short=str.trim().replace(/[।.!?]+$/u,'').trim();
@@ -206,7 +223,8 @@ function validate(state,now){
      !Number.isSafeInteger(state.startedAt)||state.startedAt<0||
      state.startedAt>now+60000||now-state.startedAt>MAX_AGE_MS||
      !state.answers||typeof state.answers!=='object'||Array.isArray(state.answers)||
-     Object.keys(state.answers).some(k=>!FIELDS.includes(k)))
+     Object.keys(state.answers).some(k=>!FIELDS.includes(k)&&k!=='budgetMinInr')||
+     (Object.hasOwn(state.answers,'budgetMinInr')&&(!Number.isSafeInteger(state.answers.budgetMinInr)||state.answers.budgetMinInr<10000||state.answers.budgetMinInr>state.answers.budgetInr||!Number.isSafeInteger(state.answers.budgetInr)||state.index<=4)))
     throw Error('invalid or expired voice preview session');
   return state;
 }
@@ -246,7 +264,7 @@ export function advanceFixedVoicePreview(current,{transcript,confidence=1,now=Da
     return response(out,'opt_out_requested',
       'Stop further calls and verify the opt-out in the CRM; preview did not modify consent.');
   }
-  let parsed;
+  let parsed,range=null;
   try{
     if(AGAIN.test(input)||NOT_HEARD.test(input)||MISUNDERSTOOD.test(input)||confidence<0.70)
       throw Error('recognition unclear; repeat question');
@@ -254,7 +272,7 @@ export function advanceFixedVoicePreview(current,{transcript,confidence=1,now=Da
     if(field==='propertyType')parsed=parseProperty(input);
     else if(field==='location'||field==='area')parsed=smallText(input,field);
     else if(field==='size')parsed=parseSize(input,out.answers.propertyType);
-    else if(field==='budgetInr')parsed=parseBudget(input);
+    else if(field==='budgetInr'){range=parseBudgetRange(input);parsed=range?range.upper:parseBudget(input);}
     else if(field==='interest')parsed=parseInterest(input);
     else if(field==='visitDate')parsed=parseDate(input,now);
     else throw Error('unsupported voice question');
@@ -268,6 +286,7 @@ export function advanceFixedVoicePreview(current,{transcript,confidence=1,now=Da
   }
   const field=FIELDS[out.index];
   out.answers[field]=parsed;
+  if(field==='budgetInr'){if(range)out.answers.budgetMinInr=range.lower;else delete out.answers.budgetMinInr;}
   out.attempts=0;
   out.index++;
   if(field==='interest'&&parsed!=='interested'){
@@ -283,6 +302,7 @@ export function advanceFixedVoicePreview(current,{transcript,confidence=1,now=Da
       area:out.answers.area||null,
       size:out.answers.size,
       budgetInr:out.answers.budgetInr??null,
+      ...(Object.hasOwn(out.answers,'budgetMinInr')?{budgetMinInr:out.answers.budgetMinInr}:{}),
       interest:out.answers.interest,
       visitDate:out.answers.visitDate||null,
       visitAt:null
@@ -308,7 +328,7 @@ const FIELD_HINTS={
  propertyType:'One of plot, flat, house. A single word is enough. Land/zameen means plot; apartment means flat; villa/makan means house. Multiple competing choices or unclear negation: unclear.',
  location:'Extract only the explicitly spoken city or location, verbatim. Do not infer city from area. No city given: unclear.',
  area:'Extract only the explicitly spoken neighborhood or area, verbatim. No area given: unclear.',
- size:'For plot, normalize a single explicitly stated measurement, e.g. 1200 sqft, 100 वर्ग गज, 30 x 40 ft. Do not invent missing units or resolve competing values. For flat/house normalize stated bedrooms to 1BHK to 5BHK, including short spoken answers when the question explicitly asks BHK.',
+ size:'For plot, normalize a single explicitly stated measurement, e.g. 1200 sqft, 100 वर्ग गज, 30 x 40 ft. Do not invent missing units or resolve competing values. For flat/house normalize one explicitly stated bedroom count from 1 to 20, including short spoken answers when the question explicitly asks BHK. Never select one of multiple competing counts.',
  budgetInr:'One stated approximate rupee amount including lakh/crore/thousand; normalize to digits in INR, e.g. 3500000. Never pick an endpoint of a range or assume a scale.',
  interest:'Interpret only the answer to the viewing-interest question: yes/interested, no/not interested, later/follow up. A short affirmative or negative is enough. Mixed/conflicting answers: unclear. Not permission to call.',
  visitDate:'Resolve one explicitly stated future date in India (YYYY-MM-DD). No vague timeframe or invented appointment. Do not schedule or promise a booking.'
@@ -369,11 +389,48 @@ export async function advanceContextualVoice(ai,current,{transcript,confidence=1
 // One-turn, field-scoped memory of an explicit incomplete quantity. Never
 // persist raw utterances. Missing units must be stated in the next answer;
 // never infer or combine amounts from different questions or sessions.
+// Deterministic multi-answer fast path. Accept only a contiguous set of
+// explicitly labelled fields (the first may be the current question without
+// a label). Never use inference, update previously accepted fields, or treat
+// qualification as consent. A single utterance remains one turn.
+const LABELLED_FIELDS=[
+ ['propertyType',/^(?:प्रॉपर्टी(?: का प्रकार)?|property(?: type)?|टाइप)\s*[:：]?\s+(.+)$/iu],
+ ['location',/^(?:शहर|लोकेशन|city|location)\s*[:：]?\s+(.+)$/iu],
+ ['area',/^(?:एरिया|इलाका|area|neighborhood)\s*[:：]?\s+(.+)$/iu],
+ ['size',/^(?:साइज|साइज़|size|माप)\s*[:：]?\s+(.+)$/iu],
+ ['budgetInr',/^(?:बजट|budget)\s*[:：]?\s+(.+)$/iu],
+ ['interest',/^(?:रुचि|interest)\s*[:：]?\s+(.+)$/iu],
+ ['visitDate',/^(?:विजिट(?: तारीख)?|तारीख|visit date)\s*[:：]?\s+(.+)$/iu]
+];
+function advanceLabelledFields(current,input,confidence,now){
+ if(confidence<.7||STOP.test(input)||AGAIN.test(input)||NOT_HEARD.test(input)||MISUNDERSTOOD.test(input))return null;
+ const clauses=input.split(/\s*[;；।]\s*|,\s+/u).filter(Boolean);
+ if(clauses.length<2||clauses.length>7)return null;
+ const labels=clauses.map(clause=>{
+  const matched=LABELLED_FIELDS.map(([field,re])=>({field,match:clause.match(re)})).filter(x=>x.match);
+  return matched.length===1?{field:matched[0].field,value:matched[0].match[1].trim()}:null;
+ });
+ if(!labels.slice(1).some(Boolean))return null;
+ const repeat=()=>({result:advanceFixedVoicePreview(current,{transcript:'repeat',confidence,now}),interpreter:'labelled_unclear',pendingQuantity:null});
+ if(labels.slice(1).some(x=>!x))return repeat();
+ let next=current,last=null;
+ for(let i=0;i<clauses.length;i++){
+  const part=labels[i]||{field:FIELDS[current.index],value:clauses[i]};
+  if(next.status!=='active'||part.field!==FIELDS[next.index])return repeat();
+  // Reset turns only for the synthetic sub-step; final state records one
+  // real spoken utterance. No raw speech is retained.
+  last=advanceFixedVoicePreview({...next,turns:current.turns},{transcript:part.value,confidence,now});
+  if(!['next_question','completed'].includes(last.action))return repeat();
+  next=last.state;
+ }
+ return {result:last,interpreter:'labelled_multi_answer',pendingQuantity:null};
+}
 export async function advanceInternalVoice(ai,current,args,memory=null){
  const {transcript,confidence=1,now=Date.now()}=args;
  const field=FIELDS[current.index],input=cleaned(transcript);
  const supported=field==='budgetInr'||(field==='size'&&current.answers.propertyType==='plot');
  const direct=advanceFixedVoicePreview(current,{transcript,confidence,now});
+ if(direct.action!=='opt_out_requested'){const labelled=advanceLabelledFields(current,input,confidence,now);if(labelled)return labelled;}
  if(!supported||direct.action==='opt_out_requested'||confidence<.7||AGAIN.test(input)||NOT_HEARD.test(input)||MISUNDERSTOOD.test(input))
   return {...await advanceContextualVoice(ai,current,args),pendingQuantity:null};
  if(['next_question','completed'].includes(direct.action))

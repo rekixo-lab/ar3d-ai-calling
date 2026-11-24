@@ -62,7 +62,7 @@ export async function handlePropertyQualificationRequest(req,env,user){
     if(!body||typeof body!=='object'||Array.isArray(body)||
        Object.keys(body).some(k=>![
          'tenantId','expectedUpdatedAt','propertyType','location','area','size',
-         'budgetInr','interest','visitDate','visitAt'
+         'budgetInr','budgetMinInr','interest','visitDate','visitAt'
        ].includes(k))||
        typeof body.expectedUpdatedAt!=='string'||
        !timestamp.test(body.expectedUpdatedAt))
@@ -87,10 +87,10 @@ export async function handlePropertyQualificationRequest(req,env,user){
     const visitId=survey.visitAt?crypto.randomUUID():null;
     const rows=[
       db.prepare(`UPDATE leads SET preferred_location=?,plot_size_preference=?,
-        budget_min_inr=NULL,budget_max_inr=?,interest_status=?,
+        budget_min_inr=?,budget_max_inr=?,interest_status=?,
         visit_date_preference=?,requirements_json=?,updated_at=?
         WHERE tenant_id=? AND id=? AND updated_at=?`).bind(
-        crm.preferredLocation,crm.plotSizePreference,crm.budgetMaxInr,
+        crm.preferredLocation,crm.plotSizePreference,crm.budgetMinInr??null,crm.budgetMaxInr,
         crm.interestStatus,crm.visitDatePreference,serialized,at,
         tid,id,existing.updatedAt),
       db.prepare(`INSERT INTO crm_audit_events(tenant_id,id,actor,action,target_id,created_at)

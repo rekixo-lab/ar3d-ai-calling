@@ -39,7 +39,7 @@ function request(action,data,method='POST'){
 export const route=(f,action,data,user=client,method='POST')=>handleScriptedCallingRequest(request(action,data,method),f.env,user,{now});
 export function configureScriptedCampaign(f){
  Object.assign(f.env,{
-  AR3D_SCRIPTED_CAMPAIGNS_ENABLED:'enabled',PLIVO_AUTH_ID:'SYNTHETIC123',
+  AR3D_SCRIPTED_CAMPAIGNS_ENABLED:'enabled',AR3D_FUNDED_CAMPAIGN_DISPATCH:'approved',PLIVO_AUTH_ID:'SYNTHETIC123',
   PLIVO_AUTH_TOKEN:'synthetic-token-value'.replaceAll('-',''),
   AR3D_PLIVO_CALLER_NUMBER:'+918000000000',AR3D_PLIVO_RECORDING_AUTH:'confirmed',
   AR3D_SCRIPTED_PILOT_ENABLED:'enabled',AR3D_SCRIPTED_PILOT_ORIGIN:'https://app.example.invalid',
@@ -47,6 +47,7 @@ export function configureScriptedCampaign(f){
   AR3D_SCRIPTED_PILOT_LEAD_ID:'88888888-8888-4888-8888-888888888888',
   AI:{async run(){return {text:'test'}}},RECORDINGS:{async get(){return null},async head(){return {size:42}}}
  });
+ f.c.db.prepare("INSERT INTO tenant_minute_ledger(id,tenant_id,kind,delta_seconds,previous_seconds,balance_seconds,actor,reason,created_at) VALUES('synthetic-funding',?,'allocation',6000,0,6000,'admin','Synthetic test allocation',?)").run(tid,at);
  f.c.db.prepare(`INSERT INTO scripted_phone_pilots(id,tenant_id,lead_id,lead_updated_at,actor_id,language,destination,caller,
   rate_slot,expires_at,phase,provider_account_id,survey_json,created_at,hangup_at)
   VALUES('synthetic-completed-pilot',?,?,?,'admin','hi',?,?,1,?,'completed',?,'{}',?,?)`)

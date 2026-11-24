@@ -61,16 +61,16 @@ test('XLSX stored and compressed first visible worksheet parses rich strings and
   }
 });
 
-test('XLSX accepts 100 customer rows and rejects 101 before importing',async()=>{
- const extra=Array.from({length:100},(_,i)=>{
+test('XLSX accepts 1000 customer rows and rejects 1001 before importing',async()=>{
+ const extra=Array.from({length:1000},(_,i)=>{
   const n=i+3,phone=String(9000000000+i);
   return '<row r="'+n+'"><c r="A'+n+'" t="inlineStr"><is><t>Buyer '+n+'</t></is></c>'+
    '<c r="B'+n+'"><v>'+phone+'</v></c></row>';
  });
  const forRows=count=>sheet.replace('</sheetData>',extra.slice(0,count-1).join('')+'</sheetData>');
- assert.equal((await parseLeadXlsx(workbookZip(forRows(100)))).length,100);
- await assert.rejects(parseLeadXlsx(workbookZip(forRows(101))),/invalid or excessive worksheet rows|maximum 100/);
- const e=env(),oversize=Buffer.from(workbookZip(forRows(101))).toString('base64');
+ assert.equal((await parseLeadXlsx(workbookZip(forRows(1000)))).length,1000);
+ await assert.rejects(parseLeadXlsx(workbookZip(forRows(1001))),/invalid or excessive worksheet rows|maximum 1000/);
+ const e=env(),oversize=Buffer.from(workbookZip(forRows(1001))).toString('base64');
  for(const action of ['preview','commit']){
   const r=await worker.fetch(request({tenantId,format:'xlsx',xlsxBase64:oversize},action),e.env);
   assert.equal(r.status,400);

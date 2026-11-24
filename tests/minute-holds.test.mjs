@@ -1,0 +1,28 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {fixture,tid} from './helpers/calling-fixture.mjs';
+import {minutePosition,reserveMinutes,closeMinuteHold} from '../src/minute-holds.mjs';
+const one='1'.repeat(32),two='2'.repeat(32),three='3'.repeat(32);
+test('atomic reservations, exact-once settlement, recovery guard and uncertain hold',async()=>{const f=fixture();try{
+ const db=f.env.CONTROL_DB;
+ f.c.db.prepare("INSERT INTO tenant_minute_ledger(id,tenant_id,kind,delta_seconds,previous_seconds,balance_seconds,actor,reason,created_at) VALUES('alloc',?,'allocation',180,0,180,'admin','Manual allocation','2026-11-24')").run(tid);
+ const r=job=>reserveMinutes(db,{tenantId:tid,job,maxSeconds:91});
+ const pair=await Promise.all([r(one),r(two)]);assert.equal(pair.filter(x=>x.ok).length,1);
+ const job=pair[0].ok?one:two,other=job===one?two:one;
+ assert.equal((await r(job)).replayed,true);assert.equal((await r(other)).ok,false);
+ assert.deepEqual(await minutePosition(db,tid),{allocatedSeconds:180,heldSeconds:120,usedSeconds:0,uncommittedSeconds:60});
+ assert.throws(()=>f.c.db.prepare("INSERT INTO tenant_minute_ledger(id,tenant_id,kind,delta_seconds,previous_seconds,balance_seconds,actor,reason,created_at) VALUES('recover',?,'recovery',-90,180,90,'admin','Manual recovery','2026-11-24')").run(tid),/minutes already committed/);
+ const settle={tenantId:tid,job,billedSeconds:150,evidenceRef:'verified-cdr-test',kind:'verified_cdr'};
+ assert.equal((await closeMinuteHold(db,settle)).state,'over_reserve_review');
+ assert.equal((await minutePosition(db,tid)).heldSeconds,120);
+ await assert.rejects(closeMinuteHold(db,{...settle,kind:'uncertain'}),/invalid/);
+ const good={...settle,billedSeconds:60};assert.equal((await closeMinuteHold(db,good)).ok,true);assert.equal((await closeMinuteHold(db,good)).replayed,true);
+ assert.equal((await closeMinuteHold(db,{...good,billedSeconds:30})).ok,false);
+ assert.equal((await r(job)).ok,false);assert.equal((await r(other)).ok,true);
+ assert.deepEqual(await minutePosition(db,tid),{allocatedSeconds:180,heldSeconds:120,usedSeconds:60,uncommittedSeconds:0});
+ assert.equal((await closeMinuteHold(db,{tenantId:tid,job:other,billedSeconds:0,evidenceRef:'verified-no-submit',kind:'verified_no_submission'})).ok,true);
+ assert.equal((await minutePosition(db,tid)).uncommittedSeconds,120);
+ assert.throws(()=>f.c.db.prepare("DELETE FROM tenant_minute_holds WHERE tenant_id=?").run(tid),/immutable/);
+ assert.throws(()=>f.c.db.prepare("UPDATE tenant_minute_holds SET charged_seconds=0 WHERE tenant_id=? AND job_id=?").run(tid,job),/immutable/);
+ assert.equal((await reserveMinutes(db,{tenantId:'99999999-9999-4999-8999-999999999999',job:three,maxSeconds:30})).ok,false);
+}finally{f.close()}});

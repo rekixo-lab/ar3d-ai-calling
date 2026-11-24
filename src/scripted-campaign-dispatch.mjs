@@ -1,4 +1,5 @@
 import {resolveCrmDb} from './core.mjs';
+import {minutePosition,reserveMinutes,closeMinuteHold} from './minute-holds.mjs';
 import {SCRIPTED_CALLING_POLICY,approvedCampaignPhone,reserveCampaignQuestionnaire,scriptedPromptsReady,submitScriptedPhone} from './scripted-phone-pilot.mjs';
 
 export const CAMPAIGN_CRON='* * * * *';
@@ -25,9 +26,20 @@ export function campaignScanOffset(now,count){
  return (page*CAMPAIGN_SCAN_LIMIT+
   (pass*CAMPAIGN_WORK_LIMIT)%CAMPAIGN_SCAN_LIMIT)%count;
 }
+// Separate, operator-only release gate. Never set by UI, allocation or deployment.
+export const fundedDispatchApproved=env=>env.AR3D_FUNDED_CAMPAIGN_DISPATCH==='approved';
 export async function scriptedCampaignConfiguration(env){
- const ready=Boolean(await approvedCampaignPhone(env));
- return {ready,missing:ready?[]:['Plivo setup, a completed internal pilot and campaign authorization']};
+ const carrier=Boolean(await approvedCampaignPhone(env)),funded=fundedDispatchApproved(env);
+ const missing=[...(!carrier?['Plivo setup, a completed internal pilot and campaign authorization']:[]),...(!funded?['Verified nontrial provider funding and manual credit dispatch approval']:[])];
+ return {ready:carrier&&funded,missing};
+}
+// A definitive provider rejection is the only automatic no-submission release.
+// A missing session, request UUID, call UUID or ambiguous network outcome is
+// never treated as evidence of a free call.
+async function releaseRejectedHold(env,job,row,now){
+ if(row?.phase!=='rejected'||row.provider_call_id!==null||row.provider_request_id!==null)return;
+ const result=await closeMinuteHold(env.CONTROL_DB,{tenantId:job.tenant_id,job:job.id,billedSeconds:0,kind:'verified_no_submission',evidenceRef:'provider-rejected:'+row.id,now});
+ if(!result.ok&&result.state!=='missing_hold')throw Error('minute release requires review');
 }
 export function inCallingWindow(now){
  const minutes=Math.floor((now+330*60000)/60000)%1440;
@@ -61,6 +73,10 @@ function partialResultStatements(db,job,row,at){
     !survey.answers||typeof survey.answers!=='object'||Array.isArray(survey.answers))return [];
  const fields=['propertyType','location','area','size','budgetInr','interest'];
  const keys=fields.slice(0,survey.index),answers=survey.answers;
+ if(Object.hasOwn(answers,'budgetMinInr')){
+  if(!keys.includes('budgetInr')||!Number.isSafeInteger(answers.budgetMinInr)||answers.budgetMinInr<10000||answers.budgetMinInr>answers.budgetInr)return [];
+  keys.push('budgetMinInr');
+ }
  if(Object.keys(answers).length!==keys.length||!keys.every(k=>Object.hasOwn(answers,k)))return [];
  if(!['plot','flat','house'].includes(answers.propertyType))return [];
  for(const k of ['location','area','size']){
@@ -85,9 +101,10 @@ function partialResultStatements(db,job,row,at){
 }
 async function reconcile(env,db,job,now,at){
  if(job.flow_id!==SCRIPTED_CALLING_POLICY)return {state:'legacy_job_locked'};
- const row=await env.CONTROL_DB.prepare(`SELECT id,lead_id,destination,survey_json,phase,expires_at,hangup_at,provider_call_id,duration_seconds
+ const row=await env.CONTROL_DB.prepare(`SELECT id,lead_id,destination,survey_json,phase,expires_at,hangup_at,provider_call_id,provider_request_id,duration_seconds
   FROM scripted_phone_pilots WHERE tenant_id=? AND job_id=?`).bind(job.tenant_id,job.id).first();
  if(row?.phase==='rejected'){
+  await releaseRejectedHold(env,job,row,now);
   await updateJob(db,job,'failed',at,{error:'plivo_rejected',phase:row.phase});
   return {state:'reconciled'};
  }
@@ -108,6 +125,7 @@ export async function tickScriptedTenant(env,db,tid,config,{apiFetch=fetch,now=D
  const pending=await db.prepare("SELECT * FROM calling_jobs WHERE tenant_id=? AND state IN('reserved','submitted','unknown') LIMIT 1").bind(tid).first();
  if(pending)return reconcile(env,db,pending,now,at);
  if(!config||!inCallingWindow(now))return {state:'disabled_or_outside_hours'};
+ if(!fundedDispatchApproved(env))return {state:'funding_approval_required'};
  const policy=await db.prepare('SELECT * FROM calling_policies WHERE tenant_id=? AND enabled=1 AND expires_at>? AND flow_id=?').bind(tid,at,SCRIPTED_CALLING_POLICY).first();
  if(!policy)return {state:'approval_required'};
  // Permanent suppression is terminal. Missing/expired approval stays queued so a later review can release it.
@@ -140,14 +158,32 @@ export async function tickScriptedTenant(env,db,tid,config,{apiFetch=fetch,now=D
   return {state:'blocked'};
  }
  if(!await scriptedPromptsReady(env,job.language,tid))return {state:'prompts_incomplete'};
+ const position=await minutePosition(env.CONTROL_DB,tid);
+ if(position.uncommittedSeconds<Math.ceil(policy.max_seconds/30)*30)return {state:'insufficient_credits'};
  const dayStart=new Date(Math.floor((now+330*60000)/86400000)*86400000-330*60000).toISOString();
  // D1 serializes this ONE reservation statement, including quotas and uniqueness.
  const reserved=await db.prepare("UPDATE calling_jobs SET state='reserved',reserved_at=?,updated_at=?,account_sid=?,caller_id=?,flow_id=?,destination=? WHERE tenant_id=? AND id=? AND state='queued' AND EXISTS(SELECT 1 FROM calling_runs r WHERE r.tenant_id=calling_jobs.tenant_id AND r.id=calling_jobs.run_id AND r.state='running') AND EXISTS(SELECT 1 FROM calling_policies p WHERE p.tenant_id=? AND p.enabled=1 AND p.expires_at>? AND p.updated_at=? AND p.flow_id=?) AND EXISTS(SELECT 1 FROM calling_clearances v JOIN leads l ON l.tenant_id=v.tenant_id AND l.id=v.lead_id WHERE v.tenant_id=? AND v.lead_id=? AND v.purpose=? AND v.expires_at>? AND v.reviewed_at>=? AND v.reviewed_at>COALESCE((SELECT MAX(h.reserved_at) FROM calling_jobs h WHERE h.tenant_id=v.tenant_id AND h.lead_id=v.lead_id),'') AND l.consent_status!='denied' AND l.dnd_status!='blocked' AND l.mobile_e164=? AND l.updated_at=? AND NOT EXISTS(SELECT 1 FROM lead_opt_out_events o WHERE o.tenant_id=l.tenant_id AND o.lead_id=l.id)) AND NOT EXISTS(SELECT 1 FROM calling_jobs x WHERE x.tenant_id=? AND x.state IN('reserved','submitted','unknown')) AND (SELECT COUNT(*) FROM calling_jobs x WHERE x.tenant_id=? AND x.reserved_at>=?)<?")
  .bind(at,at,config.authId,config.caller,policy.flow_id,job.destination,tid,job.id,tid,at,policy.updated_at,SCRIPTED_CALLING_POLICY,tid,job.lead_id,job.purpose,at,policy.updated_at,job.destination,job.lead_updated_at,tid,tid,dayStart,policy.daily_limit).run();
  if(Number(reserved.meta?.changes)!==1)return {state:'quota_or_concurrent_change'};
  try{
+  // CRM and Control are separate D1 databases. Claim CRM first, then reserve
+  // credits before creating any provider session. A crash locks the attempt
+  // for review; never retry a provider POST or silently release a hold.
+  const hold=await reserveMinutes(env.CONTROL_DB,{tenantId:tid,job:job.id,maxSeconds:policy.max_seconds,now});
+  if(!hold.ok||hold.replayed){
+   if(!hold.ok&&hold.state==='insufficient_or_unavailable'){
+    await updateJob(db,job,'failed',at,{error:'credit_reservation_unavailable'});
+    return {state:'insufficient_credits'};
+   }
+   return {state:'locked'};
+  }
   const id=await reserveCampaignQuestionnaire(env.CONTROL_DB,config,job,now);
   const outcome=await submitScriptedPhone(env.CONTROL_DB,config,id,job.destination,policy.max_seconds,apiFetch);
+  if(outcome==='rejected'){
+   const rejected=await env.CONTROL_DB.prepare('SELECT id,phase,provider_call_id,provider_request_id FROM scripted_phone_pilots WHERE tenant_id=? AND job_id=? AND id=?').bind(tid,job.id,id).first();
+   await releaseRejectedHold(env,job,rejected,now);
+   if(rejected?.phase!=='rejected'||rejected.provider_call_id!==null||rejected.provider_request_id!==null)return {state:'locked'};
+  }
   const state=outcome==='rejected'?'failed':outcome;
   await updateJob(db,job,state,at,{error:state==='failed'?'plivo_rejected':state==='unknown'?'provider_outcome_uncertain':null});
   return {state};
