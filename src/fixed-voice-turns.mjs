@@ -214,6 +214,11 @@ function parseDate(str,now){
 // Extract a visit time only when the customer explicitly supplies AM/PM,
 // a Hindi day-part, or an unambiguous 24-hour HH:mm. No guessed time.
 function parseVisitPreference(input,now){
+ // Do not choose between competing days or alternative times.
+ if(/(?:\b(?:or|either|yesterday)\b|या|अथवा|परसों)/iu.test(input)||
+    [...input.matchAll(/\b(?:\d{4}-\d{2}-\d{2}|\d{1,2}[/-]\d{1,2}[/-]\d{4})\b/g)].length>1||
+    [...input.matchAll(/(?:बजे|\b(?:am|pm)\b)/giu)].length>1||
+    [...input.matchAll(/\b\d{1,2}:\d{2}\b/g)].length>1)throw Error('conflicting visit date or time');
  const date=parseDate(input,now);
  const time=input.match(/(?:^|\s)(?:(सुबह|दोपहर|शाम|रात)\s+)?([0-9]{1,2}|[\p{L}\p{M}]+)(?::([0-9]{2}))?\s*(?:(बजे)|\b(am|pm)\b)/iu);
  const military=input.match(/(?:^|\s)([01]?\d|2[0-3]):([0-5]\d)(?:$|[\s।,.])/u);
@@ -226,7 +231,7 @@ function parseVisitPreference(input,now){
   if(!part||!Number.isInteger(hour)||hour<1||hour>12||minute>59)throw Error('state morning or evening for visit time');
   const pm=['दोपहर','शाम','रात','pm'].includes(part);
   // 12 at night is ambiguous with the stated calendar day; request clarification.
-  if(part==='रात'&&hour===12)throw Error('unclear midnight date');
+  if(['रात','सुबह'].includes(part)&&hour===12)throw Error('unclear midnight date');
   hour=hour%12+(pm?12:0);
  }else{hour=Number(military[1]);minute=Number(military[2]);}
  const stamp=Date.parse(date+'T'+String(hour).padStart(2,'0')+':'+String(minute).padStart(2,'0')+':00+05:30');

@@ -434,3 +434,9 @@ test('explicit visit time stays a preference in India timezone, never a booking'
  assert.equal(turn(state,'2027-01-12 5 बजे').action,'repeat');
  assert.equal(turn(state,'2027-01-12').state.answers.visitAt,undefined);
 });
+
+test('ambiguous alternative visit days and times never silently choose the first',()=>{
+ let state=beginFixedVoicePreview({now:stamp}).state;
+ for(const text of ['घर','कोरबा','बस स्टैंड','3BHK','30 लाख','हाँ'])state=turn(state,text).state;
+ for(const text of ['2027-01-12 सुबह 10 बजे या 11 बजे','2027-01-12 or 2027-01-13','2027-01-12 10:00 और 11:00','2027-01-12 रात 12 बजे'])assert.equal(turn(state,text).action,'repeat',text);
+});
