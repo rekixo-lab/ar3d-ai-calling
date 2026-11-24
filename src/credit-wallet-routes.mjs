@@ -72,7 +72,7 @@ async function providerPreview(env,fetcher){
   return json({available:false,reason:'provider_balance_unavailable',verifiedInr:false});
  }
 }
-// Cloudflare Workers does not implement redirect:'error' in RequestInit.
+// Cloudflare Workers does not implement the RequestInit error redirect mode.
 // Use redirect:'manual' and reject non-2xx statuses to prevent credential
 // forwarding across provider redirects. Do not replace with 'follow'.
 // A diagnostics-only Plivo read. A valid Account API response verifies only
