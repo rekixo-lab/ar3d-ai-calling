@@ -22,3 +22,5 @@ User decision: keep AR3D's own multi-tenant conversation control, memory, valida
 Current implementation is staged, not proof of accuracy or production readiness.
 
 The saved-audio Sarvam diagnostic also exercises the direct-first interpreter with a bounded Sarvam 105B adapter when needed. Report proposed results, token counts and latency only; never write them into CRM during replay. Provider activation and full multi-field extraction remain gated.
+
+The Super Admin Minutes & Wallet production cost planner uses integer micro-INR assumptions, separate from actual provider observations and client credits. It does not restrict calling volume or change a wallet.

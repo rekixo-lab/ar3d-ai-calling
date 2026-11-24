@@ -3,6 +3,7 @@
 // live calls, bypass carrier approval or represent spendable billing credits.
 import {requireMembership} from './human-auth.mjs';
 import {parseJsonBody,resolveCrmDb} from './core.mjs';
+import {estimateProductionCost} from './production-cost-plan.mjs';
 
 const base='/v1/human/credits';
 const uuid=/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
@@ -269,6 +270,15 @@ export async function handleCreditWalletRequest(req,env,user,{fetcher=fetch}={})
  if(!env.CONTROL_DB)return fail('database unavailable',503);
  const db=env.CONTROL_DB,path=url.pathname.slice(base.length+1);
  try{
+  if(path==='production-cost-plan'){
+   if(req.method!=='GET')return fail('method not allowed',405);
+   if(!await currentMfa(env,user))return fail('current MFA Super Admin required',403);
+   const keys=[...url.searchParams.keys()],allowed=['minutes','audioPercent','numbers'];
+   if(keys.length!==3||keys.some(k=>!allowed.includes(k)||url.searchParams.getAll(k).length!==1)||
+      allowed.some(k=>!/^\d{1,7}$/.test(url.searchParams.get(k)||'')))return fail('invalid cost estimate',400);
+   try{return json(estimateProductionCost(Object.fromEntries(allowed.map(k=>[k,Number(url.searchParams.get(k))]))))}
+   catch{return fail('invalid cost estimate',400)}
+  }
   if(path==='usage-summary'){
    if(req.method!=='GET'||url.search)return fail('invalid usage query',400);
    if(!await currentMfa(env,user))return fail('current MFA Super Admin required',403);
