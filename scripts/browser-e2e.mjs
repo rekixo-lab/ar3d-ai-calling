@@ -138,6 +138,7 @@ try{
     await page.getByRole('heading',{name:'Clients',exact:true}).waitFor();
     await page.getByRole('link',{name:'Calling Setup',exact:true}).click();
     await page.getByRole('heading',{name:'Internal phone test'}).waitFor();
+    await page.getByText('Advanced diagnostics · Plivo go-live readiness',{exact:true}).click();
     await page.getByRole('heading',{name:'Plivo Go-Live Readiness'}).waitFor();
     await page.getByText('Not yet production-ready. Plivo KYC alone is not the remaining step.').waitFor();
     await page.getByRole('button',{name:'Refresh go-live checks'}).click();

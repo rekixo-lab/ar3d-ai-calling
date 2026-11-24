@@ -212,6 +212,11 @@ try{
  await adminPage.goto(origin+'/app');
  await adminPage.getByRole('heading',{name:'Client directory'}).waitFor();
  await adminPage.screenshot({path:'artifacts/calling-admin-clients.png',fullPage:true});
+ await adminPage.getByRole('link',{name:'Minutes & Wallet',exact:true}).click();
+ await adminPage.getByRole('combobox',{name:'Minute wallet company'}).selectOption(tid);
+ await adminPage.getByText('Connected time',{exact:true}).waitFor();
+ await adminPage.getByRole('heading',{name:'Budget transaction history'}).waitFor();
+ await adminPage.screenshot({path:'artifacts/admin-minute-wallet.png',fullPage:true});
  await adminPage.getByRole('link',{name:'Calling Setup'}).click();
  await adminPage.getByRole('heading',{name:'Client calling approval',exact:true}).waitFor();
  assert.ok(await adminPage.getByRole('button',{name:'Call the verified internal number once'}).isDisabled());
