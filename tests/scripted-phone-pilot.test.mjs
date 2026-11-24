@@ -510,3 +510,51 @@ test('internal pilot cooldown starts at signed hangup, blocks unsigned terminal 
   assert.equal(dials,2);
  }finally{f.close()}
 });
+
+test('five-device internal registry is capped, audited, consent-attested and tenant bound',async()=>{
+ const f=fixture();
+ try{
+  f.c.db.prepare("UPDATE tenants SET display_name='AR3D Internal' WHERE id=?").run(tid);
+  const env={...f.env,PLIVO_AUTH_ID:'syntheticAuth',PLIVO_AUTH_TOKEN:token,
+   AR3D_SCRIPTED_PILOT_ENABLED:'enabled',AR3D_PLIVO_RECORDING_AUTH:'confirmed',
+   AR3D_SCRIPTED_PILOT_ORIGIN:origin,AR3D_PLIVO_CALLER_NUMBER:'+918000000000',
+   AR3D_SCRIPTED_PILOT_VERIFIED_NUMBER:internalNumber,AR3D_SCRIPTED_PILOT_TENANT_ID:tid,
+   AR3D_SCRIPTED_PILOT_LEAD_ID:lead,RECORDINGS:{head:async()=>({size:4}),get:async()=>({size:4,body:new Uint8Array(4)})},AI:{run:async()=>({text:'प्लॉट'})}};
+  let dials=0,hook,destination;
+  const fetcher=async(url,options)=>{
+   dials++;const b=JSON.parse(options.body);destination=b.to;hook=b.answer_url.replace(/\/answer$/,'');
+   return Response.json({request_uuid:requestId},{status:202});
+  };
+  const request=(path,body,user=admin,configuration=env)=>handleScriptedPhoneAdmin(new Request(origin+'/v1/human/scripted-phone-pilot'+path,{
+   method:body?'POST':'GET',headers:{Origin:origin},...(body?{body:JSON.stringify(body)}:{})
+  }),configuration,user,{now,fetcher});
+  const add=mobile=>request('/devices',{mobile,confirm:'VERIFIED_CONSENTED_INTERNAL_DEVICE_NO_CALL'});
+  const first='+919000000002';
+  assert.equal((await request('/devices',{mobile:first,confirm:'wrong'})).status,400);
+  assert.equal((await request('/devices',{mobile:first,confirm:'VERIFIED_CONSENTED_INTERNAL_DEVICE_NO_CALL'},client)).status,403);
+  assert.equal((await add(internalNumber)).status,409);
+  let enrolled=[];
+  for(let i=2;i<=5;i++){const r=await add('+91900000000'+i);assert.equal(r.status,201,await r.clone().text());enrolled.push((await r.json()).leadId)}
+  assert.equal((await add('+919000000006')).status,409);
+  assert.equal((await add(first)).status,409);
+  assert.equal(dials,0);
+  const status=await (await request('',null)).json();
+  assert.equal(status.devices.length,5);
+  assert.ok(!JSON.stringify(status).includes(first));
+  assert.equal(f.r.db.prepare("SELECT COUNT(*) AS n FROM crm_audit_events WHERE action='lead.internal_test_device_enrolled'").get().n,4);
+  assert.equal(f.r.db.prepare("SELECT COUNT(*) AS n FROM leads WHERE name='AR3D Internal Device Test' AND consent_status='unknown' AND dnd_status='unknown'").get().n,4);
+  const start=leadId=>request('',{leadId,language:'hi',confirm:'CALL_ONE_VERIFIED_INTERNAL_NUMBER'});
+  assert.equal((await start('99999999-9999-4999-8999-999999999999')).status,403);
+  assert.equal((await start(enrolled[0])).status,202);
+  assert.equal(destination,first);
+  assert.equal(dials,1);
+  assert.equal((await start(enrolled[1])).status,409);
+  const cb=(step,params)=>handleScriptedPhoneCallback(signed(hook+'/'+step,{CallUUID:callId,...params}),env,{now,fetcher});
+  const details={ALegRequestUUID:requestId,From:'918000000000',To:'919000000002',Direction:'outbound'};
+  assert.match(await (await cb('answer',details)).text(),/opening\.mp3/);
+  assert.match(await (await cb('consent',{Digits:'1'})).text(),/propertyType\.mp3/);
+  assert.equal((await cb('hangup',{Duration:'20'})).status,204);
+  const row=f.c.db.prepare('SELECT lead_id,destination,hangup_at FROM scripted_phone_pilots').get();
+  assert.equal(row.lead_id,enrolled[0]);assert.equal(row.destination,first);assert.equal(row.hangup_at,now);
+ }finally{f.close()}
+});
