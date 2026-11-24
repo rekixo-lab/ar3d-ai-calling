@@ -5,9 +5,9 @@ const root=document.getElementById('app');
 const state={me:null,tenant:null,notice:'',clientTab:'customers',clientSetTab:null};
 const node=(tag,props={},children=[])=>{const n=document.createElement(tag);for(const [k,v] of Object.entries(props)){if(k==='class')n.className=v;else if(k==='value')n.value=v;else if(k==='type')n.type=v;else if(k==='onclick')n.addEventListener('click',v);else if(k==='onsubmit')n.addEventListener('submit',v);else if(k==='text')n.textContent=v;else n.setAttribute(k,String(v))}for(const ch of (Array.isArray(children)?children:[children])){if(ch!==null&&ch!==undefined)n.append(ch instanceof Node?ch:document.createTextNode(String(ch)))}return n};
 const div=(className,...ch)=>node('div',{class:className},ch);
-const iconPaths={grid:'M3 3h7v7H3z M14 3h7v7h-7z M3 14h7v7H3z M14 14h7v7h-7z',users:'M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2 M16 3a4 4 0 0 1 0 8 M22 21v-2a4 4 0 0 0-3-3.87 M13 7a4 4 0 1 1-8 0 4 4 0 0 1 8 0',phone:'M22 16.92v3a2 2 0 0 1-2.18 2A19.79 19.79 0 0 1 3.09 5.18 2 2 0 0 1 5.08 3h3a2 2 0 0 1 2 1.72c.13.96.36 1.9.69 2.79a2 2 0 0 1-.45 2.11L9.05 10.9a16 16 0 0 0 4.05 4.05l1.27-1.27a2 2 0 0 1 2.11-.45c.89.33 1.83.56 2.79.69A2 2 0 0 1 22 16.92',shield:'M12 22s8-4 8-11V5l-8-3-8 3v6c0 7 8 11 8 11 M9 12l2 2 4-4',mail:'M4 4h16a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2 M22 6l-10 7L2 6',settings:'M4 7h16 M4 17h16 M8 4v6 M16 14v6',upload:'M12 16V3 M7 8l5-5 5 5 M3 16v4a1 1 0 0 0 1 1h16a1 1 0 0 0 1-1v-4',plus:'M12 5v14 M5 12h14',arrow:'M5 12h14 M13 6l6 6-6 6',logout:'M9 21H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h5 M16 17l5-5-5-5 M21 12H9',spark:'m12 3 2.7 6.3L21 12l-6.3 2.7L12 21l-2.7-6.3L3 12l6.3-2.7L12 3',calendar:'M4 5h16v16H4z M16 3v4 M8 3v4 M4 11h16',play:'m8 5 11 7-11 7V5',pause:'M8 5v14 M16 5v14',refresh:'M20 7v5h-5 M4 17v-5h5 M6.1 7a7 7 0 0 1 11.6-2L20 8 M4 16l2.3 3a7 7 0 0 0 11.6-2',search:'M21 21l-5-5 M18 10a8 8 0 1 1-16 0 8 8 0 0 1 16 0',file:'M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z M14 2v6h6 M8 13h8 M8 17h5'};
+const iconPaths={wallet:'M20 8V6a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h15v-4 M3 8h17a2 2 0 0 1 2 2v4a2 2 0 0 1-2 2h-5a4 4 0 0 1 0-8h5 M16 12h.01',clock:'M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20 M12 6v6l4 2',receipt:'M4 3l3 2 3-2 3 2 3-2 4 2v16l-4-2-3 2-3-2-3 2-3-2z M8 9h8 M8 13h8 M8 17h4',chart:'M3 3v18h18 M7 16v-4 M12 16V7 M17 16V4',grid:'M3 3h7v7H3z M14 3h7v7h-7z M3 14h7v7H3z M14 14h7v7h-7z',users:'M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2 M16 3a4 4 0 0 1 0 8 M22 21v-2a4 4 0 0 0-3-3.87 M13 7a4 4 0 1 1-8 0 4 4 0 0 1 8 0',phone:'M22 16.92v3a2 2 0 0 1-2.18 2A19.79 19.79 0 0 1 3.09 5.18 2 2 0 0 1 5.08 3h3a2 2 0 0 1 2 1.72c.13.96.36 1.9.69 2.79a2 2 0 0 1-.45 2.11L9.05 10.9a16 16 0 0 0 4.05 4.05l1.27-1.27a2 2 0 0 1 2.11-.45c.89.33 1.83.56 2.79.69A2 2 0 0 1 22 16.92',shield:'M12 22s8-4 8-11V5l-8-3-8 3v6c0 7 8 11 8 11 M9 12l2 2 4-4',mail:'M4 4h16a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2 M22 6l-10 7L2 6',settings:'M4 7h16 M4 17h16 M8 4v6 M16 14v6',upload:'M12 16V3 M7 8l5-5 5 5 M3 16v4a1 1 0 0 0 1 1h16a1 1 0 0 0 1-1v-4',plus:'M12 5v14 M5 12h14',arrow:'M5 12h14 M13 6l6 6-6 6',logout:'M9 21H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h5 M16 17l5-5-5-5 M21 12H9',spark:'m12 3 2.7 6.3L21 12l-6.3 2.7L12 21l-2.7-6.3L3 12l6.3-2.7L12 3',calendar:'M4 5h16v16H4z M16 3v4 M8 3v4 M4 11h16',play:'m8 5 11 7-11 7V5',pause:'M8 5v14 M16 5v14',refresh:'M20 7v5h-5 M4 17v-5h5 M6.1 7a7 7 0 0 1 11.6-2L20 8 M4 16l2.3 3a7 7 0 0 0 11.6-2',search:'M21 21l-5-5 M18 10a8 8 0 1 1-16 0 8 8 0 0 1 16 0',file:'M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z M14 2v6h6 M8 13h8 M8 17h5'};
 function icon(name){const n=document.createElementNS('http://www.w3.org/2000/svg','svg');n.setAttribute('viewBox','0 0 24 24');n.setAttribute('class','icon');n.setAttribute('aria-hidden','true');const p=document.createElementNS(n.namespaceURI,'path');p.setAttribute('d',iconPaths[name]||iconPaths.grid);n.append(p);return n}
-const sectionIcon=s=>/security|auth|access|verification/i.test(s)?'shield':/invite/i.test(s)?'mail':/call|voice/i.test(s)?'phone':/client|customer|lead/i.test(s)?'users':/import|excel|export/i.test(s)?'file':/visit/i.test(s)?'calendar':/agent|AI/i.test(s)?'spark':'settings';
+const sectionIcon=s=>/wallet|credit|minute/i.test(s)?'wallet':/transaction|billing/i.test(s)?'receipt':/usage|report/i.test(s)?'chart':/security|auth|access|verification/i.test(s)?'shield':/invite/i.test(s)?'mail':/call|voice/i.test(s)?'phone':/client|customer|lead/i.test(s)?'users':/import|excel|export/i.test(s)?'file':/visit/i.test(s)?'calendar':/agent|AI/i.test(s)?'spark':'settings';
 const title=(s,tag='h2')=>node(tag,{},[icon(sectionIcon(s)),node('span',{text:s})]);
 const btn=(label,fn,secondary=false)=>node('button',{class:'btn'+(secondary?' secondary':''),type:'button',onclick:fn},[icon(/sign out/i.test(label)?'logout':/pause/i.test(label)?'pause':/start|resume|run|test/i.test(label)?'play':/refresh|^load/i.test(label)?'refresh':/search/i.test(label)?'search':/upload|import|download|export/i.test(label)?'upload':/create|add/i.test(label)?'plus':'arrow'),node('span',{text:label})]);
 const input=(name,type='text',placeholder='')=>node('input',{class:'field',name,type,placeholder,required:'required'});
@@ -131,7 +131,8 @@ function scriptedPhonePilotPanel(){
     node('option',{value:'hi',text:'Hindi'}),
     node('option',{value:'en',text:'English'})
   ]);
-  language.value='en';
+  language.value=state.internalPilotLanguage||'hi';
+  language.addEventListener('change',()=>{state.internalPilotLanguage=language.value});
   const status=node('p',{class:'note',role:'status',text:'Checking pilot configuration…'});
   const results=div('stack'),prepared=div('stack');
   const device=node('select',{class:'field','aria-label':'Internal test number'});
@@ -205,7 +206,7 @@ function scriptedPhonePilotPanel(){
     prepare.hidden=!!config.configured;
 
     results.replaceChildren(...(config.recent?.length?[table(['Started','Test number','Language','Status','Provider call reference','Turns processed','Signed hangup','Seconds'],
-      config.recent.map(x=>[x.created_at,x.destinationLast4?'••••'+x.destinationLast4:'—',x.language,x.phase,x.provider_call_reference?'Received':'Not received',x.turn??'—',x.signed_hangup?'Received':'Not received',x.duration_seconds??'—']))]:[]));
+      config.recent.map(x=>[formatIst(x.created_at),x.destinationLast4?'••••'+x.destinationLast4:'—',x.language,x.phase,x.provider_call_reference?'Received':'Not received',x.turn??'—',x.signed_hangup?'Received':'Not received',x.duration_seconds??'—']))]:[]));
     }catch(err){config=null;status.textContent='Could not verify internal call availability. Refresh status to retry.';throw err}
     finally{refreshing=false;updateAvailability();scheduleCheck()}
   }
@@ -222,7 +223,7 @@ function dashboard(){
  const items=admin?[
   ['clients','Clients','users','Client companies and sign-in invitations.'],
   ['calling','Calling Setup','phone','Internal testing and client calling approval.'],
-  ['wallet','Minutes & Wallet','file','Review exact call seconds, reconciliation and credit transactions.'],
+  ['wallet','Minutes & Wallet','wallet','Review exact call seconds, reconciliation and credit transactions.'],
   ['company','Company details','file','Manage company information and client requests.'],
   ['security','Security','shield','Manage two-factor authentication and recovery codes.']
  ]:[
@@ -230,7 +231,7 @@ function dashboard(){
   ['ai-test','AI Testing','spark','Practice the seven fixed questions without a phone call or CRM update.'],
   ['calling','Calling','phone','Review your campaign and start or pause approved calls.'],
   ['results','Results / CRM','grid','See call outcomes and answers saved to your CRM.'],
-  ['wallet','Minutes & Wallet','file','View verified call usage and credit history.'],
+  ['wallet','Minutes & Wallet','wallet','View verified call usage and credit history.'],
   ['company','Company details','file','Review your company information and request changes.']
  ];
  const heading=title(admin?'Clients':items[0][1],'h1');
@@ -361,6 +362,9 @@ async function mfaPanel(main){
   }catch(err){asError(err)}
 }
 // Operator credit controls are optional; no client-facing setup friction.
+function formatIst(value){
+ const date=new Date(value);return value&&Number.isFinite(date.getTime())?new Intl.DateTimeFormat('en-IN',{timeZone:'Asia/Kolkata',dateStyle:'medium',timeStyle:'medium'}).format(date)+' IST':'—';
+}
 function formatSeconds(value){
  if(!Number.isSafeInteger(value)||value<0)return '—';
  return Math.floor(value/60)+'m '+String(value%60).padStart(2,'0')+'s';
@@ -374,7 +378,7 @@ function minuteUsagePanel(main,tenantId,admin){
   refresh=btn('Refresh usage',()=>load().catch(asError),true);
  previous.disabled=true;next.disabled=true;actions.append(previous,next,refresh);
  card.append(body,actions);main.append(card);
- const metric=(label,value,description)=>div('card metric',node('span',{class:'muted',text:label}),
+ const metric=(label,value,description)=>div('card metric',div('metric-symbol',icon(/time|seconds|minutes/i.test(label)?'clock':/calls|CDR/i.test(label)?'phone':'wallet')),node('span',{class:'muted',text:label}),
   node('strong',{text:value}),node('p',{class:'muted',text:description}));
  async function load(){
   const seq=++version;refresh.disabled=true;
@@ -388,7 +392,7 @@ function minuteUsagePanel(main,tenantId,admin){
      if(!confirm('Read this final call record from Plivo and record its exact seconds? No debit or new call.'))return;
      try{await api('/v1/human/plivo-cost-reconcile','POST',{tenantId,jobId:r.jobId});notice('Provider CDR verified; no debit applied.');await load()}catch(e){asError(e)}
     },true):observed?'Verified':'Pending verification';
-    return [new Date(r.updatedAt).toLocaleString(),r.state,formatSeconds(r.connectedSeconds),formatSeconds(r.billedSeconds),action];
+    return [formatIst(r.updatedAt),r.state,formatSeconds(r.connectedSeconds),formatSeconds(r.billedSeconds),action];
    });
    body.replaceChildren(div('cards wallet-metrics',
     metric('Connected time',formatSeconds(d.connectedSeconds),d.connectedSeconds+' exact seconds · verified calls'),
@@ -400,9 +404,9 @@ function minuteUsagePanel(main,tenantId,admin){
     node('p',{class:'note',text:'Connected and billed durations are separate. A provider may bill in increments. No automatic wallet debits, payment or calling approval is active.'}),
     ...(admin&&d.internal?[node('p',{class:'muted',text:'Internal tests (not client charges): '+d.internal.calls+' calls · '+formatSeconds(d.internal.connectedSeconds)+' signed hangup time.'})]:[]),
     title('Call usage records','h3'),table(['Updated','Status','Connected','Provider billed','CDR'],rows),
-    title('Budget transaction history','h3'),table(['Date','Type','Change (₹)','Before (₹)','After (₹)'],
-     d.transactions.map(t=>[new Date(t.createdAt).toLocaleString(),t.type==='allocation'?'Planned allocation':'Planned recovery',
-      (t.deltaPaise>0?'+':'')+(t.deltaPaise/100).toFixed(2),(t.previousPaise/100).toFixed(2),(t.newPaise/100).toFixed(2)])),
+    title('Budget transaction history','h3'),table(['Date (IST)','Reference','Type','Change (₹)','Before (₹)','After (₹)',...(admin?['Actor','Reason']:[])],
+     d.transactions.map(t=>[formatIst(t.createdAt),t.transactionId,t.type==='allocation'?'Planned allocation':t.type==='recovery'?'Planned recovery':'Unchanged',
+      (t.deltaPaise>0?'+':'')+(t.deltaPaise/100).toFixed(2),(t.previousPaise/100).toFixed(2),(t.newPaise/100).toFixed(2),...(admin?[t.actor,t.reason]:[])])),
     node('p',{class:'muted',text:'Budget adjustments are audited planning transactions, not purchases or charges.'}));
    previous.disabled=offset===0;next.disabled=!d.hasMore;
   }catch(e){if(seq===version){body.replaceChildren(node('p',{class:'err',text:'Usage unavailable. Refresh to retry.'}));throw e}}
