@@ -320,6 +320,14 @@ try{
  assert.equal(f.c.db.prepare("SELECT paid_paise FROM tenant_credit_purchases WHERE receipt_ref='BROWSER-CLIENT-PURCHASE-500'").get().paid_paise,100000);
  assert.equal(f.c.db.prepare("SELECT balance_seconds FROM tenant_minute_ledger WHERE tenant_id=? ORDER BY sequence DESC LIMIT 1").get(tid).balance_seconds,36000);
  await ledger.getByText('600m 00s',{exact:true}).first().waitFor();
+ await adminPage.getByRole('heading',{name:'Recorded collections by date',exact:true}).waitFor();
+ const todayIst=new Date(Date.now()+330*60000).toISOString().slice(0,10);
+ await adminPage.getByLabel('From (IST)',{exact:true}).fill(todayIst);
+ await adminPage.getByLabel('To (IST)',{exact:true}).fill(todayIst);
+ await adminPage.getByRole('button',{name:'Load collections',exact:true}).click();
+ const collectionsCard=adminPage.locator('.card').filter({has:adminPage.getByRole('heading',{name:'Recorded collections by date',exact:true})}).last();
+ await collectionsCard.getByRole('row',{name:/BROWSER-CLIENT-PURCHASE-500/}).waitFor();
+ assert.ok(await collectionsCard.getByRole('button',{name:'Export receipt page (CSV)',exact:true}).isEnabled());
  // Real browser reconciliation against an isolated, synthetic settled hold.
  const costJob='98765432-aaaa-4aaa-8aaa-111111111111',costAt=new Date().toISOString();
  f.c.db.prepare("INSERT INTO provider_cost_reservations(tenant_id,job_id,reserved_seconds,plivo_currency,plivo_micros,sarvam_currency,sarvam_micros,created_at) VALUES(?,?,60,'USD',60000,'INR',200000,?)").run(tid,costJob,costAt);

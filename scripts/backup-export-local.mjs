@@ -1,6 +1,6 @@
 // Explicit local operator command; never run from CI or a Worker.
 import {mkdtempSync,readFileSync,writeFileSync,rmSync,statSync,realpathSync} from 'node:fs';
-import {dirname,join,resolve,sep} from 'node:path';
+import {join,resolve,sep} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {spawnSync} from 'node:child_process';
 import {getCredentials,inspectCloudflare,verifiedSchemaState} from './main-cloudflare.mjs';
@@ -15,12 +15,14 @@ export async function exportCallingBackup({directory,keyPath,environment=process
  if(environment.CI||environment.GITHUB_ACTIONS)throw Error('Production backups are local operator tasks, never CI');
  const dest=privateOutside(directory,true),keyFile=privateOutside(keyPath,false);
  if(statSync(keyFile).size!==32)throw Error('Backup key must be 32 random bytes');
- const key=readFileSync(keyFile),credentials=getCredentials(environment),template=JSON.parse(readFileSync(join(repo,'wrangler.example.jsonc'),'utf8'));
+ const credentials=getCredentials(environment),template=JSON.parse(readFileSync(join(repo,'wrangler.example.jsonc'),'utf8'));
  const {config,modes}=await inspect({credentials,mode:'ready',template});
  if(verifiedSchemaState(modes)!=='ready')throw Error('Calling schema must be ready');
  // Account and exact IDs were checked read-only before any CLI export.
  const temp=mkdtempSync(join(dest,'.calling-export-'));
+ let key;
  try{
+  key=readFileSync(keyFile);
   const cfg=join(temp,'wrangler.jsonc');
   writeFileSync(cfg,JSON.stringify({...config,account_id:credentials.account}),{mode:0o600,flag:'wx'});
   const parts=[];
@@ -36,7 +38,7 @@ export async function exportCallingBackup({directory,keyPath,environment=process
   const output=join(dest,'calling-'+manifest.createdAt.replace(/[:.]/g,'-')+'.enc');
   writeFileSync(output,archive,{mode:0o600,flag:'wx'});
   return {archivePath:output,createdAt:manifest.createdAt};
- }finally{key.fill(0);rmSync(temp,{recursive:true,force:true})}
+ }finally{key?.fill(0);rmSync(temp,{recursive:true,force:true})}
 }
 if(process.argv[1]&&resolve(process.argv[1])===fileURLToPath(import.meta.url)){
  const [confirm,directory,keyPath,...rest]=process.argv.slice(2);
