@@ -79,14 +79,18 @@ function quantityText(value){
     .replace(/\s+(?:(?:का|की)\s+प्लॉट\s+)?(?:चाहिए|चाहिये|लेना है|का चाहिए|का प्लॉट|please)$/iu,'').trim();
 }
 function spokenQuantity(value){
-  const s=value.trim().replace(/(?<=\d),(?=\d{2,3}(?:,|\b))/g,'');
+  let s=value.trim();
+  if(s.includes(',')){
+    if(!/^(?:\d{1,3}(?:,\d{3})+|\d{1,2}(?:,\d{2})*,\d{3})(?:\.\d+)?$/.test(s))return null;
+    s=s.replace(/,/g,'');
+  }
   if(/^\d+(?:\.\d+)?$/.test(s))return Number(s);
   const tokens=s.split(/\s+/);
   let total=0,group=null,lastScale=Infinity,previousWord=false;
   for(const token of tokens){
     if(Object.hasOwn(SPOKEN_SCALES,token)){
       const scale=SPOKEN_SCALES[token];
-      if(scale>=lastScale||group===0||group===null)return null;
+      if(scale>=lastScale||group===0||group===null||group*scale>=lastScale)return null;
       total+=group*scale;group=null;lastScale=scale;previousWord=false;continue;
     }
     const n=/^\d+$/.test(token)?Number(token):Object.hasOwn(SPOKEN_NUMBERS,token)?SPOKEN_NUMBERS[token]:null;
@@ -107,7 +111,7 @@ function parseSize(str,propertyType){
     const value=quantityText(str);
     if(value.length>120)return unclearPlotSize();
     // Dimensions preserve both numbers; never turn a range into one area.
-    const dimension=value.match(/^(.+?)\s*(?:×|x|\bby\b|बाय|गुणा)\s*(.+?)(?:\s*(?:फुट|फीट|feet|foot|ft))?$/iu);
+    const dimension=value.match(/^(.+?)\s*(?:×|(?<=\d)x(?=\d)|\bx\b|\bby\b|बाय|गुणा)\s*(.+?)(?:\s*(?:फुट|फीट|feet|foot|ft))?$/iu);
     if(dimension){
       const a=spokenQuantity(dimension[1]),b=spokenQuantity(dimension[2]);
       if(Number.isFinite(a)&&a>0&&a<=100000&&Number.isFinite(b)&&b>0&&b<=100000)
