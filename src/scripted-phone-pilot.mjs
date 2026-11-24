@@ -137,12 +137,16 @@ const directConfirm='CALL_ONE_PRECONSENTED_INTERNAL_NUMBER';
 const legacyConfirm='CALL_ONE_VERIFIED_INTERNAL_NUMBER';
 const streamingEngine='deepgram_stream',sarvamEngine='sarvam';
 const sarvamConfirm='CALL_ONE_PRECONSENTED_INTERNAL_SARVAM_NUMBER';
+const friendlyConfirm='CALL_ONE_INTERNAL_SARVAM_WITH_PRIOR_RECORDING_NOTICE';
 const sarvamConfigured=env=>typeof env.SARVAM_API_KEY==='string'&&!!env.SARVAM_API_KEY.trim()&&env.SARVAM_API_KEY.length<=512;
 function isSarvam(row){return internalDirect(row)&&JSON.parse(row.survey_json).phoneMeta?.engine===sarvamEngine}
 function isStreaming(row){return internalDirect(row)&&JSON.parse(row.survey_json).phoneMeta?.engine===streamingEngine}
 function internalDirect(row){return !row.job_id&&JSON.parse(row.survey_json).phoneMeta?.mode==='direct_preconsented'}
 const speak=(language,text)=>'<Speak voice="'+(language==='hi'?'Polly.Aditi':'WOMAN')+'" language="'+(language==='hi'?'hi-IN':'en-US')+'">'+escapeXml(text)+'</Speak>';
 function directOpening(row){
+ // Only a separate explicit pre-call recording disclosure attestation enables this greeting.
+ // Older internal clients and all customer campaign notices remain unchanged.
+ if(isSarvam(row)&&JSON.parse(row.survey_json).phoneMeta?.priorRecordingNotice===true)return speak(row.language,row.language==='hi'?'नमस्ते! मैं ए आर थ्री डी की ए आई असिस्टेंट हूँ। आपकी पसंद की प्रॉपर्टी ढूँढने में मदद करूँगी।':'Hello! I am the AR3D AI assistant. I am here to help you find a property that suits you.');
  // Only the explicitly pre-informed internal streaming test uses the short greeting.
  if(isStreaming(row))return speak(row.language,row.language==='hi'?'नमस्कार, मैं ए आर थ्री डी की ए आई असिस्टेंट हूँ।':'Hello, I am the AR3D AI assistant.');
  return speak(row.language,row.language==='hi'?'नमस्कार, मैं ए आर थ्री डी की ए आई असिस्टेंट हूँ। यह बातचीत रिकॉर्ड होती है।':'Hello, I am the AR3D AI assistant. This conversation is recorded.');
@@ -285,8 +289,8 @@ async function startPilot(req,env,user,config,now,fetcher){
  try{data=parseJsonBody(new TextDecoder('utf-8',{fatal:true}).decode(await readBoundedBytes(req,1024)),1024)}
  catch{return error('invalid_pilot_request',400)}
  if(!['confirm,language','confirm,language,leadId','confirm,engine,language','confirm,engine,language,leadId'].includes(Object.keys(data).sort().join(','))||
-    ![legacyConfirm,directConfirm,sarvamConfirm].includes(data.confirm)||!['hi','en'].includes(data.language)||
-    (data.confirm===sarvamConfirm?data.engine!==sarvamEngine:
+    ![legacyConfirm,directConfirm,sarvamConfirm,friendlyConfirm].includes(data.confirm)||!['hi','en'].includes(data.language)||
+    ([sarvamConfirm,friendlyConfirm].includes(data.confirm)?data.engine!==sarvamEngine:
       Object.hasOwn(data,'engine')&&(!['whisper',streamingEngine].includes(data.engine)||data.confirm!==directConfirm))||
     (Object.hasOwn(data,'leadId')&&(typeof data.leadId!=='string'||!UUID.test(data.leadId))))return error('explicit_pilot_confirmation_required',400);
  if(data.engine===sarvamEngine&&!sarvamConfigured(env))return error('sarvam_not_configured',409);
@@ -301,7 +305,7 @@ async function startPilot(req,env,user,config,now,fetcher){
  const id=crypto.randomUUID(),slot=Math.floor(now/pilotCooldownMs),survey=beginFixedVoicePreview({language:data.language,now}).state;
  // Separate explicit attestation; old callers continue to require keypad consent.
  // This is limited to enrolled internal devices and never used for a campaign.
- if([directConfirm,sarvamConfirm].includes(data.confirm))survey.phoneMeta={mode:'direct_preconsented',engine:data.engine||'whisper'};
+ if([directConfirm,sarvamConfirm,friendlyConfirm].includes(data.confirm))survey.phoneMeta={mode:'direct_preconsented',engine:data.engine||'whisper',...(data.confirm===friendlyConfirm?{priorRecordingNotice:true}:{})};
  const reservation=await control.prepare(`INSERT INTO scripted_phone_pilots
   (id,tenant_id,lead_id,lead_updated_at,actor_id,language,destination,caller,rate_slot,expires_at,phase,survey_json,created_at,provider_account_id)
   SELECT ?,?,?,?,?,?,?,?,?,?,'requested',?,?,? WHERE NOT EXISTS(
@@ -405,7 +409,7 @@ async function prepareInternalTestLead(req,env,user,now){
 
 export async function handleScriptedPhoneAdmin(req,env,user,{now=Date.now(),fetcher=fetch}={}){
  const path=new URL(req.url).pathname;
- if(path!==ADMIN&&path!==ADMIN+'/prepare-lead'&&path!==ADMIN+'/devices'&&path!==ADMIN+'/media-diagnostics'&&path!==ADMIN+'/recording-probe')return null;
+ if(path!==ADMIN&&path!==ADMIN+'/prepare-lead'&&path!==ADMIN+'/devices'&&path!==ADMIN+'/media-diagnostics'&&path!==ADMIN+'/recording-probe'&&path!==ADMIN+'/verify-result')return null;
  if(user?.globalRole!=='super_admin'||!await currentMfa(env.CONTROL_DB,user,now))return error('current_super_admin_mfa_required',403);
  if(path===ADMIN+'/prepare-lead'){
   try{return await prepareInternalTestLead(req,env,user,now)}
@@ -413,6 +417,11 @@ export async function handleScriptedPhoneAdmin(req,env,user,{now=Date.now(),fetc
  }
  if(!['GET','POST'].includes(req.method))return error('method_not_allowed',405);
  const config=configuration(env);
+ if(path===ADMIN+'/verify-result'){
+  if(req.method!=='GET'||new URL(req.url).search)return error('invalid_result_verification_request',400);
+  if(!config)return error('pilot_configuration_missing',503);
+  try{return json(await verifyLatestSarvamResult(env,config))}catch{return error('result_verification_unavailable',503)}
+ }
  if(path===ADMIN+'/recording-probe'){
   if(req.method!=='POST'||!config||!mutationOriginAllowed(req)||new URL(req.url).origin!==config.origin||new URL(req.url).search)return error('invalid_recording_probe_request',400);
   try{
@@ -479,6 +488,38 @@ async function verifiedPlivoGet(req,config,url){
   if(await crypto.subtle.verify('HMAC',key,Uint8Array.from(atob(value),c=>c.charCodeAt(0)),encoder.encode(payload)))return true;
  }
  return false;
+}
+
+// Read-only verification for one signed-ended Sarvam internal session.
+// Never return names, phones, raw transcripts, provider URLs or other leads.
+async function verifyLatestSarvamResult(env,config){
+ const base={phoneCallsStarted:0,crmChanged:false,providerRequests:0};
+ const row=await env.CONTROL_DB.prepare(`SELECT id,tenant_id,lead_id,destination,phase,survey_json,turn,duration_seconds,created_at
+  FROM scripted_phone_pilots WHERE tenant_id=? AND job_id IS NULL AND provider_account_id=? AND caller=?
+  AND hangup_at IS NOT NULL AND provider_call_id IS NOT NULL AND CASE WHEN json_valid(survey_json)
+  THEN json_extract(survey_json,'$.phoneMeta.engine')='sarvam' ELSE 0 END ORDER BY created_at DESC,id DESC LIMIT 1`)
+  .bind(config.tenant,config.authId,config.caller).first();
+ if(!row)return {...base,state:'no_signed_ended_sarvam_call'};
+ const target=await selectDevice(env,config,row.lead_id),db=await pilotCrm(env,config.tenant);
+ if(!target||target.destination!==row.destination||!db||!await eligiblePilotLead(db,target))return {...base,state:'internal_device_unavailable'};
+ const s=JSON.parse(row.survey_json),m=s.phoneMeta||{};
+ const lead=await db.prepare('SELECT preferred_location,plot_size_preference,budget_max_inr,interest_status,visit_date_preference,requirements_json FROM leads WHERE tenant_id=? AND id=? AND mobile_e164=?').bind(config.tenant,row.lead_id,row.destination).first();
+ let saved=null;try{saved=JSON.parse(lead?.requirements_json||'{}').scriptedCallPilot}catch{}
+ const sameSession=saved?.id===row.id;
+ const fields=['propertyType','location','area','size','budgetInr','interest','visitDate','visitAt'];
+ const answers=Object.fromEntries(fields.map(k=>[k,s.answers?.[k]??null]));
+ const stored=sameSession?Object.fromEntries(fields.map(k=>[k,saved.answers?.[k]??null])):null;
+ const matches=stored?fields.every(k=>answers[k]===stored[k]):false;
+ const crmColumnsMatch=!!(matches&&lead&&lead.preferred_location===answers.location&&lead.plot_size_preference===answers.size&&
+  (answers.budgetInr===null||lead.budget_max_inr===answers.budgetInr)&&lead.visit_date_preference===answers.visitDate&&
+  (lead.interest_status==='converted'||lead.interest_status===({interested:'interested',later:'followup',not_interested:'not_interested'}[answers.interest])));
+ const metric=k=>Number.isSafeInteger(m[k])&&m[k]>=0?m[k]:null;
+ return {...base,state:'verified_read_only',phase:row.phase,startedAt:row.created_at,destinationLast4:row.destination.slice(-4),signedHangup:true,
+  connectedSeconds:row.duration_seconds,attempts:row.turn,questionsAccepted:s.index,answers,storedAnswers:stored,
+  crmSameSession:sameSession,answersMatch:matches,crmColumnsMatch,crmVerified:row.phase==='completed'&&matches&&crmColumnsMatch,
+  usage:{sttAudioMs:metric('sttAudioMs'),sttDurationUnknown:metric('sttDurationUnknown'),llmRequests:metric('llmRequests'),
+   llmInputTokens:metric('llmInputTokens'),llmOutputTokens:metric('llmOutputTokens'),llmUsageUnknown:metric('llmUsageUnknown'),
+   lastRecognitionMs:metric('recognitionMs'),lastInterpretationMs:metric('interpretationMs')}};
 }
 
 async function saveVerifiedPilot(env,row,now){

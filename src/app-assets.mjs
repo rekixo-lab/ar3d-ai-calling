@@ -181,6 +181,18 @@ function scriptedPhonePilotPanel(){
     sarvamReport.replaceChildren(table(['Saaras v4 diagnostic','Result'],[['Outcome',d.state],['Question',d.question??'—'],['STT',d.stt],['Recognized words',d.transcript??'—'],['Parser',d.parserAction??'—'],['Normalized answer',d.normalizedAnswer??'—'],['Recognition latency (ms)',d.recognitionMs??'—'],['Interpreter',d.interpretation?.interpreter??'—'],['Proposed action',d.interpretation?.action??'—'],['Proposed answer (not saved)',d.interpretation?.normalizedAnswer??'—'],['LLM requests',d.interpretation?.llmRequests??'—'],['LLM input tokens',d.interpretation?.usage?.inputTokens??'—'],['LLM output tokens',d.interpretation?.usage?.outputTokens??'—'],['Interpretation latency (ms)',d.interpretation?.latencyMs??'—'],['Safe error code',d.failureCode??'—']]),node('p',{class:'muted',text:d.state==='sarvam_not_configured'?'Server secret SARVAM_API_KEY is required. Do not paste it into this dashboard or chat.':'Latest existing internal recording only. Verify the recognized words against actual speech; not a live-call test.'}),btn('Clear transcript',()=>sarvamReport.replaceChildren(),true));
    }catch(e){asError(e)}finally{sarvamProbe.disabled=false}
   },true);
+  const verifiedReport=div('stack');
+  const verifyResult=btn('Verify last Sarvam call & CRM (no call)',async()=>{
+   verifyResult.disabled=true;verifiedReport.replaceChildren();
+   try{
+    const d=await api('/v1/human/scripted-phone-pilot/verify-result');
+    if(d.state!=='verified_read_only'){verifiedReport.append(node('p',{class:'note',text:d.state}));return}
+    verifiedReport.replaceChildren(table(['Call verification','Result'],[['Started',formatIst(d.startedAt)],['Test device','••••'+d.destinationLast4],['Status',d.phase],['Signed hangup',d.signedHangup?'Received':'Missing'],['CRM save verified',d.crmVerified?'Yes':'No'],['Same call saved in CRM',d.crmSameSession?'Yes':'No'],['Answers match',d.answersMatch?'Yes':'No'],['CRM columns match',d.crmColumnsMatch?'Yes':'No'],['Connected seconds',d.connectedSeconds],['Attempts',d.attempts],['Questions accepted',d.questionsAccepted]]),
+     table(['Field','Call answer','Saved CRM answer'],Object.entries(d.answers).map(([k,v])=>[k,v??'—',d.storedAnswers?.[k]??'—'])),
+     table(['Recorded usage (not invoice)','Value'],Object.entries(d.usage).map(([k,v])=>[k,v??'Unknown'])),
+     node('p',{class:'muted',text:'Read-only check of the latest signed-ended internal Sarvam call and its exact test lead. Does not compare to what the recipient actually said; check the displayed values yourself. No new call, AI request, or CRM write.'}),btn('Clear result',()=>verifiedReport.replaceChildren(),true));
+   }catch(e){asError(e)}finally{verifyResult.disabled=false}
+  },true);
   const listenReport=div('stack');
   let revokeListening=null;
   const listen=btn('Listen to last saved answer (no call, no AI)',async()=>{
@@ -254,10 +266,10 @@ function scriptedPhonePilotPanel(){
   }
   const call=btn('Call the verified internal number once',async()=>{
     const selected=config?.devices?.find(x=>x.leadId===device.value);
-    if(busy||refreshing||!selected||config?.availability?.ready!==true||!window.confirm('Place one internal pilot call to the selected test number ending '+selected.destinationLast4+'? Confirm the actual recipient has been informed BEFORE this call about AI processing, text retention and their right to decline, and has explicitly agreed to the selected provider processing their speech and text. Sarvam uses recorded answers and Sarvam AI speech recognition and optional contextual interpretation. Legacy Whisper and Deepgram use Workers AI. Recorded calls play a recording notice. No keypad required. Selected recognition: '+engine.options[engine.selectedIndex].textContent+'. Telephony and AI usage may be charged.'))return;
+    if(busy||refreshing||!selected||config?.availability?.ready!==true||!window.confirm('Place one internal pilot call to the selected test number ending '+selected.destinationLast4+'? Confirm the actual recipient has been informed BEFORE this call about AI processing, text retention and their right to decline, and has explicitly agreed to the selected provider processing their speech and text. Sarvam uses recorded answers and Sarvam AI speech recognition and optional contextual interpretation. Legacy Whisper and Deepgram use Workers AI. For Sarvam, explicitly confirm the recipient has already received and accepted the recording notice before placing this call; it will not be repeated in the greeting. Other recorded calls play their usual notice. No keypad required. Selected recognition: '+engine.options[engine.selectedIndex].textContent+'. Telephony and AI usage may be charged.'))return;
     busy=true;updateAvailability();
     try{
-      await api('/v1/human/scripted-phone-pilot','POST',{language:language.value,leadId:selected.leadId,engine:engine.value,confirm:engine.value==='sarvam'?'CALL_ONE_PRECONSENTED_INTERNAL_SARVAM_NUMBER':'CALL_ONE_PRECONSENTED_INTERNAL_NUMBER'});
+      await api('/v1/human/scripted-phone-pilot','POST',{language:language.value,leadId:selected.leadId,engine:engine.value,confirm:engine.value==='sarvam'?'CALL_ONE_INTERNAL_SARVAM_WITH_PRIOR_RECORDING_NOTICE':'CALL_ONE_PRECONSENTED_INTERNAL_NUMBER'});
       notice('Pilot submitted. Waiting for signed hangup.');
     }catch(err){asError(err)}
     finally{try{await refresh()}catch(err){asError(err)}busy=false;updateAvailability()}
@@ -285,7 +297,7 @@ function scriptedPhonePilotPanel(){
   }
   enrollment.hidden=true;device.addEventListener('change',updateAvailability);
   card.append(status,prepare,prepared,enrollment,div('formrow',lab('Internal test number',device),lab('Recorded prompt language',language),lab('Speech recognition engine',engine),call,
-    btn('Refresh fixed-question pilot status',()=>refresh().catch(asError),true)),cooldown,results,sarvamProbe,sarvamReport,listen,listenReport,node('details',{class:'card'},[node('summary',{text:'Legacy recognition diagnostics (no call)'}),mediaCheck,mediaReport,probe,probeReport,answerProbe,answerReport,lastAnswerProbe,lastAnswerReport]));
+    btn('Refresh fixed-question pilot status',()=>refresh().catch(asError),true)),cooldown,results,verifyResult,verifiedReport,sarvamProbe,sarvamReport,listen,listenReport,node('details',{class:'card'},[node('summary',{text:'Legacy recognition diagnostics (no call)'}),mediaCheck,mediaReport,probe,probeReport,answerProbe,answerReport,lastAnswerProbe,lastAnswerReport]));
   refresh().catch(()=>{status.textContent='Pilot status requires a current MFA Super Admin session.'});
   return card;
 }

@@ -905,7 +905,7 @@ test('consented Sarvam internal call uses one STT per turn, direct parser and no
    RECORDINGS:{head:async()=>({size:4}),get:async()=>({size:4,body:new Uint8Array(4)})},
    AI:{async run(){throw Error('legacy AI must not be called')}}};
   let hook,dials=0,stt=0;
-  const phrases=['प्लॉट','रायपुर','अमलीडीह','1000 वर्ग फुट','20 लाख।'];
+  const phrases=['प्लॉट','रायपुर','अमलीडीह','1000 वर्ग फुट','20 लाख।','बाद में'];
   const fetcher=async(url,opts)=>{
    if(url.startsWith('https://api.plivo.com/')){dials++;hook=JSON.parse(opts.body).answer_url.replace(/\/answer$/,'');return Response.json({request_uuid:requestId},{status:202})}
    if(url==='https://api.sarvam.ai/speech-to-text'){
@@ -918,12 +918,24 @@ test('consented Sarvam internal call uses one STT per turn, direct parser and no
   assert.equal((await start('CALL_ONE_PRECONSENTED_INTERNAL_SARVAM_NUMBER')).status,409);assert.equal(dials,0);
   env.SARVAM_API_KEY='synthetic-key';
   assert.equal((await start('CALL_ONE_PRECONSENTED_INTERNAL_NUMBER')).status,400);assert.equal(dials,0);
-  assert.equal((await start('CALL_ONE_PRECONSENTED_INTERNAL_SARVAM_NUMBER')).status,202);assert.equal(dials,1);
+  assert.equal((await start('CALL_ONE_INTERNAL_SARVAM_WITH_PRIOR_RECORDING_NOTICE')).status,202);assert.equal(dials,1);
   const cb=(step,params)=>handleScriptedPhoneCallback(signed(hook+'/'+step,{CallUUID:callId,...params}),env,{now,fetcher});
-  assert.match(await (await cb('answer',{ALegRequestUUID:requestId,From:'918000000000',To:'919000000001',Direction:'outbound'})).text(),/maxLength="12".*timeout="3"/);
+  const opening=await (await cb('answer',{ALegRequestUUID:requestId,From:'918000000000',To:'919000000001',Direction:'outbound'})).text();
+  assert.match(opening,/नमस्ते.*आपकी पसंद की प्रॉपर्टी/);assert.doesNotMatch(opening,/यह बातचीत रिकॉर्ड होती है/);assert.match(opening,/maxLength="12".*timeout="3"/);
   for(let i=0;i<5;i++)assert.equal((await cb('turn/'+i,{RecordingID:'record-id-0'+i,RecordingDurationMs:'2500'})).status,200);
   const row=f.c.db.prepare('SELECT survey_json FROM scripted_phone_pilots').get(),s=JSON.parse(row.survey_json);
   assert.equal(s.answers.budgetInr,2000000);assert.equal(s.phoneMeta.engine,'sarvam');assert.equal(s.phoneMeta.llmRequests,0);assert.equal(s.phoneMeta.sttAudioMs,12500);assert.equal(stt,5);
   await cb('turn/4',{RecordingID:'record-id-04',RecordingDurationMs:'2500'});assert.equal(stt,5);assert.equal(dials,1);
+  await cb('turn/5',{RecordingID:'record-id-05',RecordingDurationMs:'2500'});
+  const verify=user=>handleScriptedPhoneAdmin(new Request(origin+'/v1/human/scripted-phone-pilot/verify-result'),env,user,{now,fetcher:async()=>{throw Error('no external request')}});
+  assert.equal((await verify(client)).status,403);
+  assert.equal((await (await verify(admin)).json()).state,'no_signed_ended_sarvam_call');
+  await cb('hangup',{Duration:'73'});
+  const before=f.r.db.prepare('SELECT * FROM leads WHERE id=?').get(lead);
+  const report=await (await verify(admin)).json();
+  assert.equal(report.crmVerified,true);assert.equal(report.answers.budgetInr,2000000);assert.equal(report.storedAnswers.budgetInr,2000000);
+  assert.equal(report.connectedSeconds,73);assert.equal(report.usage.llmRequests,0);assert.equal(report.usage.sttAudioMs,15000);
+  assert.equal(report.phoneCallsStarted,0);assert.equal(report.crmChanged,false);assert.equal(stt,6);
+  assert.deepEqual(f.r.db.prepare('SELECT * FROM leads WHERE id=?').get(lead),before);
  }finally{f.close()}
 });
