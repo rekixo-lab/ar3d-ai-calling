@@ -707,3 +707,37 @@ test('read-only internal media diagnostics scopes requests to signed ended calls
   assert.doesNotMatch(JSON.stringify(data),/private|34111111|14111111/);
  }finally{f.close()}
 });
+
+test('recording 403 may recover only through matching authenticated regional metadata',async()=>{
+ for(const mode of ['regional','wrong_call','wrong_host']){
+  const f=fixture();try{
+   const env={...f.env,PLIVO_AUTH_ID:'syntheticAuth',PLIVO_AUTH_TOKEN:token,
+    AR3D_SCRIPTED_PILOT_ENABLED:'enabled',AR3D_PLIVO_RECORDING_AUTH:'confirmed',
+    AR3D_SCRIPTED_PILOT_ORIGIN:origin,AR3D_PLIVO_CALLER_NUMBER:'+918000000000',
+    AR3D_SCRIPTED_PILOT_VERIFIED_NUMBER:internalNumber,AR3D_SCRIPTED_PILOT_TENANT_ID:tid,
+    AR3D_SCRIPTED_PILOT_LEAD_ID:lead,RECORDINGS:{head:async()=>({size:4}),get:async()=>null},
+    AI:{async run(){assert.equal(mode,'regional');return {text:'प्लॉट'}}}};
+   let hook,regional=0;const recording='record-id-00';
+   const fetcher=async(url,opts)=>{
+    assert.equal(opts.redirect,'manual');
+    if(url.endsWith('/Call/')){hook=JSON.parse(opts.body).answer_url.replace(/\/answer$/,'');return Response.json({request_uuid:requestId},{status:202})}
+    if(url.startsWith('https://media.plivo.com/'))return new Response('forbidden',{status:403});
+    if(url.startsWith('https://api.plivo.com/')&&url.endsWith('/Recording/'+recording+'/'))return Response.json({
+     recording_id:recording,call_uuid:mode==='wrong_call'?'another-call':callId,recording_format:'mp3',
+     recording_url:'https://'+(mode==='wrong_host'?'untrusted.invalid':'aps1.media.plivo.com')+'/v1/Account/syntheticAuth/Recording/'+recording+'.mp3'});
+    assert.match(url,/^https:\/\/aps1\.media\.plivo\.com\//);regional++;
+    return new Response('RIFF',{headers:{'Content-Type':'audio/wav'}});
+   };
+   const start=await handleScriptedPhoneAdmin(new Request(origin+'/v1/human/scripted-phone-pilot',{
+    method:'POST',headers:{Origin:origin},body:JSON.stringify({language:'hi',confirm:'CALL_ONE_PRECONSENTED_INTERNAL_NUMBER'})
+   }),env,admin,{now,fetcher});assert.equal(start.status,202);
+   const cb=(step,params)=>handleScriptedPhoneCallback(signed(hook+'/'+step,{CallUUID:callId,...params}),env,{now,fetcher});
+   await cb('answer',{ALegRequestUUID:requestId,From:'918000000000',To:'919000000001',Direction:'outbound'});
+   const result=await (await cb('turn/0',{RecordingID:recording,RecordUrl:'https://untrusted.invalid/ignore'})).text();
+   assert.equal(regional,mode==='regional'?1:0);
+   const state=JSON.parse(f.c.db.prepare('SELECT survey_json FROM scripted_phone_pilots').get().survey_json);
+   assert.equal(state.index,mode==='regional'?1:0);
+   assert.match(result,mode==='regional'?/location\.mp3/:/propertyType\.mp3/);
+  }finally{f.close()}
+ }
+});
