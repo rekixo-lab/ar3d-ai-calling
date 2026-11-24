@@ -377,3 +377,13 @@ test('single BHK count preserves larger values; competing counts are not silentl
  assert.equal(sized.answers.size,'3BHK');
  assert.equal(advanceFixedVoicePreview(sized,{transcript:'मेरा बजट लगभग पचपन लाख है',now}).state.answers.budgetInr,5500000);
 });
+
+test('explicit budget range preserves both endpoints and rejects alternatives',()=>{
+ const now=Date.parse('2026-11-24T08:00:00Z');let state=beginFixedVoicePreview({language:'hi',now}).state;
+ for(const transcript of ['घर','कोरबा','बस स्टैंड','3BHK'])state=advanceFixedVoicePreview(state,{transcript,now}).state;
+ for(const transcript of ['20 से 30 लाख','बीस लाख से तीस लाख','20 lakh to 30 lakh']){
+  const a=advanceFixedVoicePreview(state,{transcript,now});assert.equal(a.state.answers.budgetMinInr,2000000);assert.equal(a.state.answers.budgetInr,3000000);
+  const end=advanceFixedVoicePreview(a.state,{transcript:'बाद में',now});assert.equal(end.state.status,'completed');assert.equal(end.state.answers.budgetMinInr,2000000);
+ }
+ for(const transcript of ['30 से 20 लाख','20 या 30 लाख'])assert.equal(advanceFixedVoicePreview(state,{transcript,now}).action,'repeat');
+});

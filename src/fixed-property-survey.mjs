@@ -6,7 +6,7 @@ export const BHK_OPTIONS=Object.freeze(['1BHK','2BHK','3BHK','4BHK','5BHK+']);
 export const INTERESTS=Object.freeze(['interested','later','not_interested']);
 const CLEAN=/[\u0000-\u001f\u007f]/u;
 const fields=Object.freeze(['propertyType','location','area','size','budgetInr',
-  'interest','visitDate','visitAt']);
+  'interest','visitDate','visitAt','budgetMinInr']);
 export function fixedPropertyQuestions(propertyType='plot',language='hi'){
   if(!PROPERTY_TYPES.includes(propertyType)||!['hi','en'].includes(language))
     throw Error('invalid qualification question settings');
@@ -72,6 +72,8 @@ export function normalizePropertySurvey(raw,{now=Date.now()}={}){
     null:raw.budgetInr;
   if(budgetInr!==null&&(!Number.isSafeInteger(budgetInr)||budgetInr<1||
      budgetInr>1000000000000))throw Error('invalid budget');
+  const budgetMinInr=raw.budgetMinInr??null;
+  if(budgetMinInr!==null&&(!Number.isSafeInteger(budgetMinInr)||budgetMinInr<1||budgetInr===null||budgetMinInr>budgetInr))throw Error('invalid budget range');
   const interest=raw.interest;
   if(!INTERESTS.includes(interest))throw Error('invalid interest');
   const visitDate=calendarDate(raw.visitDate);
@@ -94,13 +96,14 @@ export function normalizePropertySurvey(raw,{now=Date.now()}={}){
       throw Error('visit date and time mismatch');
   }
   return Object.freeze({propertyType,location,area,size,budgetInr,
-    interest,visitDate,visitAt:visitIso});
+    ...(budgetMinInr!==null?{budgetMinInr}:{}),interest,visitDate,visitAt:visitIso});
 }
 export function surveyToCrm(survey){
   return Object.freeze({
     preferredLocation:survey.location,
     plotSizePreference:survey.size,
     budgetMaxInr:survey.budgetInr,
+    ...(survey.budgetMinInr!==undefined?{budgetMinInr:survey.budgetMinInr}:{}),
     interestStatus:survey.interest==='interested'?'interested':
       survey.interest==='later'?'followup':'not_interested',
     visitDatePreference:survey.visitDate,

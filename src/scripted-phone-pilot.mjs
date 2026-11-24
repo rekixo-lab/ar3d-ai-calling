@@ -510,15 +510,15 @@ async function verifyLatestSarvamResult(env,config){
  const target=await selectDevice(env,config,row.lead_id),db=await pilotCrm(env,config.tenant);
  if(!target||target.destination!==row.destination||!db||!await eligiblePilotLead(db,target))return {...base,state:'internal_device_unavailable'};
  const s=JSON.parse(row.survey_json),m=s.phoneMeta||{};
- const lead=await db.prepare('SELECT preferred_location,plot_size_preference,budget_max_inr,interest_status,visit_date_preference,requirements_json FROM leads WHERE tenant_id=? AND id=? AND mobile_e164=?').bind(config.tenant,row.lead_id,row.destination).first();
+ const lead=await db.prepare('SELECT preferred_location,plot_size_preference,budget_min_inr,budget_max_inr,interest_status,visit_date_preference,requirements_json FROM leads WHERE tenant_id=? AND id=? AND mobile_e164=?').bind(config.tenant,row.lead_id,row.destination).first();
  let saved=null;try{saved=JSON.parse(lead?.requirements_json||'{}').scriptedCallPilot}catch{}
  const sameSession=saved?.id===row.id;
- const fields=['propertyType','location','area','size','budgetInr','interest','visitDate','visitAt'];
+ const fields=['propertyType','location','area','size','budgetMinInr','budgetInr','interest','visitDate','visitAt'];
  const answers=Object.fromEntries(fields.map(k=>[k,s.answers?.[k]??null]));
  const stored=sameSession?Object.fromEntries(fields.map(k=>[k,saved.answers?.[k]??null])):null;
  const matches=stored?fields.every(k=>answers[k]===stored[k]):false;
  const crmColumnsMatch=!!(matches&&lead&&lead.preferred_location===answers.location&&lead.plot_size_preference===answers.size&&
-  (answers.budgetInr===null||lead.budget_max_inr===answers.budgetInr)&&lead.visit_date_preference===answers.visitDate&&
+  (answers.budgetInr===null||(lead.budget_max_inr===answers.budgetInr&&lead.budget_min_inr===answers.budgetMinInr))&&lead.visit_date_preference===answers.visitDate&&
   (lead.interest_status==='converted'||lead.interest_status===({interested:'interested',later:'followup',not_interested:'not_interested'}[answers.interest])));
  const metric=k=>Number.isSafeInteger(m[k])&&m[k]>=0?m[k]:null;
  return {...base,state:'verified_read_only',phase:row.phase,startedAt:row.created_at,destinationLast4:row.destination.slice(-4),signedHangup:true,
@@ -551,12 +551,12 @@ async function saveVerifiedPilot(env,row,now){
  if(existing.updated_at===row.lead_updated_at&&stored&&stored.length<=8000){
   statements.push(
    db.prepare(`UPDATE leads SET preferred_location=COALESCE(?,preferred_location),plot_size_preference=?,
-    budget_min_inr=CASE WHEN ? IS NULL THEN budget_min_inr ELSE NULL END,budget_max_inr=COALESCE(?,budget_max_inr),
+    budget_min_inr=CASE WHEN ? IS NULL THEN budget_min_inr ELSE ? END,budget_max_inr=COALESCE(?,budget_max_inr),
     interest_status=CASE WHEN interest_status='converted' THEN interest_status ELSE ? END,
     visit_date_preference=?,requirements_json=?,updated_at=?
     WHERE tenant_id=? AND id=? AND mobile_e164=? AND updated_at=? AND consent_status!='denied' AND dnd_status!='blocked'
     AND NOT EXISTS(SELECT 1 FROM lead_opt_out_events o WHERE o.tenant_id=leads.tenant_id AND o.lead_id=leads.id)`)
-    .bind(crm.preferredLocation,crm.plotSizePreference,crm.budgetMaxInr,crm.budgetMaxInr,crm.interestStatus,
+    .bind(crm.preferredLocation,crm.plotSizePreference,crm.budgetMaxInr,crm.budgetMinInr??null,crm.budgetMaxInr,crm.interestStatus,
      crm.visitDatePreference,stored,at,row.tenant_id,row.lead_id,row.destination,existing.updated_at),
    db.prepare(`INSERT INTO crm_audit_events(tenant_id,id,actor,action,target_id,created_at)
     SELECT tenant_id,?,'scripted_phone_pilot','lead.scripted_phone_pilot_saved',id,?

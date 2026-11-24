@@ -1258,7 +1258,7 @@ function aiTestingPanel(content,tenantId,role){
    preview.replaceChildren(title('Test result','h3'),
      table(['Question','Interpreted answer'],[
       ['Property type',a.propertyType],['Location',a.location],['Area',a.area],
-      ['Size',a.size],['Budget (INR)',a.budgetInr??'—'],
+      ['Size',a.size],['Budget (INR)',a.budgetMinInr!=null?a.budgetMinInr+' – '+a.budgetInr:a.budgetInr??'—'],
       ['Interest',a.interest],['Visit date',a.visitDate||'Not requested']
      ]),node('p',{class:'muted',text:result.savedToCrm?
        'Auto-save completed for '+selectedName+'. This is simulated qualification, not a verified customer phone call or a confirmed visit.':
@@ -1474,7 +1474,7 @@ function campaignResultsPanel(tenantId,content,role){
   const trigger=document.activeElement,q=result.answers;
   const fields=[
    ['Property type',q.propertyType],['City or location',q.location],['Area',q.area],['Property size',q.size],
-   ['Budget',answerBudget(q.budgetInr)],['Interest',({interested:'Interested',later:'Follow up later',not_interested:'Not interested'})[q.interest]],
+   ['Budget',q.budgetMinInr!=null?answerBudget(q.budgetMinInr)+' – '+answerBudget(q.budgetInr):answerBudget(q.budgetInr)],['Interest',({interested:'Interested',later:'Follow up later',not_interested:'Not interested'})[q.interest]],
    ['Preferred visit date',q.visitDate]
   ];
   answer.replaceChildren(div('row between',title(result.name+(result.partial?' — partial call answers':' — call answers'),'h3'),
@@ -2156,6 +2156,7 @@ function fixedSurveyPanel(tenantId,lead,onSave){
       budget.required=false;budget.min='1';budget.step='1';
       budget.value=previous.budgetInr===null||previous.budgetInr===undefined?
         '':String(previous.budgetInr);
+      const minBudget=input('surveyMinBudget','number','Optional minimum in rupees');minBudget.required=false;minBudget.min='1';minBudget.step='1';minBudget.value=previous.budgetMinInr??'';
       const interest=node('select',{class:'field'},[
         ['interested','Interested / इंटरेस्टेड'],
         ['later','Follow up later / बाद में'],
@@ -2179,20 +2180,20 @@ function fixedSurveyPanel(tenantId,lead,onSave){
         question('location',city),
         question('area',area),
         question('size',sizeHost),
-        question('budgetInr',budget),
+        question('budgetInr',div('stack',lab('Maximum / single budget',budget),lab('Minimum (only if range stated)',minBudget))),
         question('interest',interest),
         question('visitDate',visitDateField)
       );
+      const bhkChoices=['1BHK','2BHK','3BHK','4BHK','5BHK+',...Array.from({length:15},(_,i)=>(i+6)+'BHK')];
       function buildSize(){
         const old=sizeInput?.value||previous.size||'';
         sizeInput=propertyType.value==='plot'?
           input('surveyPlotSize','text','e.g. 1200 sqft / 30x40 ft'):
-          node('select',{class:'field'},['1BHK','2BHK','3BHK','4BHK','5BHK+']
-            .map(value=>node('option',{value,text:value})));
+          node('select',{class:'field'},bhkChoices.map(value=>node('option',{value,text:value})));
         if(propertyType.value==='plot'){
           sizeInput.maxLength=80;
           sizeInput.value=old&&old.includes('BHK')?'':old;
-        }else sizeInput.value=['1BHK','2BHK','3BHK','4BHK','5BHK+'].includes(old)?old:'2BHK';
+        }else sizeInput.value=bhkChoices.includes(old)?old:'2BHK';
         sizeHost.replaceChildren(sizeInput);
       }
       function refreshQuestions(){
@@ -2372,7 +2373,7 @@ function fixedSurveyPanel(tenantId,lead,onSave){
           propertyType.value=a.propertyType;buildSize();
           city.value=a.location||'';area.value=a.area||'';
           sizeInput.value=a.size||'';
-          budget.value=a.budgetInr===null||a.budgetInr===undefined?'':String(a.budgetInr);
+          budget.value=a.budgetInr===null||a.budgetInr===undefined?'':String(a.budgetInr);minBudget.value=a.budgetMinInr??'';
           interest.value=a.interest;visitDate.value=a.visitDate||'';
           visitTime.value='';refreshQuestions();
           questionText.textContent='Seven questions completed — answers filled into the CRM form for your review.';
@@ -2403,6 +2404,8 @@ function fixedSurveyPanel(tenantId,lead,onSave){
             amount=Number(budget.value);
             if(!Number.isSafeInteger(amount)||amount<1)throw Error('Invalid budget');
           }
+          const minimum=minBudget.value===''?null:Number(minBudget.value);
+          if(minimum!==null&&(!/^\d+$/.test(minBudget.value)||!Number.isSafeInteger(minimum)||minimum<1||amount===null||minimum>amount))throw Error('Invalid budget range');
           const desired=interest.value==='interested'?visitDate.value||null:null;
           if(visitTime.value&&!desired)throw Error('Choose a visit date before an exact time');
           const at=desired&&visitTime.value?
@@ -2411,7 +2414,7 @@ function fixedSurveyPanel(tenantId,lead,onSave){
             tenantId,expectedUpdatedAt:record.updatedAt,
             propertyType:propertyType.value,location:city.value,
             area:area.value||null,size:sizeInput.value,
-            budgetInr:amount,interest:interest.value,
+            budgetInr:amount,budgetMinInr:minimum,interest:interest.value,
             visitDate:desired,visitAt:at
           };
           if(!window.confirm('Save the reviewed property answers for '+lead.name+'? No phone call will be made.'))

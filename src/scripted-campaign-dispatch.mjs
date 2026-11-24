@@ -73,6 +73,10 @@ function partialResultStatements(db,job,row,at){
     !survey.answers||typeof survey.answers!=='object'||Array.isArray(survey.answers))return [];
  const fields=['propertyType','location','area','size','budgetInr','interest'];
  const keys=fields.slice(0,survey.index),answers=survey.answers;
+ if(Object.hasOwn(answers,'budgetMinInr')){
+  if(!keys.includes('budgetInr')||!Number.isSafeInteger(answers.budgetMinInr)||answers.budgetMinInr<10000||answers.budgetMinInr>answers.budgetInr)return [];
+  keys.push('budgetMinInr');
+ }
  if(Object.keys(answers).length!==keys.length||!keys.every(k=>Object.hasOwn(answers,k)))return [];
  if(!['plot','flat','house'].includes(answers.propertyType))return [];
  for(const k of ['location','area','size']){

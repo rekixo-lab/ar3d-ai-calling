@@ -146,6 +146,22 @@ function parseBudget(str){
     throw Error('unclear rupee budget; repeat or review');
   return rupees;
 }
+// Explicit range grammar: two amounts joined by "से"/"to", or a shared
+// scale on the right (20 से 30 लाख). Never treat "या"/"or" as a range.
+function parseBudgetRange(str){
+ const text=quantityText(str.replace(/^(?:(?:मेरा|हमारा|my)\s+)?(?:बजट|budget)\s*[:：]?\s*/iu,'').replace(/\s+(?:है|रहेगा)$/u,''));
+ const pair=text.match(/^(.+?)\s+(?:से|to)\s+(.+)$/iu);
+ if(!pair)return null;
+ const upper=parseBudget(pair[2]);let lower;
+ try{lower=parseBudget(pair[1])}catch{
+  const scale=pair[2].match(/\s+(लाख|करोड़|करोड|हजार|हज़ार|lakh|lac|crore|thousand)(?:\s+(?:रुपये|रुपए|rupees?|तक))?$/iu);
+  const n=spokenQuantity(pair[1]);
+  if(!scale||!Number.isFinite(n)||n<=0||n>=10000)throw Error('unclear budget range');
+  lower=parseBudget(pair[1]+' '+scale[1]);
+ }
+ if(lower>upper)throw Error('conflicting budget range');
+ return {lower,upper};
+}
 function parseInterest(str){
   const short=str.trim().replace(/[।.!?]+$/u,'').trim();
   if(/^(?:जी|जी हाँ|जी हां|हाँ जी|हां जी|हाँ|हां|बिल्कुल|बिलकुल|ज़रूर|जरूर|yes|yeah|yep|sure|haan|han|ji|bilkul|zaroor)$/iu.test(short))return 'interested';
@@ -207,7 +223,8 @@ function validate(state,now){
      !Number.isSafeInteger(state.startedAt)||state.startedAt<0||
      state.startedAt>now+60000||now-state.startedAt>MAX_AGE_MS||
      !state.answers||typeof state.answers!=='object'||Array.isArray(state.answers)||
-     Object.keys(state.answers).some(k=>!FIELDS.includes(k)))
+     Object.keys(state.answers).some(k=>!FIELDS.includes(k)&&k!=='budgetMinInr')||
+     (Object.hasOwn(state.answers,'budgetMinInr')&&(!Number.isSafeInteger(state.answers.budgetMinInr)||state.answers.budgetMinInr<10000||state.answers.budgetMinInr>state.answers.budgetInr||!Number.isSafeInteger(state.answers.budgetInr)||state.index<=4)))
     throw Error('invalid or expired voice preview session');
   return state;
 }
@@ -247,7 +264,7 @@ export function advanceFixedVoicePreview(current,{transcript,confidence=1,now=Da
     return response(out,'opt_out_requested',
       'Stop further calls and verify the opt-out in the CRM; preview did not modify consent.');
   }
-  let parsed;
+  let parsed,range=null;
   try{
     if(AGAIN.test(input)||NOT_HEARD.test(input)||MISUNDERSTOOD.test(input)||confidence<0.70)
       throw Error('recognition unclear; repeat question');
@@ -255,7 +272,7 @@ export function advanceFixedVoicePreview(current,{transcript,confidence=1,now=Da
     if(field==='propertyType')parsed=parseProperty(input);
     else if(field==='location'||field==='area')parsed=smallText(input,field);
     else if(field==='size')parsed=parseSize(input,out.answers.propertyType);
-    else if(field==='budgetInr')parsed=parseBudget(input);
+    else if(field==='budgetInr'){range=parseBudgetRange(input);parsed=range?range.upper:parseBudget(input);}
     else if(field==='interest')parsed=parseInterest(input);
     else if(field==='visitDate')parsed=parseDate(input,now);
     else throw Error('unsupported voice question');
@@ -269,6 +286,7 @@ export function advanceFixedVoicePreview(current,{transcript,confidence=1,now=Da
   }
   const field=FIELDS[out.index];
   out.answers[field]=parsed;
+  if(field==='budgetInr'){if(range)out.answers.budgetMinInr=range.lower;else delete out.answers.budgetMinInr;}
   out.attempts=0;
   out.index++;
   if(field==='interest'&&parsed!=='interested'){
@@ -284,6 +302,7 @@ export function advanceFixedVoicePreview(current,{transcript,confidence=1,now=Da
       area:out.answers.area||null,
       size:out.answers.size,
       budgetInr:out.answers.budgetInr??null,
+      ...(Object.hasOwn(out.answers,'budgetMinInr')?{budgetMinInr:out.answers.budgetMinInr}:{}),
       interest:out.answers.interest,
       visitDate:out.answers.visitDate||null,
       visitAt:null
