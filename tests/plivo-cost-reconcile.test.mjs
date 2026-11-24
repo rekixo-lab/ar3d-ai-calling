@@ -130,3 +130,20 @@ test('reject mismatched provider call, currency-unsafe cost and wrong provider a
   assert.equal(f.r.db.prepare('SELECT COUNT(*) AS n FROM verified_provider_call_costs').get().n,0);
  }finally{f.close()}
 });
+
+test('reconcile accepts compact campaign IDs and observes a CDR only once',async()=>{
+ const f=fixture();try{
+  seed(f);
+  const compact='a'.repeat(32);
+  f.r.db.prepare('UPDATE calling_jobs SET id=? WHERE tenant_id=? AND id=?').run(compact,tid,job);
+  const opts={fetcher:gateway(good)},data={tenantId:tid,jobId:compact};
+  const first=await handlePlivoCostReconcile(request(data),f.env,admin,opts);
+  assert.equal(first.status,200,await first.clone().text());
+  assert.equal((await first.json()).alreadyRecorded,false);
+  const again=await handlePlivoCostReconcile(request(data),f.env,admin,opts);
+  assert.equal(again.status,200);assert.equal((await again.json()).alreadyRecorded,true);
+  assert.equal(f.r.db.prepare('SELECT COUNT(*) AS n FROM verified_provider_call_costs').get().n,1);
+  assert.equal((await handlePlivoCostReconcile(request({...data,jobId:'z'.repeat(32)}),f.env,admin,opts)).status,400);
+  assert.equal(f.c.db.prepare('SELECT COUNT(*) AS n FROM tenant_credit_audit').get().n,0);
+ }finally{f.close()}
+});
