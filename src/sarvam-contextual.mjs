@@ -3,10 +3,11 @@
 import {readBoundedBytes} from './scripted-speech.mjs';
 export function createSarvamContextualAdapter(key,fetcher=fetch){
  if(typeof key!=='string'||!key.trim()||key.length>512)throw Error('sarvam_not_configured');
- let requests=0,usage=null;
+ let requests=0,usage=null,failureStatus=null;
  return {
   get requests(){return requests},
   get usage(){return usage},
+  get failureStatus(){return failureStatus},
   async run(_model,request){
    if(requests!==0||!Array.isArray(request?.messages)||request.messages.length!==2||
       request.messages[0]?.role!=='system'||request.messages[1]?.role!=='user'||
@@ -19,7 +20,7 @@ export function createSarvamContextualAdapter(key,fetcher=fetch){
    const response=await fetcher('https://api.sarvam.ai/v1/chat/completions',{
     method:'POST',headers:{'api-subscription-key':key,'Content-Type':'application/json'},
     body:JSON.stringify(body),redirect:'manual',signal:AbortSignal.timeout(3000)});
-   if(!response.ok){try{await response.body?.cancel()}catch{}throw Error('sarvam_contextual_unavailable')}
+   if(!response.ok){failureStatus=response.status;try{await response.body?.cancel()}catch{}throw Error('sarvam_contextual_unavailable')}
    const raw=JSON.parse(new TextDecoder().decode(await readBoundedBytes(response,65536)));
    const u=raw?.usage;
    if(Number.isSafeInteger(u?.prompt_tokens)&&u.prompt_tokens>=0&&Number.isSafeInteger(u?.completion_tokens)&&u.completion_tokens>=0)

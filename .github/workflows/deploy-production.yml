@@ -106,6 +106,9 @@ jobs:
       - name: Create isolated Calling Control immutable minute ledger
         if: github.event_name == 'push' && steps.schema.outputs.schema_state == 'control_minute_ledger_upgrade'
         run: npx --yes wrangler@4 d1 execute ar3d-calling-control --remote --yes --config wrangler.jsonc --file migrations/control/0021_tenant_minute_ledger.sql
+      - name: Create isolated Calling provider safety history
+        if: github.event_name == 'push' && steps.schema.outputs.schema_state == 'control_provider_safety_upgrade'
+        run: npx --yes wrangler@4 d1 execute ar3d-calling-control --remote --yes --config wrangler.jsonc --file migrations/control/0025_provider_safety_events.sql
       - name: Create isolated Calling atomic client credit purchases
         if: github.event_name == 'push' && steps.schema.outputs.schema_state == 'control_credit_purchase_upgrade'
         run: npx --yes wrangler@4 d1 execute ar3d-calling-control --remote --yes --config wrangler.jsonc --file migrations/control/0024_tenant_credit_purchases.sql
@@ -147,6 +150,7 @@ jobs:
           npx --yes wrangler@4 d1 execute ar3d-calling-control --remote --yes --config wrangler.jsonc --file migrations/control/0022_tenant_minute_holds.sql
           npx --yes wrangler@4 d1 execute ar3d-calling-control --remote --yes --config wrangler.jsonc --file migrations/control/0023_provider_financial_journal.sql
           npx --yes wrangler@4 d1 execute ar3d-calling-control --remote --yes --config wrangler.jsonc --file migrations/control/0024_tenant_credit_purchases.sql
+          npx --yes wrangler@4 d1 execute ar3d-calling-control --remote --yes --config wrangler.jsonc --file migrations/control/0025_provider_safety_events.sql
       - name: Initialize NEW AR3D Calling Shared CRM D1 database
         if: (github.event_name == 'push' && steps.schema.outputs.schema_state == 'fresh') || (github.event_name == 'workflow_dispatch' && inputs.operation == 'initialize')
         run: |

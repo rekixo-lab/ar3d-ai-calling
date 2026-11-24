@@ -1,4 +1,5 @@
 import {resolveCrmDb} from './core.mjs';
+import {providerFaultBlocked} from './provider-safety.mjs';
 import {minutePosition,reserveMinutes,closeMinuteHold,fundingCap,fundingPosition,affordableCallSeconds,BILLING_PULSE_SECONDS} from './minute-holds.mjs';
 import {SCRIPTED_CALLING_POLICY,approvedCampaignPhone,reserveCampaignQuestionnaire,scriptedPromptsReady,submitScriptedPhone} from './scripted-phone-pilot.mjs';
 
@@ -31,8 +32,10 @@ export const fundedDispatchApproved=env=>env.AR3D_FUNDED_CAMPAIGN_DISPATCH==='ap
 export const creditOnlyCallingApproved=env=>fundedDispatchApproved(env)&&env.AR3D_CREDIT_ONLY_CALLING==='approved';
 export async function scriptedCampaignConfiguration(env){
  const carrier=Boolean(await approvedCampaignPhone(env)),funded=fundedDispatchApproved(env);
+ const blocked=carrier&&funded?await providerFaultBlocked(env.CONTROL_DB):false;
  const missing=[...(!carrier?['Plivo setup, a completed internal pilot and campaign authorization']:[]),...(!funded?['Separate reviewed Plivo and Sarvam funding ceilings, combined ceiling and manual dispatch approval']:[])];
- return {ready:carrier&&funded,missing,creditOnly:carrier&&creditOnlyCallingApproved(env)};
+ if(blocked)missing.push('Provider billing or authentication fault requires Super Admin review');
+ return {ready:carrier&&funded&&!blocked,missing,creditOnly:carrier&&!blocked&&creditOnlyCallingApproved(env)};
 }
 // A definitive provider rejection is the only automatic no-submission release.
 // A missing session, request UUID, call UUID or ambiguous network outcome is
@@ -127,6 +130,7 @@ export async function tickScriptedTenant(env,db,tid,config,{apiFetch=fetch,now=D
  if(pending)return reconcile(env,db,pending,now,at);
  if(!config||!inCallingWindow(now))return {state:'disabled_or_outside_hours'};
  if(!fundedDispatchApproved(env))return {state:'funding_approval_required'};
+ if(await providerFaultBlocked(env.CONTROL_DB))return {state:'provider_review_required'};
  const policy=await db.prepare('SELECT * FROM calling_policies WHERE tenant_id=? AND enabled=1 AND expires_at>? AND flow_id=?').bind(tid,at,SCRIPTED_CALLING_POLICY).first();
  if(!policy)return {state:'approval_required'};
  // Permanent suppression is terminal. Missing/expired approval stays queued so a later review can release it.
@@ -182,7 +186,7 @@ export async function tickScriptedTenant(env,db,tid,config,{apiFetch=fetch,now=D
    return {state:'locked'};
   }
   const id=await reserveCampaignQuestionnaire(env.CONTROL_DB,config,job,now);
-  const outcome=await submitScriptedPhone(env.CONTROL_DB,config,id,job.destination,needed,apiFetch);
+  const outcome=await submitScriptedPhone(env.CONTROL_DB,config,id,job.destination,needed,apiFetch,{commercial:true});
   if(outcome==='rejected'){
    const rejected=await env.CONTROL_DB.prepare('SELECT id,phase,provider_call_id,provider_request_id FROM scripted_phone_pilots WHERE tenant_id=? AND job_id=? AND id=?').bind(tid,job.id,id).first();
    await releaseRejectedHold(env,job,rejected,now);
