@@ -50,3 +50,12 @@ node scripts/backup-archive.mjs verify "$HOME/ar3d-private-backups/calling-2026-
 ```
 
 Only private 0600 files outside the repository and private output directories are accepted. Archive uses AES-256-GCM with random nonce and authenticated per-dump checksums. Maximum 64 MiB per dump; for larger exports use an approved streaming backup procedure. The utility authenticates bytes, not DB identity or SQL semantics. After verification, remove plaintext exports according to approved secure storage policy. To extract, use the `extract <archive> <key> <new-private-dir>` command; it refuses existing destinations. Import only to explicitly identified isolated test databases, run integrity/schema/suppression/tenant tests, then remove plaintext. R2 prompt objects, dedicated databases, Worker secrets and provider copies require separate approved backups. No production backup has been executed by CI.
+
+### One-command local export (optional scheduler-compatible)
+On a trusted operator computer, install/authenticate Wrangler separately and provide the existing Cloudflare environment values `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, `CONTROL_DB_ID`, `CRM_DB_ID` using a secure local credential source. Use a private 0700 directory and a separately stored private 32-byte key. Run:
+
+```sh
+node scripts/backup-export-local.mjs EXPORT_TWO_VERIFIED_CALLING_DATABASES "$HOME/ar3d-private-backups" "$HOME/ar3d-private-backups/key.bin"
+```
+
+This first checks exact Calling resources/schema using the existing guarded read-only preflight, then exports only the two Calling bindings via the locally installed Wrangler CLI and creates an authenticated encrypted archive. Temporary plaintext exports are removed on ordinary completion or failure; abrupt termination may leave a private `.calling-export-*` directory, so inspect and securely clean it. No cross-D1 atomic snapshot, no automatic restore, no R2/secret export. The command deliberately rejects CI. A local cron/systemd timer can invoke it only after the operator chooses retention, credentials, disk quota and an acceptable consistency/write-pause policy; no scheduler is installed or enabled by this change. No production export was run during development.
