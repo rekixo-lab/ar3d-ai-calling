@@ -7,9 +7,35 @@ const node=(tag,props={},children=[])=>{const n=document.createElement(tag);for(
 const div=(className,...ch)=>node('div',{class:className},ch);
 const iconPaths={wallet:'M20 8V6a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h15v-4 M3 8h17a2 2 0 0 1 2 2v4a2 2 0 0 1-2 2h-5a4 4 0 0 1 0-8h5 M16 12h.01',clock:'M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20 M12 6v6l4 2',receipt:'M4 3l3 2 3-2 3 2 3-2 4 2v16l-4-2-3 2-3-2-3 2-3-2z M8 9h8 M8 13h8 M8 17h4',chart:'M3 3v18h18 M7 16v-4 M12 16V7 M17 16V4',grid:'M3 3h7v7H3z M14 3h7v7h-7z M3 14h7v7H3z M14 14h7v7h-7z',users:'M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2 M16 3a4 4 0 0 1 0 8 M22 21v-2a4 4 0 0 0-3-3.87 M13 7a4 4 0 1 1-8 0 4 4 0 0 1 8 0',phone:'M22 16.92v3a2 2 0 0 1-2.18 2A19.79 19.79 0 0 1 3.09 5.18 2 2 0 0 1 5.08 3h3a2 2 0 0 1 2 1.72c.13.96.36 1.9.69 2.79a2 2 0 0 1-.45 2.11L9.05 10.9a16 16 0 0 0 4.05 4.05l1.27-1.27a2 2 0 0 1 2.11-.45c.89.33 1.83.56 2.79.69A2 2 0 0 1 22 16.92',shield:'M12 22s8-4 8-11V5l-8-3-8 3v6c0 7 8 11 8 11 M9 12l2 2 4-4',mail:'M4 4h16a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2 M22 6l-10 7L2 6',settings:'M4 7h16 M4 17h16 M8 4v6 M16 14v6',upload:'M12 16V3 M7 8l5-5 5 5 M3 16v4a1 1 0 0 0 1 1h16a1 1 0 0 0 1-1v-4',plus:'M12 5v14 M5 12h14',arrow:'M5 12h14 M13 6l6 6-6 6',logout:'M9 21H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h5 M16 17l5-5-5-5 M21 12H9',spark:'m12 3 2.7 6.3L21 12l-6.3 2.7L12 21l-2.7-6.3L3 12l6.3-2.7L12 3',calendar:'M4 5h16v16H4z M16 3v4 M8 3v4 M4 11h16',play:'m8 5 11 7-11 7V5',pause:'M8 5v14 M16 5v14',refresh:'M20 7v5h-5 M4 17v-5h5 M6.1 7a7 7 0 0 1 11.6-2L20 8 M4 16l2.3 3a7 7 0 0 0 11.6-2',search:'M21 21l-5-5 M18 10a8 8 0 1 1-16 0 8 8 0 0 1 16 0',file:'M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z M14 2v6h6 M8 13h8 M8 17h5'};
 function icon(name){const n=document.createElementNS('http://www.w3.org/2000/svg','svg');n.setAttribute('viewBox','0 0 24 24');n.setAttribute('class','icon');n.setAttribute('aria-hidden','true');const p=document.createElementNS(n.namespaceURI,'path');p.setAttribute('d',iconPaths[name]||iconPaths.grid);n.append(p);return n}
+Object.assign(iconPaths,{
+ building:'M3 21h18 M5 21V5l8-2v18 M13 9h6v12 M8 8v1 M8 12v1 M8 16v1 M16 13v1 M16 17v1',
+ check:'m5 12 4 4L19 6',close:'m6 6 12 12 M18 6 6 18',
+ edit:'m15 5 4 4 M4 20l4-1L20 7l-4-4L4 15z',eye:'M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12 M12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6',
+ download:'M12 3v13 M7 11l5 5 5-5 M4 17v4h16v-4',chevronLeft:'m15 6-6 6 6 6',chevronRight:'m9 6 6 6-6 6',
+ alert:'M12 8v4 M12 16h.01 M10.3 3.9 2.5 18a1.4 1.4 0 0 0 1.3 2h16.4a1.4 1.4 0 0 0 1.3-2L13.7 3.9a2 2 0 0 0-3.4 0',
+ history:'M3 12a9 9 0 1 0 3-6.7L3 8 M3 3v5h5 M12 7v5l3 2'
+});
 const sectionIcon=s=>/wallet|credit|minute/i.test(s)?'wallet':/transaction|billing/i.test(s)?'receipt':/usage|report/i.test(s)?'chart':/security|auth|access|verification/i.test(s)?'shield':/invite/i.test(s)?'mail':/call|voice/i.test(s)?'phone':/client|customer|lead/i.test(s)?'users':/import|excel|export/i.test(s)?'file':/visit/i.test(s)?'calendar':/agent|AI/i.test(s)?'spark':'settings';
 const title=(s,tag='h2')=>node(tag,{},[icon(sectionIcon(s)),node('span',{text:s})]);
-const btn=(label,fn,secondary=false)=>node('button',{class:'btn'+(secondary?' secondary':''),type:'button',onclick:fn},[icon(/sign out/i.test(label)?'logout':/pause/i.test(label)?'pause':/start|resume|run|test/i.test(label)?'play':/refresh|^load/i.test(label)?'refresh':/search/i.test(label)?'search':/upload|import|download|export/i.test(label)?'upload':/create|add/i.test(label)?'plus':'arrow'),node('span',{text:label})]);
+function buttonIcon(label){
+ const s=label.toLowerCase();
+ if(/sign out/.test(s))return 'logout';
+ if(/^(?:close|cancel|dismiss)/.test(s))return 'close';
+ if(/^previous|^back\b/.test(s))return 'chevronLeft';
+ if(/^next\b/.test(s))return 'chevronRight';
+ if(/refresh|^load|retry/.test(s))return 'refresh';
+ if(/export|download/.test(s))return 'download';
+ if(/upload|import/.test(s))return 'upload';
+ if(/search|find/.test(s))return 'search';
+ if(/pause/.test(s))return 'pause';
+ if(/^start|^resume|^run|^test/.test(s))return 'play';
+ if(/^save|^confirm|^approve|^validate/.test(s))return 'check';
+ if(/^edit|^update/.test(s))return 'edit';
+ if(/^view|^show|^preview/.test(s))return 'eye';
+ if(/^create|^add|^invite/.test(s))return 'plus';
+ return 'arrow';
+}
+const btn=(label,fn,secondary=false)=>node('button',{class:'btn'+(secondary?' secondary':''),type:'button',onclick:fn},[icon(buttonIcon(label)),node('span',{text:label})]);
 const input=(name,type='text',placeholder='')=>node('input',{class:'field',name,type,placeholder,required:'required'});
 const lab=(text,control)=>node('label',{},[node('span',{class:'label',text}),control]);
 function notice(msg,isError=false){state.notice=msg;const old=document.getElementById('notice');if(old)old.remove();const area=document.getElementById('notice-anchor')||root;area.prepend(node('div',{id:'notice',class:'banner '+(isError?'err':'success'),text:msg}))}
@@ -310,15 +336,15 @@ function dashboard(){
   ['clients','Clients','users','Client companies and sign-in invitations.'],
   ['calling','Calling Setup','phone','Internal testing and client calling approval.'],
   ['wallet','Minutes & Wallet','wallet','Review exact call seconds, reconciliation and credit transactions.'],
-  ['company','Company details','file','Manage company information and client requests.'],
+  ['company','Company details','building','Manage company information and client requests.'],
   ['security','Security','shield','Manage two-factor authentication and recovery codes.']
  ]:[
   ['customers','Customers / Excel','users','Import customers and prepare a calling campaign.'],
   ['ai-test','AI Testing','spark','Practice the seven fixed questions without a phone call or CRM update.'],
   ['calling','Calling','phone','Review your campaign and start or pause approved calls.'],
-  ['results','Results / CRM','grid','See call outcomes and answers saved to your CRM.'],
+  ['results','Results / CRM','chart','See call outcomes and answers saved to your CRM.'],
   ['wallet','Minutes & Wallet','wallet','View verified call usage and credit history.'],
-  ['company','Company details','file','Review your company information and request changes.']
+  ['company','Company details','building','Review your company information and request changes.']
  ];
  const heading=title(admin?'Clients':items[0][1],'h1');
  heading.tabIndex=-1;
@@ -383,7 +409,7 @@ function dashboard(){
  }
 }
 function overviewMetric(label,value,symbol){
- return div('card metric',div('metric-symbol',icon(symbol)),node('span',{class:'muted',text:label}),node('strong',{text:value}));
+ return div('card metric',div('metric-heading',div('metric-symbol',icon(symbol)),node('span',{class:'muted',text:label})),node('strong',{text:value}));
 }
 function safeCount(value){return Number.isSafeInteger(value)&&value>=0?String(value):'Unavailable'}
 // Accessible charts of verified counts. Missing values are not shown as zero.
@@ -1137,8 +1163,8 @@ function clientDashboardOverview(data,onRefresh){
    ...[['Customers',count('leads'),'users'],
        ['Call records',count('calls'),'phone'],
        ['Visit requests',count('siteVisits'),'calendar']].map(([label,value,symbol])=>
-      div('card metric',div('metric-symbol',icon(symbol)),
-       node('span',{class:'muted',text:label}),node('strong',{text:value})))),
+      div('card metric',div('metric-heading',div('metric-symbol',icon(symbol)),
+       node('span',{class:'muted',text:label})),node('strong',{text:value})))),
   node('p',{class:'muted',text:'These figures are this company’s CRM records, not verified Plivo call minutes or charges.'}),
   btn('View follow-ups and next actions',()=>{state.clientTab='results';state.clientSetTab?.('results')},true));
  summary.setAttribute('aria-label','Selected company overview');

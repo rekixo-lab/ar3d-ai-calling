@@ -225,6 +225,86 @@ pre { white-space: pre-wrap; overflow-wrap: anywhere; }
 .chart-row meter::-webkit-meter-optimum-value{background:#70a5ff;border-radius:8px;}
 .chart-row meter::-moz-meter-bar{background:#70a5ff;border-radius:8px;}
 .chart-panel p+p{margin-top:8px;}
+/* Shared final workspace refinements: compact rhythm, readable metrics and
+   touch-friendly controls. Keep icons in flow rather than over text. */
+.layout{grid-template-columns:224px minmax(0,1fr);}
+.sidebar{gap:24px;padding:22px 15px 16px;border-right:1px solid #303030;}
+.brand-mark{width:38px;height:38px;border-radius:10px;flex:0 0 auto;}
+.brand strong{font-size:18px;}
+.brand small{margin-top:3px;}
+.navitem{min-height:44px;padding:9px 10px;gap:9px;line-height:1.3;}
+.navitem span,.btn span{min-width:0;overflow-wrap:anywhere;}
+.main{padding:28px clamp(18px,3vw,44px) 40px;}
+.topbar{margin-bottom:20px;}
+.topbar h1{font-size:clamp(26px,3vw,36px);letter-spacing:-.035em;}
+.workspace-role{font-size:12px;margin-bottom:5px;}
+.page-description{line-height:1.45;}
+.card{padding:clamp(14px,2vw,22px);border-radius:12px;box-shadow:none;}
+h2{font-size:19px;}
+h3{font-size:16px;}
+h2,h3{gap:8px;line-height:1.35;overflow-wrap:anywhere;}
+.card>h2,.card>h3{margin-bottom:12px;}
+.metric{display:flex;flex-direction:column;align-items:flex-start;gap:7px;padding:13px;min-width:0;}
+.metric-heading{display:flex;align-items:center;gap:8px;min-width:0;width:100%;}
+.metric-heading .muted{min-width:0;overflow-wrap:anywhere;line-height:1.35;}
+.metric-symbol,.client-metrics .metric .metric-symbol{position:static;display:grid;place-items:center;flex:0 0 auto;width:29px;height:29px;border-radius:7px;background:#2b3748;color:#9fc1ff;}
+.metric-symbol .icon{width:16px;height:16px;}
+.metric strong,.overview-grid .metric strong,.wallet-metrics .metric strong{font-size:clamp(19px,2vw,24px);margin:0;max-width:100%;line-height:1.25;overflow-wrap:anywhere;font-variant-numeric:tabular-nums;}
+.client-summary,.import-card{border-top:1px solid var(--line);}
+.btn{min-height:42px;padding:9px 12px;gap:7px;max-width:100%;white-space:normal;}
+.field{min-height:44px;}
+.formrow,.row{gap:10px;}
+.formrow>label{max-width:100%;}
+.tablewrap{overscroll-behavior-inline:contain;}
+.table th,.table td{padding:10px;}
+.table th{white-space:normal;}
+.table .btn{min-height:38px;}
+.badge,.pill{max-width:100%;white-space:normal;line-height:1.35;overflow-wrap:anywhere;}
+.chart-panel{padding:12px;border-radius:10px;}
+.chart-label{min-width:0;}
+.chart-label span{min-width:0;overflow-wrap:anywhere;}
+.chart-row meter{height:10px;}
+.note,.banner{padding:10px 12px;line-height:1.45;}
+@media(max-width:900px){
+ .layout{grid-template-columns:188px minmax(0,1fr);}
+ .sidebar{padding-inline:10px;}
+ .main{padding:24px 18px 36px;}
+ .navitem{font-size:13px;gap:7px;padding-inline:8px;}
+}
+@media(max-width:650px){
+ .layout{display:block;}
+ .sidebar{gap:10px;padding:12px;border-right:0;border-bottom:1px solid #303030;}
+ .brand-mark{width:34px;height:34px;}
+ .brand strong{font-size:17px;}
+ .workspace-nav{gap:5px;}
+ .navitem{min-height:44px;padding:8px;font-size:12px;}
+ .navitem .icon{width:16px;height:16px;}
+ .sidebar-footer{gap:8px;min-width:0;}
+ .sidebar-footer .account{flex:1;}
+ .sidebar-footer .btn{min-height:44px;flex:0 0 auto;}
+ .main{padding:18px 12px 30px;}
+ .topbar{margin-bottom:14px;}
+ .card{padding:13px;margin-bottom:12px;}
+ .metric,.client-metrics .metric{padding:10px;gap:5px;margin:0;}
+ .metric-heading{gap:5px;}
+ .metric-symbol,.client-metrics .metric .metric-symbol{width:24px;height:24px;}
+ .metric-symbol .icon{width:14px;height:14px;}
+ .metric .muted,.client-metrics .metric .muted{font-size:11px;}
+ .metric strong,.client-metrics .metric strong,.overview-grid .metric strong{font-size:19px;}
+ .overview-grid,.metrics{gap:8px;margin:9px 0 13px;}
+ .chart-grid{grid-template-columns:minmax(0,1fr);gap:9px;}
+ .chart-panel{padding:11px;}
+ .btn{min-height:44px;font-size:13px;}
+ .table .btn{min-height:40px;}
+ .auth .card{padding:20px;}
+ .wallet-metrics{grid-template-columns:repeat(2,minmax(0,1fr));}
+}
+@media(max-width:350px){
+ .main{padding-inline:9px;}
+ .metric-heading{align-items:flex-start;}
+ .metric-symbol,.client-metrics .metric .metric-symbol{width:21px;height:21px;}
+ .navitem{padding-inline:6px;}
+}
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{transition:none!important;animation:none!important;scroll-behavior:auto!important;}}
 `;
 

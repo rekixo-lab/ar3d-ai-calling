@@ -156,6 +156,13 @@ try{
  await page.getByRole('heading',{name:'Uploaded buyer — call answers'}).waitFor();
  await page.getByText('3BHK',{exact:true}).waitFor();
  assert.equal(await page.getByRole('row',{name:/Fictional buyer/}).count(),0);
+ assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'results page overflow');
+ assert.ok(await page.evaluate(()=>Array.from(document.querySelectorAll('.metric-heading')).filter(e=>e.getClientRects().length).every(e=>{
+  const icon=e.querySelector('.metric-symbol'),label=e.querySelector('.muted');
+  if(!icon||!label)return false;
+  const a=icon.getBoundingClientRect(),b=label.getBoundingClientRect();
+  return a.width>0&&a.right<=b.left+1&&b.right<=e.getBoundingClientRect().right+1;
+ })),'metric icons overlap text');
  await page.screenshot({path:'artifacts/calling-results-'+viewport.width+'.png',fullPage:true});
  // A review snapshot is shown separately from a completed CRM save.
  f.r.db.prepare("UPDATE scripted_call_results SET answers_json=?,saved_to_lead=0 WHERE tenant_id=? AND job_id=?")
