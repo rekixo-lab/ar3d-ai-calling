@@ -231,8 +231,8 @@ function scriptedPhonePilotPanel(){
     enrollment.hidden=!config.configured;
     prepare.hidden=!!config.configured;
 
-    results.replaceChildren(...(config.recent?.length?[table(['Started','Test number','Language','Speech engine','Status','Provider call reference','Attempts processed','Questions accepted','Audio result','Audio received (ms)','STT connected','Signed hangup','Seconds'],
-      config.recent.map(x=>[formatIst(x.created_at),x.destinationLast4?'••••'+x.destinationLast4:'—',x.language,x.engine==='deepgram_stream'?'Deepgram live':'Whisper',x.phase,x.provider_call_reference?'Received':'Not received',x.turn??'—',x.question_index??'—',x.last_audio_outcome?x.last_audio_outcome.replaceAll('_',' '):'—',x.audio_ms??'—',x.stt_connected==null?'—':x.stt_connected?'Yes':'No',x.signed_hangup?'Received':'Not received',x.duration_seconds??'—']))]:[]));
+    results.replaceChildren(...(config.recent?.length?[table(['Started','Test number','Language','Speech engine','Status','Provider call reference','Attempts processed','Questions accepted','Audio result','Audio received (ms)','Audio bytes','Media host','STT connected','Signed hangup','Seconds'],
+      config.recent.map(x=>[formatIst(x.created_at),x.destinationLast4?'••••'+x.destinationLast4:'—',x.language,x.engine==='deepgram_stream'?'Deepgram live':'Whisper',x.phase,x.provider_call_reference?'Received':'Not received',x.turn??'—',x.question_index??'—',x.last_audio_outcome?x.last_audio_outcome.replaceAll('_',' '):'—',x.audio_ms??'—',x.audio_bytes??'—',x.media_host??'—',x.stt_connected==null?'—':x.stt_connected?'Yes':'No',x.signed_hangup?'Received':'Not received',x.duration_seconds??'—']))]:[]));
     }catch(err){config=null;status.textContent='Could not verify internal call availability. Refresh status to retry.';throw err}
     finally{refreshing=false;updateAvailability();scheduleCheck()}
   }
