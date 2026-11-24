@@ -243,3 +243,122 @@ test('UsageSummary does not expose untrusted charge or misleading partial usage'
   assert.equal((await route(f,'usage-summary',admin,'POST',{anything:true})).status,400);
  }finally{f.close()}
 });
+
+
+test('diagnostic reports which runtime Plivo Secret is missing or malformed without exposing values',async()=>{
+ const f=fixture();
+ try{
+  freshMfa(f);
+  f.env.PLIVO_AUTH_ID='TESTACCOUNT123';
+  f.env.PLIVO_AUTH_TOKEN='SYNTHETICAUTHTOKEN123';
+  const call=async()=>{
+   const r=await route(f,'provider-check');
+   assert.equal(r.status,200);
+   return r.json();
+  };
+  delete f.env.PLIVO_AUTH_ID;
+  assert.equal((await call()).reason,'plivo_auth_id_missing');
+  f.env.PLIVO_AUTH_ID=' TESTACCOUNT123';
+  assert.equal((await call()).reason,'plivo_auth_id_format_invalid');
+  f.env.PLIVO_AUTH_ID='TESTACCOUNT123';
+  delete f.env.PLIVO_AUTH_TOKEN;
+  assert.equal((await call()).reason,'plivo_auth_token_missing');
+  f.env.PLIVO_AUTH_TOKEN='incorrect whitespace token ';
+  const bad=await call();
+  assert.equal(bad.reason,'plivo_auth_token_format_invalid');
+  assert.equal(bad.credentialChecks.authTokenConfigured,true);
+  assert.equal(bad.credentialChecks.authTokenFormatValid,false);
+  assert.equal(bad.credentialsVerified,false);
+  assert.ok(!JSON.stringify(bad).includes('incorrect whitespace token'));
+ }finally{f.close()}
+});
+
+test('diagnostic differentiates provider 401, 403, 404, 429, 503, bad JSON and unreachable network',async()=>{
+ const f=fixture();
+ try{
+  freshMfa(f);
+  f.env.PLIVO_AUTH_ID='TESTACCOUNT123';
+  f.env.PLIVO_AUTH_TOKEN='SYNTHETICAUTHTOKEN123';
+  for(const [status,reason] of [
+   [401,'plivo_account_unauthorized'],
+   [403,'plivo_account_forbidden'],
+   [404,'plivo_account_not_found'],
+   [429,'plivo_account_rate_limited'],
+   [503,'plivo_account_http_error']
+  ]){
+   const r=await route(f,'provider-check',admin,'GET',undefined,{
+    fetcher:async()=>new Response('provider error: secret must never be echoed',{status})
+   });
+   const data=await r.json();
+   assert.equal(data.credentialsVerified,false);
+   assert.equal(data.reason,reason);
+   assert.equal(data.httpStatus,status);
+   assert.ok(!JSON.stringify(data).includes('secret must never'));
+  }
+  const network=await (await route(f,'provider-check',admin,'GET',undefined,{
+   fetcher:async()=>{throw new Error('secret included in network failure')}
+  })).json();
+  assert.equal(network.reason,'plivo_account_network_error');
+  assert.equal(network.httpStatus,null);
+  assert.ok(!JSON.stringify(network).includes('secret included'));
+  const invalid=await (await route(f,'provider-check',admin,'GET',undefined,{
+   fetcher:async()=>new Response('<html>ok</html>',{
+    status:200,headers:{'content-type':'text/html'}
+   })
+  })).json();
+  assert.equal(invalid.reason,'plivo_account_invalid_response');
+ }finally{f.close()}
+});
+
+test('rented-number list failure is distinct from valid Plivo authentication and direct caller lookup can succeed',async()=>{
+ const f=fixture();
+ try{
+  freshMfa(f);
+  f.env.PLIVO_AUTH_ID='TESTACCOUNT123';
+  f.env.PLIVO_AUTH_TOKEN='SYNTHETICAUTHTOKEN123';
+  f.env.AR3D_PLIVO_CALLER_NUMBER='+918065491333';
+  const paths=[];
+  const d=await (await route(f,'provider-check',admin,'GET',undefined,{
+   fetcher:async(url,options)=>{
+    paths.push(url);
+    assert.equal(options.method,'GET');
+    if(url.endsWith('/Number/?limit=20'))return new Response('provider unavailable',{
+     status:503,headers:{'content-type':'application/json'}
+    });
+    if(url.endsWith('/Number/918065491333/'))
+     return Response.json({number:'918065491333',voice_enabled:true});
+    return Response.json({auth_id:'TESTACCOUNT123',account_type:'standard'});
+   }
+  })).json();
+  assert.equal(d.credentialsVerified,true);
+  assert.equal(d.numberListAvailable,false);
+  assert.equal(d.numberListReason,'plivo_number_list_http_error');
+  assert.equal(d.numberListHttpStatus,503);
+  assert.equal(d.configuredCallerPresent,true);
+  assert.equal(d.callerVerifiedBy,'account_number_detail');
+  assert.equal(d.callsEnabledByThisCheck,false);
+  assert.deepEqual(paths,[
+   'https://api.plivo.com/v1/Account/TESTACCOUNT123/',
+   'https://api.plivo.com/v1/Account/TESTACCOUNT123/Number/?limit=20',
+   'https://api.plivo.com/v1/Account/TESTACCOUNT123/Number/918065491333/'
+  ]);
+  assert.ok(!JSON.stringify(d).includes('+918065491333'));
+  assert.equal(f.r.db.prepare('SELECT COUNT(*) AS n FROM calls').get().n,0);
+ }finally{f.close()}
+});
+
+test('Plivo API account identity mismatch never marks credentials verified',async()=>{
+ const f=fixture();
+ try{
+  freshMfa(f);
+  f.env.PLIVO_AUTH_ID='TESTACCOUNT123';
+  f.env.PLIVO_AUTH_TOKEN='SYNTHETICAUTHTOKEN123';
+  const d=await (await route(f,'provider-check',admin,'GET',undefined,{
+   fetcher:async()=>Response.json({auth_id:'OTHERACCOUNT123',account_type:'standard'})
+  })).json();
+  assert.equal(d.reason,'plivo_account_identity_mismatch');
+  assert.equal(d.credentialsVerified,false);
+  assert.equal(d.numberListAvailable,false);
+  assert.ok(!JSON.stringify(d).includes('OTHERACCOUNT123'));
+ }finally{f.close()}
+});
