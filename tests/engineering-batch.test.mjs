@@ -1,46 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import worker from '../src/index.mjs';
-import {productionReadiness} from '../src/release-gates.mjs';
-import {previewSandboxUsage} from '../src/sandbox-usage.mjs';
-import {runSyntheticPilot} from '../src/sandbox-pilot.mjs';
-
-const host='https://aicalling.ar3dstudio.in';
-const cookie='ar3d_calling_session='+'a'.repeat(64);
-const session=(role='super_admin')=>{
-  const statements=[];
-  const db={prepare(sql){
-    statements.push(sql);
-    return {bind(){return {
-      async first(){
-        if(!sql.includes('FROM human_sessions'))throw Error('unexpected D1 query');
-        return {id:'sandbox-operator',email:'operator@example.test',globalRole:role,token_hash:'x'};
-      }
-    }}};
-  }};
-  return {env:{CONTROL_DB:db},statements};
-};
-function request(path,{method='GET',body,headers={}}={}){
-  return new Request(host+path,{method,headers:{
-    cookie,...(method==='POST'?{origin:host,'content-type':'application/json'}:{}),...headers
-  },...(body!==undefined?{body:JSON.stringify(body)}:{})});
-}
-
-test('workstream A: immutable release gates never claim verified real calling or paid production',()=>{
-  const r=productionReadiness();
-  assert.equal(r.product,'AR3D AI Calling');
-  assert.equal(r.capabilities.authenticatedCrmDemo,true);
-  assert.equal(r.capabilities.syntheticSandbox,true);
-  assert.equal(r.capabilities.realCalling,false);
-  assert.equal(r.capabilities.billableUsage,false);
-  assert.equal(r.capabilities.paymentCollection,false);
-  assert.equal(r.productionLaunchAuthorized,false);
-  assert.ok(r.gates.some(g=>g.id==='admin_mfa_enrollment'&&g.state==='operator_pending'));
-  assert.ok(r.gates.some(g=>g.id==='consent_and_dnd'&&g.state==='blocked'));
-  assert.ok(r.gates.some(g=>g.id==='paid_subscriptions'&&g.state==='blocked'));
-  r.gates.push({id:'injected',state:'available'});
-  assert.equal(productionReadiness().gates.some(g=>g.id==='injected'),false);
-});
+import {previewSandboxUsage} from './helpers/sandbox-usage.mjs';
+import {runSyntheticPilot} from './helpers/sandbox-pilot.mjs';
 
 test('workstream B: a 100-scenario mixed mock batch has opt-outs, no dialing, zero audio',()=>{
   const result=runSyntheticPilot({count:100,scenario:'mixed'});

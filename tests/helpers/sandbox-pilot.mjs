@@ -1,8 +1,8 @@
 // Deterministic mock-only conversation batch. Never dials, reads real leads,
 // writes D1, opens sockets, streams media, stores phone numbers or changes consent.
-import {beginSimulation,advanceSimulation} from './conversation-core.mjs';
-import {processTypedTranscript,makeSpeechPlan} from './voice-core.mjs';
-import {planCallStatusTransition} from './provider-contract.mjs';
+import {beginSimulation,advanceSimulation} from '../../src/conversation-core.mjs';
+import {processTypedTranscript,makeSpeechPlan} from '../../src/voice-core.mjs';
+import {planCallStatusTransition} from '../../src/provider-contract.mjs';
 import {previewSandboxUsage} from './sandbox-usage.mjs';
 
 const SCENARIOS=['completed','opt_out','repeat','pricing','low_confidence'];
