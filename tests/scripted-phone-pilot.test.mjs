@@ -93,7 +93,7 @@ test('verified internal pilot only: consent, fixed prompts, AI answers, and one 
   assert.equal(mediaReads,6);
   const status=await handleScriptedPhoneAdmin(new Request(origin+'/v1/human/scripted-phone-pilot'),env,admin,{now,fetcher});
   const last=(await status.json()).recent[0];
-  assert.equal(last.turn,6);assert.equal(last.signed_answer,1);assert.equal(last.signed_hangup,0);
+  assert.equal(last.turn,6);assert.equal(last.provider_call_reference,1);assert.equal(last.signed_hangup,0);
   assert.equal((await callback('hangup',{Duration:'73'})).status,204);
   const ended=await handleScriptedPhoneAdmin(new Request(origin+'/v1/human/scripted-phone-pilot'),env,admin,{now,fetcher});
   const final=(await ended.json()).recent[0];assert.equal(final.signed_hangup,1);assert.equal(final.duration_seconds,73);
