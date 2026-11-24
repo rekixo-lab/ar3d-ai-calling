@@ -305,7 +305,7 @@ async function startPilot(req,env,user,config,now,fetcher){
  const id=crypto.randomUUID(),slot=Math.floor(now/pilotCooldownMs),survey=beginFixedVoicePreview({language:data.language,now}).state;
  // Separate explicit attestation; old callers continue to require keypad consent.
  // This is limited to enrolled internal devices and never used for a campaign.
- if([directConfirm,sarvamConfirm,friendlyConfirm].includes(data.confirm))survey.phoneMeta={mode:'direct_preconsented',engine:data.engine||'whisper',...(data.confirm===friendlyConfirm?{priorRecordingNotice:true}:{})};
+ if([directConfirm,sarvamConfirm,friendlyConfirm].includes(data.confirm))survey.phoneMeta={mode:'direct_preconsented',engine:data.engine||'whisper',...(data.confirm===friendlyConfirm?{priorRecordingNotice:true}:{}),...(data.engine===sarvamEngine?{costMeterVersion:1,sttRoundedSeconds:0,sttFailedRequests:0}:{})};
  const reservation=await control.prepare(`INSERT INTO scripted_phone_pilots
   (id,tenant_id,lead_id,lead_updated_at,actor_id,language,destination,caller,rate_slot,expires_at,phase,survey_json,created_at,provider_account_id)
   SELECT ?,?,?,?,?,?,?,?,?,?,'requested',?,?,? WHERE NOT EXISTS(
@@ -810,7 +810,7 @@ async function applyPhoneAnswer(config,env,row,answer,now,fetcher=fetch){
   // Never loop the apology when no actual listening opportunity was provided.
   const streamMetrics=isStreaming(row)?{audioMs:Number.isSafeInteger(answer.audioMs)?Math.min(18000,Math.max(0,answer.audioMs)):0,streamStarted:answer.streamStarted===true,sttConnected:answer.sttConnected===true}:{audioMs:answer.audioMs??null,audioBytes:answer.audioBytes??null,sttConnected:answer.sttConnected??null,mediaHost:answer.mediaHost??null,recognitionMs:answer.recognitionMs??null,failureCode:answer.failureCode??null};
   if((isStreaming(row)&&answer.reason.startsWith('stream_'))||(isSarvam(row)&&answer.reason==='speech_service_failed')){
-   const survey_json=JSON.stringify({...prior,phoneMeta:{...phoneMeta,...streamMetrics,lastAudioOutcome:answer.reason,technicalFailure:true}});
+   const survey_json=JSON.stringify({...prior,phoneMeta:{...phoneMeta,...streamMetrics,...(isSarvam(row)&&phoneMeta.costMeterVersion===1?{sttFailedRequests:(phoneMeta.sttFailedRequests||0)+1}:{}),lastAudioOutcome:answer.reason,technicalFailure:true}});
    const changed=await control.prepare("UPDATE scripted_phone_pilots SET phase='needs_review',survey_json=? WHERE id=? AND phase='transcribing' AND turn=?").bind(survey_json,id,turn).run();
    return changed.meta.changes===1?responseFor(config,{...row,phase:'needs_review',survey_json}):end();
   }
@@ -823,7 +823,7 @@ async function applyPhoneAnswer(config,env,row,answer,now,fetcher=fetch){
   const interpretationStarted=Date.now();
   const {result,interpreter,pendingQuantity=null}=internalDirect(row)&&answer.reason==='recognized'&&answer.text?
    await advanceInternalVoice(isSarvam(row)?adapter:env.AI,prior,args,phoneMeta.pendingQuantity):{result:advanceFixedVoicePreview(prior,args),interpreter:'direct'};
-  const aiMetrics=isSarvam(row)?{interpretationMs:Date.now()-interpretationStarted,llmRequests:(phoneMeta.llmRequests||0)+(adapter?.requests||0),llmInputTokens:(phoneMeta.llmInputTokens||0)+(adapter?.usage?.inputTokens||0),llmOutputTokens:(phoneMeta.llmOutputTokens||0)+(adapter?.usage?.outputTokens||0),llmUsageUnknown:(phoneMeta.llmUsageUnknown||0)+(adapter?.requests&&!adapter.usage?1:0),sttAudioMs:(phoneMeta.sttAudioMs||0)+(answer.sttConnected?answer.audioMs||0:0),sttDurationUnknown:(phoneMeta.sttDurationUnknown||0)+(answer.sttConnected&&answer.audioMs==null?1:0)}:{};
+  const aiMetrics=isSarvam(row)?{...(phoneMeta.costMeterVersion===1?{sttRoundedSeconds:(phoneMeta.sttRoundedSeconds||0)+(answer.sttConnected&&Number.isSafeInteger(answer.audioMs)?Math.ceil(answer.audioMs/1000):0)}:{}),interpretationMs:Date.now()-interpretationStarted,llmRequests:(phoneMeta.llmRequests||0)+(adapter?.requests||0),llmInputTokens:(phoneMeta.llmInputTokens||0)+(adapter?.usage?.inputTokens||0),llmOutputTokens:(phoneMeta.llmOutputTokens||0)+(adapter?.usage?.outputTokens||0),llmUsageUnknown:(phoneMeta.llmUsageUnknown||0)+(adapter?.requests&&!adapter.usage?1:0),sttAudioMs:(phoneMeta.sttAudioMs||0)+(answer.sttConnected?answer.audioMs||0:0),sttDurationUnknown:(phoneMeta.sttDurationUnknown||0)+(answer.sttConnected&&answer.audioMs==null?1:0)}:{};
 
   // No transcript, recording URL, identifiers, phone numbers or provider secrets.
   console.info('AR3D scripted answer outcome',JSON.stringify({
