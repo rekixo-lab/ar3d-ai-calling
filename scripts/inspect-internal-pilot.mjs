@@ -26,7 +26,7 @@ async function run(){
   ORDER BY p.created_at DESC LIMIT 1`);
  if(!rows.length){console.log('Internal pilot diagnostic: no matching test record');return}
  const p=rows[0],uuid=/^[0-9a-f-]{36}$/i;
- if(![p.id,p.tenant_id,p.lead_id].every(x=>uuid.test(x||''))||!/^\\+91[6-9]\\d{9}$/.test(p.destination||''))throw Error('invalid internal reference');
+ if(![p.id,p.tenant_id,p.lead_id].every(x=>uuid.test(x||''))||!/^[+]91[6-9][0-9]{9}$/.test(p.destination||''))throw Error('invalid internal reference');
  const [crm]=await select(c.crm,`SELECT COUNT(*) AS matched,
   COALESCE(MAX(CASE WHEN json_valid(requirements_json) THEN json_extract(requirements_json,'$.scriptedCallPilot.id')=? ELSE 0 END),0) AS survey_saved
   FROM leads WHERE tenant_id=? AND id=? AND mobile_e164=?`,[p.id,p.tenant_id,p.lead_id,p.destination]);
