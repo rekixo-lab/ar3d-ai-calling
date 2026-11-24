@@ -4,6 +4,7 @@ import {mutationOriginAllowed} from './human-auth.mjs';
 import {beginFixedVoicePreview,advanceFixedVoicePreview,advanceContextualVoice,advanceInternalVoice} from './fixed-voice-turns.mjs';
 import {normalizePropertySurvey,surveyToCrm} from './fixed-property-survey.mjs';
 import {createSarvamContextualAdapter} from './sarvam-contextual.mjs';
+import {addVoiceTiming,summarizeVoiceTiming} from './voice-timing.mjs';
 import {providerFaultBlocked,recordProviderFault} from './provider-safety.mjs';
 import {ANSWER_MAX_BYTES,answerContentType,readBoundedBytes,supportsAnswerAudio,speechFailureCode,transcribeSarvamRecordedAnswer} from './scripted-speech.mjs';
 
@@ -174,8 +175,13 @@ function responseFor(config,row,{repeatCue=false,directOpeningCue=false}={}){
   const prefix=(directOpeningCue?directOpening(row):'')+(clarification||retry+audio(prompt));
   // Bounded recording windows for the single speech provider.
   const quick=internalDirect(row)||isSarvam(row);
+  // Explicitly selected internal timing experiment only. Longer replies keep
+  // the standard silence window; a retry grants extra thinking time.
+  const fast=!row.job_id&&internalDirect(row)&&state.phoneMeta?.fastTiming===true;
+  const short=['propertyType','interest'].includes(field)||(field==='size'&&state.answers.propertyType!=='plot');
+  const silence=fast?(state.attempts>0?'4':short?'2':'3'):(quick?'3':'6');
   return xml(prefix+'<Record action="'+escapeXml(callback(config,row.id,'turn/'+row.turn))+
-   '" method="GET" fileFormat="mp3" maxLength="'+(quick?'12':'16')+'" timeout="'+(quick?'3':'6')+'" finishOnKey="#" playBeep="true"/><Hangup/>');
+   '" method="GET" fileFormat="mp3" maxLength="'+(quick?'12':'16')+'" timeout="'+silence+'" finishOnKey="#" playBeep="true"/><Hangup/>');
  }
  if(row.phase==='needs_review'&&isSarvam(row)&&JSON.parse(row.survey_json).phoneMeta?.technicalFailure===true)
   return xml(speak(row.language,row.language==='hi'?'माफ कीजिए, अभी हमारी तकनीकी सेवा में समस्या है। हम बाद में संपर्क करेंगे।':'Sorry, our speech service is currently unavailable. We will follow up later.')+'<Hangup/>');
@@ -282,7 +288,8 @@ async function startPilot(req,env,user,config,now,fetcher){
  let data;
  try{data=parseJsonBody(new TextDecoder('utf-8',{fatal:true}).decode(await readBoundedBytes(req,1024)),1024)}
  catch{return error('invalid_pilot_request',400)}
- if(!['confirm,language','confirm,language,leadId','confirm,engine,language','confirm,engine,language,leadId'].includes(Object.keys(data).sort().join(','))||
+ if(!['confirm,language','confirm,language,leadId','confirm,engine,language','confirm,engine,language,leadId'].includes(Object.keys(data).filter(k=>k!=='fastTiming').sort().join(','))||
+    (Object.hasOwn(data,'fastTiming')&&(typeof data.fastTiming!=='boolean'||data.fastTiming&&data.confirm!==friendlyConfirm))||
     ![keypadConfirm,sarvamConfirm,friendlyConfirm].includes(data.confirm)||!['hi','en'].includes(data.language)||
     (Object.hasOwn(data,'engine')&&data.engine!==sarvamEngine)||
     (Object.hasOwn(data,'leadId')&&(typeof data.leadId!=='string'||!UUID.test(data.leadId))))return error('explicit_pilot_confirmation_required',400);
@@ -297,7 +304,7 @@ async function startPilot(req,env,user,config,now,fetcher){
   return error('pilot_prompt_recordings_incomplete',409);
  const id=crypto.randomUUID(),slot=Math.floor(now/pilotCooldownMs),survey=beginFixedVoicePreview({language:data.language,now}).state;
  // Separate keypad and explicitly preconsented internal paths.
- survey.phoneMeta={mode:data.confirm===keypadConfirm?'internal_keypad':'direct_preconsented',engine:sarvamEngine,...(data.confirm===friendlyConfirm?{priorRecordingNotice:true}:{}),costMeterVersion:1,sttRoundedSeconds:0,sttFailedRequests:0};
+ survey.phoneMeta={mode:data.confirm===keypadConfirm?'internal_keypad':'direct_preconsented',engine:sarvamEngine,...(data.confirm===friendlyConfirm?{priorRecordingNotice:true}:{}),...(data.fastTiming===true?{fastTiming:true}:{}),costMeterVersion:1,sttRoundedSeconds:0,sttFailedRequests:0};
  const reservation=await control.prepare(`INSERT INTO scripted_phone_pilots
   (id,tenant_id,lead_id,lead_updated_at,actor_id,language,destination,caller,rate_slot,expires_at,phase,survey_json,created_at,provider_account_id)
   SELECT ?,?,?,?,?,?,?,?,?,?,'requested',?,?,? WHERE NOT EXISTS(
@@ -509,11 +516,11 @@ async function verifyLatestSarvamResult(env,config){
   (lead.interest_status==='converted'||lead.interest_status===({interested:'interested',later:'followup',not_interested:'not_interested'}[answers.interest])));
  const metric=k=>Number.isSafeInteger(m[k])&&m[k]>=0?m[k]:null;
  return {...base,state:'verified_read_only',phase:row.phase,startedAt:row.created_at,destinationLast4:row.destination.slice(-4),signedHangup:true,
-  connectedSeconds:row.duration_seconds,attempts:row.turn,questionsAccepted:s.index,answers,storedAnswers:stored,
+  connectedSeconds:row.duration_seconds,attempts:row.turn,questionsAccepted:s.index,answers,storedAnswers:stored,fastTiming:m.fastTiming===true,
   crmSameSession:sameSession,answersMatch:matches,crmColumnsMatch,crmVerified:row.phase==='completed'&&matches&&crmColumnsMatch,
   usage:{sttAudioMs:metric('sttAudioMs'),sttDurationUnknown:metric('sttDurationUnknown'),llmRequests:metric('llmRequests'),
    llmInputTokens:metric('llmInputTokens'),llmOutputTokens:metric('llmOutputTokens'),llmUsageUnknown:metric('llmUsageUnknown'),
-   lastRecognitionMs:metric('recognitionMs'),lastInterpretationMs:metric('interpretationMs')}};
+   lastRecognitionMs:metric('recognitionMs'),lastInterpretationMs:metric('interpretationMs')},voiceTiming:summarizeVoiceTiming(m.voiceTiming)};
 }
 
 async function saveVerifiedPilot(env,row,now){
@@ -710,6 +717,7 @@ function recordingDurationMs(params){
  return null;
 }
 async function recordingAnswer(config,env,row,params,fetcher){
+ const mediaStarted=Date.now();
  if(!ID.test(params.get('RecordingID')||''))return {text:null,reason:'recording_id_missing'};
  const recording=params.get('RecordingID');
  // The signed callback has already been verified and bound to this call.
@@ -750,7 +758,7 @@ async function recordingAnswer(config,env,row,params,fetcher){
  try{
   const started=Date.now();
   const text=(await transcribeSarvamRecordedAnswer(env.SARVAM_API_KEY,bytes,row.language,answerContentType(response.headers),fetcher)).text;
-  return {text,reason:text?'recognized':'speech_empty',recognitionMs:Date.now()-started,audioMs:recordingDurationMs(params),audioBytes:bytes.length,sttConnected:true,mediaHost:new URL(mediaUrl).hostname};
+  return {text,reason:text?'recognized':'speech_empty',mediaFetchMs:Math.max(0,started-mediaStarted),recognitionMs:Date.now()-started,audioMs:recordingDurationMs(params),audioBytes:bytes.length,sttConnected:true,mediaHost:new URL(mediaUrl).hostname};
  }catch(e){return {text:null,reason:'speech_service_failed',failureCode:speechFailureCode(e),audioMs:recordingDurationMs(params),audioBytes:bytes.length,sttConnected:false,mediaHost:new URL(mediaUrl).hostname}}
 }
 
@@ -777,7 +785,9 @@ async function applyPhoneAnswer(config,env,row,answer,now,fetcher=fetch){
   const {result,interpreter,pendingQuantity=null}=(internalDirect(row)||isSarvam(row))&&answer.reason==='recognized'&&answer.text?
    await advanceInternalVoice(adapter,prior,args,phoneMeta.pendingQuantity):{result:advanceFixedVoicePreview(prior,args),interpreter:'direct'};
   if(adapter&&[401,402,403].includes(adapter.failureStatus))await recordProviderFault(control,'sarvam',adapter.failureStatus,'llm:'+id+':'+turn,now);
-  const aiMetrics=isSarvam(row)?{...(phoneMeta.costMeterVersion===1?{sttRoundedSeconds:(phoneMeta.sttRoundedSeconds||0)+(answer.sttConnected&&Number.isSafeInteger(answer.audioMs)?Math.ceil(answer.audioMs/1000):0)}:{}),interpretationMs:Date.now()-interpretationStarted,llmRequests:(phoneMeta.llmRequests||0)+(adapter?.requests||0),llmInputTokens:(phoneMeta.llmInputTokens||0)+(adapter?.usage?.inputTokens||0),llmOutputTokens:(phoneMeta.llmOutputTokens||0)+(adapter?.usage?.outputTokens||0),llmUsageUnknown:(phoneMeta.llmUsageUnknown||0)+(adapter?.requests&&!adapter.usage?1:0),sttAudioMs:(phoneMeta.sttAudioMs||0)+(answer.sttConnected?answer.audioMs||0:0),sttDurationUnknown:(phoneMeta.sttDurationUnknown||0)+(answer.sttConnected&&answer.audioMs==null?1:0)}:{};
+  const interpretationMs=Math.max(0,Date.now()-interpretationStarted);
+  const voiceTiming=addVoiceTiming(phoneMeta.voiceTiming,{mediaMs:answer.mediaFetchMs,recognitionMs:answer.recognitionMs,interpretationMs});
+  const aiMetrics=isSarvam(row)?{voiceTiming,...(phoneMeta.costMeterVersion===1?{sttRoundedSeconds:(phoneMeta.sttRoundedSeconds||0)+(answer.sttConnected&&Number.isSafeInteger(answer.audioMs)?Math.ceil(answer.audioMs/1000):0)}:{}),interpretationMs,llmRequests:(phoneMeta.llmRequests||0)+(adapter?.requests||0),llmInputTokens:(phoneMeta.llmInputTokens||0)+(adapter?.usage?.inputTokens||0),llmOutputTokens:(phoneMeta.llmOutputTokens||0)+(adapter?.usage?.outputTokens||0),llmUsageUnknown:(phoneMeta.llmUsageUnknown||0)+(adapter?.requests&&!adapter.usage?1:0),sttAudioMs:(phoneMeta.sttAudioMs||0)+(answer.sttConnected?answer.audioMs||0:0),sttDurationUnknown:(phoneMeta.sttDurationUnknown||0)+(answer.sttConnected&&answer.audioMs==null?1:0)}:{};
 
   // No transcript, recording URL, identifiers, phone numbers or provider secrets.
   console.info('AR3D scripted answer outcome',JSON.stringify({

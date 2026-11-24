@@ -379,11 +379,12 @@ export async function handleCreditWalletRequest(req,env,user,{fetcher=fetch}={})
    const rows=(await db.prepare(`WITH entries AS (
     SELECT l.tenant_id AS tenantId,l.id AS reference,l.created_at AS createdAt,NULL AS closedAt,
      CASE WHEN l.id LIKE 'call-reversal:%' THEN 'call_reversal' WHEN l.id LIKE 'purchase:%' THEN 'purchase' ELSE l.kind END AS kind,
-     l.delta_seconds AS deltaSeconds,l.balance_seconds AS allocatedBalanceSeconds,NULL AS reservedSeconds,NULL AS chargedSeconds
-     FROM tenant_minute_ledger l WHERE (? IS NULL OR l.tenant_id=?)
+     l.delta_seconds AS deltaSeconds,l.balance_seconds AS allocatedBalanceSeconds,NULL AS reservedSeconds,NULL AS chargedSeconds,
+     p.paid_paise AS paidPaise,p.receipt_ref AS receiptRef,p.actor AS recordedBy
+     FROM tenant_minute_ledger l LEFT JOIN tenant_credit_purchases p ON p.tenant_id=l.tenant_id AND l.id='purchase:'||p.id WHERE (? IS NULL OR l.tenant_id=?)
     UNION ALL
     SELECT h.tenant_id,h.job_id,h.created_at,h.closed_at,CASE WHEN h.state='held' THEN 'reserved' ELSE h.state END,
-     NULL,NULL,h.reserved_seconds,h.charged_seconds FROM tenant_minute_holds h WHERE (? IS NULL OR h.tenant_id=?))
+     NULL,NULL,h.reserved_seconds,h.charged_seconds,NULL,NULL,NULL FROM tenant_minute_holds h WHERE (? IS NULL OR h.tenant_id=?))
     SELECT e.*,t.display_name AS company FROM entries e JOIN tenants t ON t.id=e.tenantId
     WHERE (?='all' OR e.kind=?) ORDER BY e.createdAt DESC,e.tenantId,e.reference LIMIT 51 OFFSET ?`).bind(tid,tid,tid,tid,kind,kind,Number(offset)).all()).results;
    return json({transactions:rows.slice(0,50),offset:Number(offset),hasMore:rows.length>50,providerRequests:0});

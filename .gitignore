@@ -10,3 +10,8 @@ wrangler.*.jsonc
 # Local acceptance evidence and Python caches
 artifacts/
 __pycache__/
+
+# Never commit private backup dumps or archive keys.
+*.sql.enc
+*.enc
+*.bin

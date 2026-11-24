@@ -32,3 +32,21 @@ Cloudflare **production** D1 backup/restore trial with verified test accounts an
 Client dashboard behavior is unchanged. This privacy work is for AR3D operators; it does not add extra forms to the client calling flow.
 
 The read-only inventory additionally includes direct lead notes, staff assignments, intent proposals, job-linked survey results and verified cost observations, direct lead-target audit events, and Control D1 phone sessions. Indirect audit targets, provider/R2 objects, export copies and backups still require operator inventory. No erasure or retention policy is implied.
+
+## Low-cost operator backup archive (no extra service)
+D1 Time Travel is the existing Cloudflare recovery facility; review its actual retention and current bookmarks for each exact isolated Calling database: https://developers.cloudflare.com/d1/reference/time-travel/. For an independent encrypted offline copy, use the existing authenticated Wrangler CLI on a trusted Linux machine. Confirm both database names/IDs and the account before export. Pause writes during the two independent exports if a consistent pair is required; these are not a cross-D1 atomic snapshot. No automatic production restore is provided.
+
+```sh
+umask 077
+mkdir -p "$HOME/ar3d-private-backups"
+# Generate once; keep key separately backed up in secure private storage.
+# Never overwrite an existing key.
+(set -C; head -c 32 /dev/urandom > "$HOME/ar3d-private-backups/key.bin")
+# Run from the isolated Calling repo using its verified Wrangler configuration.
+wrangler d1 export ar3d-calling-control --remote --output="$HOME/ar3d-private-backups/control.sql"
+wrangler d1 export ar3d-calling-shared-crm --remote --output="$HOME/ar3d-private-backups/crm.sql"
+node scripts/backup-archive.mjs seal "$HOME/ar3d-private-backups/control.sql" "$HOME/ar3d-private-backups/crm.sql" "$HOME/ar3d-private-backups/key.bin" "$HOME/ar3d-private-backups/calling-2026-11-24.enc"
+node scripts/backup-archive.mjs verify "$HOME/ar3d-private-backups/calling-2026-11-24.enc" "$HOME/ar3d-private-backups/key.bin"
+```
+
+Only private 0600 files outside the repository and private output directories are accepted. Archive uses AES-256-GCM with random nonce and authenticated per-dump checksums. Maximum 64 MiB per dump; for larger exports use an approved streaming backup procedure. The utility authenticates bytes, not DB identity or SQL semantics. After verification, remove plaintext exports according to approved secure storage policy. To extract, use the `extract <archive> <key> <new-private-dir>` command; it refuses existing destinations. Import only to explicitly identified isolated test databases, run integrity/schema/suppression/tenant tests, then remove plaintext. R2 prompt objects, dedicated databases, Worker secrets and provider copies require separate approved backups. No production backup has been executed by CI.

@@ -38,3 +38,6 @@ Still needed before real customer calling: provider account + approved Indian nu
 ## Rollout discipline
 
 This is a code-only incremental change. No phone calls or vendor updates during tests, no schema changes, no migrations, no new secret values and no other AR3D Platform/Engine project edits. A green CI suite is required but alone does **not** prove live speech quality or authorize production calls. Review branch/PR first; enable only an explicitly approved internal pilot after manual checks.
+
+### Optional low-cost internal speed test
+Super Admin can select Fast internal test in the verified-device panel before an explicitly pre-consented internal call. Plivo's Record silence timeout is 2 seconds for short property/interest/BHK questions, 3 seconds for longer answers, and 4 seconds on retry. Default stays 3 seconds; campaign behavior and consent/recording notice are unchanged. The beep remains enabled. This uses the same Sarvam recorded-answer request, not realtime streaming or a new service. Compare actual call accuracy and silence-to-reply on your own device. The new p50/p95 processing report excludes silence detection, playback/network and final CRM writes; it does not claim end-to-end latency. See https://docs.plivo.com/docs/voice/xml/record.

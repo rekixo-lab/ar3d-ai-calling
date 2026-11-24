@@ -47,9 +47,11 @@ function smallText(str,field){
   let value=raw.replace(/^[।.!\s]+|[।.!\s]+$/g,'').trim().replace(/\s+/gu,' ');
   value=value.replace(/^(?:(?:जी|हाँ|हां|मुझे|हमको|हमें|मैं|i want|i need|i prefer|looking for)\s+)+/iu,'')
     .replace(/^(?:(?:शहर|लोकेशन|city|location|एरिया|इलाका|area|neighborhood)\s*[:：]\s*|(?:शहर|लोकेशन|city|location|एरिया|इलाका|area|neighborhood)\s+)/iu,'')
+    .replace(/\s+(?:में|मे)\s+(?:प्लॉट|प्लाट|फ्लैट|घर|मकान|प्रॉपर्टी)\s+(?:चाहिए|चाहिये|देख रहा हूँ|देख रहा हूं|देख रही हूँ|देख रही हूं|लेना है)$/iu,'')
     .replace(/\s+(?:(?:में|मे)\s+)?(?:चाहिए|चाहिये|देख रहा हूँ|देख रही हूँ|लेना है|please)$/iu,'')
     .replace(/\s+(?:में|मे)$/u,'').trim();
   if(NON_ANSWER.test(value)||NOT_HEARD.test(value)||MISUNDERSTOOD.test(value)||
+    /(?:\b(?:budget|bhk|sqft|lakh|crore)\b|बजट|बीएचके|वर्ग\s*फुट|\d+\s*(?:लाख|करोड़))/iu.test(value)||
     /^(?:कहीं भी|कोई भी|anywhere|any location|any area|not decided|अभी तय नहीं|अभी नहीं|बताऊंगा|बाद में)$/iu.test(value)||
     !/[\p{L}]/u.test(value))
     throw Error('conflicting non-specific location answer; repeat or review');
@@ -144,8 +146,10 @@ function parseSize(str,propertyType){
   // or a second competing number. Preserve exact larger bedroom counts.
   const value=quantityText(str).replace(/\s+(?:का|की)\s+(?:घर|फ्लैट|मकान|house|flat)$/iu,'').replace(/\s+(?:है|होना चाहिए)$/u,'').trim();
   const match=value.match(/^(.+?)\s*(?:BHK|बीएचके|बी\s*एच\s*के|bedrooms?)\s*(\+|plus|या अधिक)?$/iu);
-  const n=match?spokenQuantity(match[1]):null;
-  if(!Number.isInteger(n)||n<1||n>20||match[2]&&n!==5)throw Error('unclear BHK; repeat or review');
+  // The current house/flat question explicitly supplies BHK as its unit.
+  // A single bare bedroom count is therefore safe; no range or competing value.
+  const n=match?spokenQuantity(match[1]):spokenQuantity(value);
+  if(!Number.isInteger(n)||n<1||n>20||match?.[2]&&n!==5)throw Error('unclear BHK; repeat or review');
   return n===5?'5BHK+':n+'BHK';
 }
 function parseBudget(str){
@@ -172,7 +176,7 @@ function parseBudget(str){
 // scale on the right (20 से 30 लाख). Never treat "या"/"or" as a range.
 function parseBudgetRange(str){
  const text=quantityText(str.replace(/^(?:(?:मेरा|हमारा|my)\s+)?(?:बजट|budget)\s*[:：]?\s*/iu,'').replace(/\s+(?:है|रहेगा)$/u,''));
- const pair=text.match(/^(.+?)\s+(?:से|to)\s+(.+)$/iu);
+ const pair=text.match(/^(.+?)\s+(?:से|to)\s+(.+)$/iu)||text.match(/^(\d+(?:\.\d+)?)\s*[-–]\s*(\d+(?:\.\d+)?\s+(?:लाख|करोड़|करोड|हजार|हज़ार|lakh|lac|crore|thousand))$/iu);
  if(!pair)return null;
  const upper=parseBudget(pair[2]);let lower;
  try{lower=parseBudget(pair[1])}catch{

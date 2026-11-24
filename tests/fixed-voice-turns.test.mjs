@@ -300,7 +300,8 @@ test('Natural short choices, budget and interest responses advance without infer
  let budget=s;for(const x of ['प्लॉट','कोरबा','पुराना बस स्टैंड','एक हजार वर्ग फीट'])budget=turn(budget,x).state;
  for(const [text,amount] of [['पैंतीस लाख रुपये','3500000'],['एक करोड़ बीस लाख','12000000'],['25 lakh','2500000'],['3.5 crore','35000000'],['करीब पच्चीस लाख तक','2500000']])
   assert.equal(turn(budget,text).state.answers.budgetInr,Number(amount),text);
- for(const text of ['20 या 30 लाख','20-30 lakh','नहीं 25 लाख'])assert.equal(turn(budget,text).action,'repeat',text);
+ for(const text of ['20 या 30 लाख','नहीं 25 लाख','30-20 lakh','20-30'])assert.equal(turn(budget,text).action,'repeat',text);
+ const explicitRange=turn(budget,'20-30 lakh');assert.equal(explicitRange.state.answers.budgetMinInr,2000000);assert.equal(explicitRange.state.answers.budgetInr,3000000);
  const interest=turn(budget,'25 लाख').state;
  for(const text of ['जी','हाँ जी','बिल्कुल','haan','sure'])assert.equal(turn(interest,text).state.answers.interest,'interested',text);
  for(const text of ['नहीं','जी नहीं','nahi','no'])assert.equal(turn(interest,text).state.answers.interest,'not_interested',text);
@@ -456,4 +457,17 @@ test('common Hindi fractional budgets and punctuated corrections stay determinis
  assert.equal(r.interpreter,'explicit_correction');assert.equal(r.result.state.answers.budgetInr,2500000);assert.equal(r.result.currentField,'interest');
  const multi=await advanceInternalVoice(ai,beginFixedVoicePreview({now:stamp}).state,{transcript:'घर; शहर कोरबा; एरिया बस स्टैंड; साइज 3BHK; मेरा बजट 25 लाख',now:stamp});
  assert.equal(multi.interpreter,'labelled_multi_answer');assert.equal(multi.result.state.answers.budgetInr,2500000);
+});
+
+
+test('natural short BHK answers, numeric budget dash ranges and explicit location wrappers',()=>{
+ let s=beginFixedVoicePreview({now:stamp}).state;
+ s=turn(s,'घर').state;
+ const city=turn(s,'मैं रायपुर में घर देख रहा हूं');assert.equal(city.state.answers.location,'रायपुर');
+ assert.equal(turn(s,'रायपुर बजट 20 लाख').action,'repeat');
+ s=turn(city.state,'शंकर नगर').state;
+ assert.equal(turn(s,'तीन').state.answers.size,'3BHK');assert.equal(turn(s,'3 या 4').action,'repeat');
+ s=turn(s,'तीन').state;
+ for(const text of ['20-25 लाख','20 – 25 lakh']){const r=turn(s,text);assert.equal(r.state.answers.budgetMinInr,2000000);assert.equal(r.state.answers.budgetInr,2500000);}
+ assert.equal(turn(s,'25-20 लाख').action,'repeat');assert.equal(turn(s,'20-25').action,'repeat');
 });

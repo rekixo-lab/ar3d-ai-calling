@@ -792,15 +792,17 @@ test('consented Sarvam internal call uses one STT per turn, direct parser and no
    }
    assert.match(url,/^https:\/\/media\.plivo\.com\//);return new Response('RIFF',{headers:{'Content-Type':'audio/wav'}});
   };
-  const start=confirm=>handleScriptedPhoneAdmin(new Request(origin+'/v1/human/scripted-phone-pilot',{method:'POST',headers:{Origin:origin},body:JSON.stringify({language:'hi',engine:'sarvam',confirm})}),env,admin,{now,fetcher});
+  const start=(confirm,fastTiming)=>handleScriptedPhoneAdmin(new Request(origin+'/v1/human/scripted-phone-pilot',{method:'POST',headers:{Origin:origin},body:JSON.stringify({language:'hi',engine:'sarvam',confirm,...(fastTiming===undefined?{}:{fastTiming})})}),env,admin,{now,fetcher});
   assert.equal((await start('CALL_ONE_PRECONSENTED_INTERNAL_SARVAM_NUMBER')).status,409);assert.equal(dials,0);
   env.SARVAM_API_KEY='synthetic-key';
   assert.equal((await start('retired-mode')).status,400);assert.equal(dials,0);
-  assert.equal((await start('CALL_ONE_INTERNAL_SARVAM_WITH_PRIOR_RECORDING_NOTICE')).status,202);assert.equal(dials,1);
+  assert.equal((await start('CALL_ONE_INTERNAL_SARVAM_WITH_PRIOR_RECORDING_NOTICE','yes')).status,400);assert.equal(dials,0);
+  assert.equal((await start('CALL_ONE_CONSENTED_INTERNAL_SARVAM_KEYPAD',true)).status,400);assert.equal(dials,0);
+  assert.equal((await start('CALL_ONE_INTERNAL_SARVAM_WITH_PRIOR_RECORDING_NOTICE',true)).status,202);assert.equal(dials,1);
   const cb=(step,params)=>handleScriptedPhoneCallback(signed(hook+'/'+step,{CallUUID:callId,...params}),env,{now,fetcher});
   const opening=await (await cb('answer',{ALegRequestUUID:requestId,From:'918000000000',To:'919000000001',Direction:'outbound'})).text();
-  assert.match(opening,/नमस्ते.*आपकी पसंद की प्रॉपर्टी/);assert.doesNotMatch(opening,/यह बातचीत रिकॉर्ड होती है/);assert.match(opening,/maxLength="12".*timeout="3"/);
-  for(let i=0;i<5;i++)assert.equal((await cb('turn/'+i,{RecordingID:'record-id-0'+i,RecordingDurationMs:'2500'})).status,200);
+  assert.match(opening,/नमस्ते.*आपकी पसंद की प्रॉपर्टी/);assert.doesNotMatch(opening,/यह बातचीत रिकॉर्ड होती है/);assert.match(opening,/maxLength="12".*timeout="2"/);
+  for(let i=0;i<5;i++){const res=await cb('turn/'+i,{RecordingID:'record-id-0'+i,RecordingDurationMs:'2500'});assert.equal(res.status,200);const xml=await res.text();assert.match(xml,i===4?/timeout="2"/:/timeout="3"/);}
   const row=f.c.db.prepare('SELECT survey_json FROM scripted_phone_pilots').get(),s=JSON.parse(row.survey_json);
   assert.equal(s.answers.budgetInr,2000000);assert.equal(s.phoneMeta.engine,'sarvam');assert.equal(s.phoneMeta.llmRequests,0);assert.equal(s.phoneMeta.sttAudioMs,12500);assert.equal(stt,5);
   await cb('turn/4',{RecordingID:'record-id-04',RecordingDurationMs:'2500'});assert.equal(stt,5);assert.equal(dials,1);
@@ -813,6 +815,7 @@ test('consented Sarvam internal call uses one STT per turn, direct parser and no
   const report=await (await verify(admin)).json();
   assert.equal(report.crmVerified,true);assert.equal(report.answers.budgetInr,2000000);assert.equal(report.storedAnswers.budgetInr,2000000);
   assert.equal(report.connectedSeconds,73);assert.equal(report.usage.llmRequests,0);assert.equal(report.usage.sttAudioMs,15000);
+  assert.equal(report.fastTiming,true);assert.equal(report.voiceTiming.samples,6);assert.ok(Number.isSafeInteger(report.voiceTiming.totalP95Ms));assert.equal(report.voiceTiming.basis,'successful_recorded_answer_processing_only');
   assert.equal(report.phoneCallsStarted,0);assert.equal(report.crmChanged,false);assert.equal(stt,6);
   assert.deepEqual(f.r.db.prepare('SELECT * FROM leads WHERE id=?').get(lead),before);
  }finally{f.close()}

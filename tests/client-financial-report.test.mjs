@@ -33,6 +33,9 @@ test('FIFO prepaid value, outstanding holds, currency-separated costs and conser
  const req=user=>handleCreditWalletRequest(new Request('https://app.example.invalid/v1/human/credits/client-financial-report'),f.env,user);
  assert.equal((await req(client)).status,403);
  const report=await (await req(admin)).json();assert.equal(report.profitVerified,false);assert.equal(report.recognizedRevenuePaise,null);
+ const receipts=await (await handleCreditWalletRequest(new Request('https://app.example.invalid/v1/human/credits/admin-transactions?kind=purchase'),f.env,admin)).json();
+ assert.equal(receipts.transactions.length,2);assert.equal(receipts.transactions.reduce((n,x)=>n+x.paidPaise,0),501);
+ assert.ok(receipts.transactions.every(x=>x.receiptRef.startsWith('ref-')&&x.recordedBy==='admin'&&x.company==='Demo'));
  assert.equal(f.c.db.prepare('SELECT COUNT(*) AS n FROM tenant_credit_purchases').get().n,2);
  }finally{f.close()}
 });
