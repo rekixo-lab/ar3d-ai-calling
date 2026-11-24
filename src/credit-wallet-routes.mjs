@@ -2,7 +2,7 @@
 // account balance preview. These budgets DO NOT transfer Plivo funds, debit
 // live calls, bypass carrier approval or represent spendable billing credits.
 import {requireMembership} from './human-auth.mjs';
-import {parseJsonBody} from './core.mjs';
+import {parseJsonBody,resolveCrmDb} from './core.mjs';
 
 const base='/v1/human/credits';
 const uuid=/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
@@ -294,6 +294,43 @@ export async function handleCreditWalletRequest(req,env,user,{fetcher=fetch}={})
    return json({plannedTotalInr:Number(row?.totalPaise||0)/100,
     clientsWithPlan:Number(row?.fundedClients||0),currency:'INR',status:'provisional_only',
     verifiedProviderFunding:false,callingEnabledByCredits:false});
+  }
+  if(path==='minute-usage'){
+   if(req.method!=='GET')return fail('method not allowed',405);
+   const keys=[...url.searchParams.keys()],tid=url.searchParams.get('tenantId'),offsetText=url.searchParams.get('offset')||'0';
+   if(keys.some(k=>!['tenantId','offset'].includes(k)||url.searchParams.getAll(k).length!==1)||
+      !uuid.test(tid||'')||!/^[0-9]{1,6}$/.test(offsetText))return fail('invalid usage query',400);
+   const admin=user?.globalRole==='super_admin';
+   let t;
+   if(admin){
+    if(!await currentMfa(env,user))return fail('current MFA Super Admin required',403);
+    t=await db.prepare('SELECT id AS tenant_id,storage_mode,dedicated_binding FROM tenants WHERE id=?').bind(tid).first();
+   }else t=await requireMembership(db,user,tid,true);
+   if(!t)return fail(admin?'tenant not found':'forbidden',admin?404:403);
+   const crm=resolveCrmDb(env,t),offset=Number(offsetText);
+   const [plan,usage,pending,history,records,internal]=await Promise.all([
+    budget(db,tid),
+    crm.prepare('SELECT COUNT(*) AS verifiedCalls,COALESCE(SUM(call_seconds),0) AS connectedSeconds,COALESCE(SUM(billed_seconds),0) AS billedSeconds FROM verified_provider_call_costs WHERE tenant_id=?').bind(tid).first(),
+    crm.prepare(`SELECT COUNT(*) AS pendingCalls FROM calling_jobs j
+     WHERE j.tenant_id=? AND j.state IN('completed','failed') AND j.provider_call_sid IS NOT NULL
+     AND NOT EXISTS(SELECT 1 FROM verified_provider_call_costs v WHERE v.tenant_id=j.tenant_id AND v.job_id=j.id)`).bind(tid).first(),
+    db.prepare('SELECT previous_paise AS previousPaise,new_paise AS newPaise,created_at AS createdAt FROM tenant_credit_audit WHERE tenant_id=? ORDER BY created_at DESC,id DESC LIMIT 51 OFFSET ?').bind(tid,offset).all(),
+    crm.prepare(`SELECT j.id AS jobId,j.updated_at AS updatedAt,j.state,v.call_seconds AS connectedSeconds,
+      v.billed_seconds AS billedSeconds,v.verified_at AS verifiedAt
+      FROM calling_jobs j LEFT JOIN verified_provider_call_costs v ON v.tenant_id=j.tenant_id AND v.job_id=j.id
+      WHERE j.tenant_id=? AND j.state IN('completed','failed') AND j.provider_call_sid IS NOT NULL
+      ORDER BY j.updated_at DESC,j.id DESC LIMIT 51 OFFSET ?`).bind(tid,offset).all(),
+    admin?db.prepare(`SELECT COUNT(*) AS calls,COALESCE(SUM(duration_seconds),0) AS connectedSeconds
+     FROM scripted_phone_pilots WHERE tenant_id=? AND job_id IS NULL AND hangup_at IS NOT NULL`).bind(tid).first():Promise.resolve(null)
+   ]);
+   return json({tenantId:tid,plannedPaise:Number(plan?.plannedPaise||0),spendableSeconds:null,
+    debitedSeconds:null,verifiedCalls:Number(usage.verifiedCalls),connectedSeconds:Number(usage.connectedSeconds),
+    billedSeconds:Number(usage.billedSeconds),pendingCalls:Number(pending.pendingCalls),
+    internal:internal?{calls:Number(internal.calls),connectedSeconds:Number(internal.connectedSeconds)}:null,
+    transactions:history.results.slice(0,50).map(x=>({...x,deltaPaise:x.newPaise-x.previousPaise,
+     type:x.newPaise>x.previousPaise?'allocation':'recovery'})),
+    records:records.results.slice(0,50),offset,hasMore:history.results.length>50||records.results.length>50,
+    status:'observation_only',notice:'Verified provider seconds and provisional budget history only. No paid minutes, automatic deductions or payments.'});
   }
   if(path!=='tenant')return null;
   if(req.method==='GET'){
