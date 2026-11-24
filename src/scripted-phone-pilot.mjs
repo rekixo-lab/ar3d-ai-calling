@@ -4,7 +4,7 @@ import {mutationOriginAllowed} from './human-auth.mjs';
 import {beginFixedVoicePreview,advanceFixedVoicePreview,advanceContextualVoice,advanceInternalVoice} from './fixed-voice-turns.mjs';
 import {normalizePropertySurvey,surveyToCrm} from './fixed-property-survey.mjs';
 import {streamToken,validStreamToken,openNovaSocket,upgradePlivoTurn} from './streaming-speech.mjs';
-import {ANSWER_MAX_BYTES,answerContentType,readBoundedBytes,supportsAnswerAudio,transcribeScriptedAnswer} from './scripted-speech.mjs';
+import {ANSWER_MAX_BYTES,answerContentType,readBoundedBytes,supportsAnswerAudio,transcribeScriptedAnswer,transcribeNovaRecordedAnswer} from './scripted-speech.mjs';
 
 const ADMIN='/v1/human/scripted-phone-pilot',HOOK='/v1/provider/plivo/scripted-pilot';
 const UUID=/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
@@ -608,12 +608,13 @@ async function probeInternalRecording(env,config,fetcher,{showFirstAnswer=false,
  const recording=showLastAnswer?candidates.at(-1):candidates[0],url=verifiedRecordingUrl(config,row,recording.recording_id,recording);
  if(!url)return {...result,state:'recording_url_not_allowlisted'};
  result.mediaHost=new URL(url).hostname;
- let bytes;
+ let bytes,contentType;
  try{
   const response=await fetcher(url,{method:'GET',headers:{Authorization:config.authorization},redirect:'manual',signal:AbortSignal.timeout(5000)});
   result.mediaHttp=response.status;
   if(!response.ok){try{await response.body?.cancel()}catch{}return {...result,state:'media_http_'+response.status}}
-  if(!supportsAnswerAudio(answerContentType(response.headers))){try{await response.body?.cancel()}catch{}return {...result,state:'media_type_invalid'}}
+  contentType=answerContentType(response.headers);
+  if(!supportsAnswerAudio(contentType)){try{await response.body?.cancel()}catch{}return {...result,state:'media_type_invalid'}}
   bytes=await readBoundedBytes(response,ANSWER_MAX_BYTES);result.bytes=bytes.length;
  }catch{return {...result,state:'media_read_failed'}}
  try{
@@ -624,19 +625,22 @@ async function probeInternalRecording(env,config,fetcher,{showFirstAnswer=false,
    // Same bytes, language and VAD settings; only the topic hint differs.
    // These are fresh recognition runs, not the original callback transcript.
    // Deterministic parser only: historical contextual/memory state is not recoverable.
-   const recognize=async(initialPrompt)=>{
-    let transcript;
-    try{transcript=await transcribeScriptedAnswer(env.AI,bytes,row.language,{vadFilter:false,initialPrompt})}
-    catch{return {stt:'service_failed',transcript:null,parserAction:null,normalizedAnswer:null}}
-    if(!transcript)return {stt:'empty_text',transcript:null,parserAction:null,normalizedAnswer:null};
+   const recognize=async(run)=>{
+    let transcript,confidence=null;
+    try{({text:transcript,confidence=null}=await run())}
+    catch{return {stt:'service_failed',transcript:null,parserAction:null,normalizedAnswer:null,confidence:null}}
+    if(!transcript)return {stt:'empty_text',transcript:null,parserAction:null,normalizedAnswer:null,confidence};
     try{
-     const replay=advanceFixedVoicePreview(replayState,{transcript,now});
-     return {stt:'text_received',transcript,parserAction:replay.action,normalizedAnswer:['next_question','completed'].includes(replay.action)?replay.state.answers[field]??null:null};
-    }catch{return {stt:'text_received',transcript,parserAction:'replay_state_invalid',normalizedAnswer:null}}
+     const replay=advanceFixedVoicePreview(replayState,{transcript,now,confidence:confidence??1});
+     return {stt:'text_received',transcript,parserAction:replay.action,normalizedAnswer:['next_question','completed'].includes(replay.action)?replay.state.answers[field]??null:null,confidence};
+    }catch{return {stt:'text_received',transcript,parserAction:'replay_state_invalid',normalizedAnswer:null,confidence}}
    };
-   const baseline=await recognize(null);
-   const hinted=await recognize(answerSpeechContext(row));
-   return {...result,state:'media_downloaded',question:field,...baseline,hinted};
+   const whisper=async(initialPrompt)=>({text:await transcribeScriptedAnswer(env.AI,bytes,row.language,{vadFilter:false,initialPrompt})});
+   const [baseline,hinted,nova]=await Promise.all([
+    recognize(()=>whisper(null)),recognize(()=>whisper(answerSpeechContext(row))),
+    recognize(()=>transcribeNovaRecordedAnswer(env.AI,bytes,row.language,contentType))
+   ]);
+   return {...result,state:'media_downloaded',question:field,...baseline,hinted,nova,contentType,recordingDurationMs:Number(recording.recording_duration_ms)};
   }
   const text=await transcribeScriptedAnswer(env.AI,bytes,row.language,{vadFilter:false});
   const output={...result,state:'media_downloaded',stt:text?'text_received':'empty_text'};

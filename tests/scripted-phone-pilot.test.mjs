@@ -786,14 +786,20 @@ test('saved recording probe is no-dial, current-MFA and explicit-consent only; r
   f.c.db.prepare("UPDATE scripted_phone_pilots SET survey_json=?").run(JSON.stringify({version:1,status:'needs_review',language:'hi',index:4,answers:{propertyType:'plot',location:'रायपुर',area:'अमलीडीह',size:'1000 sqft'},attempts:3,turns:9,startedAt:now,phoneMeta:{engine:'whisper'}}));
   const inputs=[];
   env.AI.run=async(model,input)=>{
-   assert.equal(model,'@cf/openai/whisper-large-v3-turbo');inputs.push(input);
+   inputs.push({model,input});
+   if(model==='@cf/deepgram/nova-3')return {results:{channels:[{alternatives:[{transcript:'बीस लाख',confidence:.96}]}]}};
+   assert.equal(model,'@cf/openai/whisper-large-v3-turbo');
    return {text:input.initial_prompt?'तीस लाख':'तीस'};
   };
   const controlBefore=f.c.db.prepare('SELECT * FROM scripted_phone_pilots').get();
   const compared=await (await handleScriptedPhoneAdmin(req('SHOW_ONE_CONSENTED_INTERNAL_LAST_ANSWER'),env,admin,{now,fetcher})).json();
   assert.equal(compared.question,'budgetInr');assert.equal(compared.transcript,'तीस');assert.equal(compared.parserAction,'repeat');assert.equal(compared.normalizedAnswer,null);
   assert.equal(compared.hinted.transcript,'तीस लाख');assert.equal(compared.hinted.parserAction,'next_question');assert.equal(compared.hinted.normalizedAnswer,3000000);
-  assert.equal(inputs.length,2);assert.equal(inputs[0].audio,inputs[1].audio);assert.equal(inputs[0].initial_prompt,undefined);assert.match(inputs[1].initial_prompt,/बजट/);assert.equal(inputs[0].vad_filter,inputs[1].vad_filter);
+  assert.equal(inputs.length,3);
+  const [base,hint,nova]=inputs.map(x=>x.input);
+  assert.equal(base.audio,hint.audio);assert.equal(base.initial_prompt,undefined);assert.match(hint.initial_prompt,/बजट/);assert.equal(base.vad_filter,hint.vad_filter);
+  assert.deepEqual(nova.audio,{body:base.audio,contentType:'audio/wav'});assert.equal(nova.language,'hi');
+  assert.equal(compared.nova.transcript,'बीस लाख');assert.equal(compared.nova.parserAction,'next_question');assert.equal(compared.nova.normalizedAnswer,2000000);assert.equal(compared.nova.confidence,.96);assert.equal(compared.contentType,'audio/wav');assert.equal(compared.recordingDurationMs,6000);
   assert.equal(compared.phoneCallsStarted,0);assert.equal(compared.crmChanged,false);assert.equal(calls,9);assert.deepEqual(f.c.db.prepare('SELECT * FROM scripted_phone_pilots').get(),controlBefore);
   assert.deepEqual(f.r.db.prepare('SELECT * FROM leads WHERE id=?').get(lead),before);
  }finally{f.close()}
