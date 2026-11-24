@@ -372,3 +372,37 @@ test('Silence from speech recognition ends in review, never saves invented CRM v
   assert.equal(submitted,1);
  }finally{f.close()}
 });
+
+test('MFA-only internal customer preparation is scoped, idempotent and never dials',async()=>{
+ const f=fixture();
+ try{
+  f.c.db.prepare("UPDATE tenants SET display_name='AR3D Internal' WHERE id=?").run(tid);
+  const destination='+919000000007';
+  const env={...f.env,AR3D_SCRIPTED_PILOT_ORIGIN:origin,AR3D_SCRIPTED_PILOT_TENANT_ID:tid,
+   AR3D_SCRIPTED_PILOT_VERIFIED_NUMBER:destination};
+  const run=(e=env,u=admin,body={confirm:'PREPARE_INTERNAL_TEST_LEAD_NO_CALL'},o=origin,method='POST')=>
+   handleScriptedPhoneAdmin(new Request(origin+'/v1/human/scripted-phone-pilot/prepare-lead',
+    {method,headers:{Origin:o},...(method==='POST'?{body:JSON.stringify(body)}:{})}),
+    e,u,{now,fetcher:()=>assert.fail('must not contact Plivo')});
+  assert.equal((await run(env,client)).status,403);
+  assert.equal((await run(env,admin,{},origin)).status,400);
+  assert.equal((await run(env,admin,undefined,'https://wrong.example')).status,403);
+  assert.equal((await run(env,admin,undefined,origin,'GET')).status,405);
+  assert.equal((await run({...env,AR3D_SCRIPTED_PILOT_ENABLED:'enabled'})).status,409);
+  assert.equal((await run({...env,AR3D_SCRIPTED_CAMPAIGNS_ENABLED:'enabled'})).status,409);
+  assert.equal((await run({...env,AR3D_SCRIPTED_PILOT_VERIFIED_NUMBER:internalNumber})).status,409);
+  const first=await run();assert.equal(first.status,201,await first.clone().text());
+  const d=await first.json();assert.equal(d.created,true);assert.equal(d.destinationLast4,'0007');
+  assert.ok(!JSON.stringify(d).includes(destination));
+  const again=await run();assert.equal(again.status,200);assert.equal((await again.json()).leadId,d.leadId);
+  const row=f.r.db.prepare('SELECT * FROM leads WHERE tenant_id=? AND id=?').get(tid,d.leadId);
+  assert.equal(row.name,'AR3D Internal Test');assert.equal(row.mobile_e164,destination);
+  assert.equal(row.consent_status,'unknown');assert.equal(row.dnd_status,'unknown');
+  assert.equal(f.r.db.prepare("SELECT COUNT(*) AS n FROM crm_audit_events WHERE action='lead.created' AND target_id=?").get(d.leadId).n,1);
+  assert.equal(f.c.db.prepare('SELECT COUNT(*) AS n FROM scripted_phone_pilots').get().n,0);
+  f.r.db.prepare("UPDATE leads SET consent_status='denied' WHERE tenant_id=? AND id=?").run(tid,d.leadId);
+  assert.equal((await run()).status,409);
+  f.c.db.prepare("UPDATE tenants SET display_name='External Builder' WHERE id=?").run(tid);
+  assert.equal((await run()).status,409);
+ }finally{f.close()}
+});

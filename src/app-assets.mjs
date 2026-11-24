@@ -133,7 +133,18 @@ function scriptedPhonePilotPanel(){
   ]);
   language.value='en';
   const status=node('p',{class:'note',role:'status',text:'Checking pilot configuration…'});
-  const results=div('stack');
+  const results=div('stack'),prepared=div('stack');
+  const prepare=btn('Prepare internal test customer (no call)',async()=>{
+    if(!window.confirm('Create or reuse the AR3D Internal test customer for the mobile configured in Worker Secrets? Confirm you own and have verified that number. No call, consent clearance or payment is made.'))return;
+    prepare.disabled=true;
+    try{
+      const d=await api('/v1/human/scripted-phone-pilot/prepare-lead','POST',{confirm:'PREPARE_INTERNAL_TEST_LEAD_NO_CALL'});
+      const copy=node('input',{class:'field',value:d.leadId,readonly:'readonly','aria-label':'Internal test lead ID'});
+      prepared.replaceChildren(node('p',{class:'success',text:(d.created?'Internal test customer created':'Existing internal test customer reused')+' · mobile ending '+d.destinationLast4+'. No call placed.'}),
+        node('p',{class:'note',text:'Set this ID as the Worker Secret AR3D_SCRIPTED_PILOT_LEAD_ID, deploy, then refresh go-live checks. Do not enable calling yet.'}),
+        copy,btn('Copy internal lead ID',async()=>{try{await navigator.clipboard.writeText(d.leadId);notice('Lead ID copied.')}catch{copy.select()}},true));
+    }catch(err){asError(err)}finally{prepare.disabled=false}
+  },true);
   let config;
   const call=btn('Call the verified internal number once',async()=>{
     if(!config?.configured||!window.confirm('Place one internal pilot call to the verified number ending '+config.destinationLast4+'? This uses phone credits and records short answers only after the recipient presses 1.'))return;
@@ -154,7 +165,7 @@ function scriptedPhonePilotPanel(){
     results.replaceChildren(...(config.recent?.length?[table(['Started','Language','Status'],
       config.recent.map(x=>[x.created_at,x.language,x.phase]))]:[]));
   }
-  card.append(status,div('formrow',lab('Recorded prompt language',language),call,
+  card.append(status,prepare,prepared,div('formrow',lab('Recorded prompt language',language),call,
     btn('Refresh fixed-question pilot status',()=>refresh().catch(asError),true)),results);
   refresh().catch(()=>{status.textContent='Pilot status requires a current MFA Super Admin session.'});
   return card;
