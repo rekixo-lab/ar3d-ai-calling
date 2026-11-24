@@ -272,6 +272,24 @@ export async function handleCreditWalletRequest(req,env,user,{fetcher=fetch}={})
  if(!env.CONTROL_DB)return fail('database unavailable',503);
  const db=env.CONTROL_DB,path=url.pathname.slice(base.length+1);
  try{
+  if(path==='admin-dashboard'){
+   if(req.method!=='GET')return fail('method not allowed',405);
+   if(!await currentMfa(env,user))return fail('current MFA Super Admin required',403);
+   if(url.search)return fail('invalid dashboard query',400);
+   // No CRM binding enumeration, PII or carrier API request. Financial
+   // aggregate includes inactive companies to retain outstanding liability.
+   const position=await db.prepare(`SELECT
+    COALESCE((SELECT SUM(balance_seconds) FROM tenant_minute_ledger l WHERE l.sequence=(SELECT MAX(sequence) FROM tenant_minute_ledger WHERE tenant_id=l.tenant_id)),0) AS allocatedSeconds,
+    COALESCE(SUM(CASE WHEN state='held' THEN reserved_seconds ELSE 0 END),0) AS heldSeconds,
+    COALESCE(SUM(CASE WHEN state='settled' THEN charged_seconds ELSE 0 END),0) AS usedSeconds
+    FROM tenant_minute_holds`).first();
+   const [clients,sessions,transactions]=await Promise.all([
+    db.prepare("SELECT COUNT(*) AS total,COALESCE(SUM(CASE WHEN status='active' THEN 1 ELSE 0 END),0) AS active FROM tenants").first(),
+    db.prepare("SELECT COALESCE(SUM(CASE WHEN job_id IS NULL THEN 1 ELSE 0 END),0) AS internalEnded,COALESCE(SUM(CASE WHEN job_id IS NOT NULL THEN 1 ELSE 0 END),0) AS campaignEnded FROM scripted_phone_pilots WHERE hangup_at IS NOT NULL").first(),
+    db.prepare("SELECT l.created_at AS createdAt,t.display_name AS company,l.kind,l.delta_seconds AS deltaSeconds,l.balance_seconds AS balanceSeconds FROM tenant_minute_ledger l JOIN tenants t ON t.id=l.tenant_id ORDER BY l.sequence DESC LIMIT 10").all()
+   ]);
+   return json({clients,position:{...position,uncommittedSeconds:position.allocatedSeconds-position.heldSeconds-position.usedSeconds},internal:{ended:sessions.internalEnded},campaign:{ended:sessions.campaignEnded},transactions:transactions.results,providerRequests:0,externalPaymentsRecorded:false,dispatchEnabledByDashboard:false});
+  }
   if(path==='minute-ledger'){
    const isAdmin=user?.globalRole==='super_admin';
    if(isAdmin&&!await currentMfa(env,user))return fail('current MFA Super Admin required',403);
