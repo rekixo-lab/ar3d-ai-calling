@@ -135,7 +135,10 @@ function callback(config,id,step){return config.origin+HOOK+'/'+id+'/'+step}
 const play=url=>'<Play>'+escapeXml(url)+'</Play>';
 const directConfirm='CALL_ONE_PRECONSENTED_INTERNAL_NUMBER';
 const legacyConfirm='CALL_ONE_VERIFIED_INTERNAL_NUMBER';
-const streamingEngine='deepgram_stream';
+const streamingEngine='deepgram_stream',sarvamEngine='sarvam';
+const sarvamConfirm='CALL_ONE_PRECONSENTED_INTERNAL_SARVAM_NUMBER';
+const sarvamConfigured=env=>typeof env.SARVAM_API_KEY==='string'&&!!env.SARVAM_API_KEY.trim()&&env.SARVAM_API_KEY.length<=512;
+function isSarvam(row){return internalDirect(row)&&JSON.parse(row.survey_json).phoneMeta?.engine===sarvamEngine}
 function isStreaming(row){return internalDirect(row)&&JSON.parse(row.survey_json).phoneMeta?.engine===streamingEngine}
 function internalDirect(row){return !row.job_id&&JSON.parse(row.survey_json).phoneMeta?.mode==='direct_preconsented'}
 const speak=(language,text)=>'<Speak voice="'+(language==='hi'?'Polly.Aditi':'WOMAN')+'" language="'+(language==='hi'?'hi-IN':'en-US')+'">'+escapeXml(text)+'</Speak>';
@@ -175,7 +178,7 @@ function responseFor(config,row,{repeatCue=false,directOpeningCue=false,liveToke
   return xml(prefix+'<Record action="'+escapeXml(callback(config,row.id,'turn/'+row.turn))+
    '" method="GET" fileFormat="mp3" maxLength="'+(quick?'12':'16')+'" timeout="'+(quick?'3':'6')+'" finishOnKey="#" playBeep="true"/><Hangup/>');
  }
- if(row.phase==='needs_review'&&isStreaming(row)&&JSON.parse(row.survey_json).phoneMeta?.technicalFailure===true)
+ if(row.phase==='needs_review'&&(isStreaming(row)||isSarvam(row))&&JSON.parse(row.survey_json).phoneMeta?.technicalFailure===true)
   return xml(speak(row.language,row.language==='hi'?'माफ कीजिए, अभी हमारी तकनीकी सेवा में समस्या है। हम बाद में संपर्क करेंगे।':'Sorry, our speech service is currently unavailable. We will follow up later.')+'<Hangup/>');
  if(row.phase==='completed'||row.phase==='needs_review')
   return xml(audio(row.phase==='completed'?'closing':'review')+'<Hangup/>');
@@ -282,9 +285,11 @@ async function startPilot(req,env,user,config,now,fetcher){
  try{data=parseJsonBody(new TextDecoder('utf-8',{fatal:true}).decode(await readBoundedBytes(req,1024)),1024)}
  catch{return error('invalid_pilot_request',400)}
  if(!['confirm,language','confirm,language,leadId','confirm,engine,language','confirm,engine,language,leadId'].includes(Object.keys(data).sort().join(','))||
-    ![legacyConfirm,directConfirm].includes(data.confirm)||!['hi','en'].includes(data.language)||
-    (Object.hasOwn(data,'engine')&&(!['whisper',streamingEngine].includes(data.engine)||data.confirm!==directConfirm))||
+    ![legacyConfirm,directConfirm,sarvamConfirm].includes(data.confirm)||!['hi','en'].includes(data.language)||
+    (data.confirm===sarvamConfirm?data.engine!==sarvamEngine:
+      Object.hasOwn(data,'engine')&&(!['whisper',streamingEngine].includes(data.engine)||data.confirm!==directConfirm))||
     (Object.hasOwn(data,'leadId')&&(typeof data.leadId!=='string'||!UUID.test(data.leadId))))return error('explicit_pilot_confirmation_required',400);
+ if(data.engine===sarvamEngine&&!sarvamConfigured(env))return error('sarvam_not_configured',409);
  config=await selectDevice(env,config,data.leadId);
  if(!config)return error('internal_test_device_not_enrolled_or_blocked',403);
  const control=env.CONTROL_DB,crm=await pilotCrm(env,config.tenant);
@@ -296,7 +301,7 @@ async function startPilot(req,env,user,config,now,fetcher){
  const id=crypto.randomUUID(),slot=Math.floor(now/pilotCooldownMs),survey=beginFixedVoicePreview({language:data.language,now}).state;
  // Separate explicit attestation; old callers continue to require keypad consent.
  // This is limited to enrolled internal devices and never used for a campaign.
- if(data.confirm===directConfirm)survey.phoneMeta={mode:'direct_preconsented',engine:data.engine||'whisper'};
+ if([directConfirm,sarvamConfirm].includes(data.confirm))survey.phoneMeta={mode:'direct_preconsented',engine:data.engine||'whisper'};
  const reservation=await control.prepare(`INSERT INTO scripted_phone_pilots
   (id,tenant_id,lead_id,lead_updated_at,actor_id,language,destination,caller,rate_slot,expires_at,phase,survey_json,created_at,provider_account_id)
   SELECT ?,?,?,?,?,?,?,?,?,?,'requested',?,?,? WHERE NOT EXISTS(
@@ -442,6 +447,11 @@ export async function handleScriptedPhoneAdmin(req,env,user,{now=Date.now(),fetc
     CASE WHEN json_valid(survey_json) THEN json_extract(survey_json,'$.phoneMeta.audioBytes') END AS audio_bytes,
     CASE WHEN json_valid(survey_json) THEN json_extract(survey_json,'$.phoneMeta.mediaHost') END AS media_host,
     CASE WHEN json_valid(survey_json) THEN json_extract(survey_json,'$.phoneMeta.interpreter') END AS interpreter,
+    CASE WHEN json_valid(survey_json) THEN json_extract(survey_json,'$.phoneMeta.recognitionMs') END AS recognition_ms,
+    CASE WHEN json_valid(survey_json) THEN json_extract(survey_json,'$.phoneMeta.interpretationMs') END AS interpretation_ms,
+    CASE WHEN json_valid(survey_json) THEN json_extract(survey_json,'$.phoneMeta.llmRequests') END AS llm_requests,
+    CASE WHEN json_valid(survey_json) THEN json_extract(survey_json,'$.phoneMeta.sttAudioMs') END AS stt_audio_ms,
+    CASE WHEN json_valid(survey_json) THEN json_extract(survey_json,'$.phoneMeta.failureCode') END AS failure_code,
     hangup_at IS NOT NULL AS signed_hangup,
     provider_call_id IS NOT NULL AS provider_call_reference FROM scripted_phone_pilots
     WHERE tenant_id=? AND job_id IS NULL ORDER BY created_at DESC LIMIT 5`).bind(config.tenant).all();
@@ -449,7 +459,7 @@ export async function handleScriptedPhoneAdmin(req,env,user,{now=Date.now(),fetc
   return json({configured:true,destinationLast4:config.destination.slice(-4),recent:recent.results,
    devices:devices.map((x,i)=>({leadId:x.lead,destinationLast4:x.destination.slice(-4),primary:i===0})),
    enrollmentEnabled:env.AR3D_SCRIPTED_CAMPAIGNS_ENABLED!=='enabled'&&!!await deviceCrm(env,config),
-   engines:['whisper',streamingEngine],availability:await pilotAvailability(env.CONTROL_DB,now)});
+   engines:[...(sarvamConfigured(env)?[sarvamEngine]:[]),'whisper',streamingEngine],sarvamConfigured:sarvamConfigured(env),availability:await pilotAvailability(env.CONTROL_DB,now)});
  }catch{return error('scripted_phone_pilot_unavailable',503)}
 }
 
@@ -600,7 +610,7 @@ function verifiedRecordingUrl(config,row,recording,body){
 async function probeInternalRecording(env,config,fetcher,{showFirstAnswer=false,showLastAnswer=false,playback=false,sarvam=false,now=Date.now()}={}){
  const result={phoneCallsStarted:0,crmChanged:false,metadataHttp:null,mediaHost:null,mediaHttp:null,bytes:0,stt:'not_started'};
  const row=await env.CONTROL_DB.prepare(
-  "SELECT provider_call_id,lead_id,destination,language,survey_json,CASE WHEN json_valid(survey_json) THEN json_extract(survey_json,'$.index') END AS question_index FROM scripted_phone_pilots WHERE tenant_id=? AND job_id IS NULL AND provider_account_id=? AND caller=? AND hangup_at IS NOT NULL AND provider_call_id IS NOT NULL AND turn>0 AND CASE WHEN json_valid(survey_json) THEN COALESCE(json_extract(survey_json,'$.phoneMeta.engine'),'whisper')='whisper' ELSE 0 END ORDER BY created_at DESC LIMIT 1")
+  "SELECT provider_call_id,lead_id,destination,language,survey_json,CASE WHEN json_valid(survey_json) THEN json_extract(survey_json,'$.index') END AS question_index FROM scripted_phone_pilots WHERE tenant_id=? AND job_id IS NULL AND provider_account_id=? AND caller=? AND hangup_at IS NOT NULL AND provider_call_id IS NOT NULL AND turn>0 AND CASE WHEN json_valid(survey_json) THEN COALESCE(json_extract(survey_json,'$.phoneMeta.engine'),'whisper') IN ('whisper','sarvam') ELSE 0 END ORDER BY created_at DESC LIMIT 1")
   .bind(config.tenant,config.authId,config.caller).first();
  if(!row||!ID.test(row.provider_call_id)||!['hi','en'].includes(row.language))return {...result,state:'no_matching_recorded_call'};
  if(showFirstAnswer&&row.question_index!==0)return {...result,state:'first_question_not_confirmed'};
@@ -745,18 +755,20 @@ async function recordingAnswer(config,env,row,params,fetcher){
  try{bytes=await readBoundedBytes(response,ANSWER_MAX_BYTES)}
  catch{return {text:null,reason:'recording_body_invalid'}}
  try{
-  const text=await transcribeScriptedAnswer(env.AI,bytes,row.language,{vadFilter:false,initialPrompt:internalDirect(row)?answerSpeechContext(row):null});
-  return {text,reason:text?'recognized':'speech_empty',audioMs:recordingDurationMs(params),audioBytes:bytes.length,sttConnected:true,mediaHost:new URL(mediaUrl).hostname};
- }catch{return {text:null,reason:'speech_service_failed',audioMs:recordingDurationMs(params),audioBytes:bytes.length,sttConnected:false,mediaHost:new URL(mediaUrl).hostname}}
+  const started=Date.now();
+  const text=isSarvam(row)?(await transcribeSarvamRecordedAnswer(env.SARVAM_API_KEY,bytes,row.language,answerContentType(response.headers),fetcher)).text:
+   await transcribeScriptedAnswer(env.AI,bytes,row.language,{vadFilter:false,initialPrompt:internalDirect(row)?answerSpeechContext(row):null});
+  return {text,reason:text?'recognized':'speech_empty',recognitionMs:Date.now()-started,audioMs:recordingDurationMs(params),audioBytes:bytes.length,sttConnected:true,mediaHost:new URL(mediaUrl).hostname};
+ }catch(e){return {text:null,reason:'speech_service_failed',failureCode:speechFailureCode(e),audioMs:recordingDurationMs(params),audioBytes:bytes.length,sttConnected:false,mediaHost:new URL(mediaUrl).hostname}}
 }
 
-async function applyPhoneAnswer(config,env,row,answer,now){
+async function applyPhoneAnswer(config,env,row,answer,now,fetcher=fetch){
  const control=env.CONTROL_DB,id=row.id,turn=row.turn;
   const {phoneMeta={},...prior}=JSON.parse(row.survey_json);
   // A broken media/ASR path is not an unintelligible customer response.
   // Never loop the apology when no actual listening opportunity was provided.
-  const streamMetrics=isStreaming(row)?{audioMs:Number.isSafeInteger(answer.audioMs)?Math.min(18000,Math.max(0,answer.audioMs)):0,streamStarted:answer.streamStarted===true,sttConnected:answer.sttConnected===true}:{audioMs:answer.audioMs??null,audioBytes:answer.audioBytes??null,sttConnected:answer.sttConnected??null,mediaHost:answer.mediaHost??null};
-  if(isStreaming(row)&&answer.reason.startsWith('stream_')){
+  const streamMetrics=isStreaming(row)?{audioMs:Number.isSafeInteger(answer.audioMs)?Math.min(18000,Math.max(0,answer.audioMs)):0,streamStarted:answer.streamStarted===true,sttConnected:answer.sttConnected===true}:{audioMs:answer.audioMs??null,audioBytes:answer.audioBytes??null,sttConnected:answer.sttConnected??null,mediaHost:answer.mediaHost??null,recognitionMs:answer.recognitionMs??null,failureCode:answer.failureCode??null};
+  if((isStreaming(row)&&answer.reason.startsWith('stream_'))||(isSarvam(row)&&answer.reason==='speech_service_failed')){
    const survey_json=JSON.stringify({...prior,phoneMeta:{...phoneMeta,...streamMetrics,lastAudioOutcome:answer.reason,technicalFailure:true}});
    const changed=await control.prepare("UPDATE scripted_phone_pilots SET phase='needs_review',survey_json=? WHERE id=? AND phase='transcribing' AND turn=?").bind(survey_json,id,turn).run();
    return changed.meta.changes===1?responseFor(config,{...row,phase:'needs_review',survey_json}):end();
@@ -764,8 +776,14 @@ async function applyPhoneAnswer(config,env,row,answer,now){
   // Transport, empty audio and STT errors use the SAME bounded retry budget
   // as unclear speech. Never invent an answer or repeat a paid outbound call.
   const args={transcript:answer.text||'repeat',confidence:answer.confidence??1,now};
+  // One STT request per recorded answer; only unclear text may use one LLM.
+  // No automatic cross-provider retry. Missing key during a call fails closed.
+  const adapter=isSarvam(row)&&sarvamConfigured(env)?createSarvamContextualAdapter(env.SARVAM_API_KEY,fetcher):null;
+  const interpretationStarted=Date.now();
   const {result,interpreter,pendingQuantity=null}=internalDirect(row)&&answer.reason==='recognized'&&answer.text?
-   await advanceInternalVoice(env.AI,prior,args,phoneMeta.pendingQuantity):{result:advanceFixedVoicePreview(prior,args),interpreter:'direct'};
+   await advanceInternalVoice(isSarvam(row)?adapter:env.AI,prior,args,phoneMeta.pendingQuantity):{result:advanceFixedVoicePreview(prior,args),interpreter:'direct'};
+  const aiMetrics=isSarvam(row)?{interpretationMs:Date.now()-interpretationStarted,llmRequests:(phoneMeta.llmRequests||0)+(adapter?.requests||0),llmInputTokens:(phoneMeta.llmInputTokens||0)+(adapter?.usage?.inputTokens||0),llmOutputTokens:(phoneMeta.llmOutputTokens||0)+(adapter?.usage?.outputTokens||0),llmUsageUnknown:(phoneMeta.llmUsageUnknown||0)+(adapter?.requests&&!adapter.usage?1:0),sttAudioMs:(phoneMeta.sttAudioMs||0)+(answer.sttConnected?answer.audioMs||0:0),sttDurationUnknown:(phoneMeta.sttDurationUnknown||0)+(answer.sttConnected&&answer.audioMs==null?1:0)}:{};
+
   // No transcript, recording URL, identifiers, phone numbers or provider secrets.
   console.info('AR3D scripted answer outcome',JSON.stringify({
    reason:answer.reason,action:result.action,interpreter,questionIndex:prior.index,
@@ -776,7 +794,7 @@ async function applyPhoneAnswer(config,env,row,answer,now){
    return await finishCampaignOptOut(env,row,now);
   }
   const phase={active:'question',completed:'finishing',opted_out:'declined',needs_review:'needs_review'}[result.state.status];
-  const survey_json=JSON.stringify({...result.state,phoneMeta:{...phoneMeta,...streamMetrics,interpreter,pendingQuantity,lastAudioOutcome:answer.reason==='recognized'&&result.action==='repeat'?'speech_unrecognized':answer.reason==='recognized'&&result.action==='human_review'?'speech_unrecognized':answer.reason}});
+  const survey_json=JSON.stringify({...result.state,phoneMeta:{...phoneMeta,...streamMetrics,...aiMetrics,interpreter,pendingQuantity,lastAudioOutcome:answer.reason==='recognized'&&result.action==='repeat'?'speech_unrecognized':answer.reason==='recognized'&&result.action==='human_review'?'speech_unrecognized':answer.reason}});
   const changed=await control.prepare(`UPDATE scripted_phone_pilots SET phase=CASE WHEN ?='question' AND hangup_at IS NOT NULL THEN 'ended' ELSE ? END,
    survey_json=?,turn=turn+1 WHERE id=? AND phase='transcribing' AND turn=?`)
    .bind(phase,phase,survey_json,id,turn).run();
@@ -893,6 +911,6 @@ export async function handleScriptedPhoneCallback(req,env,{now=Date.now(),fetche
   const lock=await control.prepare("UPDATE scripted_phone_pilots SET phase='transcribing' WHERE id=? AND phase='question' AND turn=?")
    .bind(id,turn).run();
   if(lock.meta.changes!==1)return error('answer_processing',503);
-  return applyPhoneAnswer(config,env,row,await recordingAnswer(config,env,row,params,fetcher),now);
+  return applyPhoneAnswer(config,env,row,await recordingAnswer(config,env,row,params,fetcher),now,fetcher);
  }catch{return error('scripted_phone_callback_unavailable',503)}
 }
