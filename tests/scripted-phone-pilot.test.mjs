@@ -626,7 +626,7 @@ test('preconsented internal test skips keypad, announces recording and retries t
   const cb=(step,params)=>handleScriptedPhoneCallback(signed(hook+'/'+step,{CallUUID:callId,...params}),env,{now,fetcher});
   const details={ALegRequestUUID:requestId,From:'918000000000',To:'919000000001',Direction:'outbound'};
   const opening=await (await cb('answer',details)).text();
-  assert.match(opening,/जवाब रिकॉर्ड किए जाएंगे/);assert.doesNotMatch(opening,/GetDigits|opening\.mp3/);
+  assert.match(opening,/यह बातचीत रिकॉर्ड होती है/);assert.doesNotMatch(opening,/आपके जवाब रिकॉर्ड किए जाएंगे|अगर आप बात नहीं करना चाहते/);assert.doesNotMatch(opening,/GetDigits|opening\.mp3/);
   assert.match(opening,/propertyType\.mp3.*Record.*maxLength="16".*timeout="6"/);
   assert.match(await (await cb('turn/0',{RecordingID:'record-id-00'})).text(),/location\.mp3/);
   assert.equal(reads,2);
@@ -769,5 +769,34 @@ test('saved recording probe is no-dial, current-MFA and explicit-consent only; r
   const d=await r.json();assert.equal(d.mediaHttp,200);assert.equal(d.stt,'text_received');assert.equal(d.bytes,4);assert.equal(media,1);assert.equal(calls,2);
   assert.doesNotMatch(JSON.stringify(d),/private transcript|record-id|syntheticAuth/);
   assert.deepEqual(f.r.db.prepare('SELECT * FROM leads WHERE id=?').get(lead),before);
+ }finally{f.close()}
+});
+
+test('signed regional RecordUrl fast path downloads one answer and exposes safe live audio metrics',async()=>{
+ const f=fixture();try{
+  const env={...f.env,PLIVO_AUTH_ID:'syntheticAuth',PLIVO_AUTH_TOKEN:token,
+   AR3D_SCRIPTED_PILOT_ENABLED:'enabled',AR3D_PLIVO_RECORDING_AUTH:'confirmed',
+   AR3D_SCRIPTED_PILOT_ORIGIN:origin,AR3D_PLIVO_CALLER_NUMBER:'+918000000000',
+   AR3D_SCRIPTED_PILOT_VERIFIED_NUMBER:internalNumber,AR3D_SCRIPTED_PILOT_TENANT_ID:tid,
+   AR3D_SCRIPTED_PILOT_LEAD_ID:lead,RECORDINGS:{head:async()=>({size:4}),get:async()=>null},
+   AI:{async run(){return {text:'प्लॉट'}}}};
+  let hook,media=0;const recording='record-id-00',mediaUrl='https://aps1.media.plivo.com/v1/Account/syntheticAuth/Recording/'+recording+'.mp3';
+  const fetcher=async(url,opts)=>{
+   assert.equal(opts.redirect,'manual');
+   if(url.endsWith('/Call/')){hook=JSON.parse(opts.body).answer_url.replace(/\/answer$/,'');return Response.json({request_uuid:requestId},{status:202})}
+   assert.equal(url,mediaUrl);assert.match(opts.headers.Authorization,/^Basic /);media++;
+   return new Response('RIFF',{headers:{'Content-Type':'audio/wav'}});
+  };
+  const start=await handleScriptedPhoneAdmin(new Request(origin+'/v1/human/scripted-phone-pilot',{
+   method:'POST',headers:{Origin:origin},body:JSON.stringify({language:'hi',confirm:'CALL_ONE_PRECONSENTED_INTERNAL_NUMBER'})
+  }),env,admin,{now,fetcher});assert.equal(start.status,202);
+  const cb=(step,params)=>handleScriptedPhoneCallback(signed(hook+'/'+step,{CallUUID:callId,...params}),env,{now,fetcher});
+  await cb('answer',{ALegRequestUUID:requestId,From:'918000000000',To:'919000000001',Direction:'outbound'});
+  assert.match(await (await cb('turn/0',{RecordingID:recording,RecordUrl:mediaUrl,RecordingDurationMs:'2500'})).text(),/location\.mp3/);
+  assert.equal(media,1);
+  const status=await (await handleScriptedPhoneAdmin(new Request(origin+'/v1/human/scripted-phone-pilot'),env,admin,{now,fetcher})).json();
+  assert.equal(status.recent[0].question_index,1);assert.equal(status.recent[0].audio_ms,2500);
+  assert.equal(status.recent[0].audio_bytes,4);assert.equal(status.recent[0].stt_connected,1);
+  assert.equal(status.recent[0].media_host,'aps1.media.plivo.com');
  }finally{f.close()}
 });
