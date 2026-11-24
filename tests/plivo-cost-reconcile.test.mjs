@@ -182,3 +182,35 @@ test('approved settlement worker reads one signed-ended CDR and never dials or d
   assert.equal(reads,1);assert.equal((await minutePosition(f.env.CONTROL_DB,tid)).usedSeconds,60);
  }finally{f.close()}
 });
+
+test('bounded settlement batch continues past provider failure without releasing uncertain holds',async()=>{
+ const f=fixture();try{seed(f);const now=Date.now();
+ f.env.AR3D_AUTO_CDR_SETTLEMENT='approved';
+ f.c.db.prepare("INSERT INTO tenant_minute_ledger(id,tenant_id,kind,delta_seconds,previous_seconds,balance_seconds,actor,reason,created_at) VALUES('batch-funding',?,'allocation',600,0,600,'admin','Synthetic batch funding',?)").run(tid,at);
+ const entries=[{job,call,lead}];
+ for(let i=1;i<=4;i++){
+  const suffix=String(i).padStart(12,'0'),j='11111111-aaaa-4aaa-8aaa-'+suffix,c='22222222-bbbb-4bbb-8bbb-'+suffix,l='33333333-cccc-4ccc-8ccc-'+suffix;
+  f.r.db.prepare("INSERT INTO leads(tenant_id,id,name,mobile_e164,source_type,created_at,updated_at) VALUES(?,?,? ,?,'excel',?,?)").run(tid,l,'Synthetic '+i,'+91900000000'+(i+1),at,at);
+  f.r.db.prepare("INSERT INTO calling_jobs(tenant_id,id,run_id,lead_id,state,account_sid,caller_id,destination,provider_call_sid,created_at,updated_at) VALUES(?,?,?,?,'completed',?,?,?,?,?,?)").run(tid,j,run,l,f.env.PLIVO_AUTH_ID,'+918000000000','+91900000000'+(i+1),c,at,at);
+  entries.push({job:j,call:c,lead:l,dest:'+91900000000'+(i+1)});
+ }
+ for(const [i,e] of entries.entries()){
+  assert.equal((await reserveMinutes(f.env.CONTROL_DB,{tenantId:tid,job:e.job,maxSeconds:60,now:now-200000+i})).ok,true);
+  f.c.db.prepare(`INSERT INTO scripted_phone_pilots(id,tenant_id,lead_id,lead_updated_at,actor_id,language,destination,caller,expires_at,phase,survey_json,created_at,provider_account_id,job_id,provider_call_id,hangup_at)
+  VALUES(?,?,?,?,'admin','hi',?,'+918000000000',9999999999999,'completed','{}',?,'TESTACCOUNT123',?,?,?)`).run('batch-session-'+i,tid,e.lead,at,e.dest||'+919000000001',at,e.job,e.call,i===4?null:now-120000);
+ }
+ const reads=[];
+ const fetcher=async(url,options)=>{
+  assert.equal(options.method,'GET');
+  const e=entries.find(x=>url.endsWith('/'+x.call+'/'));assert.ok(e);reads.push(e.call);
+  if(reads.length===1)return new Response('unavailable',{status:503});
+  return Response.json({...good,call_uuid:e.call,to_number:(e.dest||'+919000000001').slice(1)});
+ };
+ assert.deepEqual(await runAutomaticMinuteSettlement(f.env,{now,fetcher}),{attempted:3,settled:2});
+ assert.equal(new Set(reads).size,3);assert.ok(!reads.includes(entries[4].call));
+ let position=await minutePosition(f.env.CONTROL_DB,tid);assert.equal(position.usedSeconds,120);assert.equal(position.heldSeconds,180);
+ assert.deepEqual(await runAutomaticMinuteSettlement(f.env,{now:now+60000,fetcher}),{attempted:2,settled:2});
+ position=await minutePosition(f.env.CONTROL_DB,tid);assert.equal(position.usedSeconds,240);assert.equal(position.heldSeconds,60);
+ assert.deepEqual(await runAutomaticMinuteSettlement(f.env,{now:now+120000,fetcher}),{attempted:0});
+ }finally{f.close()}
+});

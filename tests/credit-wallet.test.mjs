@@ -543,3 +543,17 @@ test('global transaction explorer is current-MFA only and separates adjustments 
  assert.equal((await route(f,'admin-transactions?kind=bogus')).status,400);
  assert.equal((await (await route(f,'admin-transactions?tenantId=99999999-9999-4999-8999-999999999999')).json()).transactions.length,0);
 }finally{f.close()}});
+
+test('admin settlement queue counts distinguish unknown sessions and signed-ended holds without mutations',async()=>{
+ const f=fixture();try{freshMfa(f);
+ const {reserveMinutes}=await import('../src/minute-holds.mjs');
+ const jobs=['11111111-aaaa-4aaa-8aaa-111111111111','11111111-aaaa-4aaa-8aaa-222222222222','11111111-aaaa-4aaa-8aaa-333333333333'];
+ f.c.db.prepare("INSERT INTO tenant_minute_ledger(id,tenant_id,kind,delta_seconds,previous_seconds,balance_seconds,actor,reason,created_at) VALUES('queue-funding',?,'allocation',180,0,180,'admin','Synthetic review funding',?)").run(tid,new Date().toISOString());
+ for(const j of jobs)assert.equal((await reserveMinutes(f.env.CONTROL_DB,{tenantId:tid,job:j,maxSeconds:60})).ok,true);
+ for(const [i,j] of jobs.slice(1).entries())f.c.db.prepare(`INSERT INTO scripted_phone_pilots(id,tenant_id,lead_id,lead_updated_at,actor_id,language,destination,caller,expires_at,phase,survey_json,created_at,provider_account_id,job_id,hangup_at)
+ VALUES(?,?,'synthetic-lead',?,'admin','hi','+919000000001','+918000000000',9999999999999,'needs_review','{}',?,'TESTACCOUNT123',?,?)`).run('queue-'+i,tid,new Date().toISOString(),new Date().toISOString(),j,i===0?null:Date.now());
+ const data=await (await route(f,'admin-dashboard',admin,'GET',undefined,{fetcher:()=>assert.fail('read-only dashboard')})).json();
+ assert.equal(data.settlementQueue.heldCalls,3);assert.equal(data.settlementQueue.missingSession,1);assert.equal(data.settlementQueue.awaitingHangup,1);assert.equal(data.settlementQueue.endedAwaitingReview,1);assert.equal(data.settlementQueue.automaticApproved,false);
+ assert.equal(data.position.heldSeconds,180);assert.equal((await route(f,'admin-dashboard',client)).status,403);
+ }finally{f.close()}
+});
