@@ -17,7 +17,7 @@ Do the following only when at your own secure computer. This checklist is not pr
 
 - Choose and contract with an India-compliant calling provider, obtain the authorized caller number(s), and complete required KYC, DLT/telecom registration and permitted traffic categories with the provider.
 - Arrange independently verifiable opt-in proof, DND/suppression lookup, call-time windows, disclosure, recording notifications and deletion/retention rules. The current software **does not verify these**.
-- **Agreed fixed-question v1:** Cloudflare Workers AI speech-to-text and the existing approved prerecorded Hindi/English R2 prompts are the intended initial speech stack. No general-purpose LLM or realtime TTS provider is mandatory. Verify usage limits, processing/region and costs. Streaming TTS/LLM is an **optional future upgrade**; never claim calling minutes or speech processing are guaranteed free.
+- **Agreed fixed-question v1:** Sarvam Saaras v4 is the only speech recognition service, with reviewed prerecorded Hindi/English R2 prompts and Plivo question playback. The deterministic interpreter is primary; bounded Sarvam 105B interpretation is optional per approved disclosure. Verify provider costs and consent before use.
 - Choose payment processor, subscriptions, rates, tax/invoice policy, usage quotas and refunds. Billing and automatic minute charging are not implemented.
 - Approve explicit, permission-scoped read-only AR3D Platform/Engine project APIs and integration credentials. A pending link is not verified project data.
 - Verify backups, data-retention deletion workflows, provider callback signatures, duplicate event handling, live audio latency and telecom compliance before any actual call can be enabled.
@@ -68,7 +68,7 @@ This locally prompts for token/password invisibly rather than putting secrets in
 
 ### Browser speech permission
 
-Only /app/simulator is allowed same-origin microphone access for explicitly user-initiated SpeechRecognition; main dashboard and other pages still block microphone.
+Microphone recording in the authenticated client seven-question preview requires explicit consent to Sarvam transcription. The text simulator has optional question playback only.
 
 
 ## Bootstrap 401: exact-token mismatch troubleshooting (non-secret)

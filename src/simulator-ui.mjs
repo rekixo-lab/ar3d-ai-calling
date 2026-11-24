@@ -4,13 +4,11 @@ export const simulatorHtml=`<!doctype html><html lang="en"><head><meta charset="
 <p class="note">No microphone or audio is generated. These are locale hints for future approved TTS providers.</p>
 <button id="preview-speech" class="btn secondary" type="button" disabled>Preview next spoken turn</button>
 <div id="speech-plan" class="sim-chat" aria-live="polite"></div></section>
-<section class="card"><h2>Optional browser voice sandbox</h2>
-<p class="note">Your browser may send microphone audio to its speech service. Use FICTIONAL test responses only. No outgoing calls, server-side audio storage, or automatic response submission.</p>
+<section class="card"><h2>Optional question playback</h2>
+<p class="note">Listen to fictional agent questions and type your answers. For microphone transcription with Sarvam, use the seven-question preview in the client workspace. No outgoing calls or automatic response submission.</p>
 <div class="formrow">
 <button id="speak-demo" class="btn secondary" type="button" disabled>Speak agent demo text</button>
-<label>Recognition language<select id="mic-locale" class="field"><option value="hi-IN">Hindi (India)</option><option value="en-IN">English (India)</option></select></label>
-<button id="mic-demo" class="btn secondary" type="button" disabled>Dictate fictional response</button>
-<button id="stop-demo" class="btn secondary" type="button" disabled>Stop mic/audio</button>
+<button id="stop-demo" class="btn secondary" type="button" disabled>Stop audio</button>
 </div><p id="voice-status" class="note" role="status">Speech is disabled until you start a demo and explicitly select an action.</p>
 </section></main><script src="/app/assets/simulator.js" defer></script></body></html>`;
 export const simulatorCss=`.sim-chat{min-height:180px;max-height:430px;overflow:auto;border:1px solid #26394f;border-radius:10px;padding:18px;background:#0b192a;display:grid;align-content:start;gap:12px}.sim-msg{border:1px solid #31445e;background:#172b44;border-radius:10px;padding:12px;max-width:90%;white-space:pre-wrap;overflow-wrap:anywhere}.sim-msg.customer{background:#15363b;justify-self:end}.sim-msg.agent{justify-self:start}.sim-msg small{display:block;color:#b0c0d6;margin-bottom:6px;font-weight:700}#reply{margin-top:16px}#reply label{flex:1}#reply input{width:100%}`;
@@ -19,18 +17,15 @@ const by=id=>document.getElementById(id);
 const tenant=by('tenant'),agent=by('agent'),start=by('start'),chat=by('chat'),reply=by('reply'),input=by('utterance'),send=reply.querySelector('button'),note=by('note'),status=by('status');
 let me=null,session=null;
 const previewSpeech=by('preview-speech'),speechPlan=by('speech-plan');
-const speakDemo=by('speak-demo'),micDemo=by('mic-demo'),stopDemo=by('stop-demo'),
-  micLocale=by('mic-locale'),voiceStatus=by('voice-status');
-const synth=window.speechSynthesis||null,Recognize=window.SpeechRecognition||window.webkitSpeechRecognition||null;
-let recognizer=null,voiceSerial=0;
+const speakDemo=by('speak-demo'),stopDemo=by('stop-demo'),voiceStatus=by('voice-status');
+const synth=window.speechSynthesis||null;
+let voiceSerial=0;
 function syncVoiceControls(){
   speakDemo.disabled=!session||!synth||!window.SpeechSynthesisUtterance;
-  micDemo.disabled=!session||session.simulation.status!=='active'||!Recognize||Boolean(recognizer);
-  stopDemo.disabled=!recognizer&&(!synth||(!synth.speaking&&!synth.pending));
+  stopDemo.disabled=!synth||(!synth.speaking&&!synth.pending);
 }
 function stopBrowserVoice(){
   voiceSerial++;
-  if(recognizer){try{recognizer.abort()}catch{}recognizer=null}
   if(synth)synth.cancel();
   syncVoiceControls();
 }
@@ -56,28 +51,8 @@ speakDemo.addEventListener('click',async()=>{
     speakPart(0);
   }catch(e){error(e);syncVoiceControls()}
 });
-micDemo.addEventListener('click',()=>{
-  if(!session||session.simulation.status!=='active'||!Recognize||recognizer)return;
-  stopBrowserVoice();
-  try{
-    const rec=new Recognize();recognizer=rec;
-    rec.lang=micLocale.value==='en-IN'?'en-IN':'hi-IN';
-    rec.continuous=false;rec.interimResults=false;rec.maxAlternatives=1;
-    const expectedId=session.id;
-    rec.onresult=event=>{
-      if(!session||session.id!==expectedId)return;
-      const text=String(event.results?.[0]?.[0]?.transcript||'').trim().slice(0,500);
-      if(text){input.value=text;voiceStatus.textContent='Transcript filled. Review the fictional response and press Send manually.'}
-    };
-    rec.onerror=()=>{voiceStatus.textContent='Browser microphone unavailable or permission denied.'};
-    rec.onend=()=>{if(recognizer===rec)recognizer=null;syncVoiceControls()};
-    rec.start();
-    voiceStatus.textContent='Microphone active for one fictional response. Browser speech services may process audio.';
-    syncVoiceControls();
-  }catch(e){recognizer=null;error(e);syncVoiceControls()}
-});
 stopDemo.addEventListener('click',()=>{
-  stopBrowserVoice();voiceStatus.textContent='Browser mic/audio stopped.'
+  stopBrowserVoice();voiceStatus.textContent='Question playback stopped.'
 });
 window.addEventListener('pagehide',stopBrowserVoice);
 async function api(url,method='GET',data){const resp=await fetch(url,{method,credentials:'same-origin',cache:'no-store',headers:data?{'content-type':'application/json'}:{},body:data?JSON.stringify(data):undefined});const j=await resp.json();if(!resp.ok)throw Error(j.error||'Request failed');return j}

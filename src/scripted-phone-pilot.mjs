@@ -147,7 +147,7 @@ function internalDirect(row){return !row.job_id&&JSON.parse(row.survey_json).pho
 const speak=(language,text)=>'<Speak voice="'+(language==='hi'?'Polly.Aditi':'WOMAN')+'" language="'+(language==='hi'?'hi-IN':'en-US')+'">'+escapeXml(text)+'</Speak>';
 function directOpening(row){
  // Only a separate explicit pre-call recording disclosure attestation enables this greeting.
- // Older internal clients and all customer campaign notices remain unchanged.
+ // The separate internal and customer consent paths remain unchanged.
  if(isSarvam(row)&&JSON.parse(row.survey_json).phoneMeta?.priorRecordingNotice===true)return speak(row.language,row.language==='hi'?'नमस्ते! मैं ए आर थ्री डी की ए आई असिस्टेंट हूँ। आपकी पसंद की प्रॉपर्टी ढूँढने में मदद करूँगी।':'Hello! I am the AR3D AI assistant. I am here to help you find a property that suits you.');
  return speak(row.language,row.language==='hi'?'नमस्कार, मैं ए आर थ्री डी की ए आई असिस्टेंट हूँ। यह बातचीत रिकॉर्ड होती है।':'Hello, I am the AR3D AI assistant. This conversation is recorded.');
 }
@@ -172,8 +172,7 @@ function responseFor(config,row,{repeatCue=false,directOpeningCue=false}={}){
   const clarification=pending&&pending.turn===state.turns&&pending.field===field?
    speak(row.language,field==='size'?(row.language==='hi'?'कृपया बताइए, यह वर्ग फुट है या वर्ग गज?':'Is that in square feet or square yards?'):(row.language==='hi'?'कृपया बताइए, हजार, लाख या करोड़?':'Is that thousands, lakhs or crores?')):null;
   const prefix=(directOpeningCue?directOpening(row):'')+(clarification||retry+audio(prompt));
-  // Shorter turn capture for the pre-consented internal pilot only. Preserve
-  // independently approved customer campaign and legacy consent behavior.
+  // Bounded recording windows for the single speech provider.
   const quick=internalDirect(row)||isSarvam(row);
   return xml(prefix+'<Record action="'+escapeXml(callback(config,row.id,'turn/'+row.turn))+
    '" method="GET" fileFormat="mp3" maxLength="'+(quick?'12':'16')+'" timeout="'+(quick?'3':'6')+'" finishOnKey="#" playBeep="true"/><Hangup/>');
@@ -444,7 +443,7 @@ export async function handleScriptedPhoneAdmin(req,env,user,{now=Date.now(),fetc
     CASE WHEN phase='requested' AND provider_request_id IS NOT NULL THEN 'submitted' ELSE phase END AS phase,
     language,created_at,turn,duration_seconds,substr(destination,-4) AS destinationLast4,
     CASE WHEN json_valid(survey_json) THEN json_extract(survey_json,'$.index') END AS question_index,
-    CASE WHEN json_valid(survey_json) THEN json_extract(survey_json,'$.phoneMeta.engine') END AS engine,
+    CASE WHEN json_valid(survey_json) AND json_extract(survey_json,'$.phoneMeta.engine')='sarvam' THEN 'sarvam' ELSE 'historical' END AS engine,
     CASE WHEN json_valid(survey_json) THEN json_extract(survey_json,'$.phoneMeta.lastAudioOutcome') END AS last_audio_outcome,
     CASE WHEN json_valid(survey_json) THEN json_extract(survey_json,'$.phoneMeta.audioMs') END AS audio_ms,
     CASE WHEN json_valid(survey_json) THEN json_extract(survey_json,'$.phoneMeta.sttConnected') END AS stt_connected,
@@ -760,10 +759,10 @@ async function applyPhoneAnswer(config,env,row,answer,now,fetcher=fetch){
   const {phoneMeta={},...prior}=JSON.parse(row.survey_json);
   // A broken media/ASR path is not an unintelligible customer response.
   // Never loop the apology when no actual listening opportunity was provided.
-  const streamMetrics={audioMs:answer.audioMs??null,audioBytes:answer.audioBytes??null,sttConnected:answer.sttConnected??null,mediaHost:answer.mediaHost??null,recognitionMs:answer.recognitionMs??null,failureCode:answer.failureCode??null};
+  const audioMetrics={audioMs:answer.audioMs??null,audioBytes:answer.audioBytes??null,sttConnected:answer.sttConnected??null,mediaHost:answer.mediaHost??null,recognitionMs:answer.recognitionMs??null,failureCode:answer.failureCode??null};
   if(isSarvam(row)&&/^sarvam_http_40[123]$/.test(answer.failureCode||''))await recordProviderFault(control,'sarvam',Number(answer.failureCode.slice(-3)),'stt:'+id+':'+turn,now);
   if(answer.reason==='speech_service_failed'){
-   const survey_json=JSON.stringify({...prior,phoneMeta:{...phoneMeta,...streamMetrics,...(isSarvam(row)&&phoneMeta.costMeterVersion===1?{sttFailedRequests:(phoneMeta.sttFailedRequests||0)+1}:{}),lastAudioOutcome:answer.reason,technicalFailure:true}});
+   const survey_json=JSON.stringify({...prior,phoneMeta:{...phoneMeta,...audioMetrics,...(isSarvam(row)&&phoneMeta.costMeterVersion===1?{sttFailedRequests:(phoneMeta.sttFailedRequests||0)+1}:{}),lastAudioOutcome:answer.reason,technicalFailure:true}});
    const changed=await control.prepare("UPDATE scripted_phone_pilots SET phase='needs_review',survey_json=? WHERE id=? AND phase='transcribing' AND turn=?").bind(survey_json,id,turn).run();
    return changed.meta.changes===1?responseFor(config,{...row,phase:'needs_review',survey_json}):end();
   }
@@ -790,7 +789,7 @@ async function applyPhoneAnswer(config,env,row,answer,now,fetcher=fetch){
    return await finishCampaignOptOut(env,row,now);
   }
   const phase={active:'question',completed:'finishing',opted_out:'declined',needs_review:'needs_review'}[result.state.status];
-  const survey_json=JSON.stringify({...result.state,phoneMeta:{...phoneMeta,...streamMetrics,...aiMetrics,interpreter,pendingQuantity,lastAudioOutcome:answer.reason==='recognized'&&result.action==='repeat'?'speech_unrecognized':answer.reason==='recognized'&&result.action==='human_review'?'speech_unrecognized':answer.reason}});
+  const survey_json=JSON.stringify({...result.state,phoneMeta:{...phoneMeta,...audioMetrics,...aiMetrics,interpreter,pendingQuantity,lastAudioOutcome:answer.reason==='recognized'&&result.action==='repeat'?'speech_unrecognized':answer.reason==='recognized'&&result.action==='human_review'?'speech_unrecognized':answer.reason}});
   const changed=await control.prepare(`UPDATE scripted_phone_pilots SET phase=CASE WHEN ?='question' AND hangup_at IS NOT NULL THEN 'ended' ELSE ? END,
    survey_json=?,turn=turn+1 WHERE id=? AND phase='transcribing' AND turn=?`)
    .bind(phase,phase,survey_json,id,turn).run();
