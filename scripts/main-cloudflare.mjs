@@ -142,6 +142,18 @@ export const REQUIRED_SAFETY_TRIGGERS = Object.freeze({
   trg_call_intent_proposal_immutable: ['before update on call_intent_proposals','raise(abort'],
   trg_call_intent_proposal_no_provider: ['before insert on call_intent_proposals','raise(abort'],
 });
+export const REQUIRED_MINUTE_LEDGER_TRIGGERS=Object.freeze({
+ trg_minute_ledger_no_update:['before update on tenant_minute_ledger','raise(abort'],
+ trg_minute_ledger_no_delete:['before delete on tenant_minute_ledger','raise(abort'],
+ trg_minute_ledger_chain:['before insert on tenant_minute_ledger','new.previous_seconds','new.tenant_id','order by sequence desc','raise(abort']
+});
+export function checkMinuteLedgerTriggers(records){
+ if(!Array.isArray(records))throw Error('Invalid minute ledger trigger inspection');
+ const rows=new Map(records.map(r=>[r?.name,String(r?.sql||'').toLowerCase().replace(/\s+/g,' ')]));
+ for(const [name,parts] of Object.entries(REQUIRED_MINUTE_LEDGER_TRIGGERS)){
+  if(parts.some(p=>!rows.get(name)?.includes(p)))throw Error('Minute ledger safety trigger missing or invalid: '+name);
+ }
+}
 export function checkSafetyTriggers(records,{allowCallIntentUpgrade=false}={}) {
   if (!Array.isArray(records)) throw Error('Invalid CRM trigger inspection result.');
   const triggers = new Map(records.map(row => [row?.name, String(row?.sql || '')
@@ -154,6 +166,7 @@ export function checkSafetyTriggers(records,{allowCallIntentUpgrade=false}={}) {
   }
 }
 
+const presentMinuteLedger=names=>names.includes('tenant_minute_ledger');
 export function checkTables(tables, binding, mode) {
   const expected = REQUIRED_TABLES[binding];
   if (!expected || !Array.isArray(tables)) throw Error('Invalid schema inspection input.');
@@ -240,6 +253,10 @@ export async function inspectCloudflare({ credentials, mode, apiFetch = fetch, t
       if (binding === 'CRM_DB') {
         const triggers = await query(id, "SELECT name,sql FROM sqlite_master WHERE type='trigger' AND name LIKE 'trg_%'");
         checkSafetyTriggers(triggers,{allowCallIntentUpgrade:state === 'crm_call_intent_upgrade'});
+      }
+      if(binding==='CONTROL_DB'&&presentMinuteLedger(names)){
+        const triggers=await query(id,"SELECT name,sql FROM sqlite_master WHERE type='trigger' AND name LIKE 'trg_minute_ledger_%'");
+        checkMinuteLedgerTriggers(triggers);
       }
       for (const table of Object.keys(REQUIRED_COLUMNS[binding])) {
         if(state==='control_client_accounts_upgrade'&&table==='client_account_contacts')continue;
