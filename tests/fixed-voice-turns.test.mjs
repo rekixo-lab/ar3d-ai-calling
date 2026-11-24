@@ -300,7 +300,8 @@ test('Natural short choices, budget and interest responses advance without infer
  let budget=s;for(const x of ['प्लॉट','कोरबा','पुराना बस स्टैंड','एक हजार वर्ग फीट'])budget=turn(budget,x).state;
  for(const [text,amount] of [['पैंतीस लाख रुपये','3500000'],['एक करोड़ बीस लाख','12000000'],['25 lakh','2500000'],['3.5 crore','35000000'],['करीब पच्चीस लाख तक','2500000']])
   assert.equal(turn(budget,text).state.answers.budgetInr,Number(amount),text);
- for(const text of ['20 या 30 लाख','20-30 lakh','नहीं 25 लाख'])assert.equal(turn(budget,text).action,'repeat',text);
+ for(const text of ['20 या 30 लाख','नहीं 25 लाख','30-20 lakh','20-30'])assert.equal(turn(budget,text).action,'repeat',text);
+ const explicitRange=turn(budget,'20-30 lakh');assert.equal(explicitRange.state.answers.budgetMinInr,2000000);assert.equal(explicitRange.state.answers.budgetInr,3000000);
  const interest=turn(budget,'25 लाख').state;
  for(const text of ['जी','हाँ जी','बिल्कुल','haan','sure'])assert.equal(turn(interest,text).state.answers.interest,'interested',text);
  for(const text of ['नहीं','जी नहीं','nahi','no'])assert.equal(turn(interest,text).state.answers.interest,'not_interested',text);
