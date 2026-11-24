@@ -261,3 +261,33 @@ test('Misheard speech and mixed interest responses are never accepted as custome
   assert.equal(optout.state.answers.interest,undefined);
   assert.equal(optout.consentGranted,false);
 });
+
+test('Spoken Hindi and Hinglish plot sizes normalize without a paid call',()=>{
+ const sizeState=()=>{let s=beginFixedVoicePreview({now:stamp}).state;
+  for(const a of ['प्लॉट','कोरबा','पुराना बस स्टैंड'])s=turn(s,a).state;return s};
+ for(const [answer,expected] of [
+  ['एक हजार वर्ग फीट','1000 वर्ग फुट'],
+  ['बारह सौ वर्ग फीट','1200 वर्ग फुट'],
+  ['एक हज़ार दो सौ वर्ग फुट','1200 वर्ग फुट'],
+  ['मुझे लगभग पंद्रह सौ स्क्वायर फीट चाहिए','1500 वर्ग फुट'],
+  ['१२०० वर्ग फीट','1200 वर्ग फुट'],
+  ['1,200 sqft','1200 वर्ग फुट'],
+  ['twelve hundred square feet','1200 वर्ग फुट'],
+  ['barah sau square feet','1200 वर्ग फुट'],
+  ['वन थाउजेंड स्क्वेयर फीट','1000 वर्ग फुट'],
+  ['एक सौ गज','100 वर्ग गज'],
+  ['तीस बाय चालीस फीट','30 x 40 ft']
+ ]){
+  const r=turn(sizeState(),answer);
+  assert.equal(r.action,'next_question',answer);
+  assert.equal(r.state.answers.size,expected,answer);
+  assert.equal(r.currentField,'budgetInr');
+ }
+ for(const answer of ['बारह सौ','1000 या 1200 वर्ग फीट','एक हजार से बारह सौ वर्ग फीट','1200 1500 sqft','नहीं चाहिए 1200 वर्ग फुट','-1200 sqft','0 वर्ग फुट','20 लाख रुपये','1000 वर्ग मीटर','दो हजार हजार वर्ग फीट']){
+  const r=turn(sizeState(),answer);
+  assert.equal(r.action,'repeat',answer);
+  assert.equal(r.state.answers.size,undefined,answer);
+ }
+ assert.equal(turn(sizeState(),'एक हजार वर्ग फीट',.5).action,'repeat');
+ assert.equal(turn(sizeState(),'कॉल मत करना, एक हजार वर्ग फीट').action,'opt_out_requested');
+});
