@@ -6,7 +6,7 @@ const count=(v,max=1000000000)=>Number.isSafeInteger(v)&&v>=0&&v<=max?v:null;
 const cost=(n,rate,unit)=>n===null?null:Math.round(n*rate/unit);
 export function costObservation(row,cdr=null){
  let survey={};try{survey=JSON.parse(row.survey_json)}catch{}
- const m=survey?.phoneMeta||{},engine=m.engine||'whisper',connected=count(row.duration_seconds,86400);
+ const m=survey?.phoneMeta||{},engine=m.engine==='sarvam'?'sarvam':'historical',connected=count(row.duration_seconds,86400);
  const providerSeconds=cdr?count(cdr.billedSeconds,86400):null;
  const plannedSeconds=providerSeconds??(connected===null?null:Math.ceil(connected/30)*30);
  const audio=engine==='sarvam'?count(m.sttAudioMs):null;

@@ -2,8 +2,8 @@
 // Transcripts are NOT trusted provider transcripts and never touch D1/R2.
 import {beginFixedVoicePreview,advanceInternalVoice} from './fixed-voice-turns.mjs';
 import {parseJsonBody} from './core.mjs';
-import {requireMembership} from './human-auth.mjs';
-import {ANSWER_MAX_BYTES,answerContentType,readBoundedBytes,supportsAnswerAudio,transcribeScriptedAnswer} from './scripted-speech.mjs';
+import {requireMembership,mutationOriginAllowed} from './human-auth.mjs';
+import {ANSWER_MAX_BYTES,answerContentType,readBoundedBytes,supportsAnswerAudio,transcribeSarvamRecordedAnswer} from './scripted-speech.mjs';
 const PATH='/v1/human/voice-preview';
 const MAX_REQUEST=8192;
 const reply=(data,status=200)=>Response.json(data,{status,headers:{
@@ -25,7 +25,7 @@ async function bounded(req){
   }finally{reader.releaseLock()}
   return parseJsonBody(raw,MAX_REQUEST);
 }
-export async function handleFixedVoicePreviewRequest(req,env,user){
+export async function handleFixedVoicePreviewRequest(req,env,user,{fetcher=fetch}={}){
   const {pathname,searchParams}=new URL(req.url);
   if(pathname===PATH+'/transcribe'){
     if(req.method!=='POST')return reply({error:'method not allowed'},405);
@@ -34,12 +34,13 @@ export async function handleFixedVoicePreviewRequest(req,env,user){
       return reply({error:'invalid answer audio or language'},400);
     if(!await requireMembership(env.CONTROL_DB,user,searchParams.get('tenantId'),true))
       return reply({error:'forbidden'},403);
-    if(!env.AI?.run)return reply({error:'Cloudflare transcription is not configured'},503);
+    if(!mutationOriginAllowed(req)||req.headers.get('X-AR3D-Speech-Consent')!=='sarvam')return reply({error:'explicit Sarvam processing consent required'},403);
+    if(typeof env.SARVAM_API_KEY!=='string'||!env.SARVAM_API_KEY.trim())return reply({error:'Sarvam transcription is not configured'},503);
     let audio;
     try{audio=await readBoundedBytes(req,ANSWER_MAX_BYTES)}
     catch{return reply({error:'Use a short recorded answer (up to 512 KiB)'},400)}
     try{
-      const text=await transcribeScriptedAnswer(env.AI,audio,language);
+      const {text}=await transcribeSarvamRecordedAnswer(env.SARVAM_API_KEY,audio,language,answerContentType(req.headers),fetcher);
       return reply({text,reviewRequired:true});
     }catch{return reply({error:'Transcription failed. Try again or type the answer.'},502)}
   }
