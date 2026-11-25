@@ -96,10 +96,13 @@ export async function getSession(req,db){
     WHERE s.token_hash=? AND s.revoked_at IS NULL AND s.expires_at>?
       AND u.status='active' LIMIT 1`).bind(digest,Date.now()).first();
 }
-export async function newSession(db,userId){
+export async function newSession(db,userId,{passwordOnly=false}={}){
   const token=randomSecret(),digest=await sha256hex(token),createdAt=new Date().toISOString();
-  await db.prepare('INSERT INTO human_sessions(token_hash,user_id,created_at,expires_at) VALUES(?,?,?,?)')
-    .bind(digest,userId,createdAt,Date.now()+SESSION_MS).run();
+  // Recheck enrollment in the same statement as password-only session issuance.
+  const guard=!passwordOnly?'':' WHERE NOT EXISTS (SELECT 1 FROM human_mfa_settings WHERE user_id=? AND enabled_at IS NOT NULL)';
+  const result=await db.prepare('INSERT INTO human_sessions(token_hash,user_id,created_at,expires_at) SELECT ?,?,?,?'+guard)
+    .bind(digest,userId,createdAt,Date.now()+SESSION_MS,...(passwordOnly?[userId]:[])).run();
+  if(result?.meta?.changes===0)throw Error('Authenticator required. Sign in again.');
   return token;
 }
 export async function requireMembership(db,user,tenantId,write=false){

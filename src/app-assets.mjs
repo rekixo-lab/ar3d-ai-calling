@@ -43,6 +43,14 @@ async function api(path,method='GET',payload){const r=await fetch(path,{method,c
 function asError(e){notice(e instanceof Error?e.message:'Unexpected error',true)}
 function table(headers,rows){const t=node('table',{class:'table'});const h=node('tr');headers.forEach(v=>h.append(node('th',{text:v})));t.append(node('thead',{},h));const b=node('tbody');rows.forEach(row=>{const tr=node('tr');row.forEach(v=>{const text=String(v??'—');const cell=node('td');if(v instanceof Node){cell.append(v);tr.append(cell);return}if(['active','completed','submitted','running','trial','paused','queued','draft','suspended','failed','unknown','blocked'].includes(text))cell.append(node('span',{class:'badge '+(['active','completed','running'].includes(text)?'positive':['trial','paused','queued','draft','submitted'].includes(text)?'pending':'negative'),text}));else cell.textContent=text;tr.append(cell)});b.append(tr)});if(!rows.length)b.append(node('tr',{},node('td',{class:'empty-state',colspan:headers.length,text:'No records yet'})));t.append(b);return div('tablewrap',t)}
 async function load(){
+ const teamInvite=location.hash.match(/^#team-invite=([a-f0-9]{64})$/);
+ if(teamInvite){
+  try{state.me=await api('/v1/human/me')}
+  catch{state.me=null}
+  if(state.me)root.replaceChildren(div('auth',div('card',title('Team invitation'),node('p',{text:'Open this invitation in a private window to use the invited account.'}),btn('Back to dashboard',()=>openSignIn()))));
+  else teamEnrollView(teamInvite[1]);
+  return;
+ }
  const invite=location.hash.match(/^#invite=([a-f0-9]{64})$/);
  if(invite){
   // Opening an invitation must never replace an existing session.
@@ -296,6 +304,7 @@ function dashboard(){
   ['calling','Calling Setup','phone','Internal testing and client calling approval.'],
   ['wallet','Minutes & Wallet','wallet','Review exact call seconds, reconciliation and credit transactions.'],
   ['company','Company details','building','Manage company information and client requests.'],
+  ['team','Team','users','Manage Super Admin access and invitations.'],
   ['security','Security','shield','Manage two-factor authentication and recovery codes.']
  ]:[
   ['home','Home','grid','Your minutes, customers and what needs attention today.'],
@@ -342,6 +351,7 @@ function dashboard(){
      calling:async()=>{area.append(scriptedPhonePilotPanel());await callingAdminPanel(area)},
      wallet:()=>adminMinuteWallet(area),
      company:async()=>{await companyAdminPanel(area);await adminCompanyChangesPanel(area)},
+     team:()=>teamPanel(area),
      security:()=>mfaPanel(area)
     };
     Promise.resolve(renderers[key]()).catch(err=>{
@@ -567,6 +577,73 @@ function showRecoveryCodes(target,codes){
   target.append(lab('Recovery codes — keep offline and private',box),
     node('p',{class:'note',text:'Do not send these codes in messages or screenshots. Store them in a trusted password manager or secure offline record.'}));
 }
+function teamCode(){
+ const field=input('otp','text','6-digit code');
+ field.inputMode='numeric';field.pattern='[0-9]{6}';field.maxLength=6;field.autocomplete='one-time-code';
+ return field;
+}
+function teamForm(label,fields,action){
+ const button=node('button',{class:'btn',type:'submit',text:label});
+ return node('form',{class:'stack',onsubmit:async event=>{
+  event.preventDefault();if(button.disabled)return;button.disabled=true;
+  try{await action()}catch(error){asError(error)}finally{button.disabled=false}
+ }},[...fields,button]);
+}
+async function teamPanel(main){
+ const data=await api('/v1/human/team');
+ const email=input('email','email','member@company.com'),otp=teamCode();
+ const output=div('stack'),confirmation=div('stack');
+ const invite=teamForm('Add Super Admin',[lab('Member email',email),lab('Your current authenticator code',otp)],async()=>{
+  const result=await api('/v1/human/team/invite','POST',{email:email.value,code:otp.value});
+  await teamPanel(main);
+  const link=node('input',{class:'field',readonly:'readonly',value:result.inviteUrl});
+  main.prepend(div('card',title('Share invitation'),lab('Private link · expires in 24 hours',link),
+   node('a',{class:'btn',href:'mailto:'+encodeURIComponent(email.value)+'?subject=AR3D%20Super%20Admin%20invitation&body='+encodeURIComponent('Use this private link to join the AR3D AI Calling team:\n'+result.inviteUrl),text:'Open email draft'})));
+ });
+ function manage(row,action,label){
+  return btn(label,()=>{
+   const code=teamCode();
+   confirmation.replaceChildren(div('card',title(label+' · '+row.email),teamForm('Confirm '+label.toLowerCase(),
+    [lab('Your current authenticator code',code)],async()=>{
+     await api('/v1/human/team/'+action,'POST',{id:row.id,code:code.value});await teamPanel(main);
+    }),btn('Cancel',()=>confirmation.replaceChildren(),true)));
+   code.focus();
+  },true);
+ }
+ output.append(table(['Email','Status','Invited by','Last sign-in','Action'],[
+  ...data.members.map(m=>[m.email,'active',m.invitedBy||'—',formatIst(m.lastSignIn),m.id===state.me.id?'You':manage(m,'remove','Remove access')]),
+  ...data.pending.map(i=>[i.email,'Pending',i.invitedBy,'—',manage(i,'cancel','Cancel invitation')])
+ ]));
+ main.replaceChildren(div('card',title('Add a team member'),node('p',{text:'Super Admins can manage all clients, calling, credits and team access. Share the private invitation only with the member.'}),invite),
+  confirmation,div('card',title('Team members'),output,btn('Refresh team',()=>teamPanel(main).catch(asError),true)));
+}
+function teamEnrollView(token){
+ const email=input('email','email','Invited email'),password=input('password','password');
+ password.autocomplete='off';password.maxLength=128;
+ const card=div('card',title('Join the Super Admin team','h1'));
+ root.replaceChildren(div('auth',card));
+ card.append(teamForm('Set up authenticator',[lab('Invited email',email),lab('Password (existing password or 12+ characters for a new account)',password)],async()=>{
+  const details={email:email.value,password:password.value,token};
+  const setup=await api('/v1/human/team/setup','POST',details);
+  const code=teamCode();
+  card.replaceChildren(title('Connect your authenticator','h1'));
+  if(setup.key){
+   const scale=4,size=(setup.matrix.length+8)*scale;
+   const canvas=node('canvas',{width:size,height:size,'aria-label':'Authenticator setup QR code'});
+   const ctx=canvas.getContext('2d');ctx.fillStyle='white';ctx.fillRect(0,0,size,size);ctx.fillStyle='black';
+   setup.matrix.forEach((row,y)=>[...row].forEach((pixel,x)=>{if(pixel==='1')ctx.fillRect((x+4)*scale,(y+4)*scale,scale,scale)}));
+   card.append(node('p',{text:'Scan with your authenticator app, or enter the setup key manually.'}),canvas,lab('Setup key',node('input',{class:'field',readonly:'readonly',value:setup.key})));
+  }
+  card.append(teamForm('Activate Super Admin access',[lab('Your authenticator code',code)],async()=>{
+   const result=await api('/v1/human/team/accept','POST',{...details,code:code.value});
+   history.replaceState(null,'','/app');card.replaceChildren(title('Account activated','h1'));
+   const output=div('stack');card.append(output);
+   if(result.recoveryCodes.length)showRecoveryCodes(output,result.recoveryCodes);
+   card.append(btn('Continue to sign in',()=>openSignIn(details.email)));
+  }));
+ }));
+}
+
 async function mfaPanel(main){
   const card=div('card security-card',title('Two-factor authentication'));
   card.id='security-panel';main.append(card);
@@ -2906,6 +2983,6 @@ function fixedSurveyPanel(tenantId,lead,onSave){
 
 // Following a second invitation in the same tab can change only the hash.
 window.addEventListener('hashchange',event=>{
- if(location.hash.startsWith('#invite=')||new URL(event.oldURL).hash.startsWith('#invite='))load();
+ if([location.hash,new URL(event.oldURL).hash].some(hash=>/^#(?:team-)?invite=/.test(hash)))load();
 });
 load();`;

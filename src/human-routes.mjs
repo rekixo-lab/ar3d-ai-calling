@@ -1,3 +1,4 @@
+import {teamRoute} from './team-routes.mjs';
 import {handleScriptedPhoneAdmin} from './scripted-phone-pilot.mjs';
 import {handleScriptedCallingRequest} from './scripted-campaign-routes.mjs';
 import {handleClientAccountRequest} from './client-account-routes.mjs';
@@ -110,7 +111,7 @@ async function login(req,env){
   await db.prepare('DELETE FROM human_login_limits WHERE email_hash=?').bind(key).run();
   const mfa=await db.prepare('SELECT enabled_at FROM human_mfa_settings WHERE user_id=? AND enabled_at IS NOT NULL').bind(row.id).first();
   if(mfa?.enabled_at)return challengeAfterPassword(db,row,env);
-  const token=await newSession(db,row.id);
+  const token=await newSession(db,row.id,{passwordOnly:true});
   return response({ok:true},200,{'Set-Cookie':cookieFor(token)});
 }
 async function acceptInvitation(req,env){
@@ -142,7 +143,7 @@ async function acceptInvitation(req,env){
     const enabled=await db.prepare('SELECT enabled_at FROM human_mfa_settings WHERE user_id=? AND enabled_at IS NOT NULL').bind(id).first();
     if(enabled?.enabled_at)return challengeAfterPassword(db,user,env);
   }
-  const session=await newSession(db,id);
+  const session=await newSession(db,id,{passwordOnly:true});
   return response({ok:true},200,{'Set-Cookie':cookieFor(session)});
 }
 async function logout(req,env){
@@ -295,10 +296,13 @@ export async function handleHumanRequest(req,env){
       if(!gate.allowed)return fail(gate.error,gate.status);
       return await acceptInvitation(req,env);
     }
+    if(['/v1/human/team/setup','/v1/human/team/accept'].includes(path)&&method==='POST')
+      return await teamRoute(req,env,null,await payload(req));
     if(path==='/v1/human/login/mfa'&&method==='POST')return await finishMfaLogin(req,env,await payload(req));
     if(path==='/v1/human/logout'&&method==='POST')return await logout(req,env);
     const user=await getSession(req,env.CONTROL_DB);
     if(!user)return fail('sign in required',401);
+    if(path==='/v1/human/team'||path.startsWith('/v1/human/team/'))return await teamRoute(req,env,user,method==='POST'?await payload(req):{});
     if(path==='/v1/human/mfa'||path==='/v1/human/mfa/setup'||path==='/v1/human/mfa/enable'||path==='/v1/human/mfa/recovery/regenerate')
       return await handleMfaSettings(req,env,user,method==='POST'?await payload(req):null);
     const readiness=await handleLaunchReadiness(req,env,user);

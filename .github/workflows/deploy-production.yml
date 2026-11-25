@@ -42,6 +42,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
+      - run: npm ci --ignore-scripts
       - uses: actions/setup-python@v5
         with:
           python-version: '3.13'
@@ -184,6 +185,9 @@ jobs:
           npx --yes wrangler@4 d1 execute ar3d-calling-shared-crm --remote --yes --config wrangler.jsonc --file migrations/crm/0020_lead_staff_assignments.sql
           npx --yes wrangler@4 d1 execute ar3d-calling-shared-crm --remote --yes --config wrangler.jsonc --file migrations/crm/0021_verified_provider_call_costs.sql
           npx --yes wrangler@4 d1 execute ar3d-calling-shared-crm --remote --yes --config wrangler.jsonc --file migrations/crm/0022_parallel_company_calls.sql
+      - name: Install Super Admin team tables in verified Calling Control
+        if: github.event_name == 'push' || inputs.operation == 'initialize' || inputs.operation == 'deploy'
+        run: npx --yes wrangler@4 d1 execute ar3d-calling-control --remote --yes --config wrangler.jsonc --file migrations/control/0029_super_admin_team.sql
       - name: Verify post-initialization schema before proceeding
         if: (github.event_name == 'push' && steps.schema.outputs.schema_state == 'fresh') || (github.event_name == 'workflow_dispatch' && inputs.operation == 'initialize')
         run: node scripts/main-cloudflare.mjs ready
