@@ -251,9 +251,22 @@ try{
  await multiPage.getByText('Secondary manual buyer',{exact:true}).waitFor();
  assert.equal(f.r.db.prepare('SELECT COUNT(*) AS n FROM leads WHERE tenant_id=?').get(otherTenant).n,2);
  assert.equal(f.r.db.prepare("SELECT consent_status,dnd_status FROM leads WHERE tenant_id=? AND name='Secondary manual buyer'").get(otherTenant).consent_status,'unknown');
+ // Manual number straight into a new calling campaign.
+ await multiPage.getByRole('link',{name:'Customers / Excel',exact:true}).click();
+ await multiPage.getByText('Add one customer manually',{exact:true}).click();
+ await multiPage.locator('input[name=customerName]').fill('Secondary campaign buyer');
+ await multiPage.locator('input[name=customerMobile]').fill('9000000078');
+ await multiPage.getByLabel('Add to calling campaign',{exact:true}).selectOption('new');
+ await multiPage.getByLabel('Call language for new campaign',{exact:true}).selectOption('en');
+ await multiPage.getByRole('button',{name:'Add customer',exact:true}).click();
+ await multiPage.getByText(/Customer added to campaign “Manual numbers/).waitFor();
+ await multiPage.getByRole('heading',{name:'Campaign controls',exact:true}).waitFor();
+ const manualCampaign=f.r.db.prepare("SELECT d.id,d.language_mode AS lang FROM call_campaign_drafts d JOIN call_campaign_candidates c ON c.tenant_id=d.tenant_id AND c.campaign_id=d.id JOIN leads l ON l.tenant_id=c.tenant_id AND l.id=c.lead_id WHERE d.tenant_id=? AND l.name='Secondary campaign buyer'").get(otherTenant);
+ assert.equal(manualCampaign.lang,'en');
+ assert.equal(await multiPage.getByRole('combobox',{name:'Calling campaign',exact:true}).inputValue(),manualCampaign.id);
  await multiPage.getByRole('link',{name:'Home',exact:true}).click();
- await overview.getByText('2',{exact:true}).waitFor();
- assert.equal(await overview.getByText('2',{exact:true}).count(),1);
+ await overview.getByText('3',{exact:true}).waitFor();
+ assert.equal(await overview.getByText('3',{exact:true}).count(),1);
  await multiPage.screenshot({path:'artifacts/client-tenant-switch-mobile.png',fullPage:true});
  await multiPage.locator('.company-switch select').selectOption(tid);
  await multiPage.locator('.workspace-role').getByText('Client viewer',{exact:true}).waitFor();
