@@ -157,7 +157,7 @@ function inviteView(token){
 }
 async function logout(){
  try{await api('/v1/human/logout','POST',{})}
- finally{state.me=null;state.clientTab='home';state.adminTab='clients';state.importCampaign=null;openSignIn()}
+ finally{state.me=null;state.clientTab='home';state.adminTab='overview';state.importCampaign=null;openSignIn()}
 }
 function scriptedPhonePilotPanel(){
   const card=div('card',title('Internal phone test'));
@@ -309,13 +309,12 @@ function dashboard(){
  ]:[
   ['home','Home','grid','Your minutes, customers and what needs attention today.'],
   ['customers','Customers / Excel','users','Import customers and prepare a calling campaign.'],
-  ['ai-test','AI Testing','spark','Practice the seven fixed questions without a phone call or CRM update.'],
   ['calling','Calling','phone','Review your campaign and start or pause approved calls.'],
   ['results','Results / CRM','chart','See call outcomes and answers saved to your CRM.'],
   ['wallet','Minutes & Wallet','wallet','View verified call usage and credit history.'],
   ['company','Company details','building','Review your company information and request changes.']
  ];
- const heading=title(admin?'Clients':items[0][1],'h1');
+ const heading=title(items[0][1],'h1');
  heading.tabIndex=-1;
  const subtitle=node('p',{class:'page-description'});
  const nav=node('nav',{'aria-label':admin?'Admin sections':'Client workspace sections',class:'workspace-nav'});
@@ -329,6 +328,16 @@ function dashboard(){
  if(!admin)account.prepend(sidebarWallet);
  const brand=div('brand',div('brand-mark',icon('phone')),div('',node('strong',{text:'AR3D'}),node('small',{text:'AI Calling'})));
  root.append(div('layout',node('aside',{class:'sidebar'},[brand,nav,account]),main));
+ let selectedCompany=null;
+ const companyTabs=['calling','wallet','company'];
+ function chooseCompany(company,key){
+  selectedCompany=company;
+  for(const tab of companyTabs){
+   const old=areas.get(tab),fresh=node('section',{class:'workspace-section',id:tab,hidden:true});
+   old.replaceWith(fresh);areas.set(tab,fresh);loaded.delete(tab);
+  }
+  openView(key,{focus:true,resetScroll:true});
+ }
  function openView(key,{focus=false,resetScroll=false}={}){
   const item=items.find(x=>x[0]===key);
   if(!item)return;
@@ -345,16 +354,20 @@ function dashboard(){
    if(!loaded.has(key)){
     loaded.add(key);
     const area=areas.get(key);
+    const client=companyTabs.includes(key)?selectedCompany:null;
+    if(client)area.append(div('card row between',title(client.display_name),
+     btn('Change client',()=>chooseCompany(null,'clients'),true)));
     const renderers={
-     overview:()=>adminDashboard(area,openView),
-     clients:()=>superAdmin(area),
-     calling:async()=>{area.append(scriptedPhonePilotPanel());await callingAdminPanel(area)},
-     wallet:()=>adminMinuteWallet(area),
-     company:async()=>{await companyAdminPanel(area);await adminCompanyChangesPanel(area)},
+     overview:()=>adminDashboard(area,(tab,options)=>selectedCompany&&companyTabs.includes(tab)?chooseCompany(null,tab):openView(tab,options)),
+     clients:()=>superAdmin(area,chooseCompany),
+     calling:()=>callingAdminPanel(area,client),
+     wallet:()=>adminMinuteWallet(area,client),
+     company:()=>companyAdminPanel(area,client),
      team:()=>teamPanel(area),
      security:()=>mfaPanel(area)
     };
     Promise.resolve(renderers[key]()).catch(err=>{
+     if(areas.get(key)!==area)return;
      loaded.delete(key);
      area.replaceChildren(node('p',{class:'banner err',role:'alert',text:'Could not load this section.'}),
       btn('Retry',()=>{area.replaceChildren();openView(key)},true));
@@ -374,8 +387,8 @@ function dashboard(){
    areas.set(key,area);main.append(area);
   }
  }
- const hashTab=location.hash.slice(1);
- if(admin)openView(items.some(x=>x[0]===hashTab)?hashTab:state.adminTab||'clients');
+ const hashTab=location.hash==='#ai-test'?'calling':location.hash.slice(1);
+ if(admin)openView(items.some(x=>x[0]===hashTab)?hashTab:state.adminTab||'overview');
  else{
   if(items.some(x=>x[0]===hashTab))state.clientTab=hashTab;
   openView(state.clientTab||'home');
@@ -499,7 +512,7 @@ async function adminDashboard(main,openView){
  const freshness=node('p',{class:'muted',role:'status',text:'Updating…'});
  panel.append(div('row between',freshness,refresh),body);
  const providers=providerBalancePanel(openView);
- main.append(providers.panel,panel);
+ const alerts=div('stack');main.append(alerts,providers.panel,panel);
  async function load(){
   if(refresh.disabled)return;
   refresh.disabled=true;
@@ -519,8 +532,11 @@ async function adminDashboard(main,openView){
    ];
    const advanced=node('details',{class:'card advanced-review'},node('summary',{text:'Advanced · provider safety, settlement and funding review'}));
    if(blocked.length||q.missingSession>0)advanced.open=true;
+   alerts.replaceChildren();
+   if(attention.length)alerts.append(node('section',{class:'chart-panel','aria-label':'Needs attention'},[
+    title('Needs attention','h3'),...attention.map(t=>node('p',{class:'banner err',role:'status',text:t})),
+    btn('Review calling and funding status',()=>{advanced.open=true;advanced.scrollIntoView({block:'start'});advanced.querySelector('summary').focus()},true)]));
    body.replaceChildren(
-    ...(attention.length?[node('section',{class:'chart-panel','aria-label':'Needs attention'},[title('Needs attention','h3'),...attention.map(t=>node('p',{class:'banner err',role:'status',text:t}))])]:[node('p',{class:'note',role:'status',text:'Everything looks fine. No provider block or pending review.'})]),
     div('overview-grid',
     overviewMetric('Client companies',safeCount(d.clients.total),'users'),
     overviewMetric('Active companies',safeCount(d.clients.active),'users'),
@@ -561,7 +577,7 @@ async function adminDashboard(main,openView){
     div('overview-grid',overviewMetric('Reviewed cumulative capacity',formatSeconds(d.funding?.capSeconds),'wallet'),overviewMetric('Remaining funded capacity',formatSeconds(d.funding?.remainingFundedSeconds),'wallet'),overviewMetric('Unbacked allocations',formatSeconds(d.funding?.unbackedAllocationSeconds),'receipt')),
     div('overview-grid',overviewMetric('Plivo reviewed ceiling',formatSeconds(d.funding?.reviewedProviderCeilings?.plivo),'phone'),overviewMetric('Sarvam reviewed ceiling',formatSeconds(d.funding?.reviewedProviderCeilings?.sarvam),'spark')),
     node('p',{class:'note',text:'Independent reviewed lifetime capacity ceilings, not live cash balances. Either missing ceiling or exhausted capacity blocks new campaigns.'}));
-  }catch(e){providers.setClients(null);freshness.textContent='Update unavailable';body.replaceChildren(node('p',{class:'err',text:'Dashboard unavailable. Refresh after signing in with current MFA.'}));}
+  }catch(e){alerts.replaceChildren();providers.setClients(null);freshness.textContent='Update unavailable';body.replaceChildren(node('p',{class:'err',text:'Dashboard unavailable. Refresh after signing in with current MFA.'}));}
   finally{refresh.disabled=false}
  }
  providers.load();
@@ -927,25 +943,26 @@ function clientFinancialOverview(main){
  // and explicit refresh/page changes instead of polling every 15 seconds.
  main.append(card);load();
 }
-async function adminMinuteWallet(main){
+async function adminMinuteWallet(main,client=null){
  const card=div('card',title('Client minute management')),company=node('select',{class:'field','aria-label':'Minute wallet company'}),
   search=input('walletSearch','search','Find company by name or email'),detail=div('stack');
  search.required=false;search.maxLength=80;
  let generation=0;
  const find=async()=>{
   const seq=++generation;
-  const d=await api('/v1/human/tenants?'+new URLSearchParams({limit:'100',q:search.value.trim()}));
+  const d=client?{tenants:[client]}:await api('/v1/human/tenants?'+new URLSearchParams({limit:'100',q:search.value.trim()}));
   if(seq!==generation)return;
   const previous=company.value;
   company.replaceChildren(node('option',{value:'',text:'Select client company'}),
    ...d.tenants.map(t=>node('option',{value:t.id,text:t.display_name+' — '+t.status})));
-  if(d.tenants.some(t=>t.id===previous))company.value=previous;
+  if(client)company.value=client.id;else if(d.tenants.some(t=>t.id===previous))company.value=previous;
   await select();
  };
  async function select(){detail.replaceChildren();if(company.value){const selected=company.value;const credits=div('stack'),costs=div('stack'),minutes=div('stack');detail.append(credits,costs,minutes);manualMinuteLedger(credits,selected,true);callCostIntelligence(costs,selected);providerCostReconciliation(costs,selected);await minuteUsagePanel(minutes,selected,true)}}
  company.addEventListener('change',()=>select().catch(asError));
- card.append(div('formrow',lab('Search clients',search),btn('Find company',()=>find().catch(asError),true)),
-  lab('Client company',company),detail);main.append(card);
+ if(!client)card.append(div('formrow',lab('Search clients',search),btn('Find company',()=>find().catch(asError),true)),
+  lab('Client company',company));card.append(detail);main.append(card);
+ if(client){await find();return}
  adminTransactionExplorer(main);
  recordedCollectionsPanel(main);
  // Provider-side money and planning tools are used rarely; keep them folded.
@@ -959,7 +976,7 @@ async function adminMinuteWallet(main){
  await find();
 }
 function manualMinuteLedger(main,tenantId,admin,onBalance=()=>{},registerRefresh=()=>{}){
- const panel=div('card minute-wallet',title('Calling credit ledger')),body=div('stack'),form=div('stack');
+ const panel=div('card minute-wallet',title('Calling credit ledger')),balanceSummary=div('stack'),body=div('stack'),form=div('stack');
  const minutes=input('manualMinutes','number','Minutes'),reason=input('manualReason','text','Reason / external reference');
  minutes.min='1';minutes.max='16666666';minutes.step='1';reason.maxLength=200;
  const mode=node('select',{class:'field'},[node('option',{value:'1',text:'Allocate minutes'}),node('option',{value:'-1',text:'Recover unused allocation'})]);
@@ -1017,15 +1034,15 @@ function manualMinuteLedger(main,tenantId,admin,onBalance=()=>{},registerRefresh
   const id=++seq;refresh.disabled=prev.disabled=next.disabled=submit.disabled=purchase.disabled=true;
   try{const d=await api('/v1/human/credits/minute-ledger?'+new URLSearchParams({tenantId,offset:String(offset)}));if(id!==seq)return;balance=d.allocatedSeconds;uncommitted=d.uncommittedSeconds;onBalance(d);
    const metric=(name,value)=>div('card metric',node('span',{class:'muted',text:name}),node('strong',{text:formatSeconds(value)}));
-   body.replaceChildren(div('metrics',metric('Available minutes',d.uncommittedSeconds),metric('Used minutes',d.usedSeconds),metric('On hold (live calls)',d.heldSeconds),metric('Total minutes received',balance),...(admin?[metric('Callable now',d.spendableSeconds)]:[])),
-    ...(admin?[node('p',{class:'note',text:'Callable now is a current snapshot after provider funding checks, not a reservation for a specific customer. Telecom clearance and dispatch limits still apply.'})]:[]),
-    title('Credit adjustments','h3'),table(['Date (IST)','Transaction ID','Type','Change (min)','Before','After','Payment (INR)','Receipt',...(admin?['Actor','Reason']:[])],d.transactions.map(t=>[formatIst(t.createdAt),t.transactionId,t.kind,(t.deltaSeconds>0?'+':'')+String(t.deltaSeconds/60),formatSeconds(t.previousSeconds),formatSeconds(t.balanceSeconds),Number.isSafeInteger(t.paidPaise)?'₹'+(t.paidPaise/100).toFixed(2):'—',t.receiptRef||'—',...(admin?[t.actor,t.reason]:[])])),
+   balanceSummary.replaceChildren(div('metrics',metric('Available minutes',d.uncommittedSeconds),metric('Used minutes',d.usedSeconds),metric('On hold (live calls)',d.heldSeconds),metric('Total minutes received',balance),...(admin?[metric('Callable now',d.spendableSeconds)]:[])),
+    ...(admin?[node('p',{class:'note',text:'Callable now is a current snapshot after provider funding checks, not a reservation for a specific customer. Telecom clearance and dispatch limits still apply.'})]:[]));
+   body.replaceChildren(title('Credit adjustments','h3'),table(['Date (IST)','Transaction ID','Type','Change (min)','Before','After','Payment (INR)','Receipt',...(admin?['Actor','Reason']:[])],d.transactions.map(t=>[formatIst(t.createdAt),t.transactionId,t.kind,(t.deltaSeconds>0?'+':'')+String(t.deltaSeconds/60),formatSeconds(t.previousSeconds),formatSeconds(t.balanceSeconds),Number.isSafeInteger(t.paidPaise)?'₹'+(t.paidPaise/100).toFixed(2):'—',t.receiptRef||'—',...(admin?[t.actor,t.reason]:[])])),
     title('Call credit history','h3'),table(['Created (IST)','Call reference','Status','Reserved','Charged','Returned','Closed (IST)',...(admin?['Action']:[])],(d.callTransactions||[]).map(h=>[formatIst(h.createdAt),h.jobId,h.state,formatSeconds(h.reservedSeconds),formatSeconds(h.chargedSeconds),formatSeconds(h.reversedSeconds),h.closedAt?formatIst(h.closedAt):'—',...(admin?[h.state==='settled'&&h.chargedSeconds>0&&!h.reversedSeconds?btn('Reverse charge',()=>reverseCall(h),true):'—']:[])])));
    prev.disabled=offset===0;next.disabled=!d.hasMore;
-  }catch(e){if(id===seq){balance=null;uncommitted=null;onBalance(null);body.replaceChildren(node('p',{class:'err',text:'Credit ledger unavailable. Refresh to retry.'}))}throw e}
+  }catch(e){if(id===seq){balance=null;uncommitted=null;onBalance(null);balanceSummary.replaceChildren();body.replaceChildren(node('p',{class:'err',text:'Credit ledger unavailable. Refresh to retry.'}))}throw e}
   finally{if(id===seq){refresh.disabled=false;submit.disabled=busy||balance===null||Boolean(purchasePending);purchase.disabled=busy||balance===null||Boolean(pending)}}
  }
- panel.append(body,form,div('formrow',refresh,prev,next));main.append(panel);
+ panel.append(balanceSummary,form,body,div('formrow',refresh,prev,next));main.append(panel);
  const refreshVisible=()=>{if(!refresh.disabled&&!busy&&!pending&&!purchasePending)return load().catch(asError)};
  registerRefresh(refreshVisible);
  if(admin)foregroundRefresh(panel,15000,refreshVisible,()=>!panel.closest('[hidden]'));
@@ -1191,7 +1208,7 @@ function creditWalletOperator(main){
  document.addEventListener('client-created',()=>{opened=false;if(panel.open)open().catch(asError)});
 }
 
-async function superAdmin(main){
+async function superAdmin(main,chooseCompany){
  const panel=div('card client-directory',title('Client directory'));panel.id='clients-panel';main.append(panel);
  const list=div(''),directorySearch=input('clientDirectorySearch','search','Search company name, slug or email');
  const prev=btn('← Previous companies',async()=>{pageOffset=Math.max(0,pageOffset-100);await refresh();await refreshAccess();populateMemberCompanies()},true);
@@ -1204,6 +1221,15 @@ async function superAdmin(main){
   if(e.key==='Enter'){e.preventDefault();pageOffset=0;refresh().then(refreshAccess).then(populateMemberCompanies).catch(asError)}
  });
  panel.append(div('formrow',lab('Find any company',directorySearch),searchButton),list,pagination);
+ const clientActions=div('card');clientActions.hidden=true;
+ panel.insertBefore(clientActions,list);
+ function showClient(client){
+  const jump=(key,label)=>btn(label,()=>chooseCompany(client,key),true);
+  clientActions.replaceChildren(title(client.display_name,'h3'),div('formrow',jump('calling','Calling Setup'),jump('wallet','Minutes & Wallet'),
+   ...(['active','trial'].includes(client.status)?[jump('company','Company details')]:[])));
+  clientActions.hidden=false;clientActions.scrollIntoView({block:'nearest'});
+  clientActions.querySelector('button').focus();
+ }
  let existing=null,tenantRowsAll=[],pageOffset=0;
  async function refresh(){
   try{
@@ -1216,12 +1242,13 @@ async function superAdmin(main){
     div('cards',...[
       ['Total clients',total,'users'],
       ['Active clients',Number.isSafeInteger(d.active)?d.active:d.tenants.filter(t=>t.status==='active').length,'phone'],
-      ['Team members',Number.isSafeInteger(d.members)?d.members:d.tenants.reduce((n,t)=>n+Number(t.member_count||0),0),'shield']
+      ['Client users',Number.isSafeInteger(d.members)?d.members:d.tenants.reduce((n,t)=>n+Number(t.member_count||0),0),'shield']
     ].map(([label,value,symbol])=>div('card metric',div('metric-symbol',icon(symbol)),node('span',{class:'muted',text:label}),node('strong',{text:String(value)})))),
     node('p',{class:'muted',text:'Showing '+d.tenants.length+' of '+matched+
       ' matching companies · page '+(Math.floor(pageOffset/100)+1)}),
-    table(['Company','Contact email','Mobile','Status','Members'],d.tenants.map(t=>[t.display_name,t.contact_email||'—',t.contact_mobile||'—',t.status,t.member_count]))
+    table(['Company','Contact email','Mobile','Status','Client users'],d.tenants.map(t=>[btn(t.display_name,()=>showClient(t),true),t.contact_email||'—',t.contact_mobile||'—',t.status,t.member_count]))
    );
+   clientActions.hidden=true;
    if(existing){
     const old=existing.value;
     existing.replaceChildren(node('option',{value:'',text:'New company or automatically match by name'}),
@@ -1273,7 +1300,7 @@ async function superAdmin(main){
   }catch(err){asError(err)}
   finally{submit.disabled=false}
  });
- panel.append(node('details',{class:'card'},[node('summary',{text:'Create / invite a new client'}),f,inviteResult]));
+ panel.insertBefore(node('details',{class:'card'},[node('summary',{text:'Add client'}),f,inviteResult]),panel.children[1]);
 const accessCard=div('card access-card',title('Tenant Access: Suspend / Resume','h3'),
   node('p',{class:'note',text:'Suspending access blocks the company CRM and API keys.'}));
 const management=node('details',{class:'card client-directory',id:'client-access'},node('summary',{text:'Manage existing access'}));main.append(management);management.append(accessCard);
@@ -1390,18 +1417,15 @@ async function inviteSection(main){
  card.append(div('formrow',lab('Search client directory',search),findBtn),f);
  main.append(card);await find().catch(asError);
 }
-async function adminCompanyChangesPanel(main){
+async function adminCompanyChangesPanel(main,tenantId){
  const card=div('card client-directory',title('Client Change Requests','h3'),
   node('p',{class:'note',text:'Clients request corrections here. Update the company profile before marking a change request handled.'}));
  card.id='company-change-inbox';main.append(card);
- const company=node('select',{class:'field','aria-label':'Review client company'}),items=div('stack');
- const search=input('changeRequestCompanySearch','search','Search all companies');
- search.maxLength=80;
+ const items=div('stack');
  const refreshList=async()=>{
   items.replaceChildren();
-  if(!company.value)return;
   try{
-   const d=await api('/v1/human/company-change-requests?tenantId='+encodeURIComponent(company.value));
+   const d=await api('/v1/human/company-change-requests?tenantId='+encodeURIComponent(tenantId));
    if(!d.requests.length){items.append(node('p',{class:'muted',text:'No company change requests yet.'}));return}
    for(const item of d.requests){
     const host=div('card stack',node('p',{text:item.message}),
@@ -1415,7 +1439,7 @@ async function adminCompanyChangesPanel(main){
        button.disabled=true;
        try{
         await api('/v1/human/company-change-requests/'+encodeURIComponent(item.id)+'/resolve','POST',
-         {tenantId:company.value,status:action});
+         {tenantId,status:action});
         notice('Client request '+action+'. Current published AI changes only after a separate Admin publish.');
         await refreshList();
        }catch(e){asError(e);button.disabled=false}
@@ -1428,21 +1452,8 @@ async function adminCompanyChangesPanel(main){
    }
   }catch(e){items.append(node('p',{class:'err',text:e.message}))}
  };
- const refreshCompanies=async()=>{
-  const old=company.value;
-  const d=await api('/v1/human/tenants?'+new URLSearchParams({q:search.value.trim(),limit:'100'}));
-  company.replaceChildren(...d.tenants.filter(t=>['trial','active'].includes(t.status))
-   .map(t=>node('option',{value:t.id,text:t.display_name})));
-  if([...company.options].some(x=>x.value===old))company.value=old;
-  await refreshList();
- };
- company.addEventListener('change',()=>refreshList().catch(asError));
- const find=btn('Find companies',()=>refreshCompanies().catch(asError),true);
- search.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();refreshCompanies().catch(asError)}});
- card.append(div('formrow',lab('Find company',search),find),
-  div('formrow',lab('Client',company),
-   btn('Refresh client requests',()=>refreshCompanies().catch(asError),true)),items);
- await refreshCompanies();
+ card.append(items,btn('Refresh client requests',()=>refreshList().catch(asError),true));
+ await refreshList();
 }
 async function clientCompanySummary(tenantId,content,role,companyName=''){
  const card=div('card',title('Company information'),
@@ -1554,26 +1565,25 @@ async function renderClient(id,content){
   interestedMetric.querySelector('strong').textContent=safeCount(report.leadPipeline?.interested);
  }).catch(()=>{if(current()){campaignMetric.querySelector('strong').textContent='Unavailable';interestedMetric.querySelector('strong').textContent='Unavailable'}});
  reportRefresh();
- let syncCredit=()=>{},refreshCredit=()=>{};
+ let creditSnapshot=null,syncCredit=()=>{},refreshCredit=()=>{};
  const snapshotStatus=node('p',{class:'muted',role:'status',text:'Updates automatically'});
  overview.append(snapshotStatus);
  if(d.role==='client_admin'){
-  const creditRows=[['Available minutes','uncommittedSeconds','wallet'],['Used minutes','usedSeconds','receipt'],['On hold (live calls)','heldSeconds','clock'],['Total minutes received','allocatedSeconds','wallet']];
+  const creditRows=[['Available minutes','uncommittedSeconds','wallet']];
   const creditMetrics=creditRows.map(([label,key,symbol])=>({key,metric:overviewMetric(label,'Loading…',symbol)}));
   grid.append(...creditMetrics.map(x=>x.metric));
   overview.append(node('p',{class:'muted',text:'Minutes are added by AR3D after your payment.'}));
   const remaining=node('strong',{class:'sidebar-credit-value',text:'Loading…'});
-  const available=node('p',{class:'muted',text:'Callable now: Loading…'});
   const refresh=btn('Refresh balance',()=>refreshCredit(),true);
   let balanceVersion=0;
   const checked=node('p',{class:'muted',text:'Checking balance…'});
   syncCredit=w=>{
    if(!current())return;
-   balanceVersion++;
+   balanceVersion++;creditSnapshot=w;
+   content.querySelector('#calling')?.dispatchEvent(new Event('credit-updated'));
    const fmt=v=>Number.isSafeInteger(v)&&v>=0?formatSeconds(v):'Unavailable';
    for(const {key,metric} of creditMetrics)metric.querySelector('strong').textContent=fmt(w?.[key]);
    remaining.textContent=fmt(w?.uncommittedSeconds);
-   available.textContent='Callable now: '+fmt(w?.spendableSeconds);
    checked.textContent=w?'Updated '+formatIst(new Date().toISOString()):'Update unavailable';
   };
   async function refreshBalance(){
@@ -1594,27 +1604,51 @@ async function renderClient(id,content){
   refreshCredit=refreshBalance;
   refreshBalance();
  }
- const sections=Object.fromEntries(['home','customers','ai-test','calling','results','wallet','company'].map(key=>[
+ const sections=Object.fromEntries(['home','customers','calling','results','wallet','company'].map(key=>[
   key,node('section',{class:'workspace-section',id:key,hidden:true})
  ]));
  const loaded=new Set();
  let walletRefresh=null;
  const go=key=>()=>content.openView(key,{focus:true,resetScroll:true});
- const quickActions=div('card',title('Quick actions'),div('overview-actions',
-  ...(d.role==='client_admin'?[btn('Upload customer Excel',go('customers'))]:[]),
-  btn('Calling campaigns',go('calling'),true),btn('See call results',go('results'),true),
-  ...(d.role==='client_admin'?[btn('Minutes history',go('wallet'),true)]:[])));
+ const nextStep=div('card',title('Next step'));
+ async function homeAction(){
+  const action=div('formrow');nextStep.replaceChildren(title('Next step'),action);
+  const show=(label,key)=>action.replaceChildren(btn(label,go(key)));
+  show(d.role==='client_admin'?'Upload customer file':'View customers','customers');
+  try{
+   const [list,summary]=await Promise.all([api('/v1/human/campaigns?tenantId='+encodeURIComponent(id)),api('/v1/human/calling/state?tenantId='+encodeURIComponent(id))]);
+   const campaign=list.campaigns[0];
+   if(!current()||!campaign)return;
+   const run=summary.runs.find(r=>r.campaignId===campaign.id);
+   if(run?.state==='completed'){
+    action.replaceChildren(btn('View answers',()=>openResults(campaign.id)));
+   }else action.replaceChildren(btn('Open campaign',()=>{
+    state.importCampaign={tenantId:id,id:campaign.id};sections.calling.requestedCampaign=campaign.id;go('calling')();
+   }));
+   action.append(node('span',{class:'muted',text:campaign.name}));
+  }catch{if(current())show('Open calling','calling')}
+ }
+ function openResults(campaignId){
+  sections.results.requestedCampaign=campaignId||'';
+  go('results')();
+ }
  const renderers={
-  home:section=>{section.append(quickActions);nextActionsPanel(id,section)},
+  home:section=>{section.prepend(nextStep);homeAction();section.addEventListener('workspace-tab-shown',homeAction);nextActionsPanel(id,section)},
   customers:async section=>{
    if(d.role==='client_admin')section.append(manualCustomerPanel(id,content));
    await crmWorkflow(id,section,d.role,content);
   },
-  'ai-test':section=>aiTestingPanel(section,id,d.role),
-  calling:section=>customerCallingPanel(id,section,d.role,content.openView),
+  calling:section=>{
+   const controls=customerCallingPanel(id,section,d.role,content.openView,openResults,()=>creditSnapshot);
+   const practice=node('details',{class:'card'},node('summary',{text:'Practice with AI'}));
+   section.append(practice);
+   practice.addEventListener('toggle',()=>{if(practice.open&&!practice.dataset.loaded){practice.dataset.loaded='true';aiTestingPanel(practice,id,d.role)}});
+   if(location.hash==='#ai-test')practice.open=true;
+   return controls;
+  },
   results:async section=>{
-   operationsReportPanel(id,section);
    campaignResultsPanel(id,section,d.role);
+   operationsReportPanel(id,section);
    if(d.role==='client_admin'){
     const reports=node('details',{class:'card'},node('summary',{text:'Export and audit history'}));
     section.append(reports);
@@ -1967,9 +2001,14 @@ function campaignResultsPanel(tenantId,content,role){
   if(fetching)return;
   fetching=true;refreshBtn.disabled=true;campaign.disabled=true;back.disabled=true;next.disabled=true;exportBtn.disabled=true;page=[];
   try{
-   if(!loaded){
+   if(!loaded||content.requestedCampaign!==undefined){
+    const prior=campaign.value;
     const {campaigns}=await api('/v1/human/campaigns?tenantId='+encodeURIComponent(tenantId));
     campaign.replaceChildren(node('option',{value:'',text:'All campaigns'}),...campaigns.map(c=>node('option',{value:c.id,text:c.name})));
+    campaign.value=content.requestedCampaign??prior;
+    if(campaign.selectedIndex<0)campaign.value='';
+    if(content.requestedCampaign!==undefined)offset=0;
+    delete content.requestedCampaign;
     loaded=true;
    }
    const query=new URLSearchParams({tenantId,offset:String(offset)});
@@ -1989,6 +2028,7 @@ function campaignResultsPanel(tenantId,content,role){
    );
    back.disabled=offset===0;next.disabled=offset+results.length>=total;
   }finally{fetching=false;refreshBtn.disabled=false;campaign.disabled=false}
+  if(content.requestedCampaign!==undefined)await refresh();
  }
  async function checkCharge(result){
   try{
@@ -2024,7 +2064,7 @@ function campaignResultsPanel(tenantId,content,role){
  if(!content.hidden)refresh().catch(asError);
 }
 
-async function customerCallingPanel(tenantId,content,role,openView){
+async function customerCallingPanel(tenantId,content,role,openView,openResults,readCredit){
  const card=div('card',title('Campaign controls'));
  const pick=node('select',{class:'field','aria-label':'Calling campaign'});
  const status=node('p',{class:'note',role:'status',text:'Loading calling status…'});
@@ -2043,7 +2083,7 @@ async function customerCallingPanel(tenantId,content,role,openView){
   node('label',{class:'check-line'},[consentBox,node('span',{text:'I confirm these customers asked us to contact them about property, and we will not call anyone who has said no or is on DND.'})]));
  declaration.hidden=true;consentBox.addEventListener('change',()=>render());
  const actions=div('formrow',btn('Import customers',()=>openView('customers',{resetScroll:true}),true),
-  btn('View customer answers',()=>openView('results',{resetScroll:true}),true));
+  btn('View customer answers',()=>openResults(pick.value),true));
  if(role==='client_admin')actions.prepend(start,pause);
  card.append(status,options,summary,declaration,actions);content.append(card);
  async function changeRun(action){
@@ -2079,26 +2119,36 @@ async function customerCallingPanel(tenantId,content,role,openView){
    'AI calling is being prepared by AR3D. You can import your customer list now.':
    !policyReady?'AI calling for this company is waiting for AR3D activation.':
    !snapshot.data.credits?.ready?(snapshot.data.credits?.reason==='insufficient_credits'?'Not enough calling credits. Ask AR3D to allocate more minutes.':'Waiting for AR3D funding or calling approval.'):
-   'Calls run while you have calling minutes · 09:00–20:00 India time';
+   !campaign?'Import customers and prepare a campaign.':!languageOK?'Prepare a Hindi or English campaign.':run?.state==='completed'?'Campaign finished. View customer answers.':run?.state==='running'?'Calling is in progress.':needsDeclaration&&!consentBox.checked?'Confirm customer consent below to start calling.':'Calls run while you have calling minutes · 09:00–20:00 India time';
   status.className='note '+(ready?'ready-note':'');
   summary.replaceChildren(campaign?div('between row',
    node('strong',{text:campaign.name}),
    node('span',{class:'badge '+(run?.state==='completed'||run?.state==='running'?'positive':'pending'),text:run?.state||'draft'}),
    node('span',{class:'muted',text:languageOK?(campaign.languageMode==='hi'?'Hindi':'English'):'Use a Hindi or English campaign for the phone flow.'})
   ):node('p',{class:'muted',text:'Import a customer file to prepare your first campaign.'}));
-  if(snapshot.data.credits)summary.append(node('p',{class:'muted',text:'Available allocated credits: '+formatSeconds(snapshot.data.credits.availableSeconds)+' · minimum reserve for one call: '+formatSeconds(snapshot.data.credits.requiredSeconds)}));
+  if(snapshot.data.credits){
+   const wallet=readCredit(),left=wallet?.uncommittedSeconds??snapshot.data.credits.availableSeconds;
+   const callable=wallet?.spendableSeconds;
+   const balance='Minutes left: '+formatSeconds(left);
+   const reserve=snapshot.data.credits.requiredSeconds;
+   summary.append(node('p',{class:'muted',text:balance+
+    (Number.isSafeInteger(callable)&&callable!==left?' · Available for calling now: '+formatSeconds(callable):'')+
+    (Number.isSafeInteger(reserve)?' · Minimum for one call: '+formatSeconds(reserve):'')}));
+  }
  }
  async function refresh(){
   refreshBtn.disabled=true;
   try{
    const [data,list]=await Promise.all([api('/v1/human/calling/state?tenantId='+tenantId),api('/v1/human/campaigns?tenantId='+tenantId)]);
-   const prior=pick.value||(state.importCampaign?.tenantId===tenantId?state.importCampaign.id:'');
+   const prior=content.requestedCampaign||pick.value||(state.importCampaign?.tenantId===tenantId?state.importCampaign.id:'');
+   delete content.requestedCampaign;
    snapshot={data,campaigns:list.campaigns};
    pick.replaceChildren(...snapshot.campaigns.map(c=>node('option',{value:c.id,text:c.name})));
    if(prior&&snapshot.campaigns.some(c=>c.id===prior))pick.value=prior;
   }finally{render()}
  }
  pick.addEventListener('change',render);
+ content.addEventListener('credit-updated',render);
  content.addEventListener('workspace-tab-shown',()=>refresh().catch(asError));
  render();await refresh();
 }
@@ -2183,10 +2233,12 @@ function callingCapacityPanel(main){
   catch(err){asError(err)}finally{save.disabled=false}});
  api('/v1/human/calling/capacity').then(show).catch(()=>{info.textContent='Capacity unavailable. Sign in again with current two-factor authentication.'});
 }
-async function callingAdminPanel(main){
- callingCapacityPanel(main);
+async function callingAdminPanel(main,client=null){
+ const tools=node('details',{class:'card'},node('summary',{text:'Internal test and platform settings'}));
+ tools.append(scriptedPhonePilotPanel());
+ callingCapacityPanel(tools);
  const diagnostics=node('details',{class:'card'},node('summary',{text:'Advanced diagnostics · Plivo go-live readiness'}));
- const details=div('stack');diagnostics.append(details);main.append(diagnostics);
+ const details=div('stack');diagnostics.append(details);tools.append(diagnostics);
  diagnostics.addEventListener('toggle',()=>{if(diagnostics.open&&!diagnostics.dataset.loaded){diagnostics.dataset.loaded='true';launchReadinessPanel(details)}});
  const card=div('card calling-settings',title('Client calling approval')),area=div('approval-grid');card.id='calling-setup';main.append(card);
  const company=node('select',{class:'field','aria-label':'Calling setup company'});
@@ -2195,7 +2247,7 @@ async function callingAdminPanel(main){
  async function findCompany(){
   const prev=company.value;
   const query=new URLSearchParams({limit:'100',q:companySearch.value.trim()});
-  const d=await api('/v1/human/tenants?'+query);
+  const d=client?{tenants:[client]}:await api('/v1/human/tenants?'+query);
   company.replaceChildren(...d.tenants.map(t=>node('option',{value:t.id,text:t.display_name+' — '+t.status})));
   if(d.tenants.some(t=>t.id===prev))company.value=prev;
  }
@@ -2217,13 +2269,13 @@ async function callingAdminPanel(main){
  older.disabled=true;newer.disabled=true;
  const purpose=node('select',{class:'field'},['property_information','site_visit'].map(x=>node('option',{value:x,text:x})));
  const clearanceForm=node('form',{class:'stack'},[title('Customer clearance','h3'),node('p',{class:'note',text:'Select only customers covered by the consent evidence and current provider DND check. Excel upload alone does not supply these checks. Opted-out customers cannot be approved.'}),lab('Uploaded campaign',draft),lab('Purpose',purpose),lab('Consent evidence reference',consent),lab('DND verification reference',dnd),choices,div('formrow',newer,older),node('button',{class:'btn',type:'submit',text:'Approve selected customers'})]);
- const status=div(''),recovery=div('stack');
+ const status=div(''),clearanceHistory=div('stack'),recovery=div('stack');
  const expires=()=>{const n=Number(days.value);if(!Number.isInteger(n)||n<1||n>365)throw Error('Approval days must be 1–365');return new Date(Date.now()+n*86400000).toISOString()};
  policyForm.addEventListener('submit',async e=>{e.preventDefault();try{await api('/v1/human/calling/policy','POST',{tenantId:company.value,enabled:enabled.checked,approvalReference:approval.value,expiresAt:expires(),maxSeconds:Number(seconds.value),consentMode:consentModeSel.value});notice('Company approval saved.');await refresh()}catch(e){asError(e)}});
  clearanceForm.addEventListener('submit',async e=>{e.preventDefault();try{const leadIds=[...choices.querySelectorAll('input:checked')].map(x=>x.value);const r=await api('/v1/human/calling/clearances','POST',{tenantId:company.value,leadIds,purpose:purpose.value,consentReference:consent.value,dndReference:dnd.value,expiresAt:expires()});notice(r.reviewed+' customer approvals saved.');await refresh()}catch(e){asError(e)}});
  async function refresh(){
   const generation=++requestGeneration,tenantId=company.value;
-  choices.replaceChildren();status.replaceChildren();recovery.replaceChildren();
+  choices.replaceChildren();status.replaceChildren();recovery.replaceChildren();clearanceHistory.replaceChildren();
   if(!tenantId)return;
   try{
    const selected=draft.value;
@@ -2235,9 +2287,10 @@ async function callingAdminPanel(main){
    draft.value=selected;newer.disabled=clearanceOffset===0;older.disabled=!c.hasMore;
    approval.value=p.policy?.approvalReference||'';enabled.checked=!!p.policy?.enabled;
    seconds.value=String(p.policy?.maxSeconds||180);consentModeSel.value=p.consentMode||'reviewed';
+   status.append(node('strong',{text:!p.configuration.ready?'Platform setup required':!p.policy?.enabled?'Next step: approve company calling':Date.parse(p.policy.expiresAt)<=Date.now()?'Next step: renew company approval':'Company calling approved'}));
    status.append(node('p',{class:'note',text:p.configuration.ready?'Fixed-question customer calling configured.':p.configuration.missing.join(', ')}));
    for(const l of c.leads){const checkbox=node('input',{type:'checkbox',value:l.id});if(l.consentStatus==='denied'||l.dndStatus==='blocked')checkbox.disabled=true;choices.append(lab(l.name+' — '+l.id.slice(0,8),checkbox))}
-   status.append(table(['Customer','Purpose','Approval expires'],c.clearances.map(x=>[x.name,x.purpose,x.expiresAt])));
+   clearanceHistory.append(table(['Customer','Purpose','Approval expires'],c.clearances.map(x=>[x.name,x.purpose,x.expiresAt])));
    if(locked){
     const evidence=input('carrierEvidence','text','Carrier verification reference');
     evidence.maxLength=160;
@@ -2310,12 +2363,12 @@ async function callingAdminPanel(main){
  companySearch.addEventListener('keydown',e=>{
   if(e.key==='Enter'){e.preventDefault();findCompany().then(refresh).catch(asError)}
  });
- card.append(div('formrow',lab('Search all clients',companySearch),find),
-  lab('Client company',company),btn('Load calling setup',()=>refresh().catch(asError),true),area);
- area.append(policyForm,clearanceForm,recovery,status);await refresh();
+ if(!client)card.append(div('formrow',lab('Search all clients',companySearch),find),
+  lab('Client company',company),btn('Load calling setup',()=>refresh().catch(asError),true));card.append(area);main.append(tools);
+ area.append(status,policyForm,clearanceForm,recovery,clearanceHistory);await refresh();
 }
 
-async function companyAdminPanel(main){
+async function companyAdminPanel(main,client=null){
  const card=div('card',title('Company profile'));
  const company=node('select',{class:'field','aria-label':'Company profile'});
  const search=input('profileCompanySearch','search','Find any company by name or email');
@@ -2323,20 +2376,21 @@ async function companyAdminPanel(main){
  const area=div('stack');
  async function findCompany(){
   const prev=company.value;
-  const result=await api('/v1/human/tenants?'+new URLSearchParams({limit:'100',q:search.value.trim()}));
+  const result=client?{tenants:[client]}:await api('/v1/human/tenants?'+new URLSearchParams({limit:'100',q:search.value.trim()}));
   company.replaceChildren(...result.tenants.filter(t=>['active','trial'].includes(t.status))
    .map(t=>node('option',{value:t.id,text:t.display_name})));
-  if(result.tenants.some(t=>t.id===prev))company.value=prev;
+  if([...company.options].some(option=>option.value===prev))company.value=prev;
   load();
  }
  const button=btn('Find company',()=>findCompany().catch(asError),true);
  search.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();findCompany().catch(asError)}});
- card.append(div('formrow',lab('Search all companies',search),button),
-  div('formrow',lab('Choose company',company)),area);main.append(card);
+ if(!client)card.append(div('formrow',lab('Search all companies',search),button),
+  div('formrow',lab('Choose company',company)));card.append(area);main.append(card);
  function load(){
   if(!company.value){area.replaceChildren(node('p',{class:'muted',text:'Create a client before editing a company profile.'}));return}
-  const profile=div('stack');
-  area.replaceChildren(profile);
+  const requests=div('stack'),profile=div('stack');
+  area.replaceChildren(requests,profile);
+  adminCompanyChangesPanel(requests,company.value).catch(asError);
   companyProfileEditor(company.value,profile,true,company.selectedOptions[0]?.textContent||'').catch(asError);
  }
  company.addEventListener('change',load);
@@ -2448,13 +2502,14 @@ async function crmWorkflow(tenantId,content,role,refreshContent=content){
       }catch(e){asError(e);commitBtn.disabled=false;campaignBtn.disabled=false}
       finally{previewBtn.disabled=false;picker.disabled=false}
     }
-    const commitBtn=btn('Import to CRM',()=>commit(false),true);
+    const commitBtn=btn('Save customers only',()=>commit(false),true);
     const campaignBtn=btn('Import & prepare campaign',()=>commit(true));
     commitBtn.disabled=true;campaignBtn.disabled=true;
-    const importActions=div('formrow',lab('Campaign name for this file',importName),lab('Call language',importLanguage),commitBtn,campaignBtn);
+    const prepare=node('details',{},[node('summary',{text:'Prepare a calling campaign'}),div('formrow',lab('Campaign name for this file',importName),lab('Call language',importLanguage),campaignBtn)]);
+    const importActions=div('stack',commitBtn,prepare);
     importActions.hidden=true;
     picker.addEventListener('change',()=>{
-      importData=null;requestId=null;importActions.hidden=true;commitBtn.disabled=true;campaignBtn.disabled=true;previewBox.replaceChildren();
+      importData=null;requestId=null;prepare.open=false;importActions.hidden=true;commitBtn.disabled=true;campaignBtn.disabled=true;previewBox.replaceChildren();
     });
     csvBox.append(previewBtn);upload.append(csvBox,previewBox,importActions);
     upload.append(node('p',{class:'muted',text:'A prepared campaign needs calling clearance before any customer is dialed.'}));

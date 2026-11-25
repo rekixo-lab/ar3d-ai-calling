@@ -95,9 +95,9 @@ test('all Super Admin management panels can search clients instead of stopping a
  assert.match(js,/Search all companies/);
  assert.match(js,/Search all clients/);
  assert.match(js,/function inviteSection\(main\)/);
- assert.match(js,/function companyAdminPanel\(main\)/);
- assert.match(js,/function callingAdminPanel\(main\)/);
- assert.match(js,/function adminCompanyChangesPanel\(main\)/);
+ assert.match(js,/function companyAdminPanel\(main,client=null\)/);
+ assert.match(js,/function callingAdminPanel\(main,client=null\)/);
+ assert.match(js,/adminCompanyChangesPanel\(requests,company.value\)/);
  assert.match(js,/Next companies/);
  assert.match(js,/Math\.floor\(pageOffset\/100\)/);
 });

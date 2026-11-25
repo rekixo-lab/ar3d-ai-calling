@@ -53,7 +53,12 @@ try{
  // AI Testing uses an authenticated browser preview, never live phone or CRM.
  const aiLeadCount=f.r.db.prepare('SELECT COUNT(*) AS n FROM leads').get().n;
  const aiCallsBefore=f.r.db.prepare('SELECT COUNT(*) AS n FROM calls').get().n;
- await page.getByRole('link',{name:'AI Testing',exact:true}).click();
+ if(viewport.width===390){
+  await page.goto(origin+'/app#ai-test');
+ }else{
+  await page.getByRole('link',{name:'Calling',exact:true}).click();
+  await page.getByText('Practice with AI',{exact:true}).click();
+ }
  await page.getByRole('heading',{name:'7-question AI test (no calls)',exact:true}).waitFor();
  const aiLang=viewport.width===1440?'en':'hi';
  await page.getByLabel('AI test language',{exact:true}).selectOption(aiLang);
@@ -137,10 +142,12 @@ try{
  assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
  const file=page.locator('input[type=file]');await file.setInputFiles({name:'customers.csv',mimeType:'text/csv',buffer:Buffer.from('Name,Mobile\r\nFictional buyer,9000000001\r\n')});
  await page.getByRole('button',{name:'Validate & Preview',exact:true}).click();await page.getByText(/1 valid rows; 1 existing in CRM/).waitFor();
- await page.getByRole('button',{name:'Import to CRM',exact:true}).click();await page.getByText('Import finished: 0 new, 1 duplicates. No calls placed.',{exact:true}).waitFor();
+ await page.getByRole('button',{name:'Save customers only',exact:true}).click();await page.getByText('Import finished: 0 new, 1 duplicates. No calls placed.',{exact:true}).waitFor();
  await page.locator('input[type=file]').setInputFiles({name:'campaign.csv',mimeType:'text/csv',
   buffer:Buffer.from('Name,Mobile\r\nUploaded buyer,9000000005\r\n')});
  await page.getByRole('button',{name:'Validate & Preview',exact:true}).click();
+ assert.equal(await page.getByLabel('Campaign name for this file').isVisible(),false);
+ await page.getByText('Prepare a calling campaign',{exact:true}).click();
  await page.getByLabel('Campaign name for this file').fill('Acceptance '+viewport.width);
  await page.getByRole('button',{name:'Import & prepare campaign'}).click();
  await page.getByText(/Campaign prepared with 1 customers from this file/).waitFor();
@@ -158,7 +165,7 @@ try{
  f.r.db.prepare("INSERT INTO calling_jobs(tenant_id,id,run_id,lead_id,state,provider_status,duration_seconds,created_at,updated_at) VALUES(?,?,?,?,'completed','completed',50,?,?)").run(tid,job,run,selected[0].id,at,at);
  f.r.db.prepare("INSERT INTO scripted_call_results VALUES(?,?,?,?,1,?)").run(tid,job,crypto.randomUUID(),
   JSON.stringify({propertyType:'flat',location:'Raipur',area:'Shankar Nagar',size:'3BHK',budgetInr:3500000,interest:'interested',visitDate:'2027-01-12'}),at);
- await page.getByRole('link',{name:'Results / CRM',exact:true}).click();
+ await page.getByRole('button',{name:'View customer answers',exact:true}).click();
  await page.getByRole('heading',{name:'Operations & Security Report'}).waitFor();
  const outcomes=page.getByRole('region',{name:'Call job outcomes · recorded counts'});
  await outcomes.waitFor();
@@ -168,7 +175,7 @@ try{
  await page.getByRole('button',{name:'Refresh operations report'}).click();
  await page.getByRole('heading',{name:'Campaign results & customer answers'}).waitFor();
  await page.getByRole('button',{name:'Refresh customer answers'}).waitFor();
- await page.getByRole('combobox',{name:'Filter results by campaign'}).selectOption(draft.id);
+ assert.equal(await page.getByRole('combobox',{name:'Filter results by campaign'}).inputValue(),draft.id);
  await page.getByRole('row',{name:new RegExp('Uploaded buyer Acceptance '+viewport.width+'.*Saved to lead')}).waitFor();
  await page.getByRole('row',{name:new RegExp('Uploaded buyer Acceptance '+viewport.width)}).getByRole('button',{name:'View answers'}).click();
  await page.getByRole('heading',{name:'Uploaded buyer — call answers'}).waitFor();
@@ -284,10 +291,10 @@ try{
  const adminContext=await browser.newContext({viewport:{width:1440,height:1000}});
  const adminToken=await newSession(f.env.CONTROL_DB,'admin');await adminContext.addCookies([{name:COOKIE,value:adminToken,url:origin}]);
  const adminPage=await adminContext.newPage();lastPage=adminPage;adminPage.setDefaultTimeout(10000);
- await adminPage.goto(origin+'/app');
- await adminPage.getByRole('heading',{name:'Client directory'}).waitFor();
  // Stub only the external account result; actual authorization is covered in route tests.
  await adminPage.route('**/v1/human/credits/provider',r=>r.fulfill({json:{available:true,cashCredits:'12.34',cashCreditsCurrency:'USD',accountType:'developer',checkedAt:new Date().toISOString()}}));
+ await adminPage.goto(origin+'/app');
+ await adminPage.getByRole('heading',{name:'Dashboard',exact:true}).waitFor();
  await adminPage.getByRole('link',{name:'Dashboard',exact:true}).click();
  const providers=adminPage.getByRole('region',{name:'Provider balances'});
  await providers.getByText('₹987.20',{exact:true}).waitFor();
@@ -309,6 +316,16 @@ try{
  await adminPage.getByRole('link',{name:'Clients',exact:true}).click();
  await adminPage.getByRole('heading',{name:'Client directory'}).waitFor();
  await adminPage.screenshot({path:'artifacts/calling-admin-clients.png',fullPage:true});
+ await adminPage.getByRole('button',{name:'Demo',exact:true}).click();
+ await adminPage.getByRole('button',{name:'Minutes & Wallet',exact:true}).click();
+ await adminPage.getByRole('heading',{name:'Demo',exact:true}).waitFor();
+ await adminPage.getByRole('heading',{name:'Calling credit ledger',exact:true}).waitFor();
+ await adminPage.getByRole('link',{name:'Company details',exact:true}).click();
+ await adminPage.getByRole('heading',{name:'Demo',exact:true}).waitFor();
+ await adminPage.getByRole('heading',{name:'Company Knowledge',exact:true}).waitFor();
+ await adminPage.getByRole('link',{name:'Calling Setup',exact:true}).click();
+ await adminPage.getByRole('heading',{name:'Client calling approval',exact:true}).waitFor();
+ await adminPage.getByRole('button',{name:'Change client'}).click();
  await adminPage.getByRole('link',{name:'Minutes & Wallet',exact:true}).click();
  await adminPage.getByText(/^Provider costs & reports/).click();
  await adminPage.getByRole('heading',{name:'Provider financial journal',exact:true}).waitFor();
@@ -374,6 +391,7 @@ try{
  await adminPage.screenshot({path:'artifacts/admin-minute-wallet.png',fullPage:true});
  await adminPage.getByRole('link',{name:'Calling Setup'}).click();
  await adminPage.getByRole('heading',{name:'Client calling approval',exact:true}).waitFor();
+ await adminPage.getByText('Internal test and platform settings',{exact:true}).click();
  assert.ok(await adminPage.getByRole('button',{name:'Call the verified internal number once'}).isDisabled());
  assert.equal(await adminPage.getByRole('combobox',{name:'Recorded prompt language'}).inputValue(),'hi');
  await adminPage.getByRole('combobox',{name:'Recorded prompt language'}).selectOption('en');

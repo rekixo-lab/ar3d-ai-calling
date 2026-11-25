@@ -3,9 +3,9 @@ import assert from 'node:assert/strict';
 import vm from 'node:vm';
 import {js,css} from '../src/app-assets.mjs';
 
-test('client workspace shows five primary views including independent AI Testing',()=>{
+test('client workspace shows daily views with AI practice inside Calling',()=>{
   assert.doesNotThrow(()=>new vm.Script(js));
-  for(const name of ['Customers / Excel','AI Testing','Calling','Company details','Results / CRM'])assert.ok(js.includes(name));
+  for(const name of ['Customers / Excel','Practice with AI','Calling','Company details','Results / CRM'])assert.ok(js.includes(name));
   assert.match(js,/section\.hidden=name!==key/);
   assert.match(js,/aria-current/);
   assert.match(js,/campaignResultsPanel\(id,section,d\.role\)/);
@@ -28,7 +28,7 @@ test('client overview shows only the selected tenant CRM counts and current role
 
 test('AI Testing UI defaults to preview only; explicit auto-save is scoped to selected CRM customer',()=>{
   assert.match(js,/function aiTestingPanel\(content,tenantId,role\)/);
-  assert.match(js,/'ai-test':section=>aiTestingPanel\(section,id,d.role\)/);
+  assert.match(js,/aiTestingPanel\(practice,id,d.role\)/);
   const code=js.slice(js.indexOf('function aiTestingPanel('),js.indexOf('function manualCustomerPanel('));
   assert.match(code,/action:'start'/);
   assert.match(code,/action:'turn'/);

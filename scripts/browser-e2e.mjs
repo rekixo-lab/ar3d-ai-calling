@@ -57,6 +57,10 @@ const server=http.createServer(async(req,res)=>{
         'Set-Cookie':'sandbox_session=; Path=/; HttpOnly; Max-Age=0'
       });
     if(!authenticated)return respond(res,401,{error:'sign in required'});
+    if(req.method==='GET'&&['/v1/human/credits/provider','/v1/human/credits/sarvam-balance'].includes(path))
+      return respond(res,200,{available:false});
+    if(req.method==='GET'&&path==='/v1/human/credits/admin-dashboard')
+      return respond(res,200,{clients:{total:0,active:0},position:{},internal:{ended:0},campaign:{ended:0},transactions:[]});
     if(req.method==='GET'&&path==='/v1/human/mfa')
       return respond(res,200,{enabled:false,configured:true});
     if(req.method==='GET'&&path==='/v1/human/launch-readiness')
@@ -135,8 +139,9 @@ try{
     await page.getByPlaceholder('Enter your password').fill(TEST_PASSWORD);
     await page.getByRole('button',{name:'Sign in',exact:true}).click();
     await page.getByText('Super Admin',{exact:true}).waitFor();
-    await page.getByRole('heading',{name:'Clients',exact:true}).waitFor();
+    await page.getByRole('heading',{name:'Dashboard',exact:true}).waitFor();
     await page.getByRole('link',{name:'Calling Setup',exact:true}).click();
+    await page.getByText('Internal test and platform settings',{exact:true}).click();
     await page.getByRole('heading',{name:'Internal phone test'}).waitFor();
     await page.getByText('Advanced diagnostics · Plivo go-live readiness',{exact:true}).click();
     await page.getByRole('heading',{name:'Plivo Go-Live Readiness'}).waitFor();
