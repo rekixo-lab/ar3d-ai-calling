@@ -3039,5 +3039,6 @@ function fixedSurveyPanel(tenantId,lead,onSave){
 // Following a second invitation in the same tab can change only the hash.
 window.addEventListener('hashchange',event=>{
  if([location.hash,new URL(event.oldURL).hash].some(hash=>/^#(?:team-)?invite=/.test(hash)))load();
+ else if(state.me)dashboard();
 });
 load();`;
