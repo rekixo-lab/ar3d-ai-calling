@@ -58,7 +58,7 @@ test('cron kill switch touches no database; Indian window boundary is explicit',
  assert.equal(inCallingWindow(Date.parse('2026-11-20T03:30:00Z')),true);
  assert.equal(inCallingWindow(Date.parse('2026-11-20T14:30:00Z')),false);
 });
-test('daily cap is atomic and failed attempts consume quota',async()=>{
+test('no per-company daily cap: prepaid minutes are the only volume limit',async()=>{
  const f=fixture();try{
  await setup(f);f.r.db.exec('UPDATE calling_policies SET daily_limit=1');
  await tickTenant(f.env,f.r.wrap,tid,{now,apiFetch:async()=>new Response('',{status:400})});
@@ -66,9 +66,9 @@ test('daily cap is atomic and failed attempts consume quota',async()=>{
  f.r.db.prepare("INSERT INTO leads(tenant_id,id,name,mobile_e164,source_type,created_at,updated_at) VALUES(?,?,'Second fictional','+919000000002','excel',?,?)").run(tid,second,at,at);
  f.r.db.prepare("INSERT INTO calling_clearances SELECT tenant_id,?,purpose,consent_reference,dnd_reference,expires_at,reviewed_by,reviewed_at FROM calling_clearances WHERE lead_id=?").run(second,lead);
  const run=f.r.db.prepare('SELECT id FROM calling_runs').get();
- f.r.db.prepare("INSERT INTO calling_jobs(tenant_id,id,run_id,lead_id,state,flow_id,created_at,updated_at) VALUES(?,'second-job',?,?,'queued',?,?,?)").run(tid,run.id,second,SCRIPTED_CALLING_POLICY,at,at);
- let posted=0;assert.equal((await tickTenant(f.env,f.r.wrap,tid,{now:now+60000,apiFetch:async()=>{posted++;return accepted()}})).state,'quota_or_concurrent_change');
- assert.equal(posted,0);assert.equal(f.r.db.prepare("SELECT state FROM calling_jobs WHERE id='second-job'").get().state,'queued');
+ f.r.db.prepare("INSERT INTO calling_jobs(tenant_id,id,run_id,lead_id,state,flow_id,created_at,updated_at) VALUES(?,'cccccccccccccccccccccccccccccccc',?,?,'queued',?,?,?)").run(tid,run.id,second,SCRIPTED_CALLING_POLICY,at,at);
+ let posted=0;assert.equal((await tickTenant(f.env,f.r.wrap,tid,{now:now+60000,apiFetch:async()=>{posted++;return accepted()}})).state,'submitted');
+ assert.equal(posted,1);assert.equal(f.r.db.prepare("SELECT state FROM calling_jobs WHERE id='cccccccccccccccccccccccccccccccc'").get().state,'submitted');
  }finally{f.close()}
 });
 test('a second campaign cannot recontact a customer on stale approval',async()=>{

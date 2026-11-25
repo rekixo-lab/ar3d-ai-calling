@@ -1,6 +1,6 @@
 import {requireMembership,mutationOriginAllowed} from './human-auth.mjs';
 import {resolveCrmDb,parseJsonBody} from './core.mjs';
-import {scriptedCampaignConfiguration} from './scripted-campaign-dispatch.mjs';
+import {scriptedCampaignConfiguration,dispatchSettings,providerThrottledUntil} from './scripted-campaign-dispatch.mjs';
 import {minutePosition,fundingCap,fundingPosition,affordableCallSeconds,BILLING_PULSE_SECONDS} from './minute-holds.mjs';
 import {moneyBudgetConfig,providerBudgetPosition} from './provider-cost-reservations.mjs';
 import {SCRIPTED_CALLING_POLICY,scriptedPromptsReady} from './scripted-phone-pilot.mjs';
@@ -9,7 +9,8 @@ const UUID=/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
 const json=(data,status=200)=>Response.json(data,{status,headers:{'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'}});
 const fail=(error,status=400)=>json({error},status);
 const reference=v=>typeof v==='string'&&v.trim().length>=4&&v.length<=160&&!/[\u0000-\u001f]/.test(v);
-const expiry=(v,now)=>typeof v==='string'&&/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$/.test(v)&&Date.parse(v)>now&&Date.parse(v)<=now+30*86400000;
+// Company approval and clearances may last up to one year; review can revoke earlier.
+const expiry=(v,now)=>typeof v==='string'&&/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$/.test(v)&&Date.parse(v)>now&&Date.parse(v)<=now+366*86400000;
 async function body(req){
  if(!req.body||!req.headers.get('content-type')?.startsWith('application/json'))throw Error('invalid JSON');
  let raw='',size=0;const reader=req.body.getReader(),decoder=new TextDecoder('utf-8',{fatal:true});
@@ -22,6 +23,11 @@ async function freshAdmin(env,user,now){
  if(user.globalRole!=='super_admin')return false;
  return !!await env.CONTROL_DB.prepare('SELECT m.enabled_at FROM human_mfa_settings m JOIN human_sessions s ON s.user_id=m.user_id WHERE m.user_id=? AND s.token_hash=? AND m.enabled_at IS NOT NULL AND s.created_at>=m.enabled_at AND s.revoked_at IS NULL AND s.expires_at>? LIMIT 1')
  .bind(user.id,user.token_hash,now).first();
+}
+export const CONSENT_SOURCES=['website_enquiry','site_visit_register','existing_customer','referral','advertisement_lead','other'];
+async function consentMode(env,tid){
+ try{const r=await env.CONTROL_DB.prepare('SELECT consent_mode AS mode FROM calling_company_settings WHERE tenant_id=?').bind(tid).first();return r?.mode==='client_declared'?'client_declared':'reviewed'}
+ catch{return 'reviewed'}
 }
 async function audit(db,tid,user,action,target,at){
  await db.prepare("INSERT INTO crm_audit_events(tenant_id,id,actor,action,target_id,created_at) VALUES(?,?,'human:'||?,?,?,?)")
@@ -45,9 +51,26 @@ export async function handleScriptedCallingRequest(req,env,user,{now=Date.now()}
  if(!['GET','POST'].includes(req.method))return fail('method_not_allowed',405);
  if(req.method==='POST'&&!mutationOriginAllowed(req))return fail('same_origin_required',403);
  const admin=['policy','clearances','reconcile'].includes(action);
- if(!['policy','clearances','runs','state','results','reconcile','review-partial'].includes(action))return fail('not_found',404);
+ if(!['policy','clearances','runs','state','results','reconcile','review-partial','capacity'].includes(action))return fail('not_found',404);
  try{
   const d=req.method==='POST'?await body(req):Object.fromEntries(url.searchParams);
+  // Platform-wide calling capacity (not company-scoped).
+  if(action==='capacity'){
+   if(!await freshAdmin(env,user,now))return fail('current_super_admin_mfa_required',403);
+   if(req.method==='POST'){
+    if(Object.keys(d).some(k=>!['maxConcurrent','maxPerCompany'].includes(k))||!Number.isInteger(d.maxConcurrent)||d.maxConcurrent<1||d.maxConcurrent>2000||
+     !Number.isInteger(d.maxPerCompany)||d.maxPerCompany<1||d.maxPerCompany>500)return fail('invalid_capacity');
+    await env.CONTROL_DB.prepare(`INSERT INTO calling_dispatch_settings(id,max_concurrent_calls,max_calls_per_company,updated_by,updated_at) VALUES(1,?,?,?,?)
+     ON CONFLICT(id) DO UPDATE SET max_concurrent_calls=excluded.max_concurrent_calls,max_calls_per_company=excluded.max_calls_per_company,updated_by=excluded.updated_by,updated_at=excluded.updated_at`)
+     .bind(d.maxConcurrent,d.maxPerCompany,user.id,new Date(now).toISOString()).run();
+   }else if(Object.keys(d).length)return fail('invalid_query');
+   const settings=await dispatchSettings(env);
+   let liveCalls=null;
+   try{liveCalls=Number((await env.CRM_DB.prepare("SELECT COUNT(*) AS n FROM calling_jobs WHERE state IN('reserved','submitted')").first())?.n)}catch{}
+   const until=await providerThrottledUntil(env);
+   return json({maxConcurrent:settings.maxConcurrent,maxPerCompany:settings.maxPerCompany,saved:settings.saved,updatedAt:settings.updatedAt,
+    liveCalls,sarvamPausedUntil:until>now?new Date(until).toISOString():null,queryBudget:settings.queryBudget});
+  }
   if(!UUID.test(d.tenantId||''))return fail('invalid_tenant');
   let member;
   if(admin){
@@ -59,17 +82,19 @@ export async function handleScriptedCallingRequest(req,env,user,{now=Date.now()}
    if(!member)return fail('forbidden',403);
   }
   const db=resolveCrmDb(env,member),tid=member.tenant_id,at=new Date(now).toISOString();
-  if(action==='policy'&&req.method==='GET')return json({policy:await db.prepare('SELECT enabled,approval_reference AS approvalReference,expires_at AS expiresAt,daily_limit AS dailyLimit,max_seconds AS maxSeconds FROM calling_policies WHERE tenant_id=? AND flow_id=?').bind(tid,SCRIPTED_CALLING_POLICY).first(),configuration:await scriptedCampaignConfiguration(env)});
+  if(action==='policy'&&req.method==='GET')return json({consentMode:await consentMode(env,tid),policy:await db.prepare('SELECT enabled,approval_reference AS approvalReference,expires_at AS expiresAt,daily_limit AS dailyLimit,max_seconds AS maxSeconds FROM calling_policies WHERE tenant_id=? AND flow_id=?').bind(tid,SCRIPTED_CALLING_POLICY).first(),configuration:await scriptedCampaignConfiguration(env)});
   if(action==='policy'){
-   if(Object.keys(d).some(k=>!['tenantId','enabled','approvalReference','expiresAt','dailyLimit','maxSeconds'].includes(k))||
+   if(Object.keys(d).some(k=>!['tenantId','enabled','approvalReference','expiresAt','dailyLimit','maxSeconds','consentMode'].includes(k))||(d.consentMode!==undefined&&!['reviewed','client_declared'].includes(d.consentMode))||
     typeof d.enabled!=='boolean'||!reference(d.approvalReference)||!expiry(d.expiresAt,now)||
-    !Number.isInteger(d.dailyLimit)||d.dailyLimit<1||d.dailyLimit>100||!Number.isInteger(d.maxSeconds)||d.maxSeconds<180||d.maxSeconds>300)return fail('invalid_policy');
+    (d.dailyLimit!==undefined&&(!Number.isInteger(d.dailyLimit)||d.dailyLimit<1||d.dailyLimit>100))||!Number.isInteger(d.maxSeconds)||d.maxSeconds<180||d.maxSeconds>300)return fail('invalid_policy');
    if(d.enabled&&!(await scriptedCampaignConfiguration(env)).ready)return fail('scripted_campaign_setup_required',409);
    await db.batch([
     db.prepare('INSERT INTO calling_policies(tenant_id,enabled,flow_id,approval_reference,expires_at,daily_limit,max_seconds,updated_by,updated_at) VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT(tenant_id) DO UPDATE SET enabled=excluded.enabled,flow_id=excluded.flow_id,approval_reference=excluded.approval_reference,expires_at=excluded.expires_at,daily_limit=excluded.daily_limit,max_seconds=excluded.max_seconds,updated_by=excluded.updated_by,updated_at=excluded.updated_at')
-    .bind(tid,Number(d.enabled),SCRIPTED_CALLING_POLICY,d.approvalReference,d.expiresAt,d.dailyLimit,d.maxSeconds,user.id,at),
+    .bind(tid,Number(d.enabled),SCRIPTED_CALLING_POLICY,d.approvalReference,d.expiresAt,d.dailyLimit??100,d.maxSeconds,user.id,at), // daily_limit is legacy and not enforced
     db.prepare("INSERT INTO crm_audit_events(tenant_id,id,actor,action,target_id,created_at) VALUES(?,?,'human:'||?,'calling.policy_reviewed',?,?)").bind(tid,crypto.randomUUID(),user.id,tid,at)
    ]);
+   if(d.consentMode)await env.CONTROL_DB.prepare(`INSERT INTO calling_company_settings(tenant_id,consent_mode,updated_by,updated_at) VALUES(?,?,?,?)
+    ON CONFLICT(tenant_id) DO UPDATE SET consent_mode=excluded.consent_mode,updated_by=excluded.updated_by,updated_at=excluded.updated_at`).bind(tid,d.consentMode,user.id,at).run();
    if(d.enabled&&member.status==='trial'){
     await env.CONTROL_DB.batch([
      env.CONTROL_DB.prepare("UPDATE tenants SET status='active',updated_at=? WHERE id=? AND status='trial'").bind(at,tid),
@@ -214,10 +239,11 @@ export async function handleScriptedCallingRequest(req,env,user,{now=Date.now()}
    const configuration=await scriptedCampaignConfiguration(env);
    const activePolicy=policy?.enabled&&Date.parse(policy.expiresAt)>now&&member.status==='active'?policy:null;
    const credits=member.role==='client_admin'?await creditPreflight(env,tid,activePolicy,configuration):null;
-   return json({runs:runs.results,jobs:jobs.results,policy,configuration,credits,window:'09:00–20:00 Asia/Kolkata',recordingEnabled:true});
+   return json({runs:runs.results,jobs:jobs.results,policy,configuration,credits,consentMode:await consentMode(env,tid),consentSources:CONSENT_SOURCES,window:'09:00–20:00 Asia/Kolkata',recordingEnabled:true});
   }
   if(req.method!=='POST')return fail('method_not_allowed',405);
-  if(Object.keys(d).some(k=>!['tenantId','campaignId','action'].includes(k))||!UUID.test(d.campaignId||'')||!['start','pause'].includes(d.action))return fail('invalid_run');
+  if(Object.keys(d).some(k=>!['tenantId','campaignId','action','consent'].includes(k))||!UUID.test(d.campaignId||'')||!['start','pause'].includes(d.action))return fail('invalid_run');
+  if(d.consent!==undefined&&(!d.consent||typeof d.consent!=='object'||Object.keys(d.consent).sort().join(',')!=='confirmed,source'||d.consent.confirmed!==true||!CONSENT_SOURCES.includes(d.consent.source)))return fail('invalid_consent_declaration');
   if(d.action==='pause'){
    await db.prepare("UPDATE calling_runs SET state='paused',updated_at=? WHERE tenant_id=? AND campaign_id=? AND state='running'").bind(at,tid,d.campaignId).run();
    await audit(db,tid,user,'calling.paused',d.campaignId,at);return json({state:'paused',notice:'A call already submitted to Plivo may finish.'});
@@ -225,8 +251,10 @@ export async function handleScriptedCallingRequest(req,env,user,{now=Date.now()}
   if(member.status!=='active')return fail('super_admin_must_activate_tenant',409);
   const configuration=await scriptedCampaignConfiguration(env);
   if(!configuration.ready)return fail('scripted_customer_campaigns_unconfigured',503);
-  const policy=await db.prepare('SELECT tenant_id,flow_id,enabled,max_seconds AS maxSeconds FROM calling_policies WHERE tenant_id=? AND enabled=1 AND expires_at>? AND flow_id=?').bind(tid,at,SCRIPTED_CALLING_POLICY).first();
+  const policy=await db.prepare('SELECT tenant_id,flow_id,enabled,max_seconds AS maxSeconds,expires_at AS expiresAt FROM calling_policies WHERE tenant_id=? AND enabled=1 AND expires_at>? AND flow_id=?').bind(tid,at,SCRIPTED_CALLING_POLICY).first();
   if(!policy)return fail('super_admin_calling_approval_required',409);
+  const mode=await consentMode(env,tid);
+  if(mode==='client_declared'&&!d.consent)return fail('consent_declaration_required',409);
   const credits=await creditPreflight(env,tid,policy,configuration);
   if(!credits.ready)return fail(credits.reason,409);
   const draft=await db.prepare('SELECT language_mode FROM call_campaign_drafts WHERE tenant_id=? AND id=?').bind(tid,d.campaignId).first();
@@ -238,6 +266,23 @@ export async function handleScriptedCallingRequest(req,env,user,{now=Date.now()}
   if(existing)return fail('create_a_new_campaign_after_provider_cutover',409);
   const count=await db.prepare('SELECT COUNT(*) AS n FROM call_campaign_candidates WHERE tenant_id=? AND campaign_id=?').bind(tid,d.campaignId).first();
   if(!count||count.n<1||count.n>2000)return fail('campaign_requires_1_to_2000_customers',409);
+  if(mode==='client_declared'){
+   // Client Admin declares, once per start, where these customers' consent came from.
+   // Each eligible customer gets a clearance tied to this declaration; opted-out,
+   // denied and DND-blocked customers are never cleared.
+   const draftPurpose=await db.prepare('SELECT purpose FROM call_campaign_drafts WHERE tenant_id=? AND id=?').bind(tid,d.campaignId).first();
+   const ref='client-declared:'+d.consent.source+':'+at;
+   await db.batch([
+    db.prepare(`INSERT INTO calling_clearances(tenant_id,lead_id,purpose,consent_reference,dnd_reference,expires_at,reviewed_by,reviewed_at)
+     SELECT l.tenant_id,l.id,?,?,'client-declared',?,?,? FROM call_campaign_candidates cc JOIN leads l ON l.tenant_id=cc.tenant_id AND l.id=cc.lead_id
+     WHERE cc.tenant_id=? AND cc.campaign_id=? AND l.consent_status!='denied' AND l.dnd_status!='blocked'
+     AND NOT EXISTS(SELECT 1 FROM lead_opt_out_events o WHERE o.tenant_id=l.tenant_id AND o.lead_id=l.id)
+     ON CONFLICT(tenant_id,lead_id,purpose) DO UPDATE SET consent_reference=excluded.consent_reference,dnd_reference=excluded.dnd_reference,
+      expires_at=excluded.expires_at,reviewed_by=excluded.reviewed_by,reviewed_at=excluded.reviewed_at`)
+     .bind(draftPurpose?.purpose||'property_information',ref,policy.expiresAt,'client:'+user.id,at,tid,d.campaignId),
+    db.prepare("INSERT INTO crm_audit_events(tenant_id,id,actor,action,target_id,created_at) VALUES(?,?,'human:'||?,'calling.consent_declared',?,?)").bind(tid,crypto.randomUUID(),user.id,d.campaignId,at)
+   ]);
+  }
   const id=crypto.randomUUID();
   // Retry-safe run creation + bounded snapshot of the existing tenant campaign.
   // A completed campaign cannot be restarted accidentally; create a new campaign.

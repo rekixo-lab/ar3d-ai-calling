@@ -1,141 +1,141 @@
-// Synthetic >1000-company Calling scheduler acceptance. No provider calls.
+// Synthetic 1,000-company Calling scheduler acceptance. Plivo is a local stub;
+// no real provider, customer or phone number is contacted.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {fixture,tid,at,configureScriptedCampaign} from './helpers/calling-fixture.mjs';
-import {
- CAMPAIGN_SCAN_LIMIT,CAMPAIGN_WORK_LIMIT,campaignScanOffset,runScriptedCampaignCron
-} from '../src/scripted-campaign-dispatch.mjs';
+import {runScriptedCampaignCron,dispatchSettings,signalProviderThrottle,DEFAULT_QUERY_BUDGET} from '../src/scripted-campaign-dispatch.mjs';
+import {SCRIPTED_CALLING_POLICY} from '../src/scripted-phone-pilot.mjs';
 
-const STEP=60000;
-const anchor=Date.parse('2026-11-20T06:30:00Z');
-function populate(f,count){
- const add=f.c.db.prepare(`INSERT INTO tenants
-  (id,slug,display_name,plan_code,storage_mode,status,created_at,updated_at)
-  VALUES(?,?,'Synthetic Builder','starter','shared','active',?,?)`);
- for(let i=0;i<count;i++){
-  add.run('00000000-'+String(i).padStart(4,'0')+'-4000-8000-000000000000',
-   'scale-synthetic-'+i,at,at);
+const anchor=Date.parse('2026-11-20T06:30:00Z'),STEP=60000;
+const tenantId=i=>'00000000-'+String(i).padStart(4,'0')+'-4000-8000-000000000000';
+
+// n companies, each approved, funded, with `per` cleared customers queued in a running campaign.
+function seed(f,n,per){
+ configureScriptedCampaign(f);
+ Object.assign(f.env,{AR3D_FUNDED_CUMULATIVE_SECONDS:'90000000',AR3D_PLIVO_FUNDED_CUMULATIVE_SECONDS:'90000000',AR3D_SARVAM_FUNDED_CUMULATIVE_SECONDS:'90000000',
+  AR3D_PLIVO_BUDGET_CEILING_MICROS:'900000000000',AR3D_SARVAM_BUDGET_CEILING_MICROS:'900000000000'});
+ const c=f.c.db,r=f.r.db,until=new Date(anchor+86400000).toISOString();
+ const T=c.prepare("INSERT INTO tenants(id,slug,display_name,plan_code,storage_mode,status,created_at,updated_at) VALUES(?,?,'Synthetic Builder','starter','shared','active',?,?)");
+ const M=c.prepare("INSERT INTO tenant_minute_ledger(id,tenant_id,kind,delta_seconds,previous_seconds,balance_seconds,actor,reason,created_at) VALUES(?,?,'allocation',600000,0,600000,'admin','Synthetic scale allocation',?)");
+ const P=r.prepare("INSERT INTO calling_policies(tenant_id,enabled,flow_id,approval_reference,expires_at,daily_limit,max_seconds,updated_by,updated_at) VALUES(?,1,?,'synthetic-approval',?,100,180,'admin',?)");
+ const D=r.prepare("INSERT INTO call_campaign_drafts(tenant_id,id,name,language_mode,purpose,status,created_by,created_at,updated_at) VALUES(?,?,'Scale','hi','property_information','draft','client',?,?)");
+ const R=r.prepare("INSERT INTO calling_runs(tenant_id,id,campaign_id,state,created_by,created_at,updated_at) VALUES(?,?,?,'running','client',?,?)");
+ const L=r.prepare("INSERT INTO leads(tenant_id,id,name,mobile_e164,source_type,created_at,updated_at) VALUES(?,?,'Synthetic buyer',?,'excel',?,?)");
+ const V=r.prepare("INSERT INTO calling_clearances(tenant_id,lead_id,purpose,consent_reference,dnd_reference,expires_at,reviewed_by,reviewed_at) VALUES(?,?,'property_information','consent-ref','dnd-ref',?,'admin',?)");
+ const J=r.prepare("INSERT INTO calling_jobs(tenant_id,id,run_id,lead_id,state,flow_id,created_at,updated_at) VALUES(?,?,?,?,'queued',?,?,?)");
+ c.exec('BEGIN');r.exec('BEGIN');
+ for(let i=0;i<n;i++){
+  const t=tenantId(i),camp=crypto.randomUUID(),run=crypto.randomUUID();
+  T.run(t,'scale-'+i,at,at);M.run('scale-'+i,t,at);P.run(t,SCRIPTED_CALLING_POLICY,until,at);D.run(t,camp,at,at);R.run(t,run,camp,at,at);
+  for(let k=0;k<per;k++){const lead=crypto.randomUUID();L.run(t,lead,'+9190'+String(i*10+k).padStart(8,'0'),at,at);V.run(t,lead,until,at);J.run(t,crypto.randomUUID(),run,lead,SCRIPTED_CALLING_POLICY,at,at)}
  }
+ c.exec('COMMIT');r.exec('COMMIT');
 }
-function ready(f,hasWork,checked){
- configureScriptedCampaign(f); // synthetic completed internal pilot, NEVER a real phone
- const source=f.r.wrap;
- f.env.CRM_DB={
-  prepare(sql){
-   if(sql.includes("SELECT id FROM calling_runs WHERE tenant_id=? AND state='running'")){
-    return {bind(tid1,tid2){
-     assert.equal(tid1,tid2);
-     checked.add(tid1);
-     return {async first(){return hasWork(tid1)?{id:'synthetic-scheduler-work'}:null}};
-    }};
-   }
-   return source.prepare(sql);
-  }
- };
-}
-const forbiddenNetwork=()=>assert.fail('synthetic scheduler test MUST NEVER fetch a provider');
+let seq=0;
+const plivo=log=>async(_u,opts)=>{const b=JSON.parse(opts.body);log.push(b.to);return Response.json({request_uuid:'scale-request-'+(++seq)},{status:202})};
+const liveByTenant=f=>Object.fromEntries(f.r.db.prepare("SELECT tenant_id AS t,COUNT(*) AS n FROM calling_jobs WHERE state IN('reserved','submitted') GROUP BY tenant_id").all().map(x=>[x.t,x.n]));
+const hangUpAll=(f,now,except='')=>f.c.db.prepare("UPDATE scripted_phone_pilots SET phase='completed',hangup_at=? WHERE job_id IS NOT NULL AND hangup_at IS NULL AND tenant_id!=?").run(now,except);
 
-test('bounded two-stage rotation covers every one of 1,025 active companies without 100-tenant truncation',async()=>{
+test('1,000 companies share the platform limit fairly: one call each before anyone gets a second',async()=>{
  const f=fixture();
  try{
-  populate(f,1024);
-  const checked=new Set(),ticked=new Set();
-  ready(f,()=>true,checked);
-  const total=1025;
-  const rounds=Math.ceil(total/2)+2*Math.ceil(total/CAMPAIGN_SCAN_LIMIT);
-  for(let t=0;t<rounds;t++){
-   const actual=await runScriptedCampaignCron(f.env,{
-    now:anchor+t*STEP,apiFetch:forbiddenNetwork,
-    tickTenant:async (_env,_db,id)=>{
-     // A live campaign may remain busy for many minutes; repeats are safe
-     // because the tenant's reservation is atomically guarded downstream.
-     ticked.add(id);return {state:'synthetic_ok'};
-    }
-   });
-   assert.equal(actual.activeTenants,total);
-   assert.equal(actual.processed,CAMPAIGN_WORK_LIMIT);
-   assert.ok(actual.scanned<=CAMPAIGN_SCAN_LIMIT);
-   assert.equal(actual.scanned,CAMPAIGN_WORK_LIMIT);
-   if(ticked.size===total)break;
+  seed(f,1000,3);
+  const settings={maxConcurrent:600,maxPerCompany:3,queryBudget:950};
+  const log=[];let now=anchor,minutes=0;
+  const seen=new Set();
+  // Calls last under two minutes. Every company is reached before any company gets a second call.
+  while(seen.size<1000&&minutes<60){
+   f.c.db.prepare("UPDATE scripted_phone_pilots SET phase='completed',hangup_at=? WHERE job_id IS NOT NULL AND hangup_at IS NULL AND created_at<=?").run(now,new Date(now-90000).toISOString());
+   const r=await runScriptedCampaignCron(f.env,{now,apiFetch:plivo(log),settings});
+   assert.ok(r.queriesUsed<=settings.queryBudget,'query budget respected: '+r.queriesUsed);
+   assert.ok(r.liveCalls<=settings.maxConcurrent);
+   const live=liveByTenant(f);
+   assert.ok(Object.values(live).every(n=>n<=settings.maxPerCompany));
+   for(const t of Object.keys(live))seen.add(t);
+   const dialedPerCompany=f.r.db.prepare("SELECT tenant_id,COUNT(*) AS n FROM calling_jobs WHERE state!='queued' GROUP BY tenant_id").all();
+   if(seen.size<1000)assert.ok(dialedPerCompany.every(x=>x.n===1),'no second call while some company still waits');
+   now+=STEP;minutes++;
   }
-  assert.equal(ticked.size,total);
-  assert.ok(ticked.has(tid),'the last real fixture tenant must not be starved');
-  assert.equal(checked.size,total);
-  assert.equal(f.r.db.prepare('SELECT COUNT(*) AS n FROM calls').get().n,0);
-  assert.equal(f.r.db.prepare('SELECT COUNT(*) AS n FROM calling_jobs').get().n,0);
+  assert.equal(seen.size,1000,'every company dialed');
+  assert.equal(new Set(log).size,log.length,'no customer dialed twice');
+  // Throughput: dials per minute are limited by the query budget, not by "2 companies".
+  assert.ok(log.length/minutes>=30,'at least 30 new calls per minute at paid-plan budget, got '+(log.length/minutes));
+  // Calls finish: their lines are reused and every queued customer is reached.
+  for(let k=0;k<120&&f.r.db.prepare("SELECT COUNT(*) AS n FROM calling_jobs WHERE state='queued'").get().n;k++){
+   hangUpAll(f,now);
+   await runScriptedCampaignCron(f.env,{now,apiFetch:plivo(log),settings});now+=STEP;
+  }
+  assert.equal(f.r.db.prepare("SELECT COUNT(*) AS n FROM calling_jobs WHERE state='queued'").get().n,0);
+  assert.equal(log.length,3000);assert.equal(new Set(log).size,3000);
+  hangUpAll(f,now);await runScriptedCampaignCron(f.env,{now,apiFetch:plivo(log),settings});
+  assert.equal(f.r.db.prepare("SELECT COUNT(*) AS n FROM calling_jobs WHERE state='completed'").get().n,3000);
+  assert.equal(f.c.db.prepare("SELECT COUNT(*) AS n FROM tenant_minute_holds").get().n,3000);
  }finally{f.close()}
 });
 
-test('sparse approved work beyond first 1,000 tenants is discovered in one bounded directory sweep',async()=>{
+test('platform and per-company limits hold; a company can run several calls at once',async()=>{
  const f=fixture();
  try{
-  populate(f,1024);
-  const checked=new Set(),work=[];
-  ready(f,id=>id===tid,checked);
-  const pages=Math.ceil(1025/CAMPAIGN_SCAN_LIMIT);
-  for(let t=0;t<pages+1;t++){
-   const result=await runScriptedCampaignCron(f.env,{
-    now:anchor+t*STEP,apiFetch:forbiddenNetwork,
-    tickTenant:async (_env,_db,id)=>{work.push(id);return {state:'synthetic_ok'};}
-   });
-   assert.ok(result.scanned<=CAMPAIGN_SCAN_LIMIT);
-   assert.ok(result.processed<=CAMPAIGN_WORK_LIMIT);
-   if(work.length)break;
-  }
-  assert.deepEqual(work,[tid]);
-  assert.ok(checked.has(tid));
-  assert.equal(f.r.db.prepare('SELECT COUNT(*) AS n FROM calls').get().n,0);
+  seed(f,4,10);
+  const log=[];
+  const r=await runScriptedCampaignCron(f.env,{now:anchor,apiFetch:plivo(log),settings:{maxConcurrent:10,maxPerCompany:3,queryBudget:950}});
+  assert.equal(r.dialed,10);assert.equal(r.liveCalls,10);
+  const live=Object.values(liveByTenant(f)).sort();
+  assert.deepEqual(live,[2,2,3,3]);
+  // Full platform: nothing new until a call ends.
+  const again=await runScriptedCampaignCron(f.env,{now:anchor+STEP,apiFetch:()=>assert.fail('platform is full'),settings:{maxConcurrent:10,maxPerCompany:3,queryBudget:950}});
+  assert.equal(again.dialed,0);
+  hangUpAll(f,anchor+STEP);
+  const after=await runScriptedCampaignCron(f.env,{now:anchor+2*STEP,apiFetch:plivo(log),settings:{maxConcurrent:10,maxPerCompany:3,queryBudget:950}});
+  assert.equal(after.reconciled,10);assert.equal(after.dialed,10);
  }finally{f.close()}
 });
 
-test('directory rotation is stable, bounded and advances under different clock offsets',()=>{
- for(const total of [0,1,5,16,17,100,1000,1001,1024,1025,3000]){
-  const seen=new Set(),firstSeen=new Set();
-  // Allow all intra-page positions to rotate through both work slots.
-  // Small non-divisible directory sizes need more than ceil(total/2) minutes.
-  const rounds=total?Math.ceil(total/CAMPAIGN_SCAN_LIMIT)*
-   (CAMPAIGN_SCAN_LIMIT/CAMPAIGN_WORK_LIMIT+2):1;
-  for(let t=0;t<rounds;t++){
-   const index=campaignScanOffset(anchor+t*STEP,total);
-   assert.ok(index>=0&&(!total||index<total));
-   for(let i=0;i<Math.min(total,CAMPAIGN_SCAN_LIMIT);i++)
-    seen.add((index+i)%total);
-   for(let i=0;i<Math.min(total,CAMPAIGN_WORK_LIMIT);i++)
-    firstSeen.add((index+i)%total);
-  }
-  assert.equal(seen.size,total);
-  assert.equal(firstSeen.size,total);
- }
- for(const input of [-1,NaN,Infinity,1.5])assert.throws(()=>campaignScanOffset(input,100),/invalid/);
- for(const input of [-1,NaN,1.2])assert.throws(()=>campaignScanOffset(anchor,input),/invalid/);
-});
-
-test('two-attempt cap survives a tenant failure; no extra provider activity follows',async()=>{
+test('free-plan query budget is never exceeded and an uncertain call still locks only its company',async()=>{
  const f=fixture();
  try{
-  populate(f,150);
-  ready(f,()=>true,new Set());
-  let attempts=0;
-  const result=await runScriptedCampaignCron(f.env,{
-   now:anchor,apiFetch:forbiddenNetwork,
-   tickTenant:async()=>{attempts++;throw Error('synthetic tenant error');}
-  });
-  assert.equal(attempts,CAMPAIGN_WORK_LIMIT);
-  assert.equal(result.processed,CAMPAIGN_WORK_LIMIT);
-  assert.ok(result.scanned<=CAMPAIGN_SCAN_LIMIT);
+  seed(f,20,2);
+  const log=[];
+  const r=await runScriptedCampaignCron(f.env,{now:anchor,apiFetch:plivo(log),settings:{maxConcurrent:50,maxPerCompany:1,queryBudget:DEFAULT_QUERY_BUDGET}});
+  assert.ok(r.queriesUsed<=DEFAULT_QUERY_BUDGET,'used '+r.queriesUsed);
+  assert.ok(r.dialed>=1);
+  // Mark one company's call uncertain: that company pauses, others continue.
+  const locked=f.r.db.prepare("SELECT tenant_id FROM calling_jobs WHERE state='submitted' LIMIT 1").get().tenant_id;
+  f.r.db.prepare("UPDATE calling_jobs SET state='unknown' WHERE tenant_id=? AND state='submitted'").run(locked);
+  for(let k=1;k<15;k++){hangUpAll(f,anchor+k*STEP,locked);await runScriptedCampaignCron(f.env,{now:anchor+k*STEP,apiFetch:plivo(log),settings:{maxConcurrent:50,maxPerCompany:2,queryBudget:950}})}
+  assert.equal(f.r.db.prepare("SELECT COUNT(*) AS n FROM calling_jobs WHERE tenant_id=? AND state='queued'").get(locked).n,1);
+  assert.equal(f.r.db.prepare("SELECT COUNT(*) AS n FROM calling_jobs WHERE tenant_id!=? AND state='queued'").get(locked).n,0);
  }finally{f.close()}
 });
 
-test('unapproved kill switch touches no tenant directory even at 1,000+ companies',async()=>{
+test('a Sarvam rate-limit signal pauses new calls briefly; saved settings override defaults',async()=>{
  const f=fixture();
  try{
-  populate(f,1024);
-  let reads=0;
-  const env={...f.env,AR3D_SCRIPTED_CAMPAIGNS_ENABLED:'disabled',
-   CONTROL_DB:{prepare(){reads++;throw Error('unexpected control read')}}};
-  assert.deepEqual(await runScriptedCampaignCron(env,{
-   now:anchor,apiFetch:forbiddenNetwork
-  }),{processed:0});
-  assert.equal(reads,0);
+  seed(f,3,2);
+  await signalProviderThrottle(f.env,'sarvam',anchor,120000);
+  const paused=await runScriptedCampaignCron(f.env,{now:anchor,apiFetch:()=>assert.fail('throttled'),settings:{maxConcurrent:10,maxPerCompany:2,queryBudget:950}});
+  assert.equal(paused.throttled,true);assert.equal(paused.dialed,0);
+  const resumed=await runScriptedCampaignCron(f.env,{now:anchor+180000,apiFetch:plivo([]),settings:{maxConcurrent:10,maxPerCompany:2,queryBudget:950}});
+  assert.equal(resumed.throttled,false);assert.ok(resumed.dialed>0);
+  assert.equal((await dispatchSettings(f.env)).maxConcurrent,8);
+  f.c.db.prepare("INSERT INTO calling_dispatch_settings(id,max_concurrent_calls,max_calls_per_company,updated_by,updated_at) VALUES(1,300,20,'admin',?)").run(at);
+  assert.deepEqual([(await dispatchSettings(f.env)).maxConcurrent,(await dispatchSettings(f.env)).maxPerCompany],[300,20]);
  }finally{f.close()}
+});
+
+test('outside 09:00-20:00 IST and with the kill switch, the scheduler dials nobody',async()=>{
+ const f=fixture();
+ try{
+  seed(f,3,1);
+  const night=Date.parse('2026-11-20T16:00:00Z'); // 21:30 IST
+  assert.equal((await runScriptedCampaignCron(f.env,{now:night,apiFetch:()=>assert.fail('outside hours'),settings:{maxConcurrent:10,maxPerCompany:2,queryBudget:950}})).dialed,0);
+  f.env.AR3D_SCRIPTED_CAMPAIGNS_ENABLED='disabled';
+  assert.deepEqual(await runScriptedCampaignCron(f.env,{now:anchor,apiFetch:()=>assert.fail('disabled')}),{processed:0});
+ }finally{f.close()}
+});
+
+test('Sarvam 429 during a live answer is retried once and pauses new dispatch',async()=>{
+ const {readFileSync}=await import('node:fs');
+ const src=readFileSync('src/scripted-phone-pilot.mjs','utf8');
+ assert.match(src,/e\?\.message!=='sarvam_http_429'[\s\S]*signalProviderThrottle\(env,'sarvam'\)[\s\S]*transcribeSarvamRecordedAnswer/);
 });

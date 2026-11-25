@@ -38,9 +38,13 @@ test('Plivo calling remains intact, gated and unknown provider webhooks are reje
  assert.match(pilot,/https:\/\/api\.plivo\.com\/v1\/Account\//);
  assert.match(pilot,/verifiedPlivoGet/);
  assert.match(campaign,/AR3D_SCRIPTED_CAMPAIGNS_ENABLED!==['"]enabled['"]/);
- assert.match(campaign,/CAMPAIGN_WORK_LIMIT=2/);
+ // Bounded by the platform concurrency limit and a per-invocation D1 query budget.
+ assert.match(campaign,/DEFAULT_QUERY_BUDGET=45/);
+ assert.match(campaign,/meter\.used\+DIAL_QUERY_COST>meter\.limit/);
  assert.match(migrations,/CREATE TABLE calling_jobs/);
  assert.match(migrations,/CREATE UNIQUE INDEX calling_one_inflight/);
+ assert.match(readFileSync('migrations/crm/0022_parallel_company_calls.sql','utf8'),/DROP INDEX IF EXISTS calling_one_inflight/);
+ assert.match(campaign,/NOT EXISTS\(SELECT 1 FROM calling_jobs x WHERE x\.tenant_id=\? AND x\.state='unknown'\)/);
  assert.match(schema,/trg_no_call_launch/);
  assert.match(workflow,/0011_scripted_campaign_dispatch\.sql/);
  assert.doesNotMatch(workflow,/d1 execute[^\n]*(?:0008_[^\/]*receipts|0009_operator_self_test_calls|0010_[^\/]*status_checks|0009_voicebot_review_queue|0012_verified_voicebot_turns)/);

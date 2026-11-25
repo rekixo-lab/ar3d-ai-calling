@@ -1957,17 +1957,26 @@ async function customerCallingPanel(tenantId,content,role,openView){
  const pause=btn('Pause campaign',()=>changeRun('pause'),true);
  const refreshBtn=btn('Refresh status',()=>refresh().catch(asError),true);
  const options=div('formrow',lab('Campaign',pick),refreshBtn);
+ // Consent declaration (only when AR3D enabled client-declared consent for this company).
+ const sourceLabels={website_enquiry:'Website / online enquiry',site_visit_register:'Site visit register',existing_customer:'Existing customer',referral:'Referral',advertisement_lead:'Advertisement lead form',other:'Other documented consent'};
+ const consentSource=node('select',{class:'field',id:'consentSource','aria-label':'Where these customers came from'},Object.entries(sourceLabels).map(([v,t])=>node('option',{value:v,text:t})));
+ const consentBox=node('input',{type:'checkbox',id:'consentConfirm','aria-label':'Consent declaration'});
+ const declaration=div('stack consent-declaration',
+  lab('Where did these customers come from?',consentSource),
+  node('label',{class:'check-line'},[consentBox,node('span',{text:'I confirm these customers asked us to contact them about property, and we will not call anyone who has said no or is on DND.'})]));
+ declaration.hidden=true;consentBox.addEventListener('change',()=>render());
  const actions=div('formrow',btn('Import customers',()=>openView('customers',{resetScroll:true}),true),
   btn('View customer answers',()=>openView('results',{resetScroll:true}),true));
  if(role==='client_admin')actions.prepend(start,pause);
- card.append(status,options,summary,actions);content.append(card);
+ card.append(status,options,summary,declaration,actions);content.append(card);
  async function changeRun(action){
   if(busy||!pick.value)return;
   if(action==='start'&&!confirm('Call the approved customers in this campaign? This uses calling credits.'))return;
   const campaignId=pick.value;
   busy=true;render();
   try{
-   const res=await api('/v1/human/calling/runs','POST',{tenantId,campaignId,action});
+   const declare=action==='start'&&snapshot?.data.consentMode==='client_declared';
+   const res=await api('/v1/human/calling/runs','POST',{tenantId,campaignId,action,...(declare?{consent:{source:consentSource.value,confirmed:true}}:{})});
    notice(action==='pause'?'Campaign paused. A call already with Plivo may finish.':'Campaign '+res.state+'.');
    await refresh();
   }catch(e){asError(e)}finally{busy=false;render()}
@@ -1981,7 +1990,9 @@ async function customerCallingPanel(tenantId,content,role,openView){
   const languageOK=campaign&&['hi','en'].includes(campaign.languageMode);
   pick.disabled=busy||!snapshot?.campaigns.length;
   refreshBtn.disabled=busy;
-  start.disabled=busy||!ready||!languageOK||['running','completed'].includes(run?.state);
+  const needsDeclaration=snapshot?.data.consentMode==='client_declared'&&role==='client_admin';
+  declaration.hidden=!needsDeclaration||run?.state==='running'||run?.state==='completed';
+  start.disabled=busy||!ready||!languageOK||['running','completed'].includes(run?.state)||(needsDeclaration&&!consentBox.checked);
   pause.disabled=busy||run?.state!=='running';
   start.querySelector('span').textContent=run?.state==='paused'?'Resume calling':'Start calling';
   if(!snapshot)return;
@@ -1991,7 +2002,7 @@ async function customerCallingPanel(tenantId,content,role,openView){
    'AI calling is being prepared by AR3D. You can import your customer list now.':
    !policyReady?'AI calling for this company is waiting for AR3D activation.':
    !snapshot.data.credits?.ready?(snapshot.data.credits?.reason==='insufficient_credits'?'Not enough calling credits. Ask AR3D to allocate more minutes.':'Waiting for AR3D funding or calling approval.'):
-   (snapshot.data.configuration.creditOnly?'Credit-based calling · provider safety limits apply':'Call your approved customers · up to '+policy.dailyLimit+' calls per day')+' · 09:00–20:00 India time';
+   'Calls run while you have calling minutes · 09:00–20:00 India time';
   status.className='note '+(ready?'ready-note':'');
   summary.replaceChildren(campaign?div('between row',
    node('strong',{text:campaign.name}),
@@ -2077,7 +2088,26 @@ function launchReadinessPanel(main){
  refresh().catch(()=>{});
 }
 
+// Platform-wide calling capacity: match it to the Plivo concurrency and Sarvam plan.
+function callingCapacityPanel(main){
+ const card=div('card',title('Calling capacity'));
+ const maxAll=input('capacityMax','number');maxAll.min='1';maxAll.max='2000';
+ const maxCompany=input('capacityPerCompany','number');maxCompany.min='1';maxCompany.max='500';
+ const info=node('p',{class:'muted',role:'status',text:'Loading…'});
+ const save=node('button',{class:'btn',type:'submit',text:'Save capacity'});
+ const form=node('form',{class:'stack'},[
+  node('p',{class:'muted',text:'Calls at once across all companies. Keep it at or below your Plivo concurrency and about one call per 6 Sarvam requests/minute (Pay-as-you-go ≈ 8, Pro ≈ 15, Growth ≈ 600). Companies share it fairly.'}),
+  div('formrow',lab('Calls at once, all companies (1–2000)',maxAll),lab('Calls at once, one company (1–500)',maxCompany),save),info]);
+ card.append(form);main.append(card);
+ const show=d=>{maxAll.value=String(d.maxConcurrent);maxCompany.value=String(d.maxPerCompany);
+  info.textContent='Live calls now: '+(d.liveCalls??'—')+' / '+d.maxConcurrent+(d.sarvamPausedUntil?' · New calls paused until '+formatIst(d.sarvamPausedUntil)+' (Sarvam rate limit)':'')+(d.saved?' · Saved '+formatIst(d.updatedAt):' · Default, not saved yet')};
+ form.addEventListener('submit',async e=>{e.preventDefault();save.disabled=true;
+  try{show(await api('/v1/human/calling/capacity','POST',{maxConcurrent:Number(maxAll.value),maxPerCompany:Number(maxCompany.value)}));notice('Calling capacity saved.')}
+  catch(err){asError(err)}finally{save.disabled=false}});
+ api('/v1/human/calling/capacity').then(show).catch(()=>{info.textContent='Capacity unavailable. Sign in again with current two-factor authentication.'});
+}
 async function callingAdminPanel(main){
+ callingCapacityPanel(main);
  const diagnostics=node('details',{class:'card'},node('summary',{text:'Advanced diagnostics · Plivo go-live readiness'}));
  const details=div('stack');diagnostics.append(details);main.append(diagnostics);
  diagnostics.addEventListener('toggle',()=>{if(diagnostics.open&&!diagnostics.dataset.loaded){diagnostics.dataset.loaded='true';launchReadinessPanel(details)}});
@@ -2094,11 +2124,13 @@ async function callingAdminPanel(main){
  }
  try{await findCompany()}catch(e){asError(e);return}
  const approval=input('approval','text','Approved phone provider and calling purpose reference');
- const days=input('days','number');days.value='7';days.min='1';days.max='30';
- const limit=input('dailyLimit','number');limit.value='10';limit.min='1';limit.max='100';
+ const days=input('days','number');days.value='365';days.min='1';days.max='365';
  const seconds=input('maxSeconds','number');seconds.value='180';seconds.min='180';seconds.max='300';
  const enabled=node('input',{type:'checkbox','aria-label':'Enable company calling'});
- const policyForm=node('form',{class:'stack'},[title('Company approval','h3'),lab('Provider approval reference',approval),div('formrow',lab('Approval days (1–30)',days),lab('Fallback daily safety cap (1–100)',limit),lab('Maximum call seconds (180–300)',seconds)),lab('Enable company calling',enabled),node('button',{class:'btn',type:'submit',text:'Save company calling approval'})]);
+ const consentModeSel=node('select',{class:'field','aria-label':'Customer consent mode'},[
+  node('option',{value:'client_declared',text:'Client declares consent when starting a campaign (recommended)'}),
+  node('option',{value:'reviewed',text:'AR3D reviews each customer (Customer clearance below)'})]);
+ const policyForm=node('form',{class:'stack'},[title('Company approval','h3'),lab('Provider approval reference',approval),div('formrow',lab('Approval days (1–365)',days),lab('Maximum call seconds (180–300)',seconds)),lab('Customer consent',consentModeSel),lab('Enable company calling',enabled),node('button',{class:'btn',type:'submit',text:'Save company calling approval'})]);
  const consent=input('consent','text','Purpose-specific opt-in evidence reference'),dnd=input('dnd','text','Provider DND check reference');
  const choices=div('stack approval-list');
  const draft=node('select',{class:'field','aria-label':'Uploaded campaign'});
@@ -2109,8 +2141,8 @@ async function callingAdminPanel(main){
  const purpose=node('select',{class:'field'},['property_information','site_visit'].map(x=>node('option',{value:x,text:x})));
  const clearanceForm=node('form',{class:'stack'},[title('Customer clearance','h3'),node('p',{class:'note',text:'Select only customers covered by the consent evidence and current provider DND check. Excel upload alone does not supply these checks. Opted-out customers cannot be approved.'}),lab('Uploaded campaign',draft),lab('Purpose',purpose),lab('Consent evidence reference',consent),lab('DND verification reference',dnd),choices,div('formrow',newer,older),node('button',{class:'btn',type:'submit',text:'Approve selected customers'})]);
  const status=div(''),recovery=div('stack');
- const expires=()=>{const n=Number(days.value);if(!Number.isInteger(n)||n<1||n>30)throw Error('Approval days must be 1–30');return new Date(Date.now()+n*86400000).toISOString()};
- policyForm.addEventListener('submit',async e=>{e.preventDefault();try{await api('/v1/human/calling/policy','POST',{tenantId:company.value,enabled:enabled.checked,approvalReference:approval.value,expiresAt:expires(),dailyLimit:Number(limit.value),maxSeconds:Number(seconds.value)});notice('Company approval saved.');await refresh()}catch(e){asError(e)}});
+ const expires=()=>{const n=Number(days.value);if(!Number.isInteger(n)||n<1||n>365)throw Error('Approval days must be 1–365');return new Date(Date.now()+n*86400000).toISOString()};
+ policyForm.addEventListener('submit',async e=>{e.preventDefault();try{await api('/v1/human/calling/policy','POST',{tenantId:company.value,enabled:enabled.checked,approvalReference:approval.value,expiresAt:expires(),maxSeconds:Number(seconds.value),consentMode:consentModeSel.value});notice('Company approval saved.');await refresh()}catch(e){asError(e)}});
  clearanceForm.addEventListener('submit',async e=>{e.preventDefault();try{const leadIds=[...choices.querySelectorAll('input:checked')].map(x=>x.value);const r=await api('/v1/human/calling/clearances','POST',{tenantId:company.value,leadIds,purpose:purpose.value,consentReference:consent.value,dndReference:dnd.value,expiresAt:expires()});notice(r.reviewed+' customer approvals saved.');await refresh()}catch(e){asError(e)}});
  async function refresh(){
   const generation=++requestGeneration,tenantId=company.value;
@@ -2125,7 +2157,7 @@ async function callingAdminPanel(main){
    draft.replaceChildren(node('option',{value:'',text:'All customers'}),...c.campaigns.map(x=>node('option',{value:x.id,text:x.name})));
    draft.value=selected;newer.disabled=clearanceOffset===0;older.disabled=!c.hasMore;
    approval.value=p.policy?.approvalReference||'';enabled.checked=!!p.policy?.enabled;
-   limit.value=String(p.policy?.dailyLimit||10);seconds.value=String(p.policy?.maxSeconds||180);
+   seconds.value=String(p.policy?.maxSeconds||180);consentModeSel.value=p.consentMode||'reviewed';
    status.append(node('p',{class:'note',text:p.configuration.ready?'Fixed-question customer calling configured.':p.configuration.missing.join(', ')}));
    for(const l of c.leads){const checkbox=node('input',{type:'checkbox',value:l.id});if(l.consentStatus==='denied'||l.dndStatus==='blocked')checkbox.disabled=true;choices.append(lab(l.name+' — '+l.id.slice(0,8),checkbox))}
    status.append(table(['Customer','Purpose','Approval expires'],c.clearances.map(x=>[x.name,x.purpose,x.expiresAt])));
