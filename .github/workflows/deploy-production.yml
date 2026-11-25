@@ -106,6 +106,13 @@ jobs:
       - name: Create isolated Calling Control immutable minute ledger
         if: github.event_name == 'push' && steps.schema.outputs.schema_state == 'control_minute_ledger_upgrade'
         run: npx --yes wrangler@4 d1 execute ar3d-calling-control --remote --yes --config wrangler.jsonc --file migrations/control/0021_tenant_minute_ledger.sql
+      # Additive, idempotent: platform calling capacity + per-company consent mode
+      # tables, and the CRM index change that allows parallel calls per company.
+      - name: Add Calling capacity settings and parallel company calls
+        if: github.event_name == 'push' && steps.schema.outputs.schema_state == 'control_dispatch_settings_upgrade'
+        run: |
+          npx --yes wrangler@4 d1 execute ar3d-calling-control --remote --yes --config wrangler.jsonc --file migrations/control/0028_calling_dispatch_settings.sql
+          npx --yes wrangler@4 d1 execute ar3d-calling-shared-crm --remote --yes --config wrangler.jsonc --file migrations/crm/0022_parallel_company_calls.sql
       - name: Create isolated Calling provider expense attribution
         if: github.event_name == 'push' && steps.schema.outputs.schema_state == 'control_provider_reconcile_upgrade'
         run: npx --yes wrangler@4 d1 execute ar3d-calling-control --remote --yes --config wrangler.jsonc --file migrations/control/0027_provider_cost_reconciliations.sql
@@ -159,6 +166,7 @@ jobs:
           npx --yes wrangler@4 d1 execute ar3d-calling-control --remote --yes --config wrangler.jsonc --file migrations/control/0025_provider_safety_events.sql
           npx --yes wrangler@4 d1 execute ar3d-calling-control --remote --yes --config wrangler.jsonc --file migrations/control/0026_provider_cost_reservations.sql
           npx --yes wrangler@4 d1 execute ar3d-calling-control --remote --yes --config wrangler.jsonc --file migrations/control/0027_provider_cost_reconciliations.sql
+          npx --yes wrangler@4 d1 execute ar3d-calling-control --remote --yes --config wrangler.jsonc --file migrations/control/0028_calling_dispatch_settings.sql
       - name: Initialize NEW AR3D Calling Shared CRM D1 database
         if: (github.event_name == 'push' && steps.schema.outputs.schema_state == 'fresh') || (github.event_name == 'workflow_dispatch' && inputs.operation == 'initialize')
         run: |
@@ -175,6 +183,7 @@ jobs:
           npx --yes wrangler@4 d1 execute ar3d-calling-shared-crm --remote --yes --config wrangler.jsonc --file migrations/crm/0013_scripted_call_results.sql
           npx --yes wrangler@4 d1 execute ar3d-calling-shared-crm --remote --yes --config wrangler.jsonc --file migrations/crm/0020_lead_staff_assignments.sql
           npx --yes wrangler@4 d1 execute ar3d-calling-shared-crm --remote --yes --config wrangler.jsonc --file migrations/crm/0021_verified_provider_call_costs.sql
+          npx --yes wrangler@4 d1 execute ar3d-calling-shared-crm --remote --yes --config wrangler.jsonc --file migrations/crm/0022_parallel_company_calls.sql
       - name: Verify post-initialization schema before proceeding
         if: (github.event_name == 'push' && steps.schema.outputs.schema_state == 'fresh') || (github.event_name == 'workflow_dispatch' && inputs.operation == 'initialize')
         run: node scripts/main-cloudflare.mjs ready

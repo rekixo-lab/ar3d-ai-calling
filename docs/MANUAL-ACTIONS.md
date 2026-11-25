@@ -13,6 +13,16 @@ Do the following only when at your own secure computer. This checklist is not pr
 5. Set Worker-only LOGIN_RATE_LIMIT_SECRET (32+ random characters) and MFA_ENCRYPTION_KEY (32+ random characters). Keep both secret values outside GitHub code. Create ADMIN_BOOTSTRAP_TOKEN only long enough for first Super Admin bootstrap, then delete it immediately after successful login. OPTIONAL server-to-server admin endpoints require a *different* ADMIN_API_TOKEN (32+ random characters); leave unset if unused.
 6. Test /health, /app, admin login, MFA recovery and tenant isolation using **synthetic** leads. Test from a real Cloudflare request so CF-Connecting-IP is present. Configure monitoring, backups and incident response separately before collecting customer data.
 
+## Scaling calls to many companies — operator actions
+
+The scheduler shares one platform calling limit fairly across every company. Raise it only as the providers allow:
+
+1. **Sarvam:** the speech-to-text plan sets the real ceiling (about one live call per 6 requests/minute). Pay-as-you-go ≈ 8 calls at once, Pro ≈ 15, Growth ≈ 600.
+2. **Plivo:** India accounts default to 50 concurrent calls. Ask Plivo support to raise it, and consider a pool of caller numbers before running hundreds of calls at once.
+3. **Cloudflare:** after Workers Paid is active, set the Worker variable `AR3D_DISPATCH_QUERY_BUDGET=900` (default 45 is for the Free plan). This allows about 60 new calls per minute.
+4. In **Calling Setup → Calling capacity**, set *Calls at once, all companies* to the lowest of the three limits above, and *Calls at once, one company* as needed.
+5. Before enabling **Client declares consent** for a company, confirm with Plivo and legal counsel that client-declared consent meets the account's permitted traffic and TRAI rules. DND (NCPR) scrubbing is not automatic.
+
 ## Real calling and paid SaaS — human or provider actions
 
 - Choose and contract with an India-compliant calling provider, obtain the authorized caller number(s), and complete required KYC, DLT/telecom registration and permitted traffic categories with the provider.

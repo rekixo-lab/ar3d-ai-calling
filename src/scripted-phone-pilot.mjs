@@ -1,4 +1,5 @@
 // Shared phone questionnaire with a separately approved internal pilot and customer campaigns.
+import {signalProviderThrottle} from './capacity-signals.mjs';
 import {resolveCrmDb,parseJsonBody} from './core.mjs';
 import {mutationOriginAllowed} from './human-auth.mjs';
 import {beginFixedVoicePreview,advanceFixedVoicePreview,advanceContextualVoice,advanceInternalVoice} from './fixed-voice-turns.mjs';
@@ -757,7 +758,15 @@ async function recordingAnswer(config,env,row,params,fetcher){
  catch{return {text:null,reason:'recording_body_invalid'}}
  try{
   const started=Date.now();
-  const text=(await transcribeSarvamRecordedAnswer(env.SARVAM_API_KEY,bytes,row.language,answerContentType(response.headers),fetcher)).text;
+  let text;
+  try{text=(await transcribeSarvamRecordedAnswer(env.SARVAM_API_KEY,bytes,row.language,answerContentType(response.headers),fetcher)).text}
+  catch(e){
+   // Rate limited: tell the scheduler to hold new calls, then retry this answer once.
+   if(e?.message!=='sarvam_http_429')throw e;
+   await signalProviderThrottle(env,'sarvam');
+   await new Promise(resolve=>setTimeout(resolve,700));
+   text=(await transcribeSarvamRecordedAnswer(env.SARVAM_API_KEY,bytes,row.language,answerContentType(response.headers),fetcher)).text;
+  }
   return {text,reason:text?'recognized':'speech_empty',mediaFetchMs:Math.max(0,started-mediaStarted),recognitionMs:Date.now()-started,audioMs:recordingDurationMs(params),audioBytes:bytes.length,sttConnected:true,mediaHost:new URL(mediaUrl).hostname};
  }catch(e){return {text:null,reason:'speech_service_failed',failureCode:speechFailureCode(e),audioMs:recordingDurationMs(params),audioBytes:bytes.length,sttConnected:false,mediaHost:new URL(mediaUrl).hostname}}
 }

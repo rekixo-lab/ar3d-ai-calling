@@ -329,6 +329,9 @@ h2,h3{gap:8px;line-height:1.35;overflow-wrap:anywhere;}
  .sidebar-footer .sidebar-credit-actions .btn{min-height:44px;}
  .sidebar-wallet .muted{grid-column:1/-1;}
 }
+.check-line{display:flex;gap:10px;align-items:flex-start;line-height:1.45}
+.check-line input{margin-top:4px;flex:none}
+.consent-declaration{border:1px solid rgba(255,255,255,.12);border-radius:12px;padding:14px}
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{transition:none!important;animation:none!important;scroll-behavior:auto!important;}}
 `;
 

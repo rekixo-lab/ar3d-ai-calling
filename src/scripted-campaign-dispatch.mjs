@@ -5,29 +5,8 @@ import {minutePosition,closeMinuteHold,fundingCap,fundingPosition,affordableCall
 import {SCRIPTED_CALLING_POLICY,approvedCampaignPhone,reserveCampaignQuestionnaire,scriptedPromptsReady,submitScriptedPhone} from './scripted-phone-pilot.mjs';
 
 export const CAMPAIGN_CRON='* * * * *';
-// Bounds total D1/R2 lookups in a single Worker invocation. The existing
-// maximum of two attempted tenant dispatches per minute is NOT increased.
-// Cloudflare Free D1 has a 50-query/invocation limit; a small candidate window
-// leaves room for the safety checks and atomic reservations below.
-export const CAMPAIGN_SCAN_LIMIT=16;
-export const CAMPAIGN_WORK_LIMIT=2;
-
-// Stateless rotating pages. Every active tenant is scanned, including those
-// after the first 100, without loading all tenant rows into the Worker.
-// Each pass covers the entire directory; the start within each page rotates
-// by WORK_LIMIT after a full pass so heavily queued early tenants cannot
-// permanently starve their neighbors. No schema migration or stored cursor.
-export function campaignScanOffset(now,count){
- if(!Number.isSafeInteger(now)||now<0||!Number.isSafeInteger(count)||count<0)
-  throw Error('invalid scheduler time or active tenant count');
- if(count===0)return 0;
- const pages=Math.ceil(count/CAMPAIGN_SCAN_LIMIT);
- const minute=Math.floor(now/60000);
- const page=minute%pages;
- const pass=Math.floor(minute/pages);
- return (page*CAMPAIGN_SCAN_LIMIT+
-  (pass*CAMPAIGN_WORK_LIMIT)%CAMPAIGN_SCAN_LIMIT)%count;
-}
+// Capacity is set by the platform limits below (dispatchSettings): no fixed
+// number of companies per minute and no per-company daily cap.
 // Separate, operator-only release gate. Never set by UI, allocation or deployment.
 export const fundedDispatchApproved=env=>env.AR3D_FUNDED_CAMPAIGN_DISPATCH==='approved'&&fundingCap(env)!==null&&moneyBudgetConfig(env)!==null;
 export const creditOnlyCallingApproved=env=>fundedDispatchApproved(env)&&env.AR3D_CREDIT_ONLY_CALLING==='approved';
@@ -125,22 +104,69 @@ async function reconcile(env,db,job,now,at){
  return {state:'waiting_or_locked'};
 }
 
-export async function tickScriptedTenant(env,db,tid,config,{apiFetch=fetch,now=Date.now()}={}){
+// ---------- capacity settings ----------
+export const DEFAULT_MAX_CONCURRENT_CALLS=8;     // ~Sarvam pay-as-you-go 60 STT req/min
+export const DEFAULT_QUERY_BUDGET=45;            // Cloudflare Free: 50 D1 queries per invocation
+const DIAL_QUERY_COST=16,RECONCILE_QUERY_COST=4; // measured: first dial of a company 15, reconcile ~3.4
+const intEnv=(v,lo,hi,def)=>{const n=Number(v);return Number.isSafeInteger(n)&&n>=lo&&n<=hi?n:def};
+export async function dispatchSettings(env){
+ const fallbackMax=intEnv(env.AR3D_MAX_CONCURRENT_CALLS,1,2000,DEFAULT_MAX_CONCURRENT_CALLS);
+ let row=null;
+ try{row=await env.CONTROL_DB.prepare('SELECT max_concurrent_calls AS maxConcurrent,max_calls_per_company AS maxPerCompany,updated_at AS updatedAt FROM calling_dispatch_settings WHERE id=1').first()}catch{}
+ const maxConcurrent=row?.maxConcurrent??fallbackMax;
+ return {maxConcurrent,maxPerCompany:Math.min(maxConcurrent,row?.maxPerCompany??Math.min(maxConcurrent,10)),
+  queryBudget:intEnv(env.AR3D_DISPATCH_QUERY_BUDGET,20,950,DEFAULT_QUERY_BUDGET),saved:Boolean(row),updatedAt:row?.updatedAt??null};
+}
+export {providerThrottledUntil,signalProviderThrottle} from './capacity-signals.mjs';
+import {providerThrottledUntil} from './capacity-signals.mjs';
+
+// Counts D1 statements so one scheduled run never crosses the platform's
+// per-invocation query limit in the middle of a provider submission.
+function budgetedEnv(env,limit){
+ const meter={used:0,limit};
+ const wrapDb=db=>db&&{
+  prepare(sql){const st=db.prepare(sql);const wrapSt=x=>({
+   bind(...a){return wrapSt(x.bind(...a))},
+   async first(...a){meter.used++;return x.first(...a)},async all(...a){meter.used++;return x.all(...a)},async run(...a){meter.used++;return x.run(...a)},
+   __inner:x});return wrapSt(st)},
+  async batch(list){meter.used+=list.length;return db.batch(list.map(x=>x.__inner||x))}
+ };
+ return {env:{...env,CONTROL_DB:wrapDb(env.CONTROL_DB),CRM_DB:wrapDb(env.CRM_DB)},meter,wrapDb};
+}
+
+// ---------- one company: reconcile and dial ----------
+async function dispatchPreconditions(env,tid,db,now,cache){
  const at=new Date(now).toISOString();
- const pending=await db.prepare("SELECT * FROM calling_jobs WHERE tenant_id=? AND state IN('reserved','submitted','unknown') LIMIT 1").bind(tid).first();
- if(pending)return reconcile(env,db,pending,now,at);
- if(!config||!inCallingWindow(now))return {state:'disabled_or_outside_hours'};
- if(!fundedDispatchApproved(env))return {state:'funding_approval_required'};
- if(await providerFaultBlocked(env.CONTROL_DB))return {state:'provider_review_required'};
+ if(!cache.global){
+  cache.global=!fundedDispatchApproved(env)?{state:'funding_approval_required'}:
+   await providerFaultBlocked(env.CONTROL_DB)?{state:'provider_review_required'}:{ok:true};
+ }
+ if(!cache.global.ok)return cache.global;
+ if(cache.tenants.has(tid))return cache.tenants.get(tid);
  const policy=await db.prepare('SELECT * FROM calling_policies WHERE tenant_id=? AND enabled=1 AND expires_at>? AND flow_id=?').bind(tid,at,SCRIPTED_CALLING_POLICY).first();
- if(!policy)return {state:'approval_required'};
- // Permanent suppression is terminal. Missing/expired approval stays queued so a later review can release it.
- await db.prepare(`UPDATE calling_jobs SET state='blocked',error_code='customer_suppressed',updated_at=?
-  WHERE tenant_id=? AND state='queued' AND flow_id=? AND EXISTS(
-   SELECT 1 FROM leads l WHERE l.tenant_id=calling_jobs.tenant_id AND l.id=calling_jobs.lead_id
-   AND (l.consent_status='denied' OR l.dnd_status='blocked' OR EXISTS(
-    SELECT 1 FROM lead_opt_out_events o WHERE o.tenant_id=l.tenant_id AND o.lead_id=l.id)))`)
-  .bind(at,tid,SCRIPTED_CALLING_POLICY).run();
+ let result;
+ if(!policy)result={state:'approval_required'};
+ else{
+  // Permanent suppression is terminal. Missing/expired approval stays queued so a later review can release it.
+  await db.prepare(`UPDATE calling_jobs SET state='blocked',error_code='customer_suppressed',updated_at=?
+   WHERE tenant_id=? AND state='queued' AND flow_id=? AND EXISTS(
+    SELECT 1 FROM leads l WHERE l.tenant_id=calling_jobs.tenant_id AND l.id=calling_jobs.lead_id
+    AND (l.consent_status='denied' OR l.dnd_status='blocked' OR EXISTS(
+     SELECT 1 FROM lead_opt_out_events o WHERE o.tenant_id=l.tenant_id AND o.lead_id=l.id)))`)
+   .bind(at,tid,SCRIPTED_CALLING_POLICY).run();
+  result={ok:true,policy,prompts:new Map()};
+ }
+ cache.tenants.set(tid,result);return result;
+}
+
+// Dials the next eligible queued customer of ONE company, if that company has
+// fewer than maxPerCompany live calls and no uncertain call awaiting review.
+export async function dialNextForTenant(env,db,tid,config,{apiFetch=fetch,now=Date.now(),maxPerCompany=1,cache={tenants:new Map()}}={}){
+ const at=new Date(now).toISOString();
+ if(!config||!inCallingWindow(now))return {state:'disabled_or_outside_hours'};
+ const pre=await dispatchPreconditions(env,tid,db,now,cache);
+ if(!pre.ok)return pre;
+ const policy=pre.policy;
  // Choose the next eligible job, so an earlier unapproved lead cannot stall approved customers.
  const job=await db.prepare(`SELECT j.id,j.tenant_id,j.lead_id,l.mobile_e164 AS destination,l.updated_at AS lead_updated_at,
   c.purpose,c.language_mode AS language,r.created_by
@@ -163,17 +189,22 @@ export async function tickScriptedTenant(env,db,tid,config,{apiFetch=fetch,now=D
    .bind(at,tid,job.id).run();
   return {state:'blocked'};
  }
- if(!await scriptedPromptsReady(env,job.language,tid))return {state:'prompts_incomplete'};
+ if(!pre.prompts.has(job.language))pre.prompts.set(job.language,await scriptedPromptsReady(env,job.language,tid));
+ if(!pre.prompts.get(job.language))return {state:'prompts_incomplete'};
  const position=await minutePosition(env.CONTROL_DB,tid),cap=fundingCap(env);
  if(position.uncommittedSeconds<BILLING_PULSE_SECONDS)return {state:'insufficient_credits'};
  const funding=await fundingPosition(env.CONTROL_DB,cap),budgetConfig=moneyBudgetConfig(env);
  const money=await providerBudgetPosition(env.CONTROL_DB,budgetConfig);
  const needed=affordableCallSeconds(policy.max_seconds,position.uncommittedSeconds,Math.min(funding.remainingFundedSeconds,money.remainingSeconds));
  if(needed<BILLING_PULSE_SECONDS)return {state:'provider_funding_exhausted'};
- const dayStart=new Date(Math.floor((now+330*60000)/86400000)*86400000-330*60000).toISOString();
- // D1 serializes this ONE reservation statement, including quotas and uniqueness.
- const reserved=await db.prepare("UPDATE calling_jobs SET state='reserved',reserved_at=?,updated_at=?,account_sid=?,caller_id=?,flow_id=?,destination=? WHERE tenant_id=? AND id=? AND state='queued' AND EXISTS(SELECT 1 FROM calling_runs r WHERE r.tenant_id=calling_jobs.tenant_id AND r.id=calling_jobs.run_id AND r.state='running') AND EXISTS(SELECT 1 FROM calling_policies p WHERE p.tenant_id=? AND p.enabled=1 AND p.expires_at>? AND p.updated_at=? AND p.flow_id=?) AND EXISTS(SELECT 1 FROM calling_clearances v JOIN leads l ON l.tenant_id=v.tenant_id AND l.id=v.lead_id WHERE v.tenant_id=? AND v.lead_id=? AND v.purpose=? AND v.expires_at>? AND v.reviewed_at>=? AND v.reviewed_at>COALESCE((SELECT MAX(h.reserved_at) FROM calling_jobs h WHERE h.tenant_id=v.tenant_id AND h.lead_id=v.lead_id),'') AND l.consent_status!='denied' AND l.dnd_status!='blocked' AND l.mobile_e164=? AND l.updated_at=? AND NOT EXISTS(SELECT 1 FROM lead_opt_out_events o WHERE o.tenant_id=l.tenant_id AND o.lead_id=l.id)) AND NOT EXISTS(SELECT 1 FROM calling_jobs x WHERE x.tenant_id=? AND x.state IN('reserved','submitted','unknown')) AND (?=1 OR (SELECT COUNT(*) FROM calling_jobs x WHERE x.tenant_id=? AND x.reserved_at>=?)<?)")
- .bind(at,at,config.authId,config.caller,policy.flow_id,job.destination,tid,job.id,tid,at,policy.updated_at,SCRIPTED_CALLING_POLICY,tid,job.lead_id,job.purpose,at,policy.updated_at,job.destination,job.lead_updated_at,tid,Number(creditOnlyCallingApproved(env)),tid,dayStart,policy.daily_limit).run();
+ // D1 serializes this ONE reservation statement: approval, clearance, suppression,
+ // per-company live-call limit and "no uncertain call" are checked atomically.
+ // Prepaid minutes and provider ceilings (below) are the only volume limits.
+ let reserved;
+ try{
+  reserved=await db.prepare("UPDATE calling_jobs SET state='reserved',reserved_at=?,updated_at=?,account_sid=?,caller_id=?,flow_id=?,destination=? WHERE tenant_id=? AND id=? AND state='queued' AND EXISTS(SELECT 1 FROM calling_runs r WHERE r.tenant_id=calling_jobs.tenant_id AND r.id=calling_jobs.run_id AND r.state='running') AND EXISTS(SELECT 1 FROM calling_policies p WHERE p.tenant_id=? AND p.enabled=1 AND p.expires_at>? AND p.updated_at=? AND p.flow_id=?) AND EXISTS(SELECT 1 FROM calling_clearances v JOIN leads l ON l.tenant_id=v.tenant_id AND l.id=v.lead_id WHERE v.tenant_id=? AND v.lead_id=? AND v.purpose=? AND v.expires_at>? AND v.reviewed_at>=? AND v.reviewed_at>COALESCE((SELECT MAX(h.reserved_at) FROM calling_jobs h WHERE h.tenant_id=v.tenant_id AND h.lead_id=v.lead_id),'') AND l.consent_status!='denied' AND l.dnd_status!='blocked' AND l.mobile_e164=? AND l.updated_at=? AND NOT EXISTS(SELECT 1 FROM lead_opt_out_events o WHERE o.tenant_id=l.tenant_id AND o.lead_id=l.id)) AND NOT EXISTS(SELECT 1 FROM calling_jobs x WHERE x.tenant_id=? AND x.state='unknown') AND (SELECT COUNT(*) FROM calling_jobs x WHERE x.tenant_id=? AND x.state IN('reserved','submitted'))<?")
+  .bind(at,at,config.authId,config.caller,policy.flow_id,job.destination,tid,job.id,tid,at,policy.updated_at,SCRIPTED_CALLING_POLICY,tid,job.lead_id,job.purpose,at,policy.updated_at,job.destination,job.lead_updated_at,tid,tid,maxPerCompany).run();
+ }catch{return {state:'quota_or_concurrent_change'}} // e.g. a legacy one-call-per-company index
  if(Number(reserved.meta?.changes)!==1)return {state:'quota_or_concurrent_change'};
  try{
   // CRM and Control are separate D1 databases. Claim CRM first, then reserve
@@ -203,50 +234,95 @@ export async function tickScriptedTenant(env,db,tid,config,{apiFetch=fetch,now=D
  }
 }
 
-export async function runScriptedCampaignCron(env,{
- now=Date.now(),apiFetch=fetch,tickTenant=tickScriptedTenant
-}={}){
- if(env.AR3D_SCRIPTED_CAMPAIGNS_ENABLED!=='enabled')return {processed:0};
+// Single-company step used by tools and tests: finish one in-flight call if
+// any, otherwise dial at most one customer.
+export async function tickScriptedTenant(env,db,tid,config,{apiFetch=fetch,now=Date.now(),maxPerCompany=1}={}){
+ const at=new Date(now).toISOString();
+ const pending=await db.prepare("SELECT * FROM calling_jobs WHERE tenant_id=? AND state IN('reserved','submitted','unknown') LIMIT 1").bind(tid).first();
+ if(pending&&maxPerCompany<=1)return reconcile(env,db,pending,now,at);
+ return dialNextForTenant(env,db,tid,config,{apiFetch,now,maxPerCompany});
+}
+
+// Reconcile in-flight jobs of one company whose call has ended, was rejected or
+// has passed its expiry. Live calls are not touched.
+async function reconcileTenantJobs(env,db,tid,jobs,now,meter){
+ const at=new Date(now).toISOString();let finished=0;
+ for(let i=0;i<jobs.length;i+=90){
+  if(meter&&meter.used+RECONCILE_QUERY_COST>meter.limit)break;
+  const chunk=jobs.slice(i,i+90);
+  const rows=(await env.CONTROL_DB.prepare(`SELECT job_id FROM scripted_phone_pilots WHERE tenant_id=? AND job_id IN (${chunk.map(()=>'?').join(',')})
+   AND (phase='rejected' OR (hangup_at IS NOT NULL AND phase IN('completed','declined','ended','needs_review')) OR expires_at<=?)`)
+   .bind(tid,...chunk.map(j=>j.id),now).all()).results||[];
+  const ready=new Set(rows.map(r=>r.job_id));
+  for(const job of chunk){
+   const stale=job.state!=='unknown'&&now>=Date.parse(job.reserved_at)+600000;
+   if(!ready.has(job.id)&&!stale)continue;
+   if(meter&&meter.used+RECONCILE_QUERY_COST>meter.limit)return finished;
+   try{const r=await reconcile(env,db,job,now,at);if(r.state==='reconciled'){finished++;job.done=true}}catch{console.error('AR3D campaign reconcile unavailable')}
+  }
+ }
+ return finished;
+}
+
+function rotate(list,now){if(!list.length)return list;const k=Math.floor(now/60000)%list.length;return [...list.slice(k),...list.slice(0,k)]}
+
+export async function runScriptedCampaignCron(baseEnv,{now=Date.now(),apiFetch=fetch,settings=null}={}){
+ if(baseEnv.AR3D_SCRIPTED_CAMPAIGNS_ENABLED!=='enabled')return {processed:0};
  // Bad schedule inputs fail closed before making any provider or CRM request.
  if(!Number.isSafeInteger(now)||now<0)throw Error('invalid Calling cron time');
- const config=await approvedCampaignPhone(env);
+ const config=await approvedCampaignPhone(baseEnv);
  if(!config)return {processed:0};
- const count=await env.CONTROL_DB.prepare(
-  "SELECT COUNT(*) AS total FROM tenants WHERE status='active'"
- ).first();
- const total=Number(count?.total);
- if(!Number.isSafeInteger(total)||total<0)
-  throw Error('invalid active tenant directory count');
- if(total===0)return {processed:0,scanned:0,activeTenants:0};
- const offset=campaignScanOffset(now,total);
- const batchSize=Math.min(total,CAMPAIGN_SCAN_LIMIT);
- const sql="SELECT id,storage_mode,dedicated_binding FROM tenants WHERE status='active' ORDER BY id LIMIT ? OFFSET ?";
- const first=(await env.CONTROL_DB.prepare(sql).bind(batchSize,offset).all()).results;
- if(!Array.isArray(first)||first.length>batchSize)
-  throw Error('invalid scheduler tenant page');
- const remaining=batchSize-first.length;
- const wrap=remaining?(await env.CONTROL_DB.prepare(sql).bind(remaining,0).all()).results:[];
- if(!Array.isArray(wrap)||wrap.length>remaining)
-  throw Error('invalid scheduler wrap page');
- const rows=[...first,...wrap],seen=new Set();
- let processed=0,scanned=0;
- for(const tenant of rows){
-  if(!tenant||typeof tenant.id!=='string'||seen.has(tenant.id))continue;
-  seen.add(tenant.id);scanned++;
-  try{
-   const db=resolveCrmDb(env,tenant);
-   const work=await db.prepare(`SELECT id FROM calling_runs WHERE tenant_id=? AND state='running'
-    UNION ALL SELECT id FROM calling_jobs WHERE tenant_id=? AND state IN('reserved','submitted','unknown') LIMIT 1`)
-    .bind(tenant.id,tenant.id).first();
-   if(!work)continue;
-   // Count the attempt BEFORE the potentially failing network operation.
-   // A provider timeout must not cause an unbounded number of new attempts.
-   processed++;
-   await tickTenant(env,db,tenant.id,config,{now,apiFetch});
-  }catch{console.error('AR3D scripted campaign processing unavailable')}
-  if(processed>=CAMPAIGN_WORK_LIMIT)break;
+ const cfg=settings||await dispatchSettings(baseEnv);
+ const {env,meter}=budgetedEnv(baseEnv,cfg.queryBudget);
+ const db=env.CRM_DB;
+ // Shared-CRM companies only; dedicated CRM databases are not provisioned.
+ const active=new Set(((await env.CONTROL_DB.prepare("SELECT id FROM tenants WHERE status='active' AND storage_mode='shared'").all()).results||[]).map(r=>r.id));
+ if(!active.size)return {processed:0,dialed:0,reconciled:0,activeTenants:0};
+ const inflight=((await db.prepare(`SELECT tenant_id,id,state,reserved_at,flow_id,lead_id,destination,run_id FROM calling_jobs
+  WHERE state IN('reserved','submitted','unknown') ORDER BY reserved_at LIMIT 5000`).all()).results||[]).filter(j=>active.has(j.tenant_id));
+ const byTenant=new Map();
+ for(const j of inflight){if(!byTenant.has(j.tenant_id))byTenant.set(j.tenant_id,[]);byTenant.get(j.tenant_id).push(j)}
+ // 1. Close finished calls first so their lines are free for new customers.
+ let reconciled=0;
+ for(const tid of rotate([...byTenant.keys()],now)){
+  if(meter.used+RECONCILE_QUERY_COST>meter.limit)break;
+  try{reconciled+=await reconcileTenantJobs(env,db,tid,byTenant.get(tid),now,meter)}catch{console.error('AR3D campaign reconcile unavailable')}
+ }
+ const live=new Map(),uncertain=new Set();let globalLive=0;
+ for(const [tid,jobs] of byTenant)for(const j of jobs){
+  if(j.done)continue;
+  if(j.state==='unknown'){uncertain.add(tid);continue}
+  live.set(tid,(live.get(tid)||0)+1);globalLive++;
+ }
+ // 2. Fair fill: one new call per company per pass, until the platform limit,
+ // the per-company limit, the query budget or the queue runs out.
+ let dialed=0,processed=0,free=Math.max(0,cfg.maxConcurrent-globalLive);
+ const throttled=await providerThrottledUntil(env)>now;
+ if(!throttled&&free>0&&inCallingWindow(now)){
+  const running=((await db.prepare("SELECT DISTINCT tenant_id FROM calling_runs WHERE state='running' LIMIT 5000").all()).results||[])
+   .map(r=>r.tenant_id).filter(t=>active.has(t)&&!uncertain.has(t));
+  // Fair order: fewer live calls first, then the company served longest ago.
+  const since=new Date(now-86400000).toISOString();
+  const served=new Map(((await db.prepare("SELECT tenant_id,MAX(reserved_at) AS last FROM calling_jobs WHERE reserved_at>=? GROUP BY tenant_id").bind(since).all()).results||[]).map(r=>[r.tenant_id,r.last]));
+  let queue=rotate(running.sort(),now).map((t,i)=>[t,i]).sort((a,b)=>(live.get(a[0])||0)-(live.get(b[0])||0)||
+   String(served.get(a[0])||'').localeCompare(String(served.get(b[0])||''))||a[1]-b[1]).map(x=>x[0]);const cache={tenants:new Map()};
+  while(queue.length&&free>0){
+   const next=[];
+   for(const tid of queue){
+    if(free<=0||meter.used+DIAL_QUERY_COST>meter.limit){next.length=0;queue=[];break}
+    if((live.get(tid)||0)>=cfg.maxPerCompany)continue;
+    processed++;
+    let r;
+    try{r=await dialNextForTenant(env,db,tid,config,{apiFetch,now,maxPerCompany:cfg.maxPerCompany,cache})}
+    catch{console.error('AR3D scripted campaign processing unavailable');continue}
+    if(r.state==='submitted'){dialed++;free--;live.set(tid,(live.get(tid)||0)+1);next.push(tid)}
+    else if(r.state==='unknown'||r.state==='locked'){free--;}
+    else if(r.state==='funding_approval_required'||r.state==='provider_review_required'){queue=[];next.length=0;break}
+   }
+   queue=next;
+  }
  }
  // Aggregate counters only: no customer names, tenant IDs, provider tokens or
  // CRM answers in scheduled logs.
- return {processed,scanned,activeTenants:total};
+ return {processed,dialed,reconciled,liveCalls:globalLive+dialed,maxConcurrent:cfg.maxConcurrent,throttled,queriesUsed:meter.used,activeTenants:active.size};
 }

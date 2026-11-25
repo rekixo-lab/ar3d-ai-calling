@@ -161,7 +161,10 @@ function cloudflareMock({ controlTables=[],crmTables=[],controlName='ar3d-callin
       if(sql.includes("type='trigger'")) rows=sql.includes('trg_minute_ledger_')?triggers.filter(x=>x.name.startsWith('trg_minute_ledger_')):triggers;
       else if(sql.includes('sqlite_master')) rows=tableNames.map(name=>({name}));
       else if(sql.includes('PRAGMA')) {
-        if(sql.includes('leads')) rows=leadColumns.map(name=>({name}));
+        if(sql.includes('calling_dispatch_settings')) rows=REQUIRED_COLUMNS.CONTROL_DB.calling_dispatch_settings.map(name=>({name}));
+        else if(sql.includes('calling_company_settings')) rows=REQUIRED_COLUMNS.CONTROL_DB.calling_company_settings.map(name=>({name}));
+        else if(sql.includes('calling_capacity_signals')) rows=REQUIRED_COLUMNS.CONTROL_DB.calling_capacity_signals.map(name=>({name}));
+        else if(sql.includes('leads')) rows=leadColumns.map(name=>({name}));
         else if(sql.includes('conversation_simulations')) rows=['tenant_id','state_json','expires_at'].map(name=>({name}));
         else if(sql.includes('tenants')) rows=['id','plan_code','storage_mode','suspended_from_status'].map(name=>({name}));
         else if(sql.includes('human_users')) rows=['id','global_role','password_hash'].map(name=>({name}));
@@ -391,4 +394,17 @@ test('provider reconciliation migration verifies expense evidence and overrun sa
  assert.throws(()=>checkProviderReconcileTriggers([]),/Provider reconciliation safety trigger/);
  const r=await inspectCloudflare({credentials:getCredentials(env),mode:'preflight',template,apiFetch:cloudflareMock({controlTables:old,crmTables:REQUIRED_TABLES.CRM_DB})});
  assert.equal(r.modes.CONTROL_DB,'control_provider_reconcile_upgrade');
+});
+
+test('capacity settings migration is a recognized additive upgrade, also for fresh databases',async()=>{
+ const old=REQUIRED_TABLES.CONTROL_DB.filter(x=>!['calling_dispatch_settings','calling_company_settings','calling_capacity_signals'].includes(x));
+ assert.equal(checkTables(old,'CONTROL_DB','preflight'),'control_dispatch_settings_upgrade');
+ assert.equal(verifiedSchemaState({CONTROL_DB:'control_dispatch_settings_upgrade',CRM_DB:'ready'}),'control_dispatch_settings_upgrade');
+ const r=await inspectCloudflare({credentials:getCredentials(env),mode:'preflight',template,apiFetch:cloudflareMock({controlTables:old,crmTables:REQUIRED_TABLES.CRM_DB})});
+ assert.equal(r.modes.CONTROL_DB,'control_dispatch_settings_upgrade');
+ const {readFileSync}=await import('node:fs');
+ const flow=readFileSync('.github/workflows/deploy-production.yml','utf8');
+ assert.match(flow,/schema_state == 'control_dispatch_settings_upgrade'[\s\S]*0028_calling_dispatch_settings\.sql[\s\S]*0022_parallel_company_calls\.sql/);
+ for(const file of ['migrations/control/0028_calling_dispatch_settings.sql','migrations/crm/0022_parallel_company_calls.sql'])
+  assert.equal(flow.split(file).length-1,2,file+' must run in the upgrade and the fresh initialization');
 });
