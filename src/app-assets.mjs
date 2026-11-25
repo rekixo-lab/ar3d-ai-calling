@@ -1715,13 +1715,39 @@ function aiTestingPanel(content,tenantId,role){
 function manualCustomerPanel(tenantId,content){
  const details=node('details',{class:'card'},node('summary',{text:'Add one customer manually'}));
  const name=input('customerName','text','Full name'),mobile=input('customerMobile','tel','Indian mobile number');
+ // Optional: put the typed number straight into a calling campaign.
+ const campaign=node('select',{class:'field',name:'customerCampaign','aria-label':'Add to calling campaign'},[
+  node('option',{value:'',text:'Only save to CRM'}),node('option',{value:'new',text:'New campaign: Manual numbers'})]);
+ const language=node('select',{class:'field',name:'customerCampaignLanguage','aria-label':'Call language for new campaign'},[
+  node('option',{value:'hi',text:'Hindi'}),node('option',{value:'en',text:'English'})]);
+ const languageField=lab('Call language',language);languageField.hidden=true;
+ campaign.addEventListener('change',()=>{languageField.hidden=campaign.value!=='new'});
+ let listed=false;
+ details.addEventListener('toggle',async()=>{
+  if(!details.open||listed)return;listed=true;
+  try{
+   const {campaigns}=await api('/v1/human/campaigns?tenantId='+encodeURIComponent(tenantId));
+   campaign.append(...campaigns.filter(c=>c.status==='draft').map(c=>node('option',{value:c.id,text:'Campaign: '+c.name})));
+  }catch{listed=false}
+ });
  const submit=node('button',{class:'btn',type:'submit',text:'Add customer'});
- const form=node('form',{class:'formrow'},[lab('Name',name),lab('Mobile',mobile),submit]);
+ const form=node('form',{class:'formrow'},[lab('Name',name),lab('Mobile',mobile),lab('Add to calling campaign',campaign),languageField,submit]);
  form.addEventListener('submit',async e=>{
   e.preventDefault();submit.disabled=true;
   try{
-   await api('/v1/human/leads','POST',{tenantId,name:name.value,mobile:mobile.value});
-   notice('Customer added. Calling clearance still requires review.');await renderClient(tenantId,content);
+   const saved=await api('/v1/human/leads','POST',{tenantId,name:name.value,mobile:mobile.value});
+   let message='Customer added. Calling clearance still requires review.';
+   if(campaign.value){
+    let target=campaign.value,label=campaign.selectedOptions[0].text.replace(/^Campaign: /,'');
+    if(target==='new'){
+     label='Manual numbers '+new Date().toLocaleDateString('en-IN',{day:'2-digit',month:'short',timeZone:'Asia/Kolkata'});
+     target=(await api('/v1/human/campaigns','POST',{tenantId,name:label,languageMode:language.value,purpose:'property_information'})).id;
+    }
+    const added=await api('/v1/human/campaigns/'+encodeURIComponent(target)+'/candidates','POST',{tenantId,leadIds:[saved.id]});
+    message=added.inserted?'Customer added to campaign “'+label+'”. AR3D approval is needed before the call.':'Customer saved to CRM, but could not join the campaign (blocked or opted out).';
+    if(added.inserted){state.importCampaign={tenantId,id:target};state.clientTab='calling'}
+   }
+   notice(message);await renderClient(tenantId,content);
   }catch(e){asError(e)}finally{submit.disabled=false}
  });
  details.append(form);return details;
