@@ -2136,6 +2136,29 @@ function operationsReportPanel(tenantId,content){
  });
 }
 
+function callAttemptLabel(result){
+ const e=result.callEvidence;
+ if(result.state==='failed'&&result.errorCode==='credit_reservation_unavailable'&&e?.sessionPresent===false)
+  return 'Not dialed · credit reservation failed';
+ if(result.state==='queued')return 'Queued · no call sent';
+ if(result.state==='blocked')return 'Blocked before dialing';
+ if(result.state==='unknown')return 'Outcome uncertain · verification required';
+ if(result.state==='completed'||result.outcome==='completed')return 'Questionnaire completed';
+ if(e?.signedHangup)return result.outcome==='declined'?'Call ended · consent declined':'Call ended · questionnaire incomplete';
+ if(e?.requestAccepted||result.state==='submitted')return 'Accepted by provider · awaiting outcome';
+ if(result.outcome==='rejected')return 'Stopped before connection';
+ if(result.state==='reserved')return 'Preparing call · outcome not confirmed';
+ return result.state==='failed'?'Attempt failed':result.state;
+}
+function campaignRunProgress(run,jobs){
+ const rows=(jobs||[]).filter(j=>j.runId===run?.id);
+ if(rows.some(j=>j.state==='unknown'))return 'An attempt needs verification. Open customer answers to see call status.';
+ if(rows.some(j=>j.state==='submitted'))return 'Provider accepted a call request. Ringing or answer is not yet confirmed here.';
+ if(rows.some(j=>j.state==='reserved'))return 'Preparing a call. Open customer answers for the latest attempt status.';
+ if(rows.some(j=>j.state==='queued'))return 'Campaign queued. Calls start in the calling window when eligible.';
+ if(rows.some(j=>j.state==='failed'||j.state==='blocked'))return 'Attempts have finished with issues. Open customer answers for the reason.';
+ return 'Campaign started. Refresh status to see individual attempts.';
+}
 function campaignResultsPanel(tenantId,content,role){
  const card=div('card',title('Campaign results & customer answers')),output=div('stack');
  const answer=div('answer-sheet');answer.hidden=true;
@@ -2144,22 +2167,57 @@ function campaignResultsPanel(tenantId,content,role){
  content.append(card);
  const campaign=node('select',{class:'field','aria-label':'Filter results by campaign'});
  let offset=0,fetching=false,loaded=false,page=[];
- const exportBtn=btn('Export this page (CSV)',()=>downloadReportCsv('ar3d-campaign-results-'+offset+'.csv',['Customer','Campaign','State','Outcome','Connected seconds','Partial','Reviewed','Saved to CRM','Property type','Location','Area','Size','Budget minimum INR','Budget maximum INR','Interest','Visit date','Visit time (IST)'],page.map(r=>[r.name,r.campaign,r.state,r.outcome,r.durationSeconds,r.partial,r.partialReviewed,r.savedToLead,r.answers?.propertyType,r.answers?.location,r.answers?.area,r.answers?.size,r.answers?.budgetMinInr,r.answers?.budgetInr,r.answers?.interest,r.answers?.visitDate,r.answers?.visitAt?formatIst(r.answers.visitAt):null])),true);
+ const exportBtn=btn('Export this page (CSV)',()=>downloadReportCsv('ar3d-campaign-results-'+offset+'.csv',['Customer','Target last 4','Campaign','State','Outcome','Reason','Call status','Connected seconds','Updated IST','Partial','Reviewed','Saved to CRM','Property type','Location','Area','Size','Budget minimum INR','Budget maximum INR','Interest','Visit date','Visit time (IST)'],page.map(r=>[r.name,r.destinationLast4,r.campaign,r.state,r.outcome,r.errorCode,callAttemptLabel(r),r.durationSeconds,formatIst(r.updatedAt),r.partial,r.partialReviewed,r.savedToLead,r.answers?.propertyType,r.answers?.location,r.answers?.area,r.answers?.size,r.answers?.budgetMinInr,r.answers?.budgetInr,r.answers?.interest,r.answers?.visitDate,r.answers?.visitAt?formatIst(r.answers.visitAt):null])),true);
  exportBtn.disabled=true;
  const back=btn('Previous results',()=>{offset=Math.max(0,offset-50);refresh().catch(asError)},true);
  const next=btn('Next results',()=>{offset+=50;refresh().catch(asError)},true);
  const refreshBtn=btn('Refresh customer answers',()=>refresh().catch(asError),true);
  back.disabled=true;next.disabled=true;
  function answerBudget(amount){return amount==null?'—':new Intl.NumberFormat('en-IN',{style:'currency',currency:'INR',maximumFractionDigits:0}).format(amount)}
- const outcomes={completed:'Answers saved',declined:'Declined or opted out',ended:'Ended before completion',needs_review:'Review needed',rejected:'Provider rejected',operator_reviewed:'Reviewed by admin',
-  queued:'Queued / awaiting clearance',reserved:'Preparing call',submitted:'Call sent',failed:'Call unsuccessful',unknown:'Awaiting verification',blocked:'Blocked'};
+ function attemptDetails(r){
+  const e=r.callEvidence,parts=[];
+  const duration=e?.durationSeconds??r.durationSeconds;
+  if(r.reservedAt)parts.push('Attempt: '+formatIst(r.reservedAt));
+  else if(r.createdAt)parts.push('Queued: '+formatIst(r.createdAt));
+  if(e){
+   parts.push(e.requestAccepted?'Plivo accepted the request':'No accepted Plivo request recorded');
+   parts.push(e.signedHangup?'Call-end confirmation received':'No signed call-end confirmation');
+   parts.push(e.audioReceived?'Answer audio received by the app':'No answer audio recorded in the app');
+  }
+  if(Number.isSafeInteger(duration)&&duration>=0)parts.push('Reported duration: '+duration+' seconds');
+  if(r.errorCode)parts.push('Reason: '+r.errorCode);
+  parts.push('Call reference: '+r.id);
+  const details=node('details',{},[node('summary',{text:'View call details'}),...parts.map(text=>node('p',{class:'muted',text}))]);
+  if(e)details.append(node('p',{class:'muted',text:'This flow does not save an audio playback file in the client panel.'}));
+  if(role==='super_admin'&&r.state==='failed'&&r.errorCode==='credit_reservation_unavailable'&&e?.sessionPresent===false&&e?.reservationState==='held'){
+   const release=btn('Return unused held minutes',async()=>{
+    if(release.disabled)return;
+    release.disabled=true;
+    try{
+     await api('/v1/human/calling/release-unused-reservation','POST',{tenantId,jobId:r.id});
+     notice('Unused held minutes returned. The call was not retried.');
+     await refresh();
+    }catch(error){asError(error);release.disabled=false}
+   },true);
+   details.append(node('p',{class:'note',text:'This failed before a calling session was created. Return its unused reservation after the server verifies the attempt.'}),release);
+  }
+  return details;
+ }
+ function creditStatus(r){
+  const e=r.callEvidence;
+  if(e?.reservationState==='released')return 'Unused reservation returned';
+  if(e?.reservationState==='held')return 'On hold: '+formatSeconds(e.reservedSeconds);
+  if(e?.reservationState==='settled')return 'Charged: '+formatSeconds(e.chargedSeconds);
+  return '—';
+ }
  async function refresh(){
   if(fetching)return;
   fetching=true;refreshBtn.disabled=true;campaign.disabled=true;back.disabled=true;next.disabled=true;exportBtn.disabled=true;page=[];
   try{
    if(!loaded||content.requestedCampaign!==undefined){
     const prior=campaign.value;
-    const {campaigns}=await api('/v1/human/campaigns?tenantId='+encodeURIComponent(tenantId));
+    const {campaigns}=role==='super_admin'?{campaigns:[]}:await api('/v1/human/campaigns?tenantId='+encodeURIComponent(tenantId));
+    if(!card.isConnected)return;
     campaign.replaceChildren(node('option',{value:'',text:'All campaigns'}),...campaigns.map(c=>node('option',{value:c.id,text:c.name})));
     campaign.value=content.requestedCampaign??prior;
     if(campaign.selectedIndex<0)campaign.value='';
@@ -2170,20 +2228,21 @@ function campaignResultsPanel(tenantId,content,role){
    const query=new URLSearchParams({tenantId,offset:String(offset)});
    if(campaign.value)query.set('campaignId',campaign.value);
    const {results,total}=await api('/v1/human/calling/results?'+query);
+   if(!card.isConnected)return;
    page=results;exportBtn.disabled=!page.length;
    answer.hidden=true;
    output.replaceChildren(
     node('p',{class:'muted',text:total?(offset+1)+'–'+(offset+results.length)+' of '+total+' customers':'Campaign call attempts will appear here.'}),
-    table(['Customer','Campaign','Outcome','CRM','Answers','Calling credits'],results.map(r=>[
-     r.name,r.campaign,outcomes[r.outcome]||outcomes[r.state]||r.state,
+    table(['Customer','Number','Campaign','Call status','Details','CRM','Answers','Calling credits'],results.map(r=>[
+     r.name,r.destinationLast4?'••••'+r.destinationLast4+(r.destinationSource==='queued_lead'?' (queued)':''):'Unavailable',r.campaign,callAttemptLabel(r),attemptDetails(r),
      r.answers?(r.partial?(r.partialReviewed?'Partial · reviewed':'Partial · review needed'):r.savedToLead?'Saved to lead':'Lead needs review'):'—',
      r.answers?btn(r.partial?'View partial answers':'View answers',()=>showAnswers(r),true):'—',
      role==='client_admin'&&['completed','failed'].includes(r.state)?
-      btn('Check credits',()=>checkCharge(r),true):'—'
+      div('stack',node('span',{text:creditStatus(r)}),btn('Check credits',()=>checkCharge(r),true)):creditStatus(r)
     ]))
    );
    back.disabled=offset===0;next.disabled=offset+results.length>=total;
-  }finally{fetching=false;refreshBtn.disabled=false;campaign.disabled=false}
+  }finally{fetching=false;refreshBtn.disabled=false;campaign.disabled=role==='super_admin'}
   if(content.requestedCampaign!==undefined)await refresh();
  }
  async function checkCharge(result){
@@ -2281,7 +2340,7 @@ async function customerCallingPanel(tenantId,content,role,openView,openResults,r
    'AI calling is being prepared by AR3D. You can import your customer list now.':
    !policyReady?'AI calling for this company is waiting for AR3D activation.':
    !snapshot.data.credits?.ready?'Company calling setup is incomplete. Ask the Super Admin to check Calling Setup.':
-   !campaign?'Import customers and prepare a campaign.':!languageOK?'Prepare a Hindi or English campaign.':run?.state==='completed'?'Campaign finished. View customer answers.':run?.state==='running'?'Calling is in progress.':needsDeclaration&&!consentBox.checked?'Confirm customer consent below to start calling.':'Calls run while you have calling minutes · 09:00–20:00 India time');
+   !campaign?'Import customers and prepare a campaign.':!languageOK?'Prepare a Hindi or English campaign.':run?.state==='completed'?'Campaign finished. View customer answers.':run?.state==='running'?campaignRunProgress(run,snapshot.data.jobs):needsDeclaration&&!consentBox.checked?'Confirm customer consent below to start calling.':'Calls run while you have calling minutes · 09:00–20:00 India time');
   status.className='note '+(ready?'ready-note':'');
   summary.replaceChildren(campaign?div('between row',
    node('strong',{text:campaign.name}),
@@ -2403,6 +2462,7 @@ async function callingAdminPanel(main,client=null){
  const details=div('stack');diagnostics.append(details);tools.append(diagnostics);
  diagnostics.addEventListener('toggle',()=>{if(diagnostics.open&&!diagnostics.dataset.loaded){diagnostics.dataset.loaded='true';launchReadinessPanel(details)}});
  const card=div('card calling-settings',title('Client calling activation')),area=div('approval-grid');card.id='calling-setup';main.append(card);
+ const attemptHistory=div('stack');main.append(attemptHistory);let historyTenant=null;
  const company=node('select',{class:'field','aria-label':'Calling setup company'});
  const companySearch=input('callingSetupCompanySearch','search','Search company name or email');
  companySearch.maxLength=80;
@@ -2438,6 +2498,10 @@ async function callingAdminPanel(main,client=null){
  async function refresh(){
   const generation=++requestGeneration,tenantId=company.value;
   choices.replaceChildren();status.replaceChildren();recovery.replaceChildren();clearanceHistory.replaceChildren();
+  if(historyTenant!==tenantId){
+   historyTenant=tenantId;attemptHistory.replaceChildren();
+   if(tenantId)campaignResultsPanel(tenantId,attemptHistory,'super_admin');
+  }else attemptHistory.dispatchEvent(new Event('workspace-tab-shown'));
   if(!tenantId)return;
   try{
    const selected=draft.value;

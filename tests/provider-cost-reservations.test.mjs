@@ -5,9 +5,103 @@ import {moneyBudgetConfig,providerBudgetPosition,reserveBudgetedMinutes} from '.
 import {closeMinuteHold,minutePosition} from '../src/minute-holds.mjs';
 import {tickScriptedTenant,scriptedCampaignConfiguration} from '../src/scripted-campaign-dispatch.mjs';
 import {approvedCampaignPhone} from '../src/scripted-phone-pilot.mjs';
+import {syncManualBalance} from '../src/manual-provider-balances.mjs';
+import {handleCallingCron} from '../src/calling-schedule.mjs';
 const one='11111111-aaaa-4aaa-8aaa-111111111111',two='11111111-aaaa-4aaa-8aaa-222222222222',other='99999999-9999-4999-8999-999999999999';
 const config={plivo:{currency:'USD',capMicros:100,pulseMicros:30},sarvam:{currency:'INR',capMicros:1000,pulseMicros:100}};
 function fund(f,id){f.c.db.prepare("INSERT INTO tenant_minute_ledger(id,tenant_id,kind,delta_seconds,previous_seconds,balance_seconds,actor,reason,created_at) VALUES(?,?,'allocation',600,0,600,'admin','Synthetic allocation',?)").run('fund-'+id,id,at);}
+
+// D1 reports the total_changes() delta, including AFTER INSERT trigger writes.
+// node:sqlite Statement.run().changes reports only the outer statement, which
+// previously hid a successful provider reservation plus hold being called a failure.
+function d1Control(f,reservations,beforeReservation=()=>{}){
+ const db=f.c.db,total=()=>db.prepare('SELECT total_changes() AS n').get().n;
+ return {
+  prepare(sql){
+   const statement=db.prepare(sql);
+   const bound=args=>{
+    const execute=method=>{
+     if(/INSERT INTO provider_cost_reservations/.test(sql))beforeReservation();
+     const before=total();
+     const results=method==='run'?(statement.run(...args),[]):statement.all(...args);
+     const changes=total()-before;
+     if(/INSERT INTO provider_cost_reservations/.test(sql))reservations.push({method,changes});
+     return {results,meta:{changes}};
+    };
+    return {async first(){return execute('first').results[0]??null},async all(){return execute('all')},async run(){return execute('run')}};
+   };
+   return {...bound([]),bind(...args){return bound(args)}};
+  },
+  async batch(statements){
+   db.exec('BEGIN IMMEDIATE');
+   try{const results=[];for(const statement of statements)results.push(await statement.run());db.exec('COMMIT');return results}
+   catch(error){db.exec('ROLLBACK');throw error}
+  }
+ };
+}
+
+test('D1 trigger-inclusive change counts recognize a new reservation once and reject a replay',async()=>{
+ const f=fixture();try{
+  fund(f,tid);
+  const reservations=[],db=d1Control(f,reservations);
+  const data={tenantId:tid,job:one,maxSeconds:60,globalCap:600,config};
+  assert.deepEqual(await reserveBudgetedMinutes(db,data),{ok:true,replayed:false,state:'held'});
+  assert.equal(reservations[0].changes,2,'one provider reservation plus its triggered minute hold');
+  assert.deepEqual(await reserveBudgetedMinutes(db,data),{ok:false,replayed:false,state:'insufficient_or_unavailable'});
+  assert.equal(reservations[1].changes,0);
+  assert.equal(f.c.db.prepare('SELECT COUNT(*) AS n FROM provider_cost_reservations').get().n,1);
+  assert.equal(f.c.db.prepare('SELECT COUNT(*) AS n FROM tenant_minute_holds').get().n,1);
+ }finally{f.close()}
+});
+
+test('manual-balance cron reaches one provider submission with D1 trigger-inclusive metadata',async()=>{
+ const f=fixture();try{
+  await setup(f);
+  for(const [provider,balanceMicros] of [['plivo',753690000],['sarvam',98730000]])
+   assert.equal((await syncManualBalance(f.env.CONTROL_DB,
+    {id:crypto.randomUUID(),provider,balanceMicros,expectedRevision:0},'admin',now)).ok,true);
+  const reservations=[];
+  f.env.CONTROL_DB=d1Control(f,reservations);
+  f.env.RECORDINGS={async head(){return null},async get(){return null}};
+  let posts=0;
+  const result=await handleCallingCron({cron:'* * * * *',scheduledTime:now+60000},f.env,{
+   apiFetch:async(_url,options)=>{assert.equal(options.method,'POST');posts++;return accepted()},
+   cdrFetch:async()=>assert.fail('new call has no ended CDR to fetch')
+  });
+  assert.equal(posts,1);
+  assert.equal(result.dialed,1);
+  assert.equal(reservations.length,1);
+  assert.equal(reservations[0].changes,2);
+  assert.equal(f.r.db.prepare('SELECT state FROM calling_jobs').get().state,'submitted');
+  assert.equal(f.c.db.prepare('SELECT COUNT(*) AS n FROM scripted_phone_pilots WHERE job_id IS NOT NULL').get().n,1);
+  assert.equal(f.c.db.prepare('SELECT state FROM tenant_minute_holds').get().state,'held');
+  await handleCallingCron({cron:'* * * * *',scheduledTime:now+120000},f.env,{
+   apiFetch:async()=>assert.fail('an already submitted customer must not be redialed'),
+   cdrFetch:async()=>assert.fail('no signed hangup exists')
+  });
+  assert.equal(reservations.length,1);
+ }finally{f.close()}
+});
+
+test('D1 reservation refusal after a concurrent company suspension never submits a call or leaves a hold',async()=>{
+ const f=fixture();try{
+  await setup(f);
+  const reservations=[];
+  f.env.CONTROL_DB=d1Control(f,reservations,()=>{
+   f.c.db.prepare("UPDATE tenants SET suspended_from_status=status,status='suspended' WHERE id=?").run(tid);
+  });
+  const result=await tickScriptedTenant(f.env,f.r.wrap,tid,await approvedCampaignPhone(f.env),{
+   now,apiFetch:async()=>assert.fail('a refused reservation must not reach the provider')
+  });
+  assert.equal(result.state,'insufficient_credits');
+  assert.equal(reservations.length,1);
+  assert.equal(reservations[0].changes,0);
+  assert.equal(f.r.db.prepare('SELECT error_code FROM calling_jobs').get().error_code,'credit_reservation_unavailable');
+  for(const table of ['provider_cost_reservations','tenant_minute_holds'])
+   assert.equal(f.c.db.prepare('SELECT COUNT(*) AS n FROM '+table).get().n,0);
+  assert.equal(f.c.db.prepare('SELECT COUNT(*) AS n FROM scripted_phone_pilots WHERE job_id IS NOT NULL').get().n,0);
+ }finally{f.close()}
+});
 test('independent provider budgets reserve atomically across tenants, no duplicate or inferred refund',async()=>{
  const f=fixture();try{
  f.c.db.prepare("INSERT INTO tenants(id,slug,display_name,plan_code,storage_mode,status,created_at,updated_at) VALUES(?,'other','Other','starter','shared','active',?,?)").run(other,at,at);

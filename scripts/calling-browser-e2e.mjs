@@ -176,8 +176,8 @@ try{
  await page.getByRole('heading',{name:'Campaign results & customer answers'}).waitFor();
  await page.getByRole('button',{name:'Refresh customer answers'}).waitFor();
  assert.equal(await page.getByRole('combobox',{name:'Filter results by campaign'}).inputValue(),draft.id);
- await page.getByRole('row',{name:new RegExp('Uploaded buyer Acceptance '+viewport.width+'.*Saved to lead')}).waitFor();
- await page.getByRole('row',{name:new RegExp('Uploaded buyer Acceptance '+viewport.width)}).getByRole('button',{name:'View answers'}).click();
+ await page.getByRole('row',{name:new RegExp('Uploaded buyer.*Acceptance '+viewport.width+'.*Saved to lead')}).waitFor();
+ await page.getByRole('row',{name:new RegExp('Uploaded buyer.*Acceptance '+viewport.width)}).getByRole('button',{name:'View answers'}).click();
  await page.getByRole('heading',{name:'Uploaded buyer — call answers'}).waitFor();
  await page.getByText('3BHK',{exact:true}).waitFor();
  assert.equal(await page.getByRole('row',{name:/Fictional buyer/}).count(),0);

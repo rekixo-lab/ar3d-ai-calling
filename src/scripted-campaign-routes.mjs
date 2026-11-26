@@ -7,10 +7,18 @@ import {SCRIPTED_CALLING_POLICY,scriptedPromptsReady,approvedCampaignPhone} from
 import {resolveFundingEnv} from './provider-funding.mjs';
 import {enableClientCalling,validCallingActivationReference} from './client-calling-activation.mjs';
 import {setManualFundingEnabled} from './manual-provider-balances.mjs';
+import {readCallingAttemptEvidence} from './calling-attempt-evidence.mjs';
+import {releaseUnusedReservation} from './unused-reservation-recovery.mjs';
 const BASE='/v1/human/calling';
 const UUID=/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
 const json=(data,status=200)=>Response.json(data,{status,headers:{'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'}});
 const fail=(error,status=400)=>json({error},status);
+// Preserve the exact reserved target. Only a queued job may fall back to the
+// current lead number, and the source remains explicit in both read-only views.
+const targetColumns=`CASE WHEN j.destination IS NOT NULL THEN substr(j.destination,-4)
+ WHEN j.state='queued' THEN substr(l.mobile_e164,-4) ELSE NULL END AS destinationLast4,
+ CASE WHEN j.destination IS NOT NULL THEN 'attempt' WHEN j.state='queued' THEN 'queued_lead'
+ ELSE 'unavailable' END AS destinationSource`;
 const reference=v=>typeof v==='string'&&v.trim().length>=4&&v.length<=160&&!/[\u0000-\u001f]/.test(v);
 // Company approval and clearances may last up to one year; review can revoke earlier.
 const expiry=(v,now)=>typeof v==='string'&&/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$/.test(v)&&Date.parse(v)>now&&Date.parse(v)<=now+366*86400000;
@@ -66,8 +74,8 @@ export async function handleScriptedCallingRequest(req,env,user,{now=Date.now()}
  const action=path.slice(BASE.length+1);
  if(!['GET','POST'].includes(req.method))return fail('method_not_allowed',405);
  if(req.method==='POST'&&!mutationOriginAllowed(req))return fail('same_origin_required',403);
- const admin=['policy','clearances','reconcile'].includes(action);
- if(!['policy','clearances','runs','state','results','reconcile','review-partial','capacity','enable-clients'].includes(action))return fail('not_found',404);
+ const admin=['policy','clearances','reconcile','release-unused-reservation'].includes(action);
+ if(!['policy','clearances','runs','state','results','reconcile','review-partial','capacity','enable-clients','release-unused-reservation'].includes(action))return fail('not_found',404);
  try{
   const d=req.method==='POST'?await body(req):Object.fromEntries(url.searchParams);
   if(action==='enable-clients'){
@@ -103,7 +111,8 @@ export async function handleScriptedCallingRequest(req,env,user,{now=Date.now()}
   }
   if(!UUID.test(d.tenantId||''))return fail('invalid_tenant');
   let member;
-  if(admin){
+  const adminRead=req.method==='GET'&&['state','results'].includes(action)&&user?.globalRole==='super_admin';
+  if(admin||adminRead){
    if(!await freshAdmin(env,user,now))return fail('current_super_admin_mfa_required',403);
    const t=await env.CONTROL_DB.prepare("SELECT id AS tenant_id,storage_mode,dedicated_binding,status FROM tenants WHERE id=? AND status IN('trial','active')").bind(d.tenantId).first();
    if(!t)return fail('tenant_unavailable',404);member=t;
@@ -112,6 +121,13 @@ export async function handleScriptedCallingRequest(req,env,user,{now=Date.now()}
    if(!member)return fail('forbidden',403);
   }
   const db=resolveCrmDb(env,member),tid=member.tenant_id,at=new Date(now).toISOString();
+  if(action==='release-unused-reservation'){
+   if(req.method!=='POST')return fail('method_not_allowed',405);
+   if(url.search||Object.keys(d).length!==2||Object.keys(d).some(k=>!['tenantId','jobId'].includes(k))||
+      !(UUID.test(d.jobId||'')||/^[a-f0-9]{32}$/i.test(d.jobId||'')))return fail('invalid_reservation_selection');
+   const result=await releaseUnusedReservation(env,db,{tenantId:tid,jobId:d.jobId},user.id,now);
+   return result.ok?json(result):fail(result.state,409);
+  }
   if(action==='policy'&&req.method==='GET')return json({consentMode:await consentMode(env,tid),policy:await db.prepare('SELECT enabled,approval_reference AS approvalReference,expires_at AS expiresAt,daily_limit AS dailyLimit,max_seconds AS maxSeconds FROM calling_policies WHERE tenant_id=? AND flow_id=?').bind(tid,SCRIPTED_CALLING_POLICY).first(),configuration:await scriptedCampaignConfiguration(env)});
   if(action==='policy'){
    if(Object.keys(d).some(k=>!['tenantId','enabled','approvalReference','expiresAt','dailyLimit','maxSeconds','consentMode'].includes(k))||(d.consentMode!==undefined&&!['reviewed','client_declared'].includes(d.consentMode))||
@@ -241,6 +257,7 @@ export async function handleScriptedCallingRequest(req,env,user,{now=Date.now()}
    const [rows,count]=await Promise.all([
     db.prepare(`SELECT j.id,j.lead_id AS leadId,l.name,c.name AS campaign,j.state,j.provider_status AS outcome,
      j.duration_seconds AS durationSeconds,j.error_code AS errorCode,j.updated_at AS updatedAt,
+     j.created_at AS createdAt,j.reserved_at AS reservedAt,${targetColumns},
      a.answers_json AS answersJson,a.saved_to_lead AS savedToLead,a.captured_at AS capturedAt,l.updated_at AS leadUpdatedAt,
      EXISTS(SELECT 1 FROM crm_audit_events e WHERE e.tenant_id=j.tenant_id AND e.action='calling.partial_reviewed' AND e.target_id=j.id) AS partialReviewed
      FROM calling_jobs j JOIN calling_runs r ON r.tenant_id=j.tenant_id AND r.id=j.run_id
@@ -251,11 +268,13 @@ export async function handleScriptedCallingRequest(req,env,user,{now=Date.now()}
      ORDER BY j.created_at DESC,j.id DESC LIMIT ? OFFSET ?`).bind(tid,campaign,campaign,limit,offset).all(),
     db.prepare('SELECT COUNT(*) AS total '+scope).bind(tid,campaign,campaign).first()
    ]);
+   const callEvidence=await readCallingAttemptEvidence(env.CONTROL_DB,tid,rows.results.map(row=>row.id));
    const results=rows.results.map(({answersJson,savedToLead,...row})=>{
     const stored=answersJson?JSON.parse(answersJson):null;
     const partial=stored?.__partial===true;
     if(partial)delete stored.__partial;
-    return {...row,partialReviewed:row.partialReviewed===1,answers:stored,partial,savedToLead:savedToLead===1&&!partial};
+    return {...row,partialReviewed:row.partialReviewed===1,answers:stored,partial,savedToLead:savedToLead===1&&!partial,
+     callEvidence:callEvidence.get(row.id)};
    });
    return json({results,total:count.total,limit,offset});
   }
@@ -263,7 +282,7 @@ export async function handleScriptedCallingRequest(req,env,user,{now=Date.now()}
    if(req.method!=='GET')return fail('method_not_allowed',405);
    const [runs,jobs,policy]=await Promise.all([
     db.prepare('SELECT r.id,r.campaign_id AS campaignId,c.name,r.state,r.created_at AS createdAt FROM calling_runs r JOIN call_campaign_drafts c ON c.tenant_id=r.tenant_id AND c.id=r.campaign_id WHERE r.tenant_id=? ORDER BY r.created_at DESC LIMIT 50').bind(tid).all(),
-    db.prepare('SELECT j.id,j.run_id AS runId,j.lead_id AS leadId,l.name,j.state,j.provider_status AS providerStatus,j.duration_seconds AS durationSeconds,j.error_code AS errorCode,j.updated_at AS updatedAt FROM calling_jobs j JOIN leads l ON l.tenant_id=j.tenant_id AND l.id=j.lead_id WHERE j.tenant_id=? ORDER BY j.created_at DESC,j.id DESC LIMIT 200').bind(tid).all(),
+    db.prepare(`SELECT j.id,j.run_id AS runId,j.lead_id AS leadId,l.name,j.state,j.provider_status AS providerStatus,j.duration_seconds AS durationSeconds,j.error_code AS errorCode,j.updated_at AS updatedAt,j.created_at AS createdAt,j.reserved_at AS reservedAt,${targetColumns} FROM calling_jobs j JOIN leads l ON l.tenant_id=j.tenant_id AND l.id=j.lead_id WHERE j.tenant_id=? ORDER BY j.created_at DESC,j.id DESC LIMIT 200`).bind(tid).all(),
     db.prepare('SELECT enabled,expires_at AS expiresAt,daily_limit AS dailyLimit,max_seconds AS maxSeconds FROM calling_policies WHERE tenant_id=? AND flow_id=?').bind(tid,SCRIPTED_CALLING_POLICY).first()
    ]);
    const configuration=await scriptedCampaignConfiguration(env);
