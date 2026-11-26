@@ -59,6 +59,15 @@ const server=http.createServer(async(req,res)=>{
     if(!authenticated)return respond(res,401,{error:'sign in required'});
     if(req.method==='GET'&&['/v1/human/credits/provider','/v1/human/credits/sarvam-balance'].includes(path))
       return respond(res,200,{available:false});
+    if(req.method==='GET'&&path==='/v1/human/credits/provider-balance-sync')
+      return respond(res,200,{
+        mode:'manual_balance',callingEnabled:false,controlRevision:0,status:'provider_balance_sync_required',
+        providers:['plivo','sarvam'].map(provider=>({
+          provider,currency:'INR',available:false,syncedBalanceMicros:null,
+          availableBalanceMicros:null,heldMicros:null,usedMicros:null,lastSyncAt:null,revision:0,
+          source:'manual_provider_dashboard',estimated:true
+        }))
+      });
     if(req.method==='GET'&&path==='/v1/human/credits/admin-dashboard')
       return respond(res,200,{clients:{total:0,active:0},position:{},internal:{ended:0},campaign:{ended:0},transactions:[]});
     if(req.method==='GET'&&path==='/v1/human/mfa')
