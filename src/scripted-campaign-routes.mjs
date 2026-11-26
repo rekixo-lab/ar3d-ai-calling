@@ -4,6 +4,7 @@ import {scriptedCampaignConfiguration,dispatchSettings,providerThrottledUntil} f
 import {minutePosition,fundingCap,fundingPosition,affordableCallSeconds,BILLING_PULSE_SECONDS} from './minute-holds.mjs';
 import {moneyBudgetConfig,providerBudgetPosition} from './provider-cost-reservations.mjs';
 import {SCRIPTED_CALLING_POLICY,scriptedPromptsReady} from './scripted-phone-pilot.mjs';
+import {resolveFundingEnv} from './provider-funding.mjs';
 const BASE='/v1/human/calling';
 const UUID=/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
 const json=(data,status=200)=>Response.json(data,{status,headers:{'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'}});
@@ -53,6 +54,7 @@ export async function handleScriptedCallingRequest(req,env,user,{now=Date.now()}
  const admin=['policy','clearances','reconcile'].includes(action);
  if(!['policy','clearances','runs','state','results','reconcile','review-partial','capacity'].includes(action))return fail('not_found',404);
  try{
+  env=await resolveFundingEnv(env);
   const d=req.method==='POST'?await body(req):Object.fromEntries(url.searchParams);
   // Platform-wide calling capacity (not company-scoped).
   if(action==='capacity'){

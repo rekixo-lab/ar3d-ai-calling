@@ -15,7 +15,7 @@ export const REQUIRED_TABLES = Object.freeze({
   CONTROL_DB: Object.freeze([
     'tenants','tenant_keys','project_links','tenant_numbers','tenant_audit_events',
     'human_users','tenant_memberships','human_sessions','human_invitations',
-    'human_login_limits','human_bootstrap_claim','human_ip_login_limits','human_mfa_settings','human_mfa_challenges','human_mfa_recovery_codes','provider_event_inbox','calling_script_bindings','calling_script_versions','company_profile_versions','calling_agent_publications','shared_voice_gateway','voice_call_routes','client_account_contacts','company_change_requests','scripted_phone_pilots','tenant_credit_budgets','tenant_credit_audit','tenant_minute_ledger','tenant_minute_holds','provider_financial_journal','tenant_credit_purchases','provider_safety_events','provider_cost_reservations','provider_cost_reconciliations','calling_dispatch_settings','calling_company_settings','calling_capacity_signals'
+    'human_login_limits','human_bootstrap_claim','human_ip_login_limits','human_mfa_settings','human_mfa_challenges','human_mfa_recovery_codes','provider_event_inbox','calling_script_bindings','calling_script_versions','company_profile_versions','calling_agent_publications','shared_voice_gateway','voice_call_routes','client_account_contacts','company_change_requests','scripted_phone_pilots','tenant_credit_budgets','tenant_credit_audit','tenant_minute_ledger','tenant_minute_holds','provider_financial_journal','tenant_credit_purchases','provider_safety_events','provider_cost_reservations','provider_cost_reconciliations','calling_dispatch_settings','calling_company_settings','calling_capacity_signals','calling_funding_settings'
   ]),
   CRM_DB: Object.freeze([
     'leads','agents','calls','site_visits','crm_audit_events',
@@ -52,6 +52,7 @@ export const REQUIRED_COLUMNS = Object.freeze({
     calling_dispatch_settings: Object.freeze(['id','max_concurrent_calls','max_calls_per_company','updated_by','updated_at']),
     calling_company_settings: Object.freeze(['tenant_id','consent_mode','updated_by','updated_at']),
     calling_capacity_signals: Object.freeze(['provider','throttled_until','updated_at']),
+    calling_funding_settings: Object.freeze(['id','mode','plivo_currency','plivo_pulse_micros','sarvam_currency','sarvam_pulse_micros','revision','evidence_ref','updated_by','updated_at']),
   }),
   CRM_DB: Object.freeze({
     leads: Object.freeze(['tenant_id','consent_status','dnd_status','interest_status','followup_at',
@@ -188,6 +189,14 @@ export const REQUIRED_PROVIDER_RECONCILE_TRIGGERS=Object.freeze({
  trg_provider_cost_reconcile_no_delete:['before delete on provider_cost_reconciliations','raise(abort'],
  trg_provider_cost_zero_evidence_guard:['before insert on provider_financial_journal','provider_cost_reconciliations','raise(abort']
 });
+export const REQUIRED_FUNDING_SETTINGS_TRIGGERS=Object.freeze({
+ trg_calling_funding_no_delete:['before delete on calling_funding_settings','raise(abort'],
+ trg_calling_funding_revision:['before update on calling_funding_settings','new.revision<>old.revision+1','raise(abort']
+});
+export function checkFundingSettingsTriggers(records){
+ const map=new Map(records.map(r=>[r.name,String(r.sql||'').toLowerCase().replace(/\s+/g,' ')]));
+ for(const [name,parts] of Object.entries(REQUIRED_FUNDING_SETTINGS_TRIGGERS))if(parts.some(p=>!map.get(name)?.includes(p)))throw Error('Calling funding settings safety trigger missing or invalid: '+name);
+}
 export function checkProviderReconcileTriggers(records){
  const map=new Map(records.map(r=>[r.name,String(r.sql||'').toLowerCase().replace(/\s+/g,' ')]));
  for(const [name,parts] of Object.entries(REQUIRED_PROVIDER_RECONCILE_TRIGGERS))if(parts.some(p=>!map.get(name)?.includes(p)))throw Error('Provider reconciliation safety trigger missing or invalid: '+name);
@@ -241,6 +250,7 @@ export function checkTables(tables, binding, mode) {
     return 'fresh';
   }
   const missing = expected.filter(name => !present.has(name));
+  if(mode==='preflight'&&binding==='CONTROL_DB'&&missing.length===1&&missing[0]==='calling_funding_settings')return 'control_funding_settings_upgrade';
   if(mode==='preflight'&&binding==='CONTROL_DB'&&missing.length===3&&['calling_dispatch_settings','calling_company_settings','calling_capacity_signals'].every(t=>missing.includes(t)))return 'control_dispatch_settings_upgrade';
   if(mode==='preflight'&&binding==='CONTROL_DB'&&missing.length===1&&missing[0]==='provider_cost_reconciliations')return 'control_provider_reconcile_upgrade';
   if(mode==='preflight'&&binding==='CONTROL_DB'&&missing.length===1&&missing[0]==='provider_cost_reservations')return 'control_provider_reserve_upgrade';
@@ -321,7 +331,7 @@ export async function inspectCloudflare({ credentials, mode, apiFetch = fetch, t
     if (['control_client_accounts_upgrade','control_publication_upgrade','control_profile_upgrade',
          'control_script_upgrade','crm_dispatch_upgrade','ready','crm_call_intent_upgrade',
          'crm_scripted_results_upgrade','control_company_change_upgrade',
-         'control_scripted_pilot_upgrade','control_dispatch_settings_upgrade','control_credit_upgrade','control_minute_ledger_upgrade','control_minute_holds_upgrade','control_provider_journal_upgrade','control_credit_purchase_upgrade','control_provider_safety_upgrade','control_provider_reserve_upgrade','control_provider_reconcile_upgrade','crm_staff_upgrade','crm_cdr_upgrade','crm_staff_cdr_upgrade'].includes(state)) {
+         'control_scripted_pilot_upgrade','control_dispatch_settings_upgrade','control_funding_settings_upgrade','control_credit_upgrade','control_minute_ledger_upgrade','control_minute_holds_upgrade','control_provider_journal_upgrade','control_credit_purchase_upgrade','control_provider_safety_upgrade','control_provider_reserve_upgrade','control_provider_reconcile_upgrade','crm_staff_upgrade','crm_cdr_upgrade','crm_staff_cdr_upgrade'].includes(state)) {
       if (binding === 'CRM_DB') {
         const triggers = await query(id, "SELECT name,sql FROM sqlite_master WHERE type='trigger' AND name LIKE 'trg_%'");
         checkSafetyTriggers(triggers,{allowCallIntentUpgrade:state === 'crm_call_intent_upgrade'});
@@ -354,7 +364,12 @@ export async function inspectCloudflare({ credentials, mode, apiFetch = fetch, t
         const triggers=await query(id,"SELECT name,sql FROM sqlite_master WHERE type='trigger' AND name LIKE 'trg_provider_cost_%'");
         checkProviderReconcileTriggers(triggers);
       }
+      if(binding==='CONTROL_DB'&&names.includes('calling_funding_settings')){
+        const triggers=await query(id,"SELECT name,sql FROM sqlite_master WHERE type='trigger' AND name LIKE 'trg_calling_funding_%'");
+        checkFundingSettingsTriggers(triggers);
+      }
       for (const table of Object.keys(REQUIRED_COLUMNS[binding])) {
+        if(state==='control_funding_settings_upgrade'&&table==='calling_funding_settings')continue;
         if(state==='control_dispatch_settings_upgrade'&&['calling_dispatch_settings','calling_company_settings','calling_capacity_signals'].includes(table))continue;
         if(state==='control_provider_reconcile_upgrade'&&table==='provider_cost_reconciliations')continue;
         if(state==='control_provider_reserve_upgrade'&&table==='provider_cost_reservations')continue;
@@ -402,6 +417,7 @@ export function verifiedSchemaState(modes) {
   if(modes?.CONTROL_DB==='control_credit_upgrade'&&modes?.CRM_DB==='ready')return 'control_credit_upgrade';
   if(modes?.CONTROL_DB==='control_minute_ledger_upgrade'&&modes?.CRM_DB==='ready')return 'control_minute_ledger_upgrade';
   if(modes?.CONTROL_DB==='control_dispatch_settings_upgrade'&&modes?.CRM_DB==='ready')return 'control_dispatch_settings_upgrade';
+  if(modes?.CONTROL_DB==='control_funding_settings_upgrade'&&modes?.CRM_DB==='ready')return 'control_funding_settings_upgrade';
   if(modes?.CONTROL_DB==='control_provider_reconcile_upgrade'&&modes?.CRM_DB==='ready')return 'control_provider_reconcile_upgrade';
   if(modes?.CONTROL_DB==='control_provider_reserve_upgrade'&&modes?.CRM_DB==='ready')return 'control_provider_reserve_upgrade';
   if(modes?.CONTROL_DB==='control_provider_safety_upgrade'&&modes?.CRM_DB==='ready')return 'control_provider_safety_upgrade';

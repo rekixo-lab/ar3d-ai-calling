@@ -1,6 +1,7 @@
 import {inspectScriptedPromptPack,inspectInternalPilotLead} from './scripted-phone-pilot.mjs';
 import {fundingCap} from './minute-holds.mjs';
 import {moneyBudgetConfig} from './provider-cost-reservations.mjs';
+import {resolveFundingEnv} from './provider-funding.mjs';
 // Super Admin, current-MFA only. This endpoint is strictly read-only:
 // it never calls Plivo, creates secrets, changes CRM consent, or enables dialing.
 // Public descriptions are intentionally code-backed/explicitly unverified.
@@ -28,7 +29,7 @@ export function buildPlivoReadinessSnapshot(env){
   ['pilotTenantId',uuid(env?.AR3D_SCRIPTED_PILOT_TENANT_ID),'Internal pilot tenant ID is configured'],
   ['pilotLeadId',uuid(env?.AR3D_SCRIPTED_PILOT_LEAD_ID),'Internal pilot CRM lead ID is configured'],
   ['sarvamSpeech',typeof env?.SARVAM_API_KEY==='string'&&Boolean(env.SARVAM_API_KEY.trim()),'Sarvam speech credential is configured (presence only)'],
-  ['fundingReview',env?.AR3D_FUNDED_CAMPAIGN_DISPATCH==='approved'&&fundingCap(env)!==null&&moneyBudgetConfig(env)!==null,'Separate reviewed time and monetary ceilings configured; not live provider funds'],
+  ['fundingReview',env?.AR3D_FUNDED_CAMPAIGN_DISPATCH==='approved'&&fundingCap(env)!==null&&moneyBudgetConfig(env)!==null,'Reviewed provider funding limits configured; recorded funds are not a live provider balance'],
   ['privateRecordings',typeof env?.RECORDINGS?.get==='function'&&
     typeof env?.RECORDINGS?.head==='function','Private R2 recording/prompt binding exists'],
   ['customerDispatchSwitch',env?.AR3D_SCRIPTED_CAMPAIGNS_ENABLED==='enabled','Customer campaign switch is enabled']
@@ -122,6 +123,7 @@ export async function handleLaunchReadiness(req,env,user){
     AND s.created_at>=m.enabled_at AND s.revoked_at IS NULL AND s.expires_at>? LIMIT 1`)
    .bind(user.id,user.token_hash,now).first();
  if(!mfa)return json({error:'current Super Admin MFA session required'},403);
+ env=await resolveFundingEnv(env);
  // R2 HEAD metadata only, after fresh MFA verification. No audio-body reads.
  const audioPacks=await Promise.all(['hi','en'].map(language=>
   inspectScriptedPromptPack(env,language)));

@@ -12,6 +12,8 @@ import {moneyBudgetConfig,providerBudgetPosition} from './provider-cost-reservat
 import {validReconciliation,reconcileProviderCost,providerCostRows} from './provider-cost-reconciliation.mjs';
 import {clientFinancialReport} from './client-financial-report.mjs';
 import {parseCollectionWindow,recordedCollections} from './recorded-collections.mjs';
+import {resolveFundingEnv,resolvedFunding,saveFundingSettings,validFundingSettings,fundingNotice} from './provider-funding.mjs';
+import {readPlivoBalance} from './provider-balance.mjs';
 
 const base='/v1/human/credits';
 const uuid=/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
@@ -304,6 +306,25 @@ export async function handleCreditWalletRequest(req,env,user,{fetcher=fetch}={})
  if(!env.CONTROL_DB)return fail('database unavailable',503);
  const db=env.CONTROL_DB,path=url.pathname.slice(base.length+1);
  try{
+  if(path==='funding-settings'){
+   if(!await currentMfa(env,user))return fail('current MFA Super Admin required',403);
+   if(url.search)return fail('unsupported funding query');
+   if(req.method==='POST'){
+    if(!mutationOriginAllowed(req))return fail('same origin required',403);
+    const d=await boundedBody(req);
+    if(!validFundingSettings(d))return fail('invalid funding settings');
+    // Confirm paid/prepaid account metadata, without converting API USD to INR
+    // or treating this read as a receipt, route approval or recharge.
+    if(d.mode==='journal'){
+     const provider=await readPlivoBalance(env,{fetcher});
+     if(!provider.available||!provider.productionEligible||provider.balanceMicros<1)
+      return fail('Paid prepaid Plivo account with available credits must be verified: '+provider.reason,409);
+    }
+    if(!await saveFundingSettings(db,d,user.id))return fail('funding settings changed; refresh before saving',409);
+   }
+   const configured=await resolveFundingEnv(env),funding=resolvedFunding(configured);
+   return json({settings:funding.settings,funding,automaticProviderSync:false,notice:fundingNotice});
+  }
   if(path==='provider-usage-summary'){
    if(req.method!=='GET')return fail('method not allowed',405);
    if(!await currentMfa(env,user))return fail('current MFA Super Admin required',403);
@@ -442,6 +463,7 @@ export async function handleCreditWalletRequest(req,env,user,{fetcher=fetch}={})
    if(req.method!=='GET')return fail('method not allowed',405);
    if(!await currentMfa(env,user))return fail('current MFA Super Admin required',403);
    if(url.search)return fail('invalid dashboard query',400);
+   env=await resolveFundingEnv(env);
    // No CRM binding enumeration, PII or carrier API request. Financial
    // aggregate includes inactive companies to retain outstanding liability.
    const position=await db.prepare(`SELECT
@@ -460,7 +482,7 @@ export async function handleCreditWalletRequest(req,env,user,{fetcher=fetch}={})
     COALESCE(SUM(CASE WHEN p.id IS NOT NULL AND p.hangup_at IS NULL THEN 1 ELSE 0 END),0) AS awaitingHangup,
     COALESCE(SUM(CASE WHEN p.hangup_at IS NOT NULL THEN 1 ELSE 0 END),0) AS endedAwaitingReview,
     MIN(h.created_at) AS oldestHeldAt FROM tenant_minute_holds h LEFT JOIN scripted_phone_pilots p ON p.tenant_id=h.tenant_id AND p.job_id=h.job_id WHERE h.state='held'`).first();
-   return json({clients,purchases,providerBudget:await providerBudgetPosition(db,moneyBudgetConfig(env)),providerSafety:await providerSafety(db),settlementQueue:{...settlementQueue,automaticApproved:env.AR3D_AUTO_CDR_SETTLEMENT==='approved'},funding:{...funding,reviewedProviderCeilings:providerFundingCaps(env)},position:{...position,outstandingSeconds:position.allocatedSeconds-position.usedSeconds,uncommittedSeconds:position.allocatedSeconds-position.heldSeconds-position.usedSeconds},internal:{ended:sessions.internalEnded},campaign:{ended:sessions.campaignEnded},transactions:transactions.results,providerRequests:0,externalPaymentsRecorded:purchases.count>0,dispatchEnabledByDashboard:false});
+   return json({clients,purchases,providerBudget:await providerBudgetPosition(db,moneyBudgetConfig(env)),providerSafety:await providerSafety(db),settlementQueue:{...settlementQueue,automaticApproved:env.AR3D_AUTO_CDR_SETTLEMENT==='approved'},funding:{...funding,source:resolvedFunding(env).source,status:resolvedFunding(env).status,automaticProviderSync:false,reviewedProviderCeilings:providerFundingCaps(env)},position:{...position,outstandingSeconds:position.allocatedSeconds-position.usedSeconds,uncommittedSeconds:position.allocatedSeconds-position.heldSeconds-position.usedSeconds},internal:{ended:sessions.internalEnded},campaign:{ended:sessions.campaignEnded},transactions:transactions.results,providerRequests:0,externalPaymentsRecorded:purchases.count>0,dispatchEnabledByDashboard:false});
   }
   if(path==='reverse-call-charge'){
    if(req.method!=='POST')return fail('method not allowed',405);
@@ -538,6 +560,7 @@ export async function handleCreditWalletRequest(req,env,user,{fetcher=fetch}={})
     const holds=(await db.prepare(`SELECT h.job_id AS jobId,h.state,h.reserved_seconds AS reservedSeconds,h.charged_seconds AS chargedSeconds,h.created_at AS createdAt,h.closed_at AS closedAt,COALESCE(r.delta_seconds,0) AS reversedSeconds
      FROM tenant_minute_holds h LEFT JOIN tenant_minute_ledger r ON r.tenant_id=h.tenant_id AND r.id='call-reversal:'||h.tenant_id||':'||h.job_id
      WHERE h.tenant_id=? ORDER BY h.created_at DESC,h.job_id DESC LIMIT 51 OFFSET ?`).bind(tid,Number(offset)).all()).results;
+    env=await resolveFundingEnv(env);
     const configuration=await scriptedCampaignConfiguration(env);
     let dispatchEnabled=false,spendableSeconds=null;
     if(configuration.ready&&t.status==='active'){

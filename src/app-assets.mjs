@@ -453,7 +453,7 @@ function providerBalancePanel(openView){
  plivo.append(equivalent,status,refresh,node('a',{class:'provider-link',href:'https://cx.plivo.com/home',target:'_blank',rel:'noopener noreferrer',text:'Open Plivo console'}));
  const sarvam=overviewMetric('Sarvam balance','Loading…','spark');
  const sarvamValue=sarvam.querySelector('strong');
- const sarvamStatus=node('p',{class:'muted',role:'status',text:'Sarvam has no balance API. Copy “Credits Left” from Sarvam Settings → Billing and sync.'});
+ const sarvamStatus=node('p',{class:'muted',role:'status',text:'Automatic Sarvam balance sync is not connected. Sync Credits Left from Settings → Billing.'});
  const sarvamSync=btn('Sync with Sarvam dashboard',async()=>{
   const raw=prompt('Enter the exact “Credits Left” (₹) shown in Sarvam dashboard → Settings → Billing:');
   if(raw===null)return;
@@ -462,14 +462,14 @@ function providerBalancePanel(openView){
   const [whole,frac='']=t.split('.');
   const micros=Number(whole)*1000000+Number(frac.padEnd(6,'0'));
   sarvamSync.disabled=true;
-  try{showSarvam(await api('/v1/human/credits/sarvam-balance','POST',{id:crypto.randomUUID(),creditsLeftMicros:micros}));notice('Sarvam balance synced.')}
+  try{showSarvam(await api('/v1/human/credits/sarvam-balance','POST',{id:crypto.randomUUID(),creditsLeftMicros:micros}));notice('Sarvam balance recorded. Funding limits update automatically when recorded provider funds are enabled.')}
   catch(e){asError(e)}finally{sarvamSync.disabled=false}
  },true);
  function showSarvam(d){
   if(d?.available&&Number.isSafeInteger(d.balanceMicros)){
    sarvamValue.textContent=inr(d.balanceMicros/1000000);
    sarvamStatus.textContent=d.lastSyncAt?'Synced with Sarvam dashboard '+formatIst(d.lastSyncAt)+'. Recorded Sarvam expenses after that are deducted.':'From recorded Sarvam journal entries. Sync to match the dashboard.';
-  }else{sarvamValue.textContent='Not synced';sarvamStatus.textContent='Sarvam has no balance API. Copy “Credits Left” from Sarvam Settings → Billing and sync.';}
+  }else{sarvamValue.textContent='Not synced';sarvamStatus.textContent='Automatic Sarvam balance sync is not connected. Sync Credits Left from Settings → Billing.';}
  }
  async function loadSarvam(){try{showSarvam(await api('/v1/human/credits/sarvam-balance'))}catch{sarvamValue.textContent='Unavailable';sarvamStatus.textContent='Check current MFA.'}}
  sarvam.append(sarvamStatus,sarvamSync,
@@ -576,7 +576,7 @@ async function adminDashboard(main,openView){
     title('Funding review','h3'),
     div('overview-grid',overviewMetric('Reviewed cumulative capacity',formatSeconds(d.funding?.capSeconds),'wallet'),overviewMetric('Remaining funded capacity',formatSeconds(d.funding?.remainingFundedSeconds),'wallet'),overviewMetric('Unbacked allocations',formatSeconds(d.funding?.unbackedAllocationSeconds),'receipt')),
     div('overview-grid',overviewMetric('Plivo reviewed ceiling',formatSeconds(d.funding?.reviewedProviderCeilings?.plivo),'phone'),overviewMetric('Sarvam reviewed ceiling',formatSeconds(d.funding?.reviewedProviderCeilings?.sarvam),'spark')),
-    node('p',{class:'note',text:'Independent reviewed lifetime capacity ceilings, not live cash balances. Either missing ceiling or exhausted capacity blocks new campaigns.'}));
+    node('p',{class:'note',text:d.funding?.source==='recorded_provider_ledger'?'Funding limits are calculated from recorded provider transactions and saved call costs. Record each provider recharge in Credit transactions; Worker variables and redeployment are not needed. These are recorded funds, not a live wallet sync.':'Independent reviewed lifetime capacity ceilings, not live cash balances. Configure recorded provider funding in Credit transactions to update limits without Worker variable changes.'}));
   }catch(e){alerts.replaceChildren();providers.setClients(null);freshness.textContent='Update unavailable';body.replaceChildren(node('p',{class:'err',text:'Dashboard unavailable. Refresh after signing in with current MFA.'}));}
   finally{refresh.disabled=false}
  }
@@ -849,8 +849,81 @@ function providerUsageOverview(main){
  period.addEventListener('change',()=>body.replaceChildren(node('p',{class:'muted',text:'Window changed. Check Plivo spend to load the selected period.'})));
  card.append(div('formrow',lab('Spend reporting window',period),refresh),body);main.append(card);
 }
+function fundingSettingsPanel(main,openJournal){
+ const card=div('card',title('Provider funding setup')),status=node('p',{class:'muted',role:'status',text:'Loading funding settings…'});
+ const currency=node('select',{class:'field',required:'required'},[
+  node('option',{value:'',text:'Select confirmed Plivo currency'}),
+  ...['INR','USD'].map(value=>node('option',{value,text:value}))]);
+ const plivo=input('fundingPlivoPulse','text','Maximum cost for 30 seconds');
+ const sarvam=input('fundingSarvamPulse','text','Maximum INR cost for 30 seconds');
+ const reference=input('fundingEvidence','text','Paid funding and cost review reference');
+ plivo.inputMode=sarvam.inputMode='decimal';plivo.maxLength=sarvam.maxLength=12;
+ reference.minLength=10;reference.maxLength=160;
+ const reviewed=node('input',{type:'checkbox',required:'required'});
+ let revision=null,saved=null,busy=false;
+ const save=node('button',{class:'btn',type:'submit',text:'Save funding settings',disabled:'disabled'});
+ const disable=btn('Disable journal funding',()=>persist('disabled'),true);
+ disable.disabled=true;
+ const refresh=btn('Refresh funding settings',()=>load().catch(asError),true);
+ function pulse(raw){
+  const value=raw.trim();
+  if(!/^\d{1,4}(?:\.\d{1,6})?$/.test(value))return null;
+  const [whole,fraction='']=value.split('.');
+  const micros=Number(whole)*1000000+Number(fraction.padEnd(6,'0'));
+  return Number.isSafeInteger(micros)&&micros>=1&&micros<=1000000000?micros:null;
+ }
+ function amount(micros){return Number.isSafeInteger(micros)?(micros/1000000).toFixed(6):''}
+ function show(data){
+  saved=data.settings||null;revision=saved?.revision??0;
+  currency.value=saved?.plivoCurrency||'';plivo.value=amount(saved?.plivoPulseMicros);sarvam.value=amount(saved?.sarvamPulseMicros);
+  reference.value=saved?.evidenceRef||'';reviewed.checked=false;
+  const source=data.funding?.source;
+  status.textContent=source==='recorded_provider_ledger'?
+   'Recorded provider funding is enabled. Limits are recalculated from the journal. Status: '+String(data.funding.status||'review required').replaceAll('_',' ')+'.':
+   source==='disabled'?'Recorded provider funding is disabled. New calls are blocked.':
+   'Recorded provider funding is not configured. Existing Worker limits remain in use until you save these settings.';
+  if(saved?.updatedAt)status.textContent+=' Saved '+formatIst(saved.updatedAt)+'.';
+ }
+ function buttons(){save.disabled=busy||revision===null;disable.disabled=busy||revision===null||!saved||saved.mode==='disabled';refresh.disabled=busy;}
+ async function load(){
+  if(busy)return;busy=true;buttons();
+  try{show(await api('/v1/human/credits/funding-settings'))}
+  catch(error){revision=null;status.textContent='Funding settings unavailable. Refresh after signing in with current two-factor authentication.';throw error}
+  finally{busy=false;buttons()}
+ }
+ async function persist(mode){
+  if(busy||revision===null)return;
+  const plivoPulseMicros=mode==='disabled'?saved?.plivoPulseMicros:pulse(plivo.value);
+  const sarvamPulseMicros=mode==='disabled'?saved?.sarvamPulseMicros:pulse(sarvam.value);
+  const plivoCurrency=mode==='disabled'?saved?.plivoCurrency:currency.value,evidenceRef=reference.value.trim();
+  if(!['INR','USD'].includes(plivoCurrency)||plivoPulseMicros===null||sarvamPulseMicros===null||
+    !Number.isSafeInteger(plivoPulseMicros)||!Number.isSafeInteger(sarvamPulseMicros)||evidenceRef.length<10||evidenceRef.length>160||/[\u0000-\u001f]/.test(evidenceRef)){
+   notice('Enter the confirmed currency, both positive 30-second cost ceilings (up to 1,000), and a review reference of 10–160 characters.',true);return;
+  }
+  if(mode==='journal'&&!reviewed.checked){notice('Review the paid funding records and costs before enabling recorded provider funding.',true);return;}
+  busy=true;buttons();
+  try{
+   show(await api('/v1/human/credits/funding-settings','POST',{mode,plivoCurrency,plivoPulseMicros,sarvamPulseMicros,evidenceRef,expectedRevision:revision}));
+   notice(mode==='journal'?'Funding settings saved. Recorded recharges update calling limits without Worker variable edits or redeployment.':'Recorded provider funding disabled. New calls are blocked.');
+  }catch(error){asError(error);status.textContent='Save not confirmed. Refresh settings before trying again; another admin may have changed them.';revision=null;}
+  finally{busy=false;buttons()}
+ }
+ const form=node('form',{class:'stack'},[
+  node('p',{class:'note',text:'Set reviewed calling costs once. AR3D calculates funding limits from your recorded opening balances, recharges, expenses and call reservations. Record each recharge in the provider journal or use Sarvam balance sync; no Cloudflare variable update or redeployment is needed.'}),
+  node('p',{class:'muted',text:'Automatic provider recharge detection is not connected. This does not top up either provider. Client credits, provider access and company calling approval must also be ready.'}),
+  div('formrow',lab('Confirmed Plivo billing currency',currency),lab('Plivo maximum total cost per 30 seconds',plivo),lab('Sarvam maximum total cost per 30 seconds (INR)',sarvam)),
+  node('p',{class:'muted',text:'Use conservative costs from your provider plan, including applicable taxes and fees. Sarvam must include speech recognition and any AI clarification cost. Change these values when tariffs change.'}),
+  lab('Funding and cost review reference',reference),
+  lab('I reviewed the paid provider funding records, currency and maximum call costs. Trial credits are excluded.',reviewed),
+  div('formrow',save,disable,refresh),status]);
+ form.addEventListener('submit',event=>{event.preventDefault();persist('journal')});
+ card.append(form);
+ if(openJournal)card.append(btn('Record or review provider funds',openJournal,true));
+ main.append(card);load().catch(()=>{});
+}
 function providerFinancialJournal(main){
  const card=div('card',title('Provider financial journal')),body=div('stack');
+ card.id='provider-financial-journal';
  const provider=node('select',{class:'field'},['plivo','sarvam'].map(v=>node('option',{value:v,text:v==='plivo'?'Plivo':'Sarvam'})));
  const currency=node('select',{class:'field'},['INR','USD'].map(v=>node('option',{value:v,text:v})));
  const kind=node('select',{class:'field'},[['topup','Recharge / top-up'],['expense','Verified expense'],['refund','Provider refund'],['opening','Opening balance']].map(([value,text])=>node('option',{value,text})));
@@ -866,7 +939,7 @@ function providerFinancialJournal(main){
    if(!/^\d{1,7}(?:\.\d{1,6})?$/.test(raw)){notice('Enter a valid amount with up to six decimals.');return;}
    const [whole,fraction='']=raw.split('.'),micros=Number(whole)*1000000+Number(fraction.padEnd(6,'0'));
    if(!Number.isSafeInteger(micros)||micros<1||micros>1000000000000){notice('Amount out of range.');return;}
-   if(!confirm('Record this evidence-based transaction? This does not recharge a provider or enable calling.'))return;
+   if(!confirm('Record this evidence-based transaction? If recorded provider funding is enabled, it updates calling limits. No provider payment is made; other calling approvals still apply.'))return;
    pending={id:crypto.randomUUID(),provider:provider.value,currency:currency.value,kind:kind.value,amountMicros:micros,evidenceRef:reference.value.trim(),reason:reason.value.trim()};
   }
   busy=true;save.disabled=true;
@@ -887,7 +960,7 @@ function providerFinancialJournal(main){
   }catch(e){body.replaceChildren(node('p',{class:'err',text:'Provider journal unavailable.'}));}
   finally{refresh.disabled=false}
  }
- card.append(node('p',{class:'note',text:'Record real external receipts and invoices only. Recorded net is not the live provider balance; never enter the same funds in two currencies. No payment or call action.'}),
+ card.append(node('p',{class:'note',text:'Record real external receipts and invoices only. Recorded net is not the live provider balance; never enter the same funds in two currencies. With recorded provider funding enabled, new entries update calling limits automatically. No provider payment is made.'}),
   div('formrow',lab('Provider',provider),lab('Currency',currency),lab('Provider transaction type',kind),lab('Amount',amount)),
   div('formrow',lab('Evidence reference',reference),lab('Reason',reason)),div('formrow',save,refresh),body,div('formrow',prev,next));main.append(card);load();
  foregroundRefresh(card,15000,load,()=>!card.closest('[hidden]')&&!busy);
@@ -967,6 +1040,7 @@ async function adminMinuteWallet(main,client=null){
  recordedCollectionsPanel(main);
  // Provider-side money and planning tools are used rarely; keep them folded.
  const providerReports=node('details',{class:'card provider-reports'},node('summary',{text:'Provider costs & reports · Plivo spend, provider journal, financial position, cost planner'}));
+ fundingSettingsPanel(main,()=>{providerReports.open=true;const journal=providerReports.querySelector('#provider-financial-journal');journal?.scrollIntoView({block:'start'});journal?.querySelector('input')?.focus()});
  main.append(providerReports);
  clientFinancialOverview(providerReports);
  providerUsageOverview(providerReports);
