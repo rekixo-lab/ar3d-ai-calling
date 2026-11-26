@@ -33,8 +33,15 @@
   ],
   "triggers": {
     "crons": [
-      "* * * * *",
-      "*/2 * * * *"
+      "* * * * *"
+    ]
+  },
+  "queues": {
+    "producers": [
+      {"binding": "WHATSAPP_TICKS", "queue": "ar3d-calling-whatsapp"}
+    ],
+    "consumers": [
+      {"queue": "ar3d-calling-whatsapp", "max_batch_size": 1, "max_batch_timeout": 1, "max_retries": 2, "max_concurrency": 1, "retry_delay": 60}
     ]
   }
 }

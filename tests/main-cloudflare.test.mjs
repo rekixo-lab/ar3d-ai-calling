@@ -90,7 +90,9 @@ const template = {
   name:'ar3d-ai-calling', main:'./src/index.mjs', workers_dev:false,
   vars:{AR3D_PLIVO_CALLER_NUMBER:'+918065491333'},
   routes:[{pattern:'aicalling.ar3dstudio.in',custom_domain:true}],
-  triggers:{crons:['* * * * *','*/2 * * * *']},
+  triggers:{crons:['* * * * *']},
+  queues:{producers:[{binding:'WHATSAPP_TICKS',queue:'ar3d-calling-whatsapp'}],
+    consumers:[{queue:'ar3d-calling-whatsapp',max_batch_size:1,max_batch_timeout:1,max_retries:2,max_concurrency:1,retry_delay:60}]},
   d1_databases:[
     {binding:'CONTROL_DB',database_name:'ar3d-calling-control',database_id:'PLACEHOLDER'},
     {binding:'CRM_DB',database_name:'ar3d-calling-shared-crm',database_id:'PLACEHOLDER'},
@@ -111,7 +113,7 @@ test('config binds only main Calling resources and exact approved custom domain'
   assert.equal(config.d1_databases[0].database_id, env.CONTROL_DB_ID);
   assert.equal(config.r2_buckets[0].bucket_name,'ar3d-calling-recordings');
   assert.deepEqual(config.routes,[{pattern:'aicalling.ar3dstudio.in',custom_domain:true}]);
-  assert.deepEqual(config.triggers,{crons:['* * * * *','*/2 * * * *']});
+  assert.deepEqual(config.triggers,{crons:['* * * * *']});
   assert.deepEqual(config.vars,{AR3D_PLIVO_CALLER_NUMBER:'+918065491333'});
   assert.equal(config.vars.AR3D_SCRIPTED_CAMPAIGNS_ENABLED,undefined);
 });
@@ -162,7 +164,7 @@ function cloudflareMock({ controlTables=[],crmTables=[],controlName='ar3d-callin
       else if(sql.includes('sqlite_master')) rows=tableNames.map(name=>({name}));
       else if(sql.includes('PRAGMA')) {
         const table=sql.match(/PRAGMA table_info\(([^)]+)\)/)?.[1];
-        if(['whatsapp_connections','whatsapp_webhook_batches','properties','property_assets','campaign_property_settings','campaign_properties','property_media_shares','whatsapp_rules','whatsapp_permissions','whatsapp_threads','whatsapp_messages','whatsapp_inbound_messages','whatsapp_event_receipts'].includes(table))
+        if(['whatsapp_connections','whatsapp_webhook_batches','whatsapp_dispatch_ticks','properties','property_assets','campaign_property_settings','campaign_properties','property_media_shares','whatsapp_rules','whatsapp_permissions','whatsapp_threads','whatsapp_messages','whatsapp_inbound_messages','whatsapp_event_receipts'].includes(table))
           rows=REQUIRED_COLUMNS[control?'CONTROL_DB':'CRM_DB'][table].map(name=>({name}));
         else if(sql.includes('provider_balance_snapshots')) rows=REQUIRED_COLUMNS.CONTROL_DB.provider_balance_snapshots.map(name=>({name}));
         else if(sql.includes('provider_balance_covered_calls')) rows=REQUIRED_COLUMNS.CONTROL_DB.provider_balance_covered_calls.map(name=>({name}));
