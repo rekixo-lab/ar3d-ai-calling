@@ -2,22 +2,27 @@ import {resolveCrmDb} from './core.mjs';
 import {providerFaultBlocked} from './provider-safety.mjs';
 import {moneyBudgetConfig,providerBudgetPosition,reserveBudgetedMinutes} from './provider-cost-reservations.mjs';
 import {minutePosition,closeMinuteHold,fundingCap,fundingPosition,affordableCallSeconds,BILLING_PULSE_SECONDS} from './minute-holds.mjs';
-import {SCRIPTED_CALLING_POLICY,approvedCampaignPhone,reserveCampaignQuestionnaire,scriptedPromptsReady,submitScriptedPhone} from './scripted-phone-pilot.mjs';
+import {SCRIPTED_CALLING_POLICY,approvedCampaignPhone,reserveCampaignQuestionnaire,campaignPromptMode,submitScriptedPhone} from './scripted-phone-pilot.mjs';
 import {resolveFundingEnv,resolvedFunding} from './provider-funding.mjs';
 
 export const CAMPAIGN_CRON='* * * * *';
 // Capacity is set by the platform limits below (dispatchSettings): no fixed
 // number of companies per minute and no per-company daily cap.
-// Separate, operator-only release gate. Never set by UI, allocation or deployment.
-export const fundedDispatchApproved=env=>env.AR3D_FUNDED_CAMPAIGN_DISPATCH==='approved'&&fundingCap(env)!==null&&moneyBudgetConfig(env)!==null;
+// Authenticated manual-balance setup carries the owner's dispatch permission.
+// Older envelope configurations retain their explicit deployment release gate.
+export const fundedDispatchApproved=env=>(env.AR3D_FUNDED_CAMPAIGN_DISPATCH==='approved'||
+ resolvedFunding(env)?.source==='manual_balance'&&resolvedFunding(env)?.status==='ready')&&
+ fundingCap(env)!==null&&moneyBudgetConfig(env)!==null;
 export const creditOnlyCallingApproved=env=>fundedDispatchApproved(env)&&env.AR3D_CREDIT_ONLY_CALLING==='approved';
 export async function scriptedCampaignConfiguration(env){
  env=await resolveFundingEnv(env);
  const carrier=Boolean(await approvedCampaignPhone(env)),funded=fundedDispatchApproved(env);
  const blocked=carrier&&funded?await providerFaultBlocked(env.CONTROL_DB):false;
- const missing=[...(!carrier?['Plivo setup, a completed internal pilot and campaign authorization']:[]),...(!funded?['Reviewed provider funding setup and dispatch approval are required. Check Super Admin → Credit transactions → Provider funding setup.']:[])];
+ const missing=[...(!carrier?['Plivo setup, a completed internal pilot and campaign authorization']:[]),...(!funded?[
+  resolvedFunding(env)?.source==='manual_balance'?'Sync both current provider balances on Super Admin Dashboard. Available funds must cover one billing pulse.':
+  'Reviewed provider funding setup and dispatch approval are required. Check Super Admin → Credit transactions → Provider funding setup.']:[])];
  if(blocked)missing.push('Provider billing or authentication fault requires Super Admin review');
- return {ready:carrier&&funded&&!blocked,missing,creditOnly:carrier&&!blocked&&creditOnlyCallingApproved(env),
+ return {ready:carrier&&funded&&!blocked,carrierReady:carrier,missing,creditOnly:carrier&&!blocked&&creditOnlyCallingApproved(env),
   funding:{source:resolvedFunding(env).source,status:resolvedFunding(env).status}};
 }
 // A definitive provider rejection is the only automatic no-submission release.
@@ -110,7 +115,7 @@ async function reconcile(env,db,job,now,at){
 // ---------- capacity settings ----------
 export const DEFAULT_MAX_CONCURRENT_CALLS=8;     // ~Sarvam pay-as-you-go 60 STT req/min
 export const DEFAULT_QUERY_BUDGET=45;            // Cloudflare Free: 50 D1 queries per invocation
-const DIAL_QUERY_COST=16,RECONCILE_QUERY_COST=4; // measured: first dial of a company 15, reconcile ~3.4
+const DIAL_QUERY_COST=17,RECONCILE_QUERY_COST=4; // includes named-client lookup for built-in campaign speech
 const intEnv=(v,lo,hi,def)=>{const n=Number(v);return Number.isSafeInteger(n)&&n>=lo&&n<=hi?n:def};
 export async function dispatchSettings(env){
  const fallbackMax=intEnv(env.AR3D_MAX_CONCURRENT_CALLS,1,2000,DEFAULT_MAX_CONCURRENT_CALLS);
@@ -192,8 +197,9 @@ export async function dialNextForTenant(env,db,tid,config,{apiFetch=fetch,now=Da
    .bind(at,tid,job.id).run();
   return {state:'blocked'};
  }
- if(!pre.prompts.has(job.language))pre.prompts.set(job.language,await scriptedPromptsReady(env,job.language,tid));
- if(!pre.prompts.get(job.language))return {state:'prompts_incomplete'};
+ if(!pre.prompts.has(job.language))pre.prompts.set(job.language,await campaignPromptMode(env,job.language,tid));
+ const promptMode=pre.prompts.get(job.language);
+ if(!promptMode)return {state:'prompts_incomplete'};
  const position=await minutePosition(env.CONTROL_DB,tid),cap=fundingCap(env);
  if(position.uncommittedSeconds<BILLING_PULSE_SECONDS)return {state:'insufficient_credits'};
  const funding=await fundingPosition(env.CONTROL_DB,cap),budgetConfig=moneyBudgetConfig(env);
@@ -221,7 +227,7 @@ export async function dialNextForTenant(env,db,tid,config,{apiFetch=fetch,now=Da
    }
    return {state:'locked'};
   }
-  const id=await reserveCampaignQuestionnaire(env.CONTROL_DB,config,job,now);
+  const id=await reserveCampaignQuestionnaire(env.CONTROL_DB,{...config,promptMode},job,now);
   const outcome=await submitScriptedPhone(env.CONTROL_DB,config,id,job.destination,needed,apiFetch,{commercial:true});
   if(outcome==='rejected'){
    const rejected=await env.CONTROL_DB.prepare('SELECT id,phase,provider_call_id,provider_request_id FROM scripted_phone_pilots WHERE tenant_id=? AND job_id=? AND id=?').bind(tid,job.id,id).first();

@@ -1,13 +1,14 @@
 import {FUNDING_CONTEXT} from './funding-context.mjs';
 import {fundingCap,providerFundingCaps} from './minute-holds.mjs';
 import {moneyBudgetConfig,providerBudgetPosition} from './provider-cost-reservations.mjs';
+import {MANUAL_CALLING_COSTS} from './manual-calling-costs.mjs';
 
 const MAX=999999999999;
 const int=(n,min,max)=>Number.isSafeInteger(n)&&n>=min&&n<=max;
 const attach=(env,value)=>({...env,[FUNDING_CONTEXT]:value});
 const closed=(source,status,settings=null)=>({source,status,settings,globalCap:null,config:null,
  caps:{combined:null,plivo:null,sarvam:null},automaticProviderSync:false});
-export const fundingNotice='Recorded provider funds update calling limits without Worker variable edits or deployment. Provider recharges must still be recorded or synced by a Super Admin. These records are not a live provider balance or a payment authorization.';
+export const fundingNotice='Copy each provider dashboard’s full current available INR balance and Sync. Each sync replaces that provider’s earlier balance; it does not add a recharge twice. Calls share this balance and estimates update automatically. No Worker variable edit or deployment is needed. Provider balances and account restrictions remain authoritative.';
 
 export function publicFundingSettings(row){
  return row?{mode:row.mode,plivoCurrency:row.plivo_currency,plivoPulseMicros:row.plivo_pulse_micros,
@@ -48,9 +49,12 @@ export async function saveFundingSettings(db,d,actor,now=Date.now()){
 export async function resolveFundingEnv(env){
  if(env?.[FUNDING_CONTEXT])return env;
  let row;
- try{row=env.CONTROL_DB?await env.CONTROL_DB.prepare('SELECT * FROM calling_funding_settings WHERE id=1').first():null;}
+ try{row=env.CONTROL_DB?await env.CONTROL_DB.prepare(`SELECT f.*,m.enabled AS manualEnabled,m.revision AS manualRevision,
+  m.updated_at AS manualUpdatedAt FROM (SELECT 1) seed
+  LEFT JOIN calling_funding_settings f ON f.id=1 LEFT JOIN provider_manual_funding_control m ON m.id=1`).first():null;}
  catch{return attach(env,closed('unavailable','funding_settings_unavailable'));}
- if(!row){
+ if(row?.manualRevision!=null)return resolveManualFunding(env,row);
+ if(!row?.id){
   const globalCap=fundingCap(env),config=moneyBudgetConfig(env);
   return attach(env,{source:'legacy_environment',status:globalCap!==null&&config?'configured':'setup_required',
    settings:null,globalCap,config,caps:providerFundingCaps(env),automaticProviderSync:false});
@@ -88,3 +92,30 @@ export async function resolveFundingEnv(env){
  }catch{return attach(env,closed('recorded_provider_ledger','funding_records_unavailable',settings));}
 }
 export const resolvedFunding=env=>env?.[FUNDING_CONTEXT]??null;
+
+async function resolveManualFunding(env,row){
+ const rates=MANUAL_CALLING_COSTS;
+ const settings={mode:'manual_balance',revision:row.manualRevision,enabled:row.manualEnabled===1,
+  updatedAt:row.manualUpdatedAt,plivoCurrency:'INR',plivoPulseMicros:rates.plivoPulseMicros,
+  sarvamPulseMicros:rates.sarvamPulseMicros,rateVersion:rates.version,estimatedRates:true};
+ if(row.manualEnabled!==1)return attach(env,closed('manual_balance','disabled',settings));
+ try{
+  const snapshot=await env.CONTROL_DB.prepare(`SELECT
+   (SELECT sequence FROM provider_balance_snapshots WHERE provider='plivo' ORDER BY sequence DESC LIMIT 1) AS plivoSequence,
+   (SELECT balance_micros FROM provider_balance_snapshots WHERE provider='plivo' ORDER BY sequence DESC LIMIT 1) AS plivo,
+   (SELECT sequence FROM provider_balance_snapshots WHERE provider='sarvam' ORDER BY sequence DESC LIMIT 1) AS sarvamSequence,
+   (SELECT balance_micros FROM provider_balance_snapshots WHERE provider='sarvam' ORDER BY sequence DESC LIMIT 1) AS sarvam,
+   COALESCE((SELECT SUM(CASE WHEN state='held' THEN reserved_seconds ELSE charged_seconds END) FROM tenant_minute_holds),0) AS committedSeconds`).first();
+  if(!snapshot?.plivoSequence||!snapshot?.sarvamSequence)
+   return attach(env,closed('manual_balance','provider_balance_sync_required',settings));
+  if(!int(snapshot.plivo,0,MAX)||!int(snapshot.sarvam,0,MAX)||!int(snapshot.committedSeconds,0,MAX))
+   return attach(env,closed('manual_balance','balance_review_required',settings));
+  const config={plivo:{currency:'INR',capMicros:snapshot.plivo,pulseMicros:rates.plivoPulseMicros},
+   sarvam:{currency:'INR',capMicros:snapshot.sarvam,pulseMicros:rates.sarvamPulseMicros},
+   fundingGuard:{kind:'manual_balance',revision:row.manualRevision,plivoSequence:snapshot.plivoSequence,sarvamSequence:snapshot.sarvamSequence}};
+  const money=await providerBudgetPosition(env.CONTROL_DB,config);
+  const globalCap=Math.min(MAX,snapshot.committedSeconds+money.remainingSeconds);
+  return attach(env,{source:'manual_balance',status:money.ready?'ready':money.reason,settings,config,globalCap,
+   caps:{combined:globalCap,plivo:globalCap,sarvam:globalCap},automaticProviderSync:false,estimatedRates:true,rateVersion:rates.version});
+ }catch{return attach(env,closed('manual_balance','funding_records_unavailable',settings));}
+}

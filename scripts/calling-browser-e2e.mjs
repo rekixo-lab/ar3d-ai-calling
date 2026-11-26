@@ -291,28 +291,29 @@ try{
  const adminContext=await browser.newContext({viewport:{width:1440,height:1000}});
  const adminToken=await newSession(f.env.CONTROL_DB,'admin');await adminContext.addCookies([{name:COOKIE,value:adminToken,url:origin}]);
  const adminPage=await adminContext.newPage();lastPage=adminPage;adminPage.setDefaultTimeout(10000);
- // Stub only the external account result; actual authorization is covered in route tests.
- await adminPage.route('**/v1/human/credits/provider',r=>r.fulfill({json:{available:true,cashCredits:'12.34',cashCreditsCurrency:'USD',accountType:'developer',checkedAt:new Date().toISOString()}}));
  await adminPage.goto(origin+'/app');
  await adminPage.getByRole('heading',{name:'Dashboard',exact:true}).waitFor();
  await adminPage.getByRole('link',{name:'Dashboard',exact:true}).click();
  const providers=adminPage.getByRole('region',{name:'Provider balances'});
+ await providers.getByText('Not synced',{exact:true}).first().waitFor();
+ assert.equal(await providers.getByText('Not synced',{exact:true}).count(),2);
+ adminPage.once('dialog',d=>d.accept('₹987.20'));
+ await providers.getByRole('button',{name:'Sync Plivo balance',exact:true}).click();
  await providers.getByText('₹987.20',{exact:true}).waitFor();
- await providers.getByText(/Plivo API reports \$12.34/).waitFor();
- await providers.getByText('Not synced',{exact:true}).waitFor();
  adminPage.once('dialog',d=>d.accept('₹1,250.75'));
- await providers.getByRole('button',{name:'Sync with Sarvam dashboard'}).click();
+ await providers.getByRole('button',{name:'Sync Sarvam balance',exact:true}).click();
  await providers.getByText('₹1,250.75',{exact:true}).waitFor();
- await providers.getByText(/Synced with Sarvam dashboard/).waitFor();
- assert.equal(f.c.db.prepare("SELECT amount_micros FROM provider_financial_journal WHERE provider='sarvam' AND kind='opening'").get().amount_micros,1250750000);
+ assert.equal(f.c.db.prepare("SELECT balance_micros FROM provider_balance_snapshots WHERE provider='plivo' ORDER BY sequence DESC LIMIT 1").get().balance_micros,987200000);
+ assert.equal(f.c.db.prepare("SELECT balance_micros FROM provider_balance_snapshots WHERE provider='sarvam' ORDER BY sequence DESC LIMIT 1").get().balance_micros,1250750000);
+ assert.equal(f.c.db.prepare('SELECT COUNT(*) AS n FROM provider_financial_journal').get().n,0);
  await providers.getByText('Client allocated minutes',{exact:true}).waitFor();
  await providers.getByText('100m 00s',{exact:true}).waitFor();
- await providers.getByText(/Trial account/).waitFor();
+ assert.equal(await providers.getByText(/Plivo API reports|Trial account/).count(),0);
  assert.equal(await adminPage.locator('#client-sidebar-wallet').count(),0);
- await adminPage.unroute('**/v1/human/credits/provider');
- await adminPage.route('**/v1/human/credits/provider',r=>r.fulfill({json:{available:false}}));
- await providers.getByRole('button',{name:'Refresh Plivo balance'}).click();
- await providers.getByText('Unavailable',{exact:true}).waitFor();
+ await providers.getByRole('button',{name:'Refresh balances',exact:true}).click();
+ await providers.getByText('₹987.20',{exact:true}).waitFor();
+ await providers.getByText('₹1,250.75',{exact:true}).waitFor();
+ assert.equal(f.c.db.prepare('SELECT COUNT(*) AS n FROM provider_balance_snapshots').get().n,2);
  await adminPage.getByRole('link',{name:'Clients',exact:true}).click();
  await adminPage.getByRole('heading',{name:'Client directory'}).waitFor();
  await adminPage.screenshot({path:'artifacts/calling-admin-clients.png',fullPage:true});
@@ -324,7 +325,7 @@ try{
  await adminPage.getByRole('heading',{name:'Demo',exact:true}).waitFor();
  await adminPage.getByRole('heading',{name:'Company Knowledge',exact:true}).waitFor();
  await adminPage.getByRole('link',{name:'Calling Setup',exact:true}).click();
- await adminPage.getByRole('heading',{name:'Client calling approval',exact:true}).waitFor();
+ await adminPage.getByRole('heading',{name:'Client calling activation',exact:true}).waitFor();
  await adminPage.getByRole('button',{name:'Change client'}).click();
  await adminPage.getByRole('link',{name:'Minutes & Wallet',exact:true}).click();
  await adminPage.getByText(/^Provider costs & reports/).click();
@@ -339,7 +340,7 @@ try{
  await adminPage.getByRole('button',{name:'Check Plivo spend',exact:true}).click();
  await adminPage.getByText('INR 123.456',{exact:true}).waitFor();
  await adminPage.unroute('**/v1/human/credits/provider-usage-summary?days=7');
- await adminPage.getByRole('row',{name:/Sarvam dashboard sync: Credits Left INR 1250.75/}).waitFor();
+ assert.equal(await adminPage.getByRole('row',{name:/Sarvam dashboard sync: Credits Left/}).count(),0);
  await adminPage.locator('[name="providerJournalAmount"],#providerJournalAmount').first().fill('12.50');
  await adminPage.locator('[name="providerJournalReference"],#providerJournalReference').first().fill('browser-receipt-1');
  await adminPage.locator('[name="providerJournalReason"],#providerJournalReason').first().fill('Synthetic browser receipt evidence');
@@ -390,7 +391,7 @@ try{
  await adminPage.getByRole('button',{name:'Refresh transactions',exact:true}).waitFor();
  await adminPage.screenshot({path:'artifacts/admin-minute-wallet.png',fullPage:true});
  await adminPage.getByRole('link',{name:'Calling Setup'}).click();
- await adminPage.getByRole('heading',{name:'Client calling approval',exact:true}).waitFor();
+ await adminPage.getByRole('heading',{name:'Client calling activation',exact:true}).waitFor();
  await adminPage.getByText('Internal test and platform settings',{exact:true}).click();
  assert.ok(await adminPage.getByRole('button',{name:'Call the verified internal number once'}).isDisabled());
  assert.equal(await adminPage.getByRole('combobox',{name:'Recorded prompt language'}).inputValue(),'hi');
@@ -415,10 +416,10 @@ try{
  await adminPage.getByRole('button',{name:'Save capacity',exact:true}).click();
  await adminPage.getByText(/Live calls now: 0 \/ 40/).waitFor();
  assert.deepEqual({...f.c.db.prepare('SELECT max_concurrent_calls AS a,max_calls_per_company AS b FROM calling_dispatch_settings').get()},{a:40,b:5});
- await adminPage.getByLabel('Provider approval reference',{exact:true}).fill('browser-reviewed-provider-reference');
+ await adminPage.getByLabel('Calling activation reference',{exact:true}).fill('browser-owner-activation-reference');
  await adminPage.getByLabel('Customer consent mode',{exact:true}).selectOption('client_declared');
- await adminPage.getByRole('button',{name:'Save company calling approval',exact:true}).click();
- await adminPage.getByText('Company approval saved.',{exact:true}).waitFor();
+ await adminPage.getByRole('button',{name:'Save company calling settings',exact:true}).click();
+ await adminPage.getByText('Company calling settings saved.',{exact:true}).waitFor();
  await adminPage.getByLabel('Consent evidence reference',{exact:true}).fill('browser-consent-reference');
  await adminPage.getByLabel('DND verification reference',{exact:true}).fill('browser-dnd-reference');
  await adminPage.getByLabel('Fictional buyer — '+lead.slice(0,8),{exact:true}).check();
@@ -426,6 +427,32 @@ try{
  await adminPage.getByText('1 customer approvals saved.',{exact:true}).waitFor();
  await adminPage.evaluate(()=>window.scrollTo(0,0));await adminPage.screenshot({path:'artifacts/premium-super-admin.png',fullPage:true});
  assert.equal(f.c.db.prepare('SELECT consent_mode FROM calling_company_settings WHERE tenant_id=?').get(tid).consent_mode,'client_declared');
+ // Exercise the actual owner activation endpoint with a synthetic, signed-ended
+ // acceptance record. This script never runs cron or submits a provider call.
+ Object.assign(f.env,{AR3D_SCRIPTED_CAMPAIGNS_ENABLED:'enabled',AR3D_SCRIPTED_PILOT_ENABLED:'enabled',
+  PLIVO_AUTH_ID:'SYNTHETIC123',PLIVO_AUTH_TOKEN:'syntheticdashboardtesttoken123',
+  AR3D_PLIVO_CALLER_NUMBER:'+918000000000',AR3D_PLIVO_RECORDING_AUTH:'confirmed',
+  AR3D_SCRIPTED_PILOT_ORIGIN:'https://app.example.invalid',AR3D_SCRIPTED_PILOT_VERIFIED_NUMBER:'+919000000009',
+  AR3D_SCRIPTED_PILOT_TENANT_ID:tid,AR3D_SCRIPTED_PILOT_LEAD_ID:'88888888-8888-4888-8888-888888888888',
+  SARVAM_API_KEY:'synthetic-key',AR3D_CAMPAIGN_SARVAM_DISCLOSURE:'approved',
+  RECORDINGS:{async get(){return null},async head(){return null}}});
+ f.c.db.prepare(`INSERT INTO scripted_phone_pilots(id,tenant_id,lead_id,lead_updated_at,actor_id,language,destination,caller,
+  rate_slot,expires_at,phase,provider_account_id,survey_json,created_at,hangup_at)
+  VALUES('synthetic-browser-acceptance',?,?,?,'admin','hi',?,?,1,?,'completed',?,'{"phoneMeta":{"engine":"sarvam"}}',?,?)`)
+  .run(tid,f.env.AR3D_SCRIPTED_PILOT_LEAD_ID,new Date().toISOString(),f.env.AR3D_SCRIPTED_PILOT_VERIFIED_NUMBER,
+   f.env.AR3D_PLIVO_CALLER_NUMBER,Date.now()+600000,f.env.PLIVO_AUTH_ID,new Date().toISOString(),Date.now());
+ const draftCount=f.r.db.prepare('SELECT COUNT(*) AS n FROM call_campaign_drafts').get().n;
+ const jobCount=f.r.db.prepare('SELECT COUNT(*) AS n FROM calling_jobs').get().n;
+ const clientCount=f.c.db.prepare("SELECT COUNT(*) AS n FROM tenants WHERE status IN('trial','active')").get().n;
+ await adminPage.getByRole('link',{name:'Dashboard',exact:true}).click();
+ const activation=adminPage.getByRole('region',{name:'Client calling activation'});
+ await activation.getByRole('button',{name:'Enable client calling',exact:true}).click();
+ await activation.getByText('Calling enabled for '+clientCount+' client companies. Clients can start calls from their own panel.',{exact:true}).waitFor();
+ assert.equal(f.c.db.prepare('SELECT enabled FROM provider_manual_funding_control').get().enabled,1);
+ assert.equal(f.r.db.prepare("SELECT COUNT(*) AS n FROM calling_policies WHERE enabled=1 AND approval_reference='owner-dashboard-activation'").get().n,clientCount);
+ assert.equal(f.r.db.prepare('SELECT COUNT(*) AS n FROM call_campaign_drafts').get().n,draftCount);
+ assert.equal(f.r.db.prepare('SELECT COUNT(*) AS n FROM calling_jobs').get().n,jobCount);
+ assert.equal(f.c.db.prepare('SELECT COUNT(*) AS n FROM scripted_phone_pilots WHERE job_id IS NOT NULL').get().n,0);
  await adminContext.close();console.log('Super Admin UI: current MFA session, company policy and selected customer clearances PASS');
  // The Client Admin now declares the consent source on the Calling tab instead of waiting for per-customer review.
  const declareContext=await browser.newContext({viewport:{width:390,height:844}});

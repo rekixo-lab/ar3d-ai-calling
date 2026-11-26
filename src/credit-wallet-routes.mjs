@@ -14,6 +14,8 @@ import {clientFinancialReport} from './client-financial-report.mjs';
 import {parseCollectionWindow,recordedCollections} from './recorded-collections.mjs';
 import {resolveFundingEnv,resolvedFunding,saveFundingSettings,validFundingSettings,fundingNotice} from './provider-funding.mjs';
 import {readPlivoBalance} from './provider-balance.mjs';
+import {readManualBalances,syncManualBalance,validManualBalanceSync,setManualFundingEnabled} from './manual-provider-balances.mjs';
+import {MANUAL_CALLING_COSTS} from './manual-calling-costs.mjs';
 
 const base='/v1/human/credits';
 const uuid=/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
@@ -306,6 +308,45 @@ export async function handleCreditWalletRequest(req,env,user,{fetcher=fetch}={})
  if(!env.CONTROL_DB)return fail('database unavailable',503);
  const db=env.CONTROL_DB,path=url.pathname.slice(base.length+1);
  try{
+  if(path==='provider-balance-sync'){
+   if(!await currentMfa(env,user))return fail('current MFA Super Admin required',403);
+   if(url.search)return fail('unsupported balance sync query');
+   let result=null;
+   if(req.method==='POST'){
+    if(!mutationOriginAllowed(req))return fail('same origin required',403);
+    const d=await boundedBody(req);
+    if(!validManualBalanceSync(d))return fail('invalid provider balance sync');
+    result=await syncManualBalance(db,d,user.id);
+    if(!result.ok)return fail('balance changed; refresh and paste the current provider balance again',409);
+   }
+   const balances=await readManualBalances(db),configured=await resolveFundingEnv(env),funding=resolvedFunding(configured);
+   const rates=MANUAL_CALLING_COSTS;
+   const config=funding.config??{
+    plivo:{currency:'INR',capMicros:balances.plivo?.balanceMicros??0,pulseMicros:rates.plivoPulseMicros},
+    sarvam:{currency:'INR',capMicros:balances.sarvam?.balanceMicros??0,pulseMicros:rates.sarvamPulseMicros},
+    fundingGuard:{kind:'manual_balance',plivoSequence:balances.plivo?.sequence??0,sarvamSequence:balances.sarvam?.sequence??0}
+   };
+   const budget=await providerBudgetPosition(db,config);
+   return json({mode:'manual_balance',callingEnabled:balances.control?.enabled===true,
+    controlRevision:balances.control?.revision??0,status:funding.status,
+    providers:['plivo','sarvam'].map(provider=>{
+     const row=balances[provider],account=budget.accounts.find(a=>a.provider===provider);
+     return {provider,currency:'INR',available:!!row,syncedBalanceMicros:row?.balanceMicros??null,
+      availableBalanceMicros:row?account?.remainingMicros??null:null,heldMicros:row?account?.heldMicros??null:null,
+      usedMicros:row?account?.usedMicros??null:null,lastSyncAt:row?.createdAt??null,revision:row?.sequence??0,
+      source:'manual_provider_dashboard',estimated:true};
+    }),rates,notice:fundingNotice,...(result?{replayed:result.replayed}:{})},result&&!result.replayed?201:200);
+  }
+  if(path==='manual-funding-control'){
+   if(!await currentMfa(env,user))return fail('current MFA Super Admin required',403);
+   if(req.method!=='POST')return fail('method not allowed',405);
+   if(!mutationOriginAllowed(req)||url.search)return fail('same origin required',403);
+   const d=await boundedBody(req);
+   if(!d||Object.keys(d).sort().join(',')!=='enabled,expectedRevision'||typeof d.enabled!=='boolean'||
+    !Number.isSafeInteger(d.expectedRevision)||d.expectedRevision<0||d.expectedRevision>2147483646)return fail('invalid manual funding control');
+   const result=await setManualFundingEnabled(db,d,user.id);
+   return result.ok?json(result):fail('calling setting changed; refresh before saving',409);
+  }
   if(path==='funding-settings'){
    if(!await currentMfa(env,user))return fail('current MFA Super Admin required',403);
    if(url.search)return fail('unsupported funding query');
@@ -313,6 +354,8 @@ export async function handleCreditWalletRequest(req,env,user,{fetcher=fetch}={})
     if(!mutationOriginAllowed(req))return fail('same origin required',403);
     const d=await boundedBody(req);
     if(!validFundingSettings(d))return fail('invalid funding settings');
+    const manual=await db.prepare('SELECT revision FROM provider_manual_funding_control WHERE id=1').first();
+    if(manual)return fail('Manual balance sync is active; use the Dashboard to update current provider balances',409);
     // Confirm paid/prepaid account metadata, without converting API USD to INR
     // or treating this read as a receipt, route approval or recharge.
     if(d.mode==='journal'){
@@ -370,6 +413,8 @@ export async function handleCreditWalletRequest(req,env,user,{fetcher=fetch}={})
    };
    if(req.method==='GET'){if(url.search)return fail('invalid query');return json(await status())}
    if(!mutationOriginAllowed(req)||url.search)return fail('same origin required',403);
+   if(await db.prepare('SELECT 1 AS enabled FROM provider_manual_funding_control WHERE id=1').first())
+    return fail('Manual provider balance sync is active; refresh the Dashboard and use Sync Sarvam balance',409);
    const d=await boundedBody(req);
    if(!d||Object.keys(d).sort().join(',')!=='creditsLeftMicros,id'||!uuid.test(d.id||'')||
       !Number.isSafeInteger(d.creditsLeftMicros)||d.creditsLeftMicros<0||d.creditsLeftMicros>1000000000000)return fail('invalid Sarvam balance');
@@ -482,7 +527,7 @@ export async function handleCreditWalletRequest(req,env,user,{fetcher=fetch}={})
     COALESCE(SUM(CASE WHEN p.id IS NOT NULL AND p.hangup_at IS NULL THEN 1 ELSE 0 END),0) AS awaitingHangup,
     COALESCE(SUM(CASE WHEN p.hangup_at IS NOT NULL THEN 1 ELSE 0 END),0) AS endedAwaitingReview,
     MIN(h.created_at) AS oldestHeldAt FROM tenant_minute_holds h LEFT JOIN scripted_phone_pilots p ON p.tenant_id=h.tenant_id AND p.job_id=h.job_id WHERE h.state='held'`).first();
-   return json({clients,purchases,providerBudget:await providerBudgetPosition(db,moneyBudgetConfig(env)),providerSafety:await providerSafety(db),settlementQueue:{...settlementQueue,automaticApproved:env.AR3D_AUTO_CDR_SETTLEMENT==='approved'},funding:{...funding,source:resolvedFunding(env).source,status:resolvedFunding(env).status,automaticProviderSync:false,reviewedProviderCeilings:providerFundingCaps(env)},position:{...position,outstandingSeconds:position.allocatedSeconds-position.usedSeconds,uncommittedSeconds:position.allocatedSeconds-position.heldSeconds-position.usedSeconds},internal:{ended:sessions.internalEnded},campaign:{ended:sessions.campaignEnded},transactions:transactions.results,providerRequests:0,externalPaymentsRecorded:purchases.count>0,dispatchEnabledByDashboard:false});
+   return json({clients,purchases,providerBudget:await providerBudgetPosition(db,moneyBudgetConfig(env)),providerSafety:await providerSafety(db),settlementQueue:{...settlementQueue,automaticApproved:env.AR3D_AUTO_CDR_SETTLEMENT==='approved'||resolvedFunding(env).source==='manual_balance'},funding:{...funding,source:resolvedFunding(env).source,status:resolvedFunding(env).status,automaticProviderSync:false,reviewedProviderCeilings:providerFundingCaps(env)},position:{...position,outstandingSeconds:position.allocatedSeconds-position.usedSeconds,uncommittedSeconds:position.allocatedSeconds-position.heldSeconds-position.usedSeconds},internal:{ended:sessions.internalEnded},campaign:{ended:sessions.campaignEnded},transactions:transactions.results,providerRequests:0,externalPaymentsRecorded:purchases.count>0,dispatchEnabledByDashboard:false});
   }
   if(path==='reverse-call-charge'){
    if(req.method!=='POST')return fail('method not allowed',405);

@@ -39,7 +39,7 @@ const btn=(label,fn,secondary=false)=>node('button',{class:'btn'+(secondary?' se
 const input=(name,type='text',placeholder='')=>node('input',{class:'field',name,type,placeholder,required:'required'});
 const lab=(text,control)=>node('label',{},[node('span',{class:'label',text}),control]);
 function notice(msg,isError=false){state.notice=msg;const old=document.getElementById('notice');if(old)old.remove();const area=document.getElementById('notice-anchor')||root;area.prepend(node('div',{id:'notice',class:'banner '+(isError?'err':'success'),text:msg}))}
-async function api(path,method='GET',payload){const r=await fetch(path,{method,credentials:'same-origin',headers:payload?{'Content-Type':'application/json'}:{},body:payload?JSON.stringify(payload):undefined,cache:'no-store'});const data=await r.json();if(!r.ok)throw Error(data.error||data.code||data.notice||'Request failed');return data}
+async function api(path,method='GET',payload){const r=await fetch(path,{method,credentials:'same-origin',headers:payload?{'Content-Type':'application/json'}:{},body:payload?JSON.stringify(payload):undefined,cache:'no-store'});const data=await r.json();if(!r.ok){const error=Error(data.error||data.code||data.notice||'Request failed');error.status=r.status;error.code=data.code;throw error}return data}
 function asError(e){notice(e instanceof Error?e.message:'Unexpected error',true)}
 function table(headers,rows){const t=node('table',{class:'table'});const h=node('tr');headers.forEach(v=>h.append(node('th',{text:v})));t.append(node('thead',{},h));const b=node('tbody');rows.forEach(row=>{const tr=node('tr');row.forEach(v=>{const text=String(v??'—');const cell=node('td');if(v instanceof Node){cell.append(v);tr.append(cell);return}if(['active','completed','submitted','running','trial','paused','queued','draft','suspended','failed','unknown','blocked'].includes(text))cell.append(node('span',{class:'badge '+(['active','completed','running'].includes(text)?'positive':['trial','paused','queued','draft','submitted'].includes(text)?'pending':'negative'),text}));else cell.textContent=text;tr.append(cell)});b.append(tr)});if(!rows.length)b.append(node('tr',{},node('td',{class:'empty-state',colspan:headers.length,text:'No records yet'})));t.append(b);return div('tablewrap',t)}
 async function load(){
@@ -433,47 +433,100 @@ function foregroundRefresh(element,ms,task,active=()=>true){
  schedule();
  return stop;
 }
-// The console/API pair supplied by the operator implies 80 INR/USD.
-// A comparison only, not a verified INR account balance or market FX rate.
 const inr=n=>'₹'+Number(n).toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2});
-function plivoInr(credits){return inr(Number(credits)*80)}
-function plivoConsoleComparison(credits){
- return 'Plivo API reports $'+credits+' · shown at the Plivo console rate ₹80/USD.';
-}
 function validPlivoUsd(d){
  return d?.available===true&&d.cashCreditsCurrency==='USD'&&typeof d.cashCredits==='string'&&/^\d{1,10}(?:\.\d{1,8})?$/.test(d.cashCredits);
 }
-// Provider cash and client minute ledger are deliberately independent.
+function plivoAccountStatus(accountType){
+ if(accountType==='developer')return 'Plivo account: Free Trial — only sandbox destinations allowed by provider.';
+ if(accountType==='standard')return 'Plivo account: paid (standard); provider route restrictions still apply.';
+ return 'Plivo account: unknown — account type could not be verified.';
+}
+function parseProviderBalanceMicros(raw){
+ const text=String(raw).trim().replace(/^₹\s*/,'');
+ // Accept copied Indian or western comma groups without accepting malformed amounts.
+ if(!/^(?:\d{1,12}|\d{1,3}(?:,\d{3})+|\d{1,2}(?:,\d{2})*,\d{3})(?:\.\d{1,6})?$/.test(text))throw Error('Enter the full current INR balance, for example ₹1,000.50. Use up to six decimal places.');
+ const [whole,fraction='']=text.replace(/,/g,'').split('.');
+ const micros=Number(whole)*1000000+Number(fraction.padEnd(6,'0'));
+ if(!Number.isSafeInteger(micros)||micros<0||micros>999999999999)throw Error('Enter a balance from ₹0 to ₹9,99,999.999999.');
+ return micros;
+}
+function providerBalanceMoney(micros){
+ return '₹'+(micros/1000000).toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:6});
+}
+// The pasted provider balance and the client minute ledger stay independent.
 function providerBalancePanel(openView){
- const plivo=overviewMetric('Plivo balance','Not checked','phone');
- const value=plivo.querySelector('strong');
- const status=node('p',{class:'muted',role:'status',text:'Provider Account API · USD.'});
- const equivalent=node('p',{class:'muted',text:'India console INR balance not available via this API.'});
- const refresh=btn('Refresh Plivo balance',load,true);
- plivo.append(equivalent,status,refresh,node('a',{class:'provider-link',href:'https://cx.plivo.com/home',target:'_blank',rel:'noopener noreferrer',text:'Open Plivo console'}));
- const sarvam=overviewMetric('Sarvam balance','Loading…','spark');
- const sarvamValue=sarvam.querySelector('strong');
- const sarvamStatus=node('p',{class:'muted',role:'status',text:'Automatic Sarvam balance sync is not connected. Sync Credits Left from Settings → Billing.'});
- const sarvamSync=btn('Sync with Sarvam dashboard',async()=>{
-  const raw=prompt('Enter the exact “Credits Left” (₹) shown in Sarvam dashboard → Settings → Billing:');
-  if(raw===null)return;
-  const t=raw.replace(/[₹,\s]/g,'');
-  if(!/^\d{1,9}(?:\.\d{1,6})?$/.test(t)){notice('Enter a rupee amount like 950.50',true);return}
-  const [whole,frac='']=t.split('.');
-  const micros=Number(whole)*1000000+Number(frac.padEnd(6,'0'));
-  sarvamSync.disabled=true;
-  try{showSarvam(await api('/v1/human/credits/sarvam-balance','POST',{id:crypto.randomUUID(),creditsLeftMicros:micros}));notice('Sarvam balance recorded. Funding limits update automatically when recorded provider funds are enabled.')}
-  catch(e){asError(e)}finally{sarvamSync.disabled=false}
- },true);
- function showSarvam(d){
-  if(d?.available&&Number.isSafeInteger(d.balanceMicros)){
-   sarvamValue.textContent=inr(d.balanceMicros/1000000);
-   sarvamStatus.textContent=d.lastSyncAt?'Synced with Sarvam dashboard '+formatIst(d.lastSyncAt)+'. Recorded Sarvam expenses after that are deducted.':'From recorded Sarvam journal entries. Sync to match the dashboard.';
-  }else{sarvamValue.textContent='Not synced';sarvamStatus.textContent='Automatic Sarvam balance sync is not connected. Sync Credits Left from Settings → Billing.';}
+ const endpoint='/v1/human/credits/provider-balance-sync',states=new Map();
+ let loadSequence=0;
+ function makeProvider(provider,name,symbol,url,source){
+  const card=overviewMetric(name+' balance','Loading…',symbol),value=card.querySelector('strong');
+  const synced=node('p',{class:'muted',text:'Loading last synced balance…'});
+  const lastSync=node('p',{class:'muted',text:''});
+  const held=node('p',{class:'muted',text:''});
+  const status=node('p',{class:'muted',role:'status',text:'Paste the full current INR balance from '+source+'.'});
+  const sync=node('button',{class:'btn secondary',type:'button',disabled:'disabled',text:'Sync '+name+' balance',onclick:()=>syncProvider(provider)});
+  const state={provider,name,source,card,value,synced,lastSync,held,status,sync,revision:null,row:null,pending:null,busy:false,needsRefresh:false};
+  states.set(provider,state);
+  card.append(node('p',{class:'muted',text:'Estimated available'}),synced,lastSync,held,status,sync,
+   node('a',{class:'provider-link',href:url,target:'_blank',rel:'noopener noreferrer',text:'Open '+name+(provider==='plivo'?' console':' dashboard')}));
+  return card;
  }
- async function loadSarvam(){try{showSarvam(await api('/v1/human/credits/sarvam-balance'))}catch{sarvamValue.textContent='Unavailable';sarvamStatus.textContent='Check current MFA.'}}
- sarvam.append(sarvamStatus,sarvamSync,
-  node('a',{class:'provider-link',href:'https://dashboard.sarvam.ai/',target:'_blank',rel:'noopener noreferrer',text:'Open Sarvam dashboard'}));
+ const plivo=makeProvider('plivo','Plivo','phone','https://cx.plivo.com/home','the Plivo console');
+ const sarvam=makeProvider('sarvam','Sarvam','spark','https://indus.sarvam.ai/','Sarvam Settings → Billing → Credits Left');
+ function updateButton(state){
+  state.sync.disabled=state.busy||state.revision===null||state.needsRefresh;
+  state.sync.textContent=state.busy?'Syncing '+state.name+'…':state.pending?'Retry '+state.name+' sync':'Sync '+state.name+' balance';
+ }
+ function showSnapshot(snapshot){
+  if(!Array.isArray(snapshot?.providers))throw Error('Provider balance response unavailable. Refresh balances to retry.');
+  for(const state of states.values()){
+   const row=snapshot.providers.find(p=>p.provider===state.provider);
+   if(!row||row.currency!=='INR'||typeof row.available!=='boolean'||!Number.isSafeInteger(row.revision)||row.revision<0)throw Error('Provider balance response incomplete. Refresh balances to retry.');
+   if(state.revision!==null&&row.revision<state.revision)continue;
+   const remaining=row.availableBalanceMicros??row.remainingMicros;
+   const remainingKnown=Number.isSafeInteger(remaining)&&remaining>=0;
+   if(row.available===true&&(!Number.isSafeInteger(row.syncedBalanceMicros)||row.syncedBalanceMicros<0||(remaining!==null&&remaining!==undefined&&!remainingKnown)))throw Error('Provider balance amount unavailable. Refresh balances to retry.');
+   state.row=row;state.revision=row.revision;state.needsRefresh=false;
+   state.value.textContent=row.available===true?(remainingKnown?providerBalanceMoney(remaining):'Unavailable'):'Not synced';
+   state.synced.textContent=row.available===true?'Last synced balance: '+providerBalanceMoney(row.syncedBalanceMicros):'No current balance has been pasted yet.';
+   state.lastSync.textContent=row.lastSyncAt?'Last sync: '+formatIst(row.lastSyncAt):'';
+   state.held.textContent=row.available===true?(Number.isSafeInteger(row.heldMicros)&&row.heldMicros>=0?(row.heldMicros>0?'Reserved for calls: '+providerBalanceMoney(row.heldMicros):''):'Call reservations need balance review.'):'';
+   if(!state.pending)state.status.textContent=row.available===true?(remainingKnown?'After recharging, paste the provider’s new full balance.':'Balance review required. You can still sync the current balance from the provider console.'):'Paste the full current INR balance from '+state.source+'.';
+   updateButton(state);
+  }
+ }
+ async function syncProvider(provider){
+  const state=states.get(provider);
+  if(state.busy||state.revision===null||state.needsRefresh)return;
+  if(!state.pending){
+   const raw=prompt('Paste the full current available balance (₹) from '+state.source+'. Enter the total balance, not only the recharge amount:');
+   if(raw===null)return;
+   try{state.pending=Object.freeze({id:crypto.randomUUID(),provider,balanceMicros:parseProviderBalanceMicros(raw),expectedRevision:state.revision});}
+   catch(error){asError(error);return;}
+  }
+  // Retain this exact id and payload until an uncertain request is resolved.
+  const pending=state.pending;
+  state.busy=true;state.status.textContent='Saving '+providerBalanceMoney(pending.balanceMicros)+'…';updateButton(state);
+  try{
+   const snapshot=await api(endpoint,'POST',pending);
+   showSnapshot(snapshot);
+   state.pending=null;state.status.textContent='Balance synced. Estimated call costs update automatically.'+(Number.isSafeInteger(state.row?.availableBalanceMicros??state.row?.remainingMicros)?'':' Available amount still needs balance review.');
+   notice(state.name+' balance synced to '+providerBalanceMoney(pending.balanceMicros)+'.');
+  }catch(error){
+   if(error?.status===409){
+    state.pending=null;state.needsRefresh=true;
+    state.status.textContent='The saved balance changed. Refreshing before another sync…';
+    await load();
+    state.status.textContent=state.needsRefresh?'Refresh balances before pasting again.':'The saved balance changed. Check the provider console and paste its current balance again.';
+    notice(state.name+' balance changed in another request. Check its current balance before syncing again.',true);
+   }else if(error?.status>=400&&error.status<500){
+    state.pending=null;state.status.textContent='Sync was not saved. '+error.message;asError(error);
+   }else{
+    state.status.textContent='Sync result is uncertain. Retry to confirm the same '+providerBalanceMoney(pending.balanceMicros)+' balance.';
+    notice(state.name+' sync could not be confirmed. Retry confirms the same amount without creating another sync.',true);
+   }
+  }finally{state.busy=false;updateButton(state);}
+ }
  const clients=overviewMetric('Client allocated minutes','Loading…','users');
  const clientRemaining=node('p',{class:'muted',text:'Left with clients: Loading…'});
  clients.append(clientRemaining,btn('Manage client credits',()=>openView('wallet',{focus:true,resetScroll:true}),true));
@@ -482,29 +535,48 @@ function providerBalancePanel(openView){
   clients.querySelector('strong').textContent=fmt(position?.allocatedSeconds);
   clientRemaining.textContent='Left with clients: '+fmt(position?.uncommittedSeconds);
  }
+ const refresh=btn('Refresh balances',load,true);
  async function load(){
-  if(refresh.disabled)return;
-  refresh.disabled=true;
-  loadSarvam();
-  if(value.textContent==='Not checked')value.textContent='Checking…';
+  const sequence=++loadSequence;refresh.disabled=true;
   try{
-   const d=await api('/v1/human/credits/provider');
-   if(!plivo.isConnected)return;
-   if(validPlivoUsd(d)){
-    value.textContent=plivoInr(d.cashCredits);
-    // The supplied India console/API pair implies 80 INR/USD. This is
-    // a comparison estimate, not a carrier-confirmed conversion or funds.
-    equivalent.textContent=plivoConsoleComparison(d.cashCredits);
-    status.textContent=(d.accountType==='developer'?'Trial account · not verified live funds. ':'')+(d.checkedAt?'Checked '+formatIst(d.checkedAt):'');
-   }else{value.textContent='Unavailable';equivalent.textContent='INR unavailable';status.textContent='Provider balance could not be verified. Refresh to retry.';}
-  }catch{if(plivo.isConnected){value.textContent='Unavailable';equivalent.textContent='INR unavailable';status.textContent='Check current MFA and provider access.';}}
-  finally{refresh.disabled=false}
+   const snapshot=await api(endpoint);
+   if(sequence!==loadSequence||!panel.isConnected)return;
+   showSnapshot(snapshot);
+  }catch(error){
+   if(sequence!==loadSequence)return;
+   for(const state of states.values()){
+    if(state.revision===null){state.value.textContent='Unavailable';state.synced.textContent='Balance has not been loaded.';}
+    if(!state.pending)state.status.textContent='Could not refresh balances. Check your sign-in and try again.';
+    updateButton(state);
+   }
+  }finally{if(sequence===loadSequence)refresh.disabled=false;}
  }
  const panel=node('section',{class:'card provider-balances','aria-label':'Provider balances'},[
-  title('Provider balances','h3'),div('provider-grid',plivo,sarvam,clients),
-  node('p',{class:'muted',text:'Refreshes every 60 seconds while open. Provider balances are separate from client calling minutes.'})
+  div('row between',title('Provider balances','h3'),refresh),div('provider-grid',plivo,sarvam,clients),
+  node('p',{class:'muted',text:'After a recharge, paste each provider’s full current INR balance here. Sync replaces the previous balance; it does not buy credits. Estimated call costs and reservations reduce the available amount until the next sync. The provider’s actual balance applies. Client minutes are managed separately.'})
  ]);
  return {panel,load,setClients};
+}
+function clientCallingActivationPanel(main,onEnabled){
+ const result=div('stack');let busy=false;
+ const enable=btn('Enable client calling',async()=>{
+  if(busy)return;
+  busy=true;enable.disabled=true;result.replaceChildren(node('p',{class:'muted',role:'status',text:'Enabling client calling…'}));
+  try{
+   const data=await api('/v1/human/calling/enable-clients','POST',{reference:'owner-dashboard-activation'});
+   if(!Number.isSafeInteger(data.enabled)||data.enabled<0||!Array.isArray(data.companies))throw Error('Activation result could not be confirmed. Refresh the dashboard and check client calling settings.');
+   const details=node('details',{},node('summary',{text:'Client activation results'}));
+   details.append(...data.companies.map(company=>node('p',{class:'note',text:company.name+': '+company.status+(company.reason?' · '+company.reason:'')})));
+   result.replaceChildren(node('p',{class:'success',role:'status',text:'Calling enabled for '+data.enabled+' client '+(data.enabled===1?'company':'companies')+'. '+(data.enabled?'Clients can start calls from their own panel.':'Check client activation results below.')}),details);
+   notice('Calling enabled for '+data.enabled+' client '+(data.enabled===1?'company':'companies')+'.');
+   if(onEnabled)try{await onEnabled();}catch{notice('Client activation completed. Refresh the dashboard to update its totals.',true);}
+  }catch(error){result.replaceChildren(node('p',{class:'err',role:'status',text:error.message}));asError(error);}
+  finally{busy=false;enable.disabled=false;}
+ },true);
+ const panel=node('section',{class:'card','aria-label':'Client calling activation'},[
+  title('Client calling','h3'),node('p',{class:'muted',text:'Enable calling access for your client companies. Clients choose when to start a campaign using available provider balances, client minutes and customer consent.'}),enable,result]);
+ main.append(panel);
+ return panel;
 }
 async function adminDashboard(main,openView){
  const panel=div('card',title('Business overview')),body=div('stack');
@@ -512,7 +584,8 @@ async function adminDashboard(main,openView){
  const freshness=node('p',{class:'muted',role:'status',text:'Updating…'});
  panel.append(div('row between',freshness,refresh),body);
  const providers=providerBalancePanel(openView);
- const alerts=div('stack');main.append(alerts,providers.panel,panel);
+ const alerts=div('stack');main.append(alerts,providers.panel);
+ clientCallingActivationPanel(main,async()=>{await providers.load();await load();});main.append(panel);
  async function load(){
   if(refresh.disabled)return;
   refresh.disabled=true;
@@ -528,7 +601,7 @@ async function adminDashboard(main,openView){
     ...blocked.map(x=>(x.provider==='plivo'?'Plivo':'Sarvam')+' is blocked ('+x.code+'). New client calls are stopped.'),
     ...(q.missingSession>0?[q.missingSession+' call(s) need settlement review.']:[]),
     ...(q.endedAwaitingReview>0?[q.endedAwaitingReview+' ended call(s) waiting for charge check.']:[]),
-    ...(!d.providerBudget?.configured?['Provider budget not set yet. Client calls stay blocked until it is set.']:[])
+    ...(!d.providerBudget?.configured?['Sync the current Plivo and Sarvam balances above to make provider funds available for client calls.']:[])
    ];
    const advanced=node('details',{class:'card advanced-review'},node('summary',{text:'Advanced · provider safety, settlement and funding review'}));
    if(blocked.length||q.missingSession>0)advanced.open=true;
@@ -576,7 +649,7 @@ async function adminDashboard(main,openView){
     title('Funding review','h3'),
     div('overview-grid',overviewMetric('Reviewed cumulative capacity',formatSeconds(d.funding?.capSeconds),'wallet'),overviewMetric('Remaining funded capacity',formatSeconds(d.funding?.remainingFundedSeconds),'wallet'),overviewMetric('Unbacked allocations',formatSeconds(d.funding?.unbackedAllocationSeconds),'receipt')),
     div('overview-grid',overviewMetric('Plivo reviewed ceiling',formatSeconds(d.funding?.reviewedProviderCeilings?.plivo),'phone'),overviewMetric('Sarvam reviewed ceiling',formatSeconds(d.funding?.reviewedProviderCeilings?.sarvam),'spark')),
-    node('p',{class:'note',text:d.funding?.source==='recorded_provider_ledger'?'Funding limits are calculated from recorded provider transactions and saved call costs. Record each provider recharge in Credit transactions; Worker variables and redeployment are not needed. These are recorded funds, not a live wallet sync.':'Independent reviewed lifetime capacity ceilings, not live cash balances. Configure recorded provider funding in Credit transactions to update limits without Worker variable changes.'}));
+    node('p',{class:'note',text:d.funding?.source==='manual_balance'?'Calling funds come from the current provider balances pasted on this dashboard. Reservations and recorded call costs reduce those balances automatically. Paste each provider’s full updated balance after a recharge; Worker variables and redeployment are not needed.':d.funding?.source==='recorded_provider_ledger'?'Funding limits are calculated from recorded provider transactions and saved call costs. Record each provider recharge in Credit transactions; Worker variables and redeployment are not needed. These are recorded funds, not a live wallet sync.':'Sync the current INR balances for Plivo and Sarvam on this dashboard to fund calls without Worker variable changes.'}));
   }catch(e){alerts.replaceChildren();providers.setClients(null);freshness.textContent='Update unavailable';body.replaceChildren(node('p',{class:'err',text:'Dashboard unavailable. Refresh after signing in with current MFA.'}));}
   finally{refresh.disabled=false}
  }
@@ -860,7 +933,7 @@ function fundingSettingsPanel(main,openJournal){
  plivo.inputMode=sarvam.inputMode='decimal';plivo.maxLength=sarvam.maxLength=12;
  reference.minLength=10;reference.maxLength=160;
  const reviewed=node('input',{type:'checkbox',required:'required'});
- let revision=null,saved=null,busy=false;
+ let revision=null,saved=null,busy=false,manualBalance=false;
  const save=node('button',{class:'btn',type:'submit',text:'Save funding settings',disabled:'disabled'});
  const disable=btn('Disable journal funding',()=>persist('disabled'),true);
  disable.disabled=true;
@@ -878,13 +951,19 @@ function fundingSettingsPanel(main,openJournal){
   currency.value=saved?.plivoCurrency||'';plivo.value=amount(saved?.plivoPulseMicros);sarvam.value=amount(saved?.sarvamPulseMicros);
   reference.value=saved?.evidenceRef||'';reviewed.checked=false;
   const source=data.funding?.source;
-  status.textContent=source==='recorded_provider_ledger'?
+  manualBalance=saved?.mode==='manual_balance'||source==='manual_balance';
+  form.hidden=manualBalance;if(journalLink)journalLink.hidden=manualBalance;
+  status.textContent=manualBalance?
+   'Manual balance sync is active. Update Plivo and Sarvam balances on Dashboard. Calling estimates use published rates; actual provider balances apply.':source==='recorded_provider_ledger'?
    'Recorded provider funding is enabled. Limits are recalculated from the journal. Status: '+String(data.funding.status||'review required').replaceAll('_',' ')+'.':
    source==='disabled'?'Recorded provider funding is disabled. New calls are blocked.':
    'Recorded provider funding is not configured. Existing Worker limits remain in use until you save these settings.';
   if(saved?.updatedAt)status.textContent+=' Saved '+formatIst(saved.updatedAt)+'.';
  }
- function buttons(){save.disabled=busy||revision===null;disable.disabled=busy||revision===null||!saved||saved.mode==='disabled';refresh.disabled=busy;}
+ function buttons(){
+  for(const control of [currency,plivo,sarvam,reference,reviewed])control.disabled=manualBalance||busy||revision===null;
+  save.disabled=manualBalance||busy||revision===null;disable.disabled=manualBalance||busy||revision===null||!saved||saved.mode==='disabled';refresh.disabled=busy;
+ }
  async function load(){
   if(busy)return;busy=true;buttons();
   try{show(await api('/v1/human/credits/funding-settings'))}
@@ -892,7 +971,7 @@ function fundingSettingsPanel(main,openJournal){
   finally{busy=false;buttons()}
  }
  async function persist(mode){
-  if(busy||revision===null)return;
+  if(busy||revision===null||manualBalance)return;
   const plivoPulseMicros=mode==='disabled'?saved?.plivoPulseMicros:pulse(plivo.value);
   const sarvamPulseMicros=mode==='disabled'?saved?.sarvamPulseMicros:pulse(sarvam.value);
   const plivoCurrency=mode==='disabled'?saved?.plivoCurrency:currency.value,evidenceRef=reference.value.trim();
@@ -908,17 +987,19 @@ function fundingSettingsPanel(main,openJournal){
   }catch(error){asError(error);status.textContent='Save not confirmed. Refresh settings before trying again; another admin may have changed them.';revision=null;}
   finally{busy=false;buttons()}
  }
- const form=node('form',{class:'stack'},[
+ const form=node('form',{class:'stack',hidden:'hidden'},[
   node('p',{class:'note',text:'Set reviewed calling costs once. AR3D calculates funding limits from your recorded opening balances, recharges, expenses and call reservations. Record each recharge in the provider journal or use Sarvam balance sync; no Cloudflare variable update or redeployment is needed.'}),
   node('p',{class:'muted',text:'Automatic provider recharge detection is not connected. This does not top up either provider. Client credits, provider access and company calling approval must also be ready.'}),
   div('formrow',lab('Confirmed Plivo billing currency',currency),lab('Plivo maximum total cost per 30 seconds',plivo),lab('Sarvam maximum total cost per 30 seconds (INR)',sarvam)),
   node('p',{class:'muted',text:'Use conservative costs from your provider plan, including applicable taxes and fees. Sarvam must include speech recognition and any AI clarification cost. Change these values when tariffs change.'}),
   lab('Funding and cost review reference',reference),
   lab('I reviewed the paid provider funding records, currency and maximum call costs. Trial credits are excluded.',reviewed),
-  div('formrow',save,disable,refresh),status]);
+  div('formrow',save,disable)]);
  form.addEventListener('submit',event=>{event.preventDefault();persist('journal')});
- card.append(form);
- if(openJournal)card.append(btn('Record or review provider funds',openJournal,true));
+ const journalLink=openJournal?btn('Record or review provider funds',openJournal,true):null;
+ if(journalLink)journalLink.hidden=true;
+ card.append(status,form,refresh);
+ if(journalLink)card.append(journalLink);
  main.append(card);load().catch(()=>{});
 }
 function providerFinancialJournal(main){
@@ -1185,8 +1266,8 @@ function creditWalletOperator(main){
  const loadProvider=async()=>{
   const d=await api('/v1/human/credits/provider');
   provider.replaceChildren(node('p',{class:'note',text:validPlivoUsd(d)?
-   'Plivo API cash_credits: $'+d.cashCredits+' USD. '+plivoConsoleComparison(d.cashCredits)+' '+
-   (d.accountType==='developer'?'Trial account — not spendable client funding.':'Not yet a verified INR funding pool.')+' '+(d.checkedAt?'Checked '+formatIst(d.checkedAt):''):
+   'Plivo API cash_credits: $'+d.cashCredits+' USD. This API value is a connection diagnostic; the INR balance for calling is pasted separately on the dashboard. '+
+   plivoAccountStatus(d.accountType)+' '+(d.checkedAt?'Checked '+formatIst(d.checkedAt):''):
    'Plivo balance unavailable. Check MFA and carrier access, then refresh.'}));
  };
  const loadConnection=async()=>{
@@ -1225,6 +1306,7 @@ function creditWalletOperator(main){
    '';
   const safety=' This diagnostic never enables campaigns or overrides calling permissions.';
   connection.replaceChildren(
+   node('p',{class:'note',role:'status',text:plivoAccountStatus(d.credentialsVerified?d.accountType:null)}),
    node('p',{class:'note',role:'status',text:authStatus+http+' · '+numberStatus+details+'.'+safety}),
    ...(d.credentialsVerified&&Array.isArray(d.listedNumbers)?d.listedNumbers.map(n=>
     node('p',{class:'muted',text:n.maskedNumber+(n.inIndia?' · India':'')+
@@ -2189,11 +2271,17 @@ async function customerCallingPanel(tenantId,content,role,openView,openResults,r
   if(!snapshot)return;
   // Keep provider onboarding and consent paperwork in the AR3D operator view.
   // Ordinary clients only need to prepare a list, start when enabled and see results.
-  status.textContent=!snapshot.data.configuration.ready?
+  const creditMessage={
+   insufficient_credits:'Not enough calling credits. Ask AR3D to allocate more minutes.',
+   provider_balance_required:'Ask the Super Admin to sync both provider balances on Dashboard.',
+   provider_balance_exhausted:'Provider balance cannot cover another billing pulse. Recharge the provider and sync its current balance.',
+   funding_disabled:'Calling is paused by the Super Admin.'
+  }[snapshot.data.credits?.reason];
+  status.textContent=creditMessage||(!snapshot.data.configuration.ready?
    'AI calling is being prepared by AR3D. You can import your customer list now.':
    !policyReady?'AI calling for this company is waiting for AR3D activation.':
-   !snapshot.data.credits?.ready?(snapshot.data.credits?.reason==='insufficient_credits'?'Not enough calling credits. Ask AR3D to allocate more minutes.':'Waiting for AR3D funding or calling approval.'):
-   !campaign?'Import customers and prepare a campaign.':!languageOK?'Prepare a Hindi or English campaign.':run?.state==='completed'?'Campaign finished. View customer answers.':run?.state==='running'?'Calling is in progress.':needsDeclaration&&!consentBox.checked?'Confirm customer consent below to start calling.':'Calls run while you have calling minutes · 09:00–20:00 India time';
+   !snapshot.data.credits?.ready?'Company calling setup is incomplete. Ask the Super Admin to check Calling Setup.':
+   !campaign?'Import customers and prepare a campaign.':!languageOK?'Prepare a Hindi or English campaign.':run?.state==='completed'?'Campaign finished. View customer answers.':run?.state==='running'?'Calling is in progress.':needsDeclaration&&!consentBox.checked?'Confirm customer consent below to start calling.':'Calls run while you have calling minutes · 09:00–20:00 India time');
   status.className='note '+(ready?'ready-note':'');
   summary.replaceChildren(campaign?div('between row',
    node('strong',{text:campaign.name}),
@@ -2314,7 +2402,7 @@ async function callingAdminPanel(main,client=null){
  const diagnostics=node('details',{class:'card'},node('summary',{text:'Advanced diagnostics · Plivo go-live readiness'}));
  const details=div('stack');diagnostics.append(details);tools.append(diagnostics);
  diagnostics.addEventListener('toggle',()=>{if(diagnostics.open&&!diagnostics.dataset.loaded){diagnostics.dataset.loaded='true';launchReadinessPanel(details)}});
- const card=div('card calling-settings',title('Client calling approval')),area=div('approval-grid');card.id='calling-setup';main.append(card);
+ const card=div('card calling-settings',title('Client calling activation')),area=div('approval-grid');card.id='calling-setup';main.append(card);
  const company=node('select',{class:'field','aria-label':'Calling setup company'});
  const companySearch=input('callingSetupCompanySearch','search','Search company name or email');
  companySearch.maxLength=80;
@@ -2326,14 +2414,14 @@ async function callingAdminPanel(main,client=null){
   if(d.tenants.some(t=>t.id===prev))company.value=prev;
  }
  try{await findCompany()}catch(e){asError(e);return}
- const approval=input('approval','text','Approved phone provider and calling purpose reference');
+ const approval=input('approval','text','Owner or operator calling activation reference');
  const days=input('days','number');days.value='365';days.min='1';days.max='365';
  const seconds=input('maxSeconds','number');seconds.value='180';seconds.min='180';seconds.max='300';
  const enabled=node('input',{type:'checkbox','aria-label':'Enable company calling'});
  const consentModeSel=node('select',{class:'field','aria-label':'Customer consent mode'},[
   node('option',{value:'client_declared',text:'Client declares consent when starting a campaign (recommended)'}),
   node('option',{value:'reviewed',text:'AR3D reviews each customer (Customer clearance below)'})]);
- const policyForm=node('form',{class:'stack'},[title('Company approval','h3'),lab('Provider approval reference',approval),div('formrow',lab('Approval days (1–365)',days),lab('Maximum call seconds (180–300)',seconds)),lab('Customer consent',consentModeSel),lab('Enable company calling',enabled),node('button',{class:'btn',type:'submit',text:'Save company calling approval'})]);
+ const policyForm=node('form',{class:'stack'},[title('Company calling','h3'),lab('Calling activation reference',approval),div('formrow',lab('Activation days (1–365)',days),lab('Maximum call seconds (180–300)',seconds)),lab('Customer consent',consentModeSel),lab('Enable company calling',enabled),node('button',{class:'btn',type:'submit',text:'Save company calling settings'})]);
  const consent=input('consent','text','Purpose-specific opt-in evidence reference'),dnd=input('dnd','text','Provider DND check reference');
  const choices=div('stack approval-list');
  const draft=node('select',{class:'field','aria-label':'Uploaded campaign'});
@@ -2345,7 +2433,7 @@ async function callingAdminPanel(main,client=null){
  const clearanceForm=node('form',{class:'stack'},[title('Customer clearance','h3'),node('p',{class:'note',text:'Select only customers covered by the consent evidence and current provider DND check. Excel upload alone does not supply these checks. Opted-out customers cannot be approved.'}),lab('Uploaded campaign',draft),lab('Purpose',purpose),lab('Consent evidence reference',consent),lab('DND verification reference',dnd),choices,div('formrow',newer,older),node('button',{class:'btn',type:'submit',text:'Approve selected customers'})]);
  const status=div(''),clearanceHistory=div('stack'),recovery=div('stack');
  const expires=()=>{const n=Number(days.value);if(!Number.isInteger(n)||n<1||n>365)throw Error('Approval days must be 1–365');return new Date(Date.now()+n*86400000).toISOString()};
- policyForm.addEventListener('submit',async e=>{e.preventDefault();try{await api('/v1/human/calling/policy','POST',{tenantId:company.value,enabled:enabled.checked,approvalReference:approval.value,expiresAt:expires(),maxSeconds:Number(seconds.value),consentMode:consentModeSel.value});notice('Company approval saved.');await refresh()}catch(e){asError(e)}});
+ policyForm.addEventListener('submit',async e=>{e.preventDefault();try{await api('/v1/human/calling/policy','POST',{tenantId:company.value,enabled:enabled.checked,approvalReference:approval.value,expiresAt:expires(),maxSeconds:Number(seconds.value),consentMode:consentModeSel.value});notice('Company calling settings saved.');await refresh()}catch(e){asError(e)}});
  clearanceForm.addEventListener('submit',async e=>{e.preventDefault();try{const leadIds=[...choices.querySelectorAll('input:checked')].map(x=>x.value);const r=await api('/v1/human/calling/clearances','POST',{tenantId:company.value,leadIds,purpose:purpose.value,consentReference:consent.value,dndReference:dnd.value,expiresAt:expires()});notice(r.reviewed+' customer approvals saved.');await refresh()}catch(e){asError(e)}});
  async function refresh(){
   const generation=++requestGeneration,tenantId=company.value;
@@ -2361,7 +2449,7 @@ async function callingAdminPanel(main,client=null){
    draft.value=selected;newer.disabled=clearanceOffset===0;older.disabled=!c.hasMore;
    approval.value=p.policy?.approvalReference||'';enabled.checked=!!p.policy?.enabled;
    seconds.value=String(p.policy?.maxSeconds||180);consentModeSel.value=p.consentMode||'reviewed';
-   status.append(node('strong',{text:!p.configuration.ready?'Platform setup required':!p.policy?.enabled?'Next step: approve company calling':Date.parse(p.policy.expiresAt)<=Date.now()?'Next step: renew company approval':'Company calling approved'}));
+   status.append(node('strong',{text:!p.configuration.ready?'Platform setup required':!p.policy?.enabled?'Next step: enable company calling':Date.parse(p.policy.expiresAt)<=Date.now()?'Next step: renew calling activation':'Company calling enabled'}));
    status.append(node('p',{class:'note',text:p.configuration.ready?'Fixed-question customer calling configured.':p.configuration.missing.join(', ')}));
    for(const l of c.leads){const checkbox=node('input',{type:'checkbox',value:l.id});if(l.consentStatus==='denied'||l.dndStatus==='blocked')checkbox.disabled=true;choices.append(lab(l.name+' — '+l.id.slice(0,8),checkbox))}
    clearanceHistory.append(table(['Customer','Purpose','Approval expires'],c.clearances.map(x=>[x.name,x.purpose,x.expiresAt])));

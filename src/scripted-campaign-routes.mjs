@@ -3,8 +3,10 @@ import {resolveCrmDb,parseJsonBody} from './core.mjs';
 import {scriptedCampaignConfiguration,dispatchSettings,providerThrottledUntil} from './scripted-campaign-dispatch.mjs';
 import {minutePosition,fundingCap,fundingPosition,affordableCallSeconds,BILLING_PULSE_SECONDS} from './minute-holds.mjs';
 import {moneyBudgetConfig,providerBudgetPosition} from './provider-cost-reservations.mjs';
-import {SCRIPTED_CALLING_POLICY,scriptedPromptsReady} from './scripted-phone-pilot.mjs';
+import {SCRIPTED_CALLING_POLICY,scriptedPromptsReady,approvedCampaignPhone} from './scripted-phone-pilot.mjs';
 import {resolveFundingEnv} from './provider-funding.mjs';
+import {enableClientCalling,validCallingActivationReference} from './client-calling-activation.mjs';
+import {setManualFundingEnabled} from './manual-provider-balances.mjs';
 const BASE='/v1/human/calling';
 const UUID=/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
 const json=(data,status=200)=>Response.json(data,{status,headers:{'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'}});
@@ -37,13 +39,26 @@ async function audit(db,tid,user,action,target,at){
 async function creditPreflight(env,tid,policy,configuration){
  const position=await minutePosition(env.CONTROL_DB,tid);
  const requiredSeconds=policy?BILLING_PULSE_SECONDS:null;
- if(!configuration.ready||!policy?.enabled||requiredSeconds===null)return {availableSeconds:position.uncommittedSeconds,requiredSeconds,ready:false,reason:'approval_required'};
+ const unavailable={availableSeconds:position.uncommittedSeconds,requiredSeconds,ready:false};
+ if(!policy?.enabled||requiredSeconds===null)return {...unavailable,reason:'approval_required'};
+ const manual=configuration.funding?.source==='manual_balance';
+ if(!configuration.ready){
+  let reason='approval_required';
+  // Missing funds do not revoke an owner's existing company authorization.
+  // Keep carrier/policy problems distinct from copying or replenishing money.
+  if(manual&&configuration.carrierReady===true&&configuration.funding.status!=='ready'){
+   reason=configuration.funding.status==='disabled'?'funding_disabled':
+    configuration.funding.status==='money_budget_exhausted'?'provider_balance_exhausted':'provider_balance_required';
+  }
+  return {...unavailable,reason};
+ }
  if(position.uncommittedSeconds<requiredSeconds)return {availableSeconds:position.uncommittedSeconds,requiredSeconds,ready:false,reason:'insufficient_credits'};
  const funding=await fundingPosition(env.CONTROL_DB,fundingCap(env));
  const money=await providerBudgetPosition(env.CONTROL_DB,moneyBudgetConfig(env));
  const maxCallSeconds=affordableCallSeconds(policy.maxSeconds,position.uncommittedSeconds,Math.min(funding.remainingFundedSeconds,money.remainingSeconds));
  const ready=maxCallSeconds>=requiredSeconds;
- return {availableSeconds:position.uncommittedSeconds,requiredSeconds,maxCallSeconds,ready,reason:ready?null:'funding_review_required'};
+ return {availableSeconds:position.uncommittedSeconds,requiredSeconds,maxCallSeconds,ready,
+  reason:ready?null:manual?'provider_balance_exhausted':'funding_review_required'};
 }
 export async function handleScriptedCallingRequest(req,env,user,{now=Date.now()}={}){
  const url=new URL(req.url),path=url.pathname;
@@ -52,10 +67,23 @@ export async function handleScriptedCallingRequest(req,env,user,{now=Date.now()}
  if(!['GET','POST'].includes(req.method))return fail('method_not_allowed',405);
  if(req.method==='POST'&&!mutationOriginAllowed(req))return fail('same_origin_required',403);
  const admin=['policy','clearances','reconcile'].includes(action);
- if(!['policy','clearances','runs','state','results','reconcile','review-partial','capacity'].includes(action))return fail('not_found',404);
+ if(!['policy','clearances','runs','state','results','reconcile','review-partial','capacity','enable-clients'].includes(action))return fail('not_found',404);
  try{
-  env=await resolveFundingEnv(env);
   const d=req.method==='POST'?await body(req):Object.fromEntries(url.searchParams);
+  if(action==='enable-clients'){
+   if(req.method!=='POST')return fail('method_not_allowed',405);
+   if(!await freshAdmin(env,user,now))return fail('current_super_admin_mfa_required',403);
+   if(url.search||Object.keys(d).length!==1||!Object.hasOwn(d,'reference')||
+      !validCallingActivationReference(d.reference))return fail('invalid_activation');
+   if(!await approvedCampaignPhone(env))return fail('scripted_campaign_setup_required',409);
+   const control=await env.CONTROL_DB.prepare('SELECT enabled,revision FROM provider_manual_funding_control WHERE id=1').first();
+   if(control?.enabled!==1){
+    const enabled=await setManualFundingEnabled(env.CONTROL_DB,{enabled:true,expectedRevision:control?.revision??0},user.id,now);
+    if(!enabled.ok)return fail('manual_funding_control_changed',409);
+   }
+   return json(await enableClientCalling(env,{reference:d.reference,actor:user.id,now}));
+  }
+  env=await resolveFundingEnv(env);
   // Platform-wide calling capacity (not company-scoped).
   if(action==='capacity'){
    if(!await freshAdmin(env,user,now))return fail('current_super_admin_mfa_required',403);

@@ -1,5 +1,95 @@
 # Provider funding without Worker variable updates
 
+## Current workflow: manual available-balance sync
+
+The owner-selected workflow is **Super Admin → Dashboard → Sync Plivo balance /
+Sync Sarvam balance**. Copy the provider console's **full current available INR
+balance**, including any remaining old credit. Paste it into the corresponding
+Sync dialog. A sync replaces the previous observation; it never treats the full
+total as an additional recharge. Both providers have the same workflow. There is
+no recurring funding variable, budget variable, receipt entry or deployment step.
+
+Use **Enable client calling** once to record the authenticated owner's activation
+for all current active/trial companies. The action activates the app company and
+sets client-declared customer consent, a 180-second maximum and a 365-day policy.
+It does not recharge a provider, change the Plivo account plan, start a draft,
+allocate client minutes, or assert recipient consent. Suspended companies remain
+suspended. Clients upload CSV / enter numbers, declare their actual consent
+source, select their campaign and start it. Opt-outs and blocked DND entries stay
+excluded. A client must still have sufficient allocated calling minutes.
+
+The authenticated owner action is the application activation record. It is not
+a claim that the carrier has supplied written permission. Existing configured
+caller credentials, provider restrictions, signed internal test, recording
+notice, caller eligibility and customer consent checks continue to apply. When
+a per-company recorded question pack is absent, manual mode can use Plivo's
+built-in Hindi/English Speak voice with the company name, AI/recording disclosure,
+keypad consent and the same seven-question flow. Existing private recordings
+remain preferred; the internal test flow is unchanged.
+
+### Remaining balance and call accounting
+
+The cards show the last pasted balance and an **estimated available** balance
+after new usage and outstanding call reservations. The latter is not a live
+provider reading. Separate budgets for Plivo and Sarvam, plus client minutes,
+determine the longest affordable call in complete 30-second pulses. The maximum
+is shortened to 30/60/etc. seconds when necessary; there is no fixed cash reserve
+or percentage cutoff. Either provider having insufficient funds prevents a new
+call. Existing unknown submissions stay held and are never redialed on a sync.
+
+Default estimates are versioned in `src/manual-calling-costs.mjs`:
+
+| Provider | Allowance per 30 seconds | Basis |
+| --- | ---: | --- |
+| Plivo | ₹0.2242 | Published India domestic ₹0.38/min, plus an 18% tax allowance |
+| Sarvam | ₹0.3068 | Published ₹0.49/min STT plus ₹0.03/min planning allowance for LLM, plus 18% |
+
+These are estimates, not account-specific prices or guaranteed maximum costs.
+The Sarvam token amount can exceed its planning allowance. Complete measured
+STT seconds and tokens update estimated settled usage, and verified Plivo billed
+seconds reduce unused time reserves. Missing/failed/in-flight speech metrics
+retain their full money reservation. Exact evidenced reconciliation takes
+precedence. No estimate is inserted as a provider invoice or client cash debit.
+Do not promise exact exhaustion to ₹0: provider billing pulses, pending charges
+and external spending can differ from the app's estimate.
+
+Official pricing checked 2026-11-26:
+[Plivo India](https://www.plivo.com/voice/pricing/in/) and
+[Sarvam API pricing](https://docs.sarvam.ai/api/getting-started/pricing).
+Plivo's raw Account API USD value is never multiplied by an exchange-rate guess
+or relabeled as INR. The owner supplies INR directly from their account console.
+
+### Replacement, concurrency and fault recovery
+
+Each sync has a UUID and the previous provider snapshot revision. An uncertain
+network retry reuses the exact UUID and payload; stale editors must refresh and
+paste again. Snapshot, audit and liability coverage are transactional. Only
+settled calls closed at least 60 seconds earlier are covered by the new balance;
+running, unknown and recently closed calls remain reserved. Covered call
+identities are immutable, so later cost reconciliation cannot mint capacity
+from a numerical baseline or charge historical calls a second time.
+
+Atomic reservations recheck the enablement revision, both provider snapshot
+sequences, current shared provider costs and client minutes. Concurrent clients
+cannot consume the same remaining budget. Copied zero is accepted and pauses new
+calls. A new positive sync can recover a billing-only HTTP402 fault; it cannot
+hide an unresolved authentication, route or cost-over-reserve fault. Explicit
+manual disablement survives later balance syncs. An explicit owner activation
+can enable it again. Matched CDR settlement runs automatically in manual mode;
+it does not need another environment approval variable.
+
+Migration `0031_manual_provider_balances.sql` adds observations, covered-call
+identities and enablement control, without seeding balances or activation. The
+production workflow applies it to the exact prior schema or a fresh database
+and verifies the immutable/revision guards. Manual mode takes precedence over
+both older journal settings and environment ceilings, including when disabled.
+
+## Legacy journal workflow
+
+The remaining sections describe the older receipt-based mode for installations
+without manual-balance control. They are not additional setup steps for the
+Dashboard workflow above. Its rate form is hidden while manual mode is active.
+
 Super Admin → Credit transactions → **Provider funding setup** stores reviewed
 provider costs in Calling Control D1. In recorded-funding mode, the Worker
 derives both monetary limits and available calling seconds from the immutable

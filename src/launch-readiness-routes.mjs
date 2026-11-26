@@ -1,7 +1,7 @@
 import {inspectScriptedPromptPack,inspectInternalPilotLead} from './scripted-phone-pilot.mjs';
 import {fundingCap} from './minute-holds.mjs';
 import {moneyBudgetConfig} from './provider-cost-reservations.mjs';
-import {resolveFundingEnv} from './provider-funding.mjs';
+import {resolveFundingEnv,resolvedFunding} from './provider-funding.mjs';
 // Super Admin, current-MFA only. This endpoint is strictly read-only:
 // it never calls Plivo, creates secrets, changes CRM consent, or enables dialing.
 // Public descriptions are intentionally code-backed/explicitly unverified.
@@ -29,7 +29,7 @@ export function buildPlivoReadinessSnapshot(env){
   ['pilotTenantId',uuid(env?.AR3D_SCRIPTED_PILOT_TENANT_ID),'Internal pilot tenant ID is configured'],
   ['pilotLeadId',uuid(env?.AR3D_SCRIPTED_PILOT_LEAD_ID),'Internal pilot CRM lead ID is configured'],
   ['sarvamSpeech',typeof env?.SARVAM_API_KEY==='string'&&Boolean(env.SARVAM_API_KEY.trim()),'Sarvam speech credential is configured (presence only)'],
-  ['fundingReview',env?.AR3D_FUNDED_CAMPAIGN_DISPATCH==='approved'&&fundingCap(env)!==null&&moneyBudgetConfig(env)!==null,'Reviewed provider funding limits configured; recorded funds are not a live provider balance'],
+  ['fundingReview',(env?.AR3D_FUNDED_CAMPAIGN_DISPATCH==='approved'||resolvedFunding(env)?.source==='manual_balance')&&fundingCap(env)!==null&&moneyBudgetConfig(env)!==null,'Owner funding settings configured; between manual syncs, available balances are estimated'],
   ['privateRecordings',typeof env?.RECORDINGS?.get==='function'&&
     typeof env?.RECORDINGS?.head==='function','Private R2 recording/prompt binding exists'],
   ['customerDispatchSwitch',env?.AR3D_SCRIPTED_CAMPAIGNS_ENABLED==='enabled','Customer campaign switch is enabled']
