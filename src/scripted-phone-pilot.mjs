@@ -209,7 +209,7 @@ function responseFor(config,row,{repeatCue=false,directOpeningCue=false}={}){
   const short=['propertyType','interest'].includes(field)||(field==='size'&&state.answers.propertyType!=='plot');
   const silence=fast?(state.attempts>0?'4':short?'2':'3'):(quick?'3':'6');
   return xml(prefix+'<Record action="'+escapeXml(callback(config,row.id,'turn/'+row.turn))+
-   '" method="GET" fileFormat="mp3" maxLength="'+(quick?'12':'16')+'" timeout="'+silence+'" finishOnKey="#" playBeep="true"/><Hangup/>');
+   '" method="GET" fileFormat="mp3" maxLength="'+(quick?'12':'16')+'" timeout="'+silence+'" finishOnKey="#" playBeep="false"/><Hangup/>');
  }
  if(row.phase==='needs_review'&&isSarvam(row)&&JSON.parse(row.survey_json).phoneMeta?.technicalFailure===true)
   return xml(speak(row.language,row.language==='hi'?'माफ कीजिए, अभी हमारी तकनीकी सेवा में समस्या है। हम बाद में संपर्क करेंगे।':'Sorry, our speech service is currently unavailable. We will follow up later.')+'<Hangup/>');
