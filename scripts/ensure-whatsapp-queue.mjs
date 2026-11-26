@@ -22,13 +22,28 @@ class QueueEnsureError extends Error {
 }
 const stop=message=>{throw new QueueEnsureError(message)};
 const record=value=>value&&typeof value==='object'&&!Array.isArray(value);
+const fieldType=value=>value===undefined?'missing':value===null?'null':Array.isArray(value)?'array('+value.length+')':typeof value;
+function requestDiagnostic(stage,status,data,{parsed=true}={}){
+ // Never interpolate provider strings, URLs, identifiers, error messages, or
+ // body contents. Only fixed stage labels, JSON types, booleans and bounded
+ // numeric error codes may reach deployment logs.
+ const codes=[];
+ if(record(data)&&Array.isArray(data.errors)){
+  for(const error of data.errors.slice(0,10))
+   if(record(error)&&Number.isSafeInteger(error.code)&&error.code>=1000&&error.code<=99999999&&!codes.includes(error.code))codes.push(error.code);
+ }
+ const success=record(data)&&typeof data.success==='boolean'?'boolean('+data.success+')':fieldType(record(data)?data.success:undefined);
+ return ' [stage='+stage+'; HTTP='+status+'; envelope='+(parsed?fieldType(data):'unparsed')+
+  '; success='+success+'; result='+fieldType(record(data)?data.result:undefined)+
+  '; errors='+fieldType(record(data)?data.errors:undefined)+'; cf_codes='+(codes.length?codes.join(','):'none')+']';
+}
 function checkedCredentials(value){
  if(!record(value))stop('Cloudflare queue credentials are missing.');
  return getCredentials({CLOUDFLARE_API_TOKEN:value.token,CLOUDFLARE_ACCOUNT_ID:value.account,CONTROL_DB_ID:value.control,CRM_DB_ID:value.crm});
 }
 function relationshipList(queue,field){
  const count=queue[field+'_total_count'];
- const entries=queue[field]===undefined&&count===0?[]:queue[field];
+ const entries=(queue[field]===undefined||queue[field]===null)&&count===0?[]:queue[field];
  if(!Array.isArray(entries)||!Number.isSafeInteger(count)||count<0||count!==entries.length)
   stop('WhatsApp queue ownership metadata is incomplete; deployment was stopped.');
  return entries;
@@ -69,7 +84,8 @@ async function responseJson(response){
  }catch{throw new QueueEnsureError('Cloudflare queue response was invalid or too large.',{kind:'response'});}
  finally{reader.releaseLock()}
 }
-async function request(credentials,path,{fetcher,method='GET',body}={}){
+async function request(credentials,path,{fetcher,method='GET',body,stage}={}){
+ if(!/^(list-page-(?:[1-9]|1[0-9]|2[01])|create|detail)$/.test(stage||''))stop('Cloudflare queue request stage is invalid.');
  let response;
  try{
   response=await fetcher(API+'/accounts/'+credentials.account+'/queues'+path,{
@@ -77,17 +93,25 @@ async function request(credentials,path,{fetcher,method='GET',body}={}){
    headers:{Authorization:'Bearer '+credentials.token,...(body?{'Content-Type':'application/json'}:{})},
    ...(body?{body:JSON.stringify(body)}:{})
   });
- }catch{throw new QueueEnsureError('Cloudflare queue request did not complete; no automatic write retry was attempted.',{kind:'transport'});}
+ }catch{throw new QueueEnsureError('Cloudflare queue request did not complete; no automatic write retry was attempted.'+requestDiagnostic(stage,0,undefined,{parsed:false}),{kind:'transport'});}
+ let data,parseError;
+ try{data=await responseJson(response)}catch(error){parseError=error}
+ const diagnostic=requestDiagnostic(stage,response.status,data,{parsed:!parseError});
  if(!response.ok){
-  // Provider errors may contain request data. Use only the numeric HTTP status.
-  try{await response.body?.cancel()}catch{}
   if(response.status===401||response.status===403)
-   throw new QueueEnsureError('Cloudflare queue access was denied. The deployment token needs Queues Read/Write or Workers Scripts permissions; no plan or permission was changed.',{status:response.status,kind:'permission'});
-  throw new QueueEnsureError('Cloudflare queue request failed (HTTP '+response.status+'); deployment was stopped.',{status:response.status,kind:'http'});
+   throw new QueueEnsureError('Cloudflare queue access was denied. The deployment token needs Queues Read/Write or Workers Scripts permissions; no plan or permission was changed.'+diagnostic,{status:response.status,kind:'permission'});
+  throw new QueueEnsureError('Cloudflare queue request failed; deployment was stopped.'+diagnostic,{status:response.status,kind:'http'});
  }
- const data=await responseJson(response);
- if(!record(data)||data.success!==true||data.errors!==undefined&&(!Array.isArray(data.errors)||data.errors.length))
-  throw new QueueEnsureError('Cloudflare did not confirm the queue request; deployment was stopped.',{kind:'response'});
+ if(parseError)throw new QueueEnsureError('Cloudflare queue response was invalid or too large.'+diagnostic,{status:response.status,kind:'response'});
+ // All three Queues API schemas declare success as optional true. An omitted
+ // flag is valid only with a successful HTTP status and the operation's result
+ // shape; explicit false/null/nonboolean values still fail closed. Cloudflare
+ // also uses null for an empty errors collection. Exact identity, pagination
+ // and relationship validation remain mandatory below.
+ if(!record(data)||data.success!==undefined&&data.success!==true||
+  data.errors!==undefined&&data.errors!==null&&(!Array.isArray(data.errors)||data.errors.length)||
+  (stage.startsWith('list-page-')?!Array.isArray(data.result):!record(data.result)))
+  throw new QueueEnsureError('Cloudflare did not confirm the queue request; deployment was stopped.'+diagnostic,{status:response.status,kind:'response'});
  return data;
 }
 /** Uses the documented page/per_page parameters; there is no name filter. */
@@ -95,13 +119,15 @@ export async function findWhatsAppQueue(credentials,{fetcher=fetch}={}){
  const checked=checkedCredentials(credentials);let found=null;
  const seen=new Set();
  for(let page=1;page<=MAX_PAGES;page++){
-  const data=await request(checked,'?'+new URLSearchParams({page:String(page),per_page:String(PAGE_SIZE)}),{fetcher});
+  const data=await request(checked,'?'+new URLSearchParams({page:String(page),per_page:String(PAGE_SIZE)}),{fetcher,stage:'list-page-'+page});
   if(!Array.isArray(data.result)||data.result.length>PAGE_SIZE)stop('Cloudflare queue listing was incomplete or invalid; deployment was stopped.');
   const info=data.result_info;
   if(info!==undefined&&!record(info)||info?.page!==undefined&&info.page!==page||
    info?.total_pages!==undefined&&(!Number.isSafeInteger(info.total_pages)||info.total_pages<0||info.total_pages>MAX_PAGES)||
-   info?.per_page!==undefined&&info.per_page!==PAGE_SIZE)
+   info?.per_page!==undefined&&(!Number.isSafeInteger(info.per_page)||info.per_page<1||info.per_page>PAGE_SIZE))
    stop('Cloudflare queue pagination could not be verified; deployment was stopped.');
+  const actualPageSize=info?.per_page??PAGE_SIZE;
+  if(data.result.length>actualPageSize)stop('Cloudflare queue listing exceeded its declared page size; deployment was stopped.');
   for(const queue of data.result){
    if(!record(queue)||typeof queue.queue_name!=='string'||!ID.test(queue.queue_id||''))stop('Cloudflare queue listing was invalid; deployment was stopped.');
    if(seen.has(queue.queue_id))stop('Cloudflare queue listing repeated a resource; deployment was stopped.');seen.add(queue.queue_id);
@@ -109,14 +135,14 @@ export async function findWhatsAppQueue(credentials,{fetcher=fetch}={}){
     if(found)stop('More than one queue matched the WhatsApp name; deployment was stopped.');found={queue_id:queue.queue_id,queue_name:queue.queue_name};
    }
   }
-  const last=info?.total_pages!==undefined?page>=Math.max(1,info.total_pages):data.result.length<PAGE_SIZE;
+  const last=info?.total_pages!==undefined?page>=Math.max(1,info.total_pages):data.result.length<actualPageSize;
   if(last)return found;
   if(!data.result.length)stop('Cloudflare queue pagination ended unexpectedly; deployment was stopped.');
  }
  stop('Cloudflare queue listing exceeded the bounded account inventory; deployment was stopped.');
 }
 async function detail(credentials,queue,{fetcher}){
- const data=await request(credentials,'/'+queue.queue_id,{fetcher});
+ const data=await request(credentials,'/'+queue.queue_id,{fetcher,stage:'detail'});
  return validateWhatsAppQueue(data.result,{expectedId:queue.queue_id});
 }
 /** The only write is POST /queues with this one fixed queue_name. */
@@ -125,7 +151,7 @@ export async function ensureWhatsAppQueue(credentials,{fetcher=fetch}={}){
  const existing=await findWhatsAppQueue(checked,{fetcher});
  if(existing)return {...await detail(checked,existing,{fetcher}),created:false,reconciled:false};
  let created;
- try{created=await request(checked,'',{fetcher,method:'POST',body:{queue_name:WHATSAPP_QUEUE_NAME}});}
+ try{created=await request(checked,'',{fetcher,method:'POST',body:{queue_name:WHATSAPP_QUEUE_NAME},stage:'create'});}
  catch(error){
   // Concurrent creation or a lost acknowledgement can be resolved with reads.
   // Never repeat the POST, and never reinterpret an access denial as absence.

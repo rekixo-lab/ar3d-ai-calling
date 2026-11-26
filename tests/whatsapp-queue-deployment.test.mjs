@@ -95,3 +95,54 @@ test('list helper returns only a validated exact name and ID, without unrelated 
  const s=scripted([list([queue({sensitive_metadata:'not-returned'})])]);
  assert.deepEqual(await findWhatsAppQueue(credentials,s),{queue_id:Q,queue_name:WHATSAPP_QUEUE_NAME});
 });
+test('documented optional success and null empty collections retain exact list, create and detail validation',async()=>{
+ const s=scripted([
+  Response.json({result:[],errors:null}),
+  Response.json({result:{queue_id:Q,queue_name:WHATSAPP_QUEUE_NAME},errors:null}),
+  Response.json({result:queue({consumers:null,producers:null}),errors:null})
+ ]);
+ const result=await ensureWhatsAppQueue(credentials,s);assert.equal(result.created,true);
+ assert.deepEqual(s.calls.map(c=>c.method),['GET','POST','GET']);
+ const explicit=scripted([ok([queue()],{errors:null}),ok(queue({consumers:null,producers:null}),{errors:null})]);
+ assert.equal((await ensureWhatsAppQueue(credentials,explicit)).created,false);
+ for(const change of [{consumers:null,consumers_total_count:1},{producers:null,producers_total_count:undefined}])
+  assert.throws(()=>validateWhatsAppQueue(queue(change)));
+ for(const envelope of [
+  {success:false,result:[],errors:null},{success:null,result:[],errors:null},{success:'true',result:[],errors:[]},
+  {result:[],errors:[{code:10000}]},{result:[],errors:{}},{result:[],errors:'none'},
+  {result:null,errors:null},{result:{},errors:null},{errors:null}
+ ]){
+  const failed=scripted([Response.json(envelope)]);await assert.rejects(ensureWhatsAppQueue(credentials,failed));
+  assert.deepEqual(failed.calls.map(c=>c.method),['GET']);
+ }
+ const wrong=scripted([Response.json({result:[queue()]}),Response.json({result:queue({queue_id:OTHER})})]);
+ await assert.rejects(ensureWhatsAppQueue(credentials,wrong),/different or invalid/);
+});
+test('a server-capped declared page size cannot hide a later matching queue',async()=>{
+ const s=scripted([
+  list([{queue_id:OTHER,queue_name:'unrelated'}],{per_page:1,total_pages:undefined}),
+  list([queue()],{page:2,per_page:1,total_pages:undefined}),
+  list([],{page:3,per_page:1,total_pages:undefined}),ok(queue())
+ ]);
+ assert.equal((await ensureWhatsAppQueue(credentials,s)).created,false);
+ assert.ok(s.calls[2].url.endsWith('page=3&per_page=500'));assert.ok(s.calls.every(c=>c.method==='GET'));
+ for(const info of [{per_page:0},{per_page:501},{per_page:'100'},{per_page:1.5}]){
+  const bad=scripted([list([],info)]);await assert.rejects(ensureWhatsAppQueue(credentials,bad),/pagination/);
+ }
+});
+test('failed envelopes identify request stage, HTTP status, safe field types and numeric codes only',async()=>{
+ const environment={CLOUDFLARE_ACCOUNT_ID:credentials.account,CLOUDFLARE_API_TOKEN:credentials.token,CONTROL_DB_ID:credentials.control,CRM_DB_ID:credentials.crm};
+ const secret=credentials.token+' '+credentials.account+' private-provider-message';
+ const cases=[
+  {steps:[Response.json({success:false,result:null,errors:[{code:10023,message:secret},{code:secret,message:secret}]})],stage:'list-page-1',status:200,shape:'success=boolean(false); result=null; errors=array(2); cf_codes=10023'},
+  {steps:[list([]),Response.json({success:false,result:null,errors:[{code:10000,message:secret}]},{status:403})],stage:'create',status:403,shape:'cf_codes=10000'},
+  {steps:[list([queue()]),Response.json({success:secret,result:secret,errors:secret})],stage:'detail',status:200,shape:'success=string; result=string; errors=string; cf_codes=none'},
+  {steps:[new Response(secret,{status:503})],stage:'list-page-1',status:503,shape:'envelope=unparsed'},
+ ];
+ for(const {steps,stage,status,shape} of cases){
+  const s=scripted(steps),output=[];
+  assert.equal(await runEnsureWhatsAppQueueCli(environment,{...s,log:x=>output.push(x),error:x=>output.push(x)}),1);
+  assert.equal(output.length,1);assert.ok(output[0].includes('stage='+stage+'; HTTP='+status));assert.ok(output[0].includes(shape));
+  for(const privateValue of [credentials.token,credentials.account,'private-provider-message'])assert.ok(!output[0].includes(privateValue));
+ }
+});
