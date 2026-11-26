@@ -17,7 +17,11 @@ const sources=[
  ['optOutEvents','lead_opt_out_events'],
  ['leadNotes','lead_notes'],
  ['staffAssignments','lead_staff_assignments'],
- ['callIntentProposals','call_intent_proposals']
+ ['callIntentProposals','call_intent_proposals'],
+ ['whatsAppPermissions','whatsapp_permissions'],
+ ['whatsAppThreads','whatsapp_threads'],
+ ['whatsAppMessages','whatsapp_messages'],
+ ['whatsAppInboundMessages','whatsapp_inbound_messages']
 ];
 
 export async function handleDeletionReadiness(req,env,user){

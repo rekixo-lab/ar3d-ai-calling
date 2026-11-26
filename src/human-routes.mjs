@@ -5,6 +5,8 @@ import {handleClientAccountRequest} from './client-account-routes.mjs';
 import {handleClientAccessRequest} from './client-access-routes.mjs';
 import {enrichAdminTenantsWithUsage} from './admin-usage.mjs';
 import {handleCompanyProfile} from './company-profile.mjs';
+import {handlePropertyCatalog} from './property-catalog.mjs';
+import {handleWhatsAppRequest} from './whatsapp-routes.mjs';
 import {handleCompanyChangeRequests} from './company-change-requests.mjs';
 import {handleCallingScripts} from './calling-script-routes.mjs';
 import {handleCrmRequest} from './crm-routes.mjs';
@@ -274,7 +276,7 @@ async function addAgent(req,env,user){
 }
 export async function handleHumanRequest(req,env){
   const u=new URL(req.url),path=u.pathname,method=req.method;
-  if(path==='/app'&&method==='GET')return new Response(html,{headers:{...headers,'Permissions-Policy':'camera=(),microphone=(self)','Content-Type':'text/html;charset=utf-8','Content-Security-Policy':"default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; media-src 'self' blob:; form-action 'self'; base-uri 'none'; frame-ancestors 'none'"}});
+  if(path==='/app'&&method==='GET')return new Response(html,{headers:{...headers,'Permissions-Policy':'camera=(),microphone=(self)','Content-Type':'text/html;charset=utf-8','Content-Security-Policy':"default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' blob:; media-src 'self' blob:; form-action 'self'; base-uri 'none'; frame-ancestors 'none'"}});
   if(path==='/app/simulator'&&method==='GET')return new Response(simulatorHtml,{headers:{...headers,'Permissions-Policy':'camera=(),microphone=(self)','Content-Type':'text/html;charset=utf-8','Content-Security-Policy':"default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'"}});
   if(path==='/app/assets/simulator.js'&&method==='GET')return new Response(simulatorJs,{headers:{...headers,'Content-Type':'text/javascript;charset=utf-8'}});
   if(path==='/app/assets/simulator.css'&&method==='GET')return new Response(simulatorCss,{headers:{...headers,'Content-Type':'text/css;charset=utf-8'}});
@@ -302,6 +304,10 @@ export async function handleHumanRequest(req,env){
     if(path==='/v1/human/logout'&&method==='POST')return await logout(req,env);
     const user=await getSession(req,env.CONTROL_DB);
     if(!user)return fail('sign in required',401);
+    const properties=await handlePropertyCatalog(req,env,user);
+    if(properties)return properties;
+    const whatsapp=await handleWhatsAppRequest(req,env,user);
+    if(whatsapp)return whatsapp;
     if(path==='/v1/human/team'||path.startsWith('/v1/human/team/'))return await teamRoute(req,env,user,method==='POST'?await payload(req):{});
     if(path==='/v1/human/mfa'||path==='/v1/human/mfa/setup'||path==='/v1/human/mfa/enable'||path==='/v1/human/mfa/recovery/regenerate')
       return await handleMfaSettings(req,env,user,method==='POST'?await payload(req):null);

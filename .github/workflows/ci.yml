@@ -45,3 +45,4 @@ jobs:
           node scripts/browser-e2e.mjs
           node scripts/calling-browser-e2e.mjs
           node scripts/team-browser-e2e.mjs
+          node scripts/property-whatsapp-browser-e2e.mjs

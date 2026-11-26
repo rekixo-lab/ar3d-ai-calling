@@ -90,7 +90,7 @@ const template = {
   name:'ar3d-ai-calling', main:'./src/index.mjs', workers_dev:false,
   vars:{AR3D_PLIVO_CALLER_NUMBER:'+918065491333'},
   routes:[{pattern:'aicalling.ar3dstudio.in',custom_domain:true}],
-  triggers:{crons:['* * * * *']},
+  triggers:{crons:['* * * * *','*/2 * * * *']},
   d1_databases:[
     {binding:'CONTROL_DB',database_name:'ar3d-calling-control',database_id:'PLACEHOLDER'},
     {binding:'CRM_DB',database_name:'ar3d-calling-shared-crm',database_id:'PLACEHOLDER'},
@@ -111,7 +111,7 @@ test('config binds only main Calling resources and exact approved custom domain'
   assert.equal(config.d1_databases[0].database_id, env.CONTROL_DB_ID);
   assert.equal(config.r2_buckets[0].bucket_name,'ar3d-calling-recordings');
   assert.deepEqual(config.routes,[{pattern:'aicalling.ar3dstudio.in',custom_domain:true}]);
-  assert.deepEqual(config.triggers,{crons:['* * * * *']});
+  assert.deepEqual(config.triggers,{crons:['* * * * *','*/2 * * * *']});
   assert.deepEqual(config.vars,{AR3D_PLIVO_CALLER_NUMBER:'+918065491333'});
   assert.equal(config.vars.AR3D_SCRIPTED_CAMPAIGNS_ENABLED,undefined);
 });
@@ -161,7 +161,10 @@ function cloudflareMock({ controlTables=[],crmTables=[],controlName='ar3d-callin
       if(sql.includes("type='trigger'")) rows=sql.includes('trg_minute_ledger_')?triggers.filter(x=>x.name.startsWith('trg_minute_ledger_')):triggers;
       else if(sql.includes('sqlite_master')) rows=tableNames.map(name=>({name}));
       else if(sql.includes('PRAGMA')) {
-        if(sql.includes('provider_balance_snapshots')) rows=REQUIRED_COLUMNS.CONTROL_DB.provider_balance_snapshots.map(name=>({name}));
+        const table=sql.match(/PRAGMA table_info\(([^)]+)\)/)?.[1];
+        if(['whatsapp_connections','properties','property_assets','campaign_property_settings','campaign_properties','property_media_shares','whatsapp_rules','whatsapp_permissions','whatsapp_threads','whatsapp_messages','whatsapp_inbound_messages','whatsapp_event_receipts'].includes(table))
+          rows=REQUIRED_COLUMNS[control?'CONTROL_DB':'CRM_DB'][table].map(name=>({name}));
+        else if(sql.includes('provider_balance_snapshots')) rows=REQUIRED_COLUMNS.CONTROL_DB.provider_balance_snapshots.map(name=>({name}));
         else if(sql.includes('provider_balance_covered_calls')) rows=REQUIRED_COLUMNS.CONTROL_DB.provider_balance_covered_calls.map(name=>({name}));
         else if(sql.includes('provider_manual_funding_control')) rows=REQUIRED_COLUMNS.CONTROL_DB.provider_manual_funding_control.map(name=>({name}));
         else if(sql.includes('calling_funding_settings')) rows=REQUIRED_COLUMNS.CONTROL_DB.calling_funding_settings.map(name=>({name}));

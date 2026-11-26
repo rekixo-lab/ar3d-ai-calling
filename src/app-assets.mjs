@@ -1,3 +1,4 @@
+import {propertyWhatsAppJs} from './property-whatsapp-ui.mjs';
 export const html=`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#171717"><title>AR3D AI Calling</title><link rel="stylesheet" href="/app/assets/style.css"></head><body><div id="app" role="main"><p>Loading AR3D AI Calling…</p></div><script src="/app/assets/app.js" defer></script></body></html>`;
 export {css} from './dashboard-styles.mjs';
 export const js=String.raw`'use strict';
@@ -303,6 +304,8 @@ function dashboard(){
   ['clients','Clients','users','Client companies and sign-in invitations.'],
   ['calling','Calling Setup','phone','Internal testing and client calling approval.'],
   ['wallet','Minutes & Wallet','wallet','Review exact call seconds, reconciliation and credit transactions.'],
+  ['properties','My Properties','building','Manage each client’s property catalogue and campaign selections.'],
+  ['whatsapp','WhatsApp','mail','Connect client WhatsApp accounts and review follow-ups.'],
   ['company','Company details','building','Manage company information and client requests.'],
   ['team','Team','users','Manage Super Admin access and invitations.'],
   ['security','Security','shield','Manage two-factor authentication and recovery codes.']
@@ -311,6 +314,8 @@ function dashboard(){
   ['customers','Customers / Excel','users','Import customers and prepare a calling campaign.'],
   ['calling','Calling','phone','Review your campaign and start or pause approved calls.'],
   ['results','Results / CRM','chart','See call outcomes and answers saved to your CRM.'],
+  ['properties','My Properties','building','Add prices, availability, brochures and locations for your customers.'],
+  ['whatsapp','WhatsApp','mail','Schedule relevant follow-ups and see customer replies.'],
   ['wallet','Minutes & Wallet','wallet','View verified call usage and credit history.'],
   ['company','Company details','building','Review your company information and request changes.']
  ];
@@ -329,7 +334,7 @@ function dashboard(){
  const brand=div('brand',div('brand-mark',icon('phone')),div('',node('strong',{text:'AR3D'}),node('small',{text:'AI Calling'})));
  root.append(div('layout',node('aside',{class:'sidebar'},[brand,nav,account]),main));
  let selectedCompany=null;
- const companyTabs=['calling','wallet','company'];
+ const companyTabs=['calling','wallet','company','properties','whatsapp'];
  function chooseCompany(company,key){
   selectedCompany=company;
   for(const tab of companyTabs){
@@ -363,6 +368,8 @@ function dashboard(){
      calling:()=>callingAdminPanel(area,client),
      wallet:()=>adminMinuteWallet(area,client),
      company:()=>companyAdminPanel(area,client),
+     properties:()=>propertyWhatsAppAdminPanel(area,client,'properties'),
+     whatsapp:()=>propertyWhatsAppAdminPanel(area,client,'whatsapp'),
      team:()=>teamPanel(area),
      security:()=>mfaPanel(area)
     };
@@ -1382,7 +1389,7 @@ async function superAdmin(main,chooseCompany){
  function showClient(client){
   const jump=(key,label)=>btn(label,()=>chooseCompany(client,key),true);
   clientActions.replaceChildren(title(client.display_name,'h3'),div('formrow',jump('calling','Calling Setup'),jump('wallet','Minutes & Wallet'),
-   ...(['active','trial'].includes(client.status)?[jump('company','Company details')]:[])));
+   ...(['active','trial'].includes(client.status)?[jump('properties','My Properties'),jump('whatsapp','WhatsApp'),jump('company','Company details')]:[])));
   clientActions.hidden=false;clientActions.scrollIntoView({block:'nearest'});
   clientActions.querySelector('button').focus();
  }
@@ -1760,7 +1767,7 @@ async function renderClient(id,content){
   refreshCredit=refreshBalance;
   refreshBalance();
  }
- const sections=Object.fromEntries(['home','customers','calling','results','wallet','company'].map(key=>[
+ const sections=Object.fromEntries(['home','customers','calling','results','properties','whatsapp','wallet','company'].map(key=>[
   key,node('section',{class:'workspace-section',id:key,hidden:true})
  ]));
  const loaded=new Set();
@@ -1816,6 +1823,8 @@ async function renderClient(id,content){
    }
   },
   wallet:section=>{if(d.role==='client_admin'){manualMinuteLedger(section,id,false,syncCredit,fn=>{walletRefresh=fn});return minuteUsagePanel(section,id,false)}section.append(node('p',{class:'note',text:'Wallet and transaction details require Client Admin access.'}))},
+  properties:section=>propertyCatalogPanel(id,section,d.role),
+  whatsapp:section=>whatsappFollowupPanel(id,section,d.role),
   company:section=>clientCompanySummary(id,section,d.role,d.tenant.name)
  };
  sections.home.append(overview);
@@ -2298,7 +2307,8 @@ async function customerCallingPanel(tenantId,content,role,openView,openResults,r
   node('label',{class:'check-line'},[consentBox,node('span',{text:'I confirm these customers asked us to contact them about property, and we will not call anyone who has said no or is on DND.'})]));
  declaration.hidden=true;consentBox.addEventListener('change',()=>render());
  const actions=div('formrow',btn('Import customers',()=>openView('customers',{resetScroll:true}),true),
-  btn('View customer answers',()=>openResults(pick.value),true));
+  btn('View customer answers',()=>openResults(pick.value),true),
+  btn('Choose campaign properties',()=>openView('properties',{resetScroll:true}),true));
  if(role==='client_admin')actions.prepend(start,pause);
  card.append(status,options,summary,declaration,actions);content.append(card);
  async function changeRun(action){
@@ -3267,4 +3277,5 @@ window.addEventListener('hashchange',event=>{
  if([location.hash,new URL(event.oldURL).hash].some(hash=>/^#(?:team-)?invite=/.test(hash)))load();
  else if(state.me)dashboard();
 });
+${propertyWhatsAppJs}
 load();`;

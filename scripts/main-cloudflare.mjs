@@ -11,19 +11,32 @@ const D1_NAME = Object.freeze({
   CONTROL_DB: 'ar3d-calling-control',
   CRM_DB: 'ar3d-calling-shared-crm',
 });
+export const PROPERTY_TABLES=Object.freeze([
+  'properties','property_assets','campaign_property_settings','campaign_properties','property_media_shares',
+]);
+export const WHATSAPP_TABLES=Object.freeze([
+  'whatsapp_rules','whatsapp_permissions','whatsapp_threads','whatsapp_messages','whatsapp_inbound_messages','whatsapp_event_receipts',
+]);
+const messagingUpgradeStates=['control_whatsapp_upgrade','crm_property_upgrade','crm_whatsapp_upgrade','crm_property_whatsapp_upgrade'];
+const messagingMissingTables=state=>state==='control_whatsapp_upgrade'?['whatsapp_connections']:
+  state==='crm_property_upgrade'?PROPERTY_TABLES:state==='crm_whatsapp_upgrade'?WHATSAPP_TABLES:
+  state==='crm_property_whatsapp_upgrade'?[...PROPERTY_TABLES,...WHATSAPP_TABLES]:[];
 export const REQUIRED_TABLES = Object.freeze({
   CONTROL_DB: Object.freeze([
+    'whatsapp_connections',
     'tenants','tenant_keys','project_links','tenant_numbers','tenant_audit_events',
     'human_users','tenant_memberships','human_sessions','human_invitations',
     'human_login_limits','human_bootstrap_claim','human_ip_login_limits','human_mfa_settings','human_mfa_challenges','human_mfa_recovery_codes','provider_event_inbox','calling_script_bindings','calling_script_versions','company_profile_versions','calling_agent_publications','shared_voice_gateway','voice_call_routes','client_account_contacts','company_change_requests','scripted_phone_pilots','tenant_credit_budgets','tenant_credit_audit','tenant_minute_ledger','tenant_minute_holds','provider_financial_journal','tenant_credit_purchases','provider_safety_events','provider_cost_reservations','provider_cost_reconciliations','calling_dispatch_settings','calling_company_settings','calling_capacity_signals','calling_funding_settings','provider_balance_snapshots','provider_balance_covered_calls','provider_manual_funding_control'
   ]),
   CRM_DB: Object.freeze([
+    ...PROPERTY_TABLES,...WHATSAPP_TABLES,
     'leads','agents','calls','site_visits','crm_audit_events',
     'lead_notes','conversation_simulations','lead_opt_out_events','lead_consent_evidence','call_campaign_drafts','call_campaign_candidates','call_intent_proposals','calling_policies','calling_clearances','calling_runs','calling_jobs','scripted_call_results','lead_staff_assignments','verified_provider_call_costs',
   ]),
 });
 export const REQUIRED_COLUMNS = Object.freeze({
   CONTROL_DB: Object.freeze({
+    whatsapp_connections: Object.freeze(['tenant_id','messaging_account_id','phone_number_id','display_phone','verified_name','status','credentials_ciphertext','verify_token_hash','templates_json','webhook_verified_at','connected_at','updated_at','last_polled_at','revision']),
     tenants: Object.freeze(['id','plan_code','storage_mode','suspended_from_status']),
     human_users: Object.freeze(['id','global_role','password_hash']),
     human_sessions: Object.freeze(['token_hash','expires_at']),
@@ -58,6 +71,17 @@ export const REQUIRED_COLUMNS = Object.freeze({
     provider_manual_funding_control: Object.freeze(['id','enabled','revision','updated_by','updated_at']),
   }),
   CRM_DB: Object.freeze({
+    properties: Object.freeze(['tenant_id','id','name','property_type','city','city_aliases_json','locality','locality_aliases_json','address','map_url','price_min_inr','price_max_inr','price_basis','size_min','size_max','size_unit','bhk','description','amenities','contact_name','contact_phone','website_url','status','revision','last_write_id','created_by','updated_by','created_at','updated_at']),
+    property_assets: Object.freeze(['tenant_id','id','property_id','kind','file_name','content_type','size_bytes','object_key','active','created_by','created_at']),
+    campaign_property_settings: Object.freeze(['tenant_id','campaign_id','revision','last_write_id','updated_by','updated_at']),
+    campaign_properties: Object.freeze(['tenant_id','campaign_id','property_id','position']),
+    property_media_shares: Object.freeze(['tenant_id','token_hash','asset_id','expires_at','created_at']),
+    whatsapp_rules: Object.freeze(['tenant_id','enabled','enabled_at','first_delay_minutes','second_enabled','second_delay_hours','visit_reminder_enabled','template_name','template_language','followup_template_name','followup_template_language','visit_template_name','visit_template_language','daily_limit','cursor_at','cursor_job_id','updated_at','revision']),
+    whatsapp_permissions: Object.freeze(['tenant_id','lead_id','status','source','reference','captured_at','actor','updated_at']),
+    whatsapp_threads: Object.freeze(['tenant_id','lead_id','paused','last_inbound_at','updated_at']),
+    whatsapp_messages: Object.freeze(['tenant_id','id','source_key','lead_id','campaign_id','property_id','visit_id','kind','due_at','status','reason','template_name','template_language','provider_message_id','source_at','payload_json','created_at','updated_at','submitted_at','delivered_at','read_at']),
+    whatsapp_inbound_messages: Object.freeze(['tenant_id','id','lead_id','text','message_type','received_at']),
+    whatsapp_event_receipts: Object.freeze(['tenant_id','event_key','payload_json','processed_at','received_at']),
     leads: Object.freeze(['tenant_id','consent_status','dnd_status','interest_status','followup_at',
       'customer_segment','plot_size_preference','visit_date_preference']),
     conversation_simulations: Object.freeze(['tenant_id','state_json','expires_at']),
@@ -109,15 +133,17 @@ export function makeMainConfig(template, credentials) {
   const onlyApprovedCaller = template?.vars &&
     Object.keys(template.vars).length === 1 &&
     template.vars.AR3D_PLIVO_CALLER_NUMBER === '+918065491333';
-  // Only auth cleanup and the bounded, operator-approved campaign scheduler may run.
+  // Voice/auth and WhatsApp each have their own bounded invocation so their
+  // D1 query budgets do not compete. No unrelated schedules are accepted.
   // Reject arbitrary schedules or queue/event consumers targeting other services.
-  const onlyAuthCron = template?.triggers &&
+  const onlyCallingCrons = template?.triggers &&
     Object.keys(template.triggers).length === 1 &&
     Array.isArray(template.triggers.crons) &&
-    template.triggers.crons.length === 1 &&
-    template.triggers.crons[0] === '* * * * *';
+    template.triggers.crons.length === 2 &&
+    template.triggers.crons[0] === '* * * * *' &&
+    template.triggers.crons[1] === '*/2 * * * *';
   if (template?.name !== 'ar3d-ai-calling' || template.main !== './src/index.mjs' ||
-      template.route || !onlyCallingDomain || !onlyAuthCron || !onlyApprovedCaller || template.services ||
+      template.route || !onlyCallingDomain || !onlyCallingCrons || !onlyApprovedCaller || template.services ||
       !Array.isArray(template.d1_databases) || template.d1_databases.length !== 2 ||
       !Array.isArray(template.r2_buckets) || template.r2_buckets.length !== 1) {
     throw Error('Unsafe Worker template: wrong project, routes, resources or entry point.');
@@ -266,6 +292,15 @@ export function checkTables(tables, binding, mode) {
     return 'fresh';
   }
   const missing = expected.filter(name => !present.has(name));
+  if(mode==='preflight'){
+    const exact=names=>missing.length===names.length&&names.every(name=>missing.includes(name));
+    if(binding==='CONTROL_DB'&&exact(['whatsapp_connections']))return 'control_whatsapp_upgrade';
+    if(binding==='CRM_DB'){
+      if(exact([...PROPERTY_TABLES,...WHATSAPP_TABLES]))return 'crm_property_whatsapp_upgrade';
+      if(exact(PROPERTY_TABLES))return 'crm_property_upgrade';
+      if(exact(WHATSAPP_TABLES))return 'crm_whatsapp_upgrade';
+    }
+  }
   if(mode==='preflight'&&binding==='CONTROL_DB'&&missing.length===3&&['provider_balance_snapshots','provider_balance_covered_calls','provider_manual_funding_control'].every(t=>missing.includes(t)))return 'control_manual_balances_upgrade';
   if(mode==='preflight'&&binding==='CONTROL_DB'&&missing.length===1&&missing[0]==='calling_funding_settings')return 'control_funding_settings_upgrade';
   if(mode==='preflight'&&binding==='CONTROL_DB'&&missing.length===3&&['calling_dispatch_settings','calling_company_settings','calling_capacity_signals'].every(t=>missing.includes(t)))return 'control_dispatch_settings_upgrade';
@@ -345,7 +380,7 @@ export async function inspectCloudflare({ credentials, mode, apiFetch = fetch, t
     const names = rows.map(x => x.name);
     const state = checkTables(names, binding, mode);
     modes[binding] = state;
-    if (['control_client_accounts_upgrade','control_publication_upgrade','control_profile_upgrade',
+    if ([...messagingUpgradeStates,'control_client_accounts_upgrade','control_publication_upgrade','control_profile_upgrade',
          'control_script_upgrade','crm_dispatch_upgrade','ready','crm_call_intent_upgrade',
          'crm_scripted_results_upgrade','control_company_change_upgrade',
          'control_scripted_pilot_upgrade','control_dispatch_settings_upgrade','control_funding_settings_upgrade','control_manual_balances_upgrade','control_credit_upgrade','control_minute_ledger_upgrade','control_minute_holds_upgrade','control_provider_journal_upgrade','control_credit_purchase_upgrade','control_provider_safety_upgrade','control_provider_reserve_upgrade','control_provider_reconcile_upgrade','crm_staff_upgrade','crm_cdr_upgrade','crm_staff_cdr_upgrade'].includes(state)) {
@@ -390,6 +425,7 @@ export async function inspectCloudflare({ credentials, mode, apiFetch = fetch, t
         checkManualBalanceTriggers(triggers);
       }
       for (const table of Object.keys(REQUIRED_COLUMNS[binding])) {
+        if(messagingMissingTables(state).includes(table))continue;
         if(state==='control_manual_balances_upgrade'&&['provider_balance_snapshots','provider_balance_covered_calls','provider_manual_funding_control'].includes(table))continue;
         if(state==='control_funding_settings_upgrade'&&table==='calling_funding_settings')continue;
         if(state==='control_dispatch_settings_upgrade'&&['calling_dispatch_settings','calling_company_settings','calling_capacity_signals'].includes(table))continue;
@@ -431,6 +467,12 @@ export async function inspectCloudflare({ credentials, mode, apiFetch = fetch, t
 // A single clean state is mandatory for unattended deployment. Mixed/partial
 // schemas are NEVER safe to automatically initialize or deploy.
 export function verifiedSchemaState(modes) {
+  // These are whole, explicitly reviewed additive groups on the complete
+  // prior Calling schema. A completed group can be resumed after a failed
+  // deployment; arbitrary partial tables or unrelated upgrades still fail.
+  if(['ready','control_whatsapp_upgrade'].includes(modes?.CONTROL_DB)&&
+     ['ready','crm_property_upgrade','crm_whatsapp_upgrade','crm_property_whatsapp_upgrade'].includes(modes?.CRM_DB)&&
+     (modes.CONTROL_DB!=='ready'||modes.CRM_DB!=='ready'))return 'property_whatsapp_upgrade';
   if(modes?.CONTROL_DB==='control_credit_upgrade'&&modes?.CRM_DB==='crm_staff_cdr_upgrade')return 'credit_staff_cdr_upgrade';
   if(modes?.CONTROL_DB==='control_credit_upgrade'&&modes?.CRM_DB==='crm_cdr_upgrade')return 'credit_cdr_upgrade';
   if(modes?.CONTROL_DB==='ready'&&modes?.CRM_DB==='crm_staff_cdr_upgrade')return 'crm_staff_cdr_upgrade';

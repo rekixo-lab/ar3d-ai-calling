@@ -332,6 +332,35 @@ h2,h3{gap:8px;line-height:1.35;overflow-wrap:anywhere;}
 .check-line{display:flex;gap:10px;align-items:flex-start;line-height:1.45}
 .check-line input{margin-top:4px;flex:none}
 .consent-declaration{border:1px solid rgba(255,255,255,.12);border-radius:12px;padding:14px}
+/* Client-owned property information and WhatsApp follow-ups. */
+.property-catalog-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,250px),1fr));gap:14px;margin-top:14px;}
+.property-catalog-item{min-width:0;border:1px solid var(--line);border-radius:11px;overflow:hidden;background:#262626;}
+.property-catalog-item>.stack{padding:15px;gap:9px;}
+.property-catalog-item h3{margin:0;font-size:16px;overflow-wrap:anywhere;}
+.property-catalog-item .formrow{margin:0;gap:13px;}
+.property-photo{display:block;width:100%;height:164px;object-fit:cover;background:#1b1b1b;}
+.property-description{font-size:13px;color:#ccc;white-space:pre-wrap;overflow-wrap:anywhere;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;}
+.property-form-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:13px;}
+.property-form-grid>label{min-width:0;}
+.property-choice-list{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,230px),1fr));gap:9px;margin:12px 0;}
+.property-choice{display:flex;gap:10px;align-items:flex-start;padding:12px;border:1px solid var(--line);border-radius:9px;min-width:0;}
+.property-choice>div{min-width:0;overflow-wrap:anywhere;}
+.property-choice input{margin-top:4px;}
+.property-assets{margin-top:20px;padding-top:18px;border-top:1px solid var(--line);}
+.property-assets a{overflow-wrap:anywhere;}
+.whatsapp-summary .formrow{margin-bottom:0;}
+.whatsapp-technical{margin-top:14px;}
+.whatsapp-technical>form,.template-help>p{margin-top:12px;}
+.template-preview{white-space:pre-wrap;overflow-wrap:anywhere;max-width:100%;font:13px/1.6 inherit;background:#1b1b1b;border-radius:8px;padding:11px;margin:0;}
+.template-preview:empty{display:none;}
+.template-help{border-top:1px solid var(--line);padding-top:13px;margin-top:18px;}
+.template-help pre{margin-top:10px;}
+.message-thread-item{display:grid;gap:12px;padding:15px 0;border-bottom:1px solid var(--line);}
+.message-thread-item:last-child{border-bottom:0;}
+.message-thread-item>.btn{justify-self:start;}
+.message-thread-item form{margin-top:12px;}
+.message-text{white-space:pre-wrap;overflow-wrap:anywhere;}
+@media(max-width:650px){.property-form-grid{grid-template-columns:minmax(0,1fr);}.property-catalog-item>.stack{padding:12px;}.property-catalog-grid{grid-template-columns:minmax(0,1fr);}.property-photo{height:190px;}}
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{transition:none!important;animation:none!important;scroll-behavior:auto!important;}}
 `;
 
