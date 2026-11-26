@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  REQUIRED_COLUMNS, REQUIRED_TABLES, REQUIRED_SAFETY_TRIGGERS, REQUIRED_MINUTE_LEDGER_TRIGGERS, REQUIRED_HOLD_TRIGGERS, REQUIRED_PROVIDER_JOURNAL_TRIGGERS, REQUIRED_PURCHASE_TRIGGERS, REQUIRED_PROVIDER_SAFETY_TRIGGERS, REQUIRED_PROVIDER_RESERVE_TRIGGERS, REQUIRED_PROVIDER_RECONCILE_TRIGGERS, checkProviderReconcileTriggers, checkProviderReserveTriggers, checkProviderSafetyTriggers, checkPurchaseTriggers, checkProviderJournalTriggers, checkHoldTriggers, checkMinuteLedgerTriggers, getCredentials, makeMainConfig, checkTables, checkColumns, checkSafetyTriggers, inspectCloudflare, verifiedSchemaState,
+  REQUIRED_COLUMNS, REQUIRED_TABLES, REQUIRED_SAFETY_TRIGGERS, REQUIRED_MINUTE_LEDGER_TRIGGERS, REQUIRED_HOLD_TRIGGERS, REQUIRED_PROVIDER_JOURNAL_TRIGGERS, REQUIRED_PURCHASE_TRIGGERS, REQUIRED_PROVIDER_SAFETY_TRIGGERS, REQUIRED_PROVIDER_RESERVE_TRIGGERS, REQUIRED_PROVIDER_RECONCILE_TRIGGERS, REQUIRED_FUNDING_SETTINGS_TRIGGERS, checkFundingSettingsTriggers, checkProviderReconcileTriggers, checkProviderReserveTriggers, checkProviderSafetyTriggers, checkPurchaseTriggers, checkProviderJournalTriggers, checkHoldTriggers, checkMinuteLedgerTriggers, getCredentials, makeMainConfig, checkTables, checkColumns, checkSafetyTriggers, inspectCloudflare, verifiedSchemaState,
 } from '../scripts/main-cloudflare.mjs';
 
 test('new CDR cost observation is additive only and guarded by exact Calling CRM state',async()=>{
@@ -146,7 +146,7 @@ test('ready requires every required migration table', () => {
   assert.throws(() => checkColumns(['tenant_id','consent_status'],'CRM_DB','leads'), /missing columns/);
 });
 
-const mockTriggers=Object.entries({...REQUIRED_SAFETY_TRIGGERS,...REQUIRED_MINUTE_LEDGER_TRIGGERS,...REQUIRED_HOLD_TRIGGERS,...REQUIRED_PROVIDER_JOURNAL_TRIGGERS,...REQUIRED_PURCHASE_TRIGGERS,...REQUIRED_PROVIDER_SAFETY_TRIGGERS,...REQUIRED_PROVIDER_RESERVE_TRIGGERS,...REQUIRED_PROVIDER_RECONCILE_TRIGGERS}).map(([name,parts])=>
+const mockTriggers=Object.entries({...REQUIRED_SAFETY_TRIGGERS,...REQUIRED_MINUTE_LEDGER_TRIGGERS,...REQUIRED_HOLD_TRIGGERS,...REQUIRED_PROVIDER_JOURNAL_TRIGGERS,...REQUIRED_PURCHASE_TRIGGERS,...REQUIRED_PROVIDER_SAFETY_TRIGGERS,...REQUIRED_PROVIDER_RESERVE_TRIGGERS,...REQUIRED_PROVIDER_RECONCILE_TRIGGERS,...REQUIRED_FUNDING_SETTINGS_TRIGGERS}).map(([name,parts])=>
   ({name,sql:'CREATE TRIGGER '+name+' '+parts.join(' ')+' BEGIN SELECT RAISE(ABORT, "deny"); END'}));
 function cloudflareMock({ controlTables=[],crmTables=[],controlName='ar3d-calling-control',crmName='ar3d-calling-shared-crm',leadColumns=['tenant_id','consent_status','dnd_status','interest_status','followup_at','customer_segment','plot_size_preference','visit_date_preference'],bucketName='ar3d-calling-recordings',triggers=mockTriggers }={}) {
   return async (url,opts) => {
@@ -161,7 +161,8 @@ function cloudflareMock({ controlTables=[],crmTables=[],controlName='ar3d-callin
       if(sql.includes("type='trigger'")) rows=sql.includes('trg_minute_ledger_')?triggers.filter(x=>x.name.startsWith('trg_minute_ledger_')):triggers;
       else if(sql.includes('sqlite_master')) rows=tableNames.map(name=>({name}));
       else if(sql.includes('PRAGMA')) {
-        if(sql.includes('calling_dispatch_settings')) rows=REQUIRED_COLUMNS.CONTROL_DB.calling_dispatch_settings.map(name=>({name}));
+        if(sql.includes('calling_funding_settings')) rows=REQUIRED_COLUMNS.CONTROL_DB.calling_funding_settings.map(name=>({name}));
+        else if(sql.includes('calling_dispatch_settings')) rows=REQUIRED_COLUMNS.CONTROL_DB.calling_dispatch_settings.map(name=>({name}));
         else if(sql.includes('calling_company_settings')) rows=REQUIRED_COLUMNS.CONTROL_DB.calling_company_settings.map(name=>({name}));
         else if(sql.includes('calling_capacity_signals')) rows=REQUIRED_COLUMNS.CONTROL_DB.calling_capacity_signals.map(name=>({name}));
         else if(sql.includes('leads')) rows=leadColumns.map(name=>({name}));
@@ -407,4 +408,59 @@ test('capacity settings migration is a recognized additive upgrade, also for fre
  assert.match(flow,/schema_state == 'control_dispatch_settings_upgrade'[\s\S]*0028_calling_dispatch_settings\.sql[\s\S]*0022_parallel_company_calls\.sql/);
  for(const file of ['migrations/control/0028_calling_dispatch_settings.sql','migrations/crm/0022_parallel_company_calls.sql'])
   assert.equal(flow.split(file).length-1,2,file+' must run in the upgrade and the fresh initialization');
+});
+
+test('funding settings migrate only the exact prior Control schema and keep deployment guards',async()=>{
+ const old=REQUIRED_TABLES.CONTROL_DB.filter(x=>x!=='calling_funding_settings');
+ assert.equal(checkTables(old,'CONTROL_DB','preflight'),'control_funding_settings_upgrade');
+ assert.equal(verifiedSchemaState({CONTROL_DB:'control_funding_settings_upgrade',CRM_DB:'ready'}),'control_funding_settings_upgrade');
+ assert.throws(()=>checkTables(old,'CONTROL_DB','ready'),/calling_funding_settings/);
+ assert.throws(()=>checkTables(old.filter(x=>x!=='provider_financial_journal'),'CONTROL_DB','preflight'),/partial schema/);
+ assert.throws(()=>verifiedSchemaState({CONTROL_DB:'control_funding_settings_upgrade',CRM_DB:'crm_cdr_upgrade'}),/mixed/);
+ const r=await inspectCloudflare({credentials:getCredentials(env),mode:'preflight',template,
+  apiFetch:cloudflareMock({controlTables:old,crmTables:REQUIRED_TABLES.CRM_DB})});
+ assert.equal(r.modes.CONTROL_DB,'control_funding_settings_upgrade');
+ assert.throws(()=>checkColumns(['id','mode','revision'],'CONTROL_DB','calling_funding_settings'),/missing columns/);
+ await assert.rejects(inspectCloudflare({credentials:getCredentials(env),mode:'ready',template,
+  apiFetch:cloudflareMock({controlTables:REQUIRED_TABLES.CONTROL_DB,crmTables:REQUIRED_TABLES.CRM_DB,
+   triggers:mockTriggers.filter(x=>x.name!=='trg_calling_funding_revision')})}),/Calling funding settings safety trigger/);
+ const {readFileSync}=await import('node:fs');
+ const flow=readFileSync('.github/workflows/deploy-production.yml','utf8');
+ const migration='migrations/control/0030_calling_funding_settings.sql';
+ assert.match(flow,/schema_state == 'control_funding_settings_upgrade'\s+run: npx --yes wrangler@4 d1 execute ar3d-calling-control[^\n]*0030_calling_funding_settings\.sql/);
+ assert.equal(flow.split(migration).length-1,2,'funding migration runs on exact upgrade and fresh initialization only');
+ assert.match(flow,/Initialize NEW AR3D Calling Control D1 database[\s\S]*0030_calling_funding_settings\.sql[\s\S]*Initialize NEW AR3D Calling Shared CRM D1 database/);
+});
+
+test('funding schema seeds no allowance, validates values and preserves disablement through revision guards',async()=>{
+ const {DatabaseSync}=await import('node:sqlite');
+ const {readFileSync}=await import('node:fs');
+ const db=new DatabaseSync(':memory:');
+ try{
+  for(const file of ['0001_init.sql','0002_human_access.sql','0030_calling_funding_settings.sql'])
+   db.exec(readFileSync('migrations/control/'+file,'utf8'));
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM calling_funding_settings').get().n,0);
+  checkColumns(db.prepare('PRAGMA table_info(calling_funding_settings)').all().map(x=>x.name),'CONTROL_DB','calling_funding_settings');
+  checkFundingSettingsTriggers(db.prepare("SELECT name,sql FROM sqlite_master WHERE type='trigger' AND name LIKE 'trg_calling_funding_%'").all());
+  const at='2026-11-26T11:00:00.000Z';
+  db.prepare("INSERT INTO human_users(id,email,password_salt,password_hash,password_iterations,global_role,created_at,updated_at) VALUES('funding-admin','funding@example.invalid','salt','hash',200000,'super_admin',?,?)").run(at,at);
+  const insert=db.prepare('INSERT INTO calling_funding_settings(id,mode,plivo_currency,plivo_pulse_micros,sarvam_currency,sarvam_pulse_micros,revision,evidence_ref,updated_by,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)');
+  const valid=[1,'journal','USD',20000,'INR',500000,1,'reviewed-provider-rates','funding-admin',at];
+  for(const [index,value] of [[0,2],[1,'automatic'],[2,'EUR'],[3,0],[3,1000000001],[3,1.5],[4,'USD'],[5,-1],[6,0],[7,'short'],[9,'not-a-date']]){
+   const values=[...valid];values[index]=value;
+   assert.throws(()=>insert.run(...values),/CHECK constraint failed/);
+  }
+  assert.throws(()=>insert.run(...valid.slice(0,8),'missing-admin',at),/FOREIGN KEY constraint failed/);
+  insert.run(...valid);
+  assert.throws(()=>db.exec("UPDATE calling_funding_settings SET mode='disabled'"),/revision must advance once/);
+  assert.throws(()=>db.exec("UPDATE calling_funding_settings SET revision=3"),/revision must advance once/);
+  const disable=db.prepare("UPDATE calling_funding_settings SET mode='disabled',revision=revision+1 WHERE id=1 AND revision=?");
+  assert.equal(Number(disable.run(1).changes),1);
+  assert.equal(Number(disable.run(1).changes),0,'stale write cannot change a newer settings revision');
+  assert.equal(db.prepare('SELECT mode FROM calling_funding_settings').get().mode,'disabled');
+  assert.throws(()=>db.exec('DELETE FROM calling_funding_settings'),/cannot be deleted/);
+  // Migration retries never reset the retained disablement or current revision.
+  db.exec(readFileSync('migrations/control/0030_calling_funding_settings.sql','utf8'));
+  assert.deepEqual({...db.prepare('SELECT mode,revision FROM calling_funding_settings').get()},{mode:'disabled',revision:2});
+ }finally{db.close()}
 });

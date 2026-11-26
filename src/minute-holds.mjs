@@ -1,5 +1,6 @@
 // Internal primitives used by gated campaign dispatch and matched CDR settlement.
 // A caller must independently establish provider funding and dispatch permission.
+import {FUNDING_CONTEXT} from './funding-context.mjs';
 const uuid=/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
 const jobId=/^(?:[a-f0-9]{32}|[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})$/i;
 const integer=(n,min,max)=>Number.isSafeInteger(n)&&n>=min&&n<=max;
@@ -21,6 +22,7 @@ function readCap(raw){
 // Separate operator-reviewed lifetime capacity ceilings; neither is a live
 // monetary balance. All three must be configured before commercial dispatch.
 export function providerFundingCaps(env){
+ if(env?.[FUNDING_CONTEXT])return env[FUNDING_CONTEXT].caps;
  return {combined:readCap(env?.AR3D_FUNDED_CUMULATIVE_SECONDS),
   plivo:readCap(env?.AR3D_PLIVO_FUNDED_CUMULATIVE_SECONDS),
   sarvam:readCap(env?.AR3D_SARVAM_FUNDED_CUMULATIVE_SECONDS)};

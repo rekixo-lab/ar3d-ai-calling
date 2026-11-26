@@ -3,6 +3,7 @@ import {providerFaultBlocked} from './provider-safety.mjs';
 import {moneyBudgetConfig,providerBudgetPosition,reserveBudgetedMinutes} from './provider-cost-reservations.mjs';
 import {minutePosition,closeMinuteHold,fundingCap,fundingPosition,affordableCallSeconds,BILLING_PULSE_SECONDS} from './minute-holds.mjs';
 import {SCRIPTED_CALLING_POLICY,approvedCampaignPhone,reserveCampaignQuestionnaire,scriptedPromptsReady,submitScriptedPhone} from './scripted-phone-pilot.mjs';
+import {resolveFundingEnv,resolvedFunding} from './provider-funding.mjs';
 
 export const CAMPAIGN_CRON='* * * * *';
 // Capacity is set by the platform limits below (dispatchSettings): no fixed
@@ -11,11 +12,13 @@ export const CAMPAIGN_CRON='* * * * *';
 export const fundedDispatchApproved=env=>env.AR3D_FUNDED_CAMPAIGN_DISPATCH==='approved'&&fundingCap(env)!==null&&moneyBudgetConfig(env)!==null;
 export const creditOnlyCallingApproved=env=>fundedDispatchApproved(env)&&env.AR3D_CREDIT_ONLY_CALLING==='approved';
 export async function scriptedCampaignConfiguration(env){
+ env=await resolveFundingEnv(env);
  const carrier=Boolean(await approvedCampaignPhone(env)),funded=fundedDispatchApproved(env);
  const blocked=carrier&&funded?await providerFaultBlocked(env.CONTROL_DB):false;
- const missing=[...(!carrier?['Plivo setup, a completed internal pilot and campaign authorization']:[]),...(!funded?['Separate reviewed provider time and monetary ceilings, combined ceiling and manual dispatch approval']:[])];
+ const missing=[...(!carrier?['Plivo setup, a completed internal pilot and campaign authorization']:[]),...(!funded?['Reviewed provider funding setup and dispatch approval are required. Check Super Admin → Credit transactions → Provider funding setup.']:[])];
  if(blocked)missing.push('Provider billing or authentication fault requires Super Admin review');
- return {ready:carrier&&funded&&!blocked,missing,creditOnly:carrier&&!blocked&&creditOnlyCallingApproved(env)};
+ return {ready:carrier&&funded&&!blocked,missing,creditOnly:carrier&&!blocked&&creditOnlyCallingApproved(env),
+  funding:{source:resolvedFunding(env).source,status:resolvedFunding(env).status}};
 }
 // A definitive provider rejection is the only automatic no-submission release.
 // A missing session, request UUID, call UUID or ambiguous network outcome is
@@ -240,6 +243,7 @@ export async function tickScriptedTenant(env,db,tid,config,{apiFetch=fetch,now=D
  const at=new Date(now).toISOString();
  const pending=await db.prepare("SELECT * FROM calling_jobs WHERE tenant_id=? AND state IN('reserved','submitted','unknown') LIMIT 1").bind(tid).first();
  if(pending&&maxPerCompany<=1)return reconcile(env,db,pending,now,at);
+ env=await resolveFundingEnv(env);
  return dialNextForTenant(env,db,tid,config,{apiFetch,now,maxPerCompany});
 }
 
@@ -273,7 +277,7 @@ export async function runScriptedCampaignCron(baseEnv,{now=Date.now(),apiFetch=f
  const config=await approvedCampaignPhone(baseEnv);
  if(!config)return {processed:0};
  const cfg=settings||await dispatchSettings(baseEnv);
- const {env,meter}=budgetedEnv(baseEnv,cfg.queryBudget);
+ let {env,meter}=budgetedEnv(baseEnv,cfg.queryBudget);
  const db=env.CRM_DB;
  // Shared-CRM companies only; dedicated CRM databases are not provisioned.
  const active=new Set(((await env.CONTROL_DB.prepare("SELECT id FROM tenants WHERE status='active' AND storage_mode='shared'").all()).results||[]).map(r=>r.id));
@@ -299,6 +303,7 @@ export async function runScriptedCampaignCron(baseEnv,{now=Date.now(),apiFetch=f
  let dialed=0,processed=0,free=Math.max(0,cfg.maxConcurrent-globalLive);
  const throttled=await providerThrottledUntil(env)>now;
  if(!throttled&&free>0&&inCallingWindow(now)){
+  env=await resolveFundingEnv(env);
   const running=((await db.prepare("SELECT DISTINCT tenant_id FROM calling_runs WHERE state='running' LIMIT 5000").all()).results||[])
    .map(r=>r.tenant_id).filter(t=>active.has(t)&&!uncertain.has(t));
   // Fair order: fewer live calls first, then the company served longest ago.
