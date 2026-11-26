@@ -1,8 +1,9 @@
 import {AUTH_MAINTENANCE_CRON,pruneExpiredAuth} from './auth-maintenance.mjs';
 import {CAMPAIGN_CRON,runScriptedCampaignCron,dispatchSettings} from './scripted-campaign-dispatch.mjs';
-import {runAutomaticMinuteSettlement} from './plivo-cost-reconcile-routes.mjs';
+import {runAutomaticMinuteSettlement,automaticMinuteSettlementApproved} from './plivo-cost-reconcile-routes.mjs';
+import {resolveFundingEnv} from './provider-funding.mjs';
 
-export async function handleCallingCron(controller,env){
+export async function handleCallingCron(controller,env,{apiFetch=fetch,cdrFetch=fetch}={}){
  const cron=controller?.cron,now=controller?.scheduledTime??Date.now();
  if(cron===AUTH_MAINTENANCE_CRON)return pruneExpiredAuth(env,{now});
  if(cron!==CAMPAIGN_CRON)throw Error('unknown Calling Worker cron expression');
@@ -13,11 +14,17 @@ export async function handleCallingCron(controller,env){
  // Every invocation remains fail-closed on invalid schedule timestamps.
  if(!Number.isSafeInteger(now)||now<0)throw Error('invalid Calling Worker schedule time');
  const maintenance=Math.floor(now/60000)%60===0?await pruneExpiredAuth(env,{now}):undefined;
- // Leave room in the per-invocation D1 budget for settlement (up to 3 calls,
- // several statements each) that runs after dispatch in the same invocation.
+ // Resolve the snapshot once for both dispatch and settlement. Up to four
+ // reads happen outside dispatch's meter; include them in its reserved budget.
+ env=await resolveFundingEnv(env);
  const settings=await dispatchSettings(env);
- const reserve=(env.AR3D_AUTO_CDR_SETTLEMENT==='approved'?15:0)+(maintenance?4:0)+4;
- const campaign=await runScriptedCampaignCron(env,{now,settings:{...settings,queryBudget:Math.max(10,settings.queryBudget-reserve)}});
- const settlement=env.AR3D_AUTO_CDR_SETTLEMENT==='approved'?await runAutomaticMinuteSettlement(env,{now}):undefined;
+ const automatic=automaticMinuteSettlementApproved(env);
+ // A matched CDR can use ten statements including an idempotent/racing
+ // settlement, plus up to three queue reads. Free-tier ticks settle one call
+ // so their remaining budget can still dispatch one new customer call.
+ const maxCalls=settings.queryBudget>=80?3:1;
+ const reserve=(automatic?3+10*maxCalls:0)+(maintenance?4:0)+4+4;
+ const campaign=await runScriptedCampaignCron(env,{now,apiFetch,settings:{...settings,queryBudget:Math.max(10,settings.queryBudget-reserve)}});
+ const settlement=automatic?await runAutomaticMinuteSettlement(env,{now,maxCalls,fetcher:cdrFetch}):undefined;
  return {...campaign,maintenance,...(settlement?{settlement}:{})};
 }

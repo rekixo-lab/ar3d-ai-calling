@@ -4,6 +4,7 @@
 import {mutationOriginAllowed} from './human-auth.mjs';
 import {resolveCrmDb} from './core.mjs';
 import {closeMinuteHold} from './minute-holds.mjs';
+import {resolveFundingEnv,resolvedFunding} from './provider-funding.mjs';
 const PATH='/v1/human/plivo-cost-reconcile';
 const UUID=/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
 const JOB_ID=/^[a-f0-9]{32}$/i;
@@ -156,20 +157,25 @@ async function observeCampaignCdr(env,tid,jid,actor,auditActor,fetcher){
 
 }
 
-// Product-side settlement, not an assistant automation. Enabled only after
-// operator verifies actual provider billing and explicitly approves the job.
+// Manual dashboard funding includes automatic, identity-matched minute
+// settlement. Older deployments retain their explicit settlement switch.
+export const automaticMinuteSettlementApproved=env=>env.AR3D_AUTO_CDR_SETTLEMENT==='approved'||
+ resolvedFunding(env)?.source==='manual_balance';
+// Product-side settlement, not an assistant automation.
 // At most three sequential CDR GETs per existing Worker tick (5 seconds each).
 // Select a rotating, distinct snapshot before processing; failure of one row
 // must not block other eligible calls. Uncertain calls never qualify.
-export async function runAutomaticMinuteSettlement(env,{now=Date.now(),fetcher=fetch}={}){
- if(env.AR3D_AUTO_CDR_SETTLEMENT!=='approved')return {attempted:0};
+export async function runAutomaticMinuteSettlement(env,{now=Date.now(),fetcher=fetch,maxCalls=3}={}){
  if(!Number.isSafeInteger(now)||now<0)throw Error('invalid settlement time');
+ if(!Number.isInteger(maxCalls)||maxCalls<1||maxCalls>3)throw Error('invalid settlement limit');
+ env=await resolveFundingEnv(env);
+ if(!automaticMinuteSettlementApproved(env))return {attempted:0};
  const eligible=" FROM tenant_minute_holds h JOIN scripted_phone_pilots p ON p.tenant_id=h.tenant_id AND p.job_id=h.job_id WHERE h.state='held' AND p.hangup_at IS NOT NULL AND p.hangup_at<=? AND p.provider_call_id IS NOT NULL AND p.phase IN ('completed','declined','ended','needs_review')";
  const cutoff=now-60000;
  const count=(await env.CONTROL_DB.prepare('SELECT COUNT(*) AS total'+eligible).bind(cutoff).first())?.total;
  if(!Number.isSafeInteger(count)||count<0)throw Error('invalid settlement queue');
  if(count===0)return {attempted:0};
- const limit=Math.min(3,count),offset=(Math.floor(now/60000)*3)%count;
+ const limit=Math.min(maxCalls,count),offset=(Math.floor(now/60000)*maxCalls)%count;
  const select=async(n,skip)=>(await env.CONTROL_DB.prepare('SELECT h.tenant_id AS tenantId,h.job_id AS jobId'+eligible+' ORDER BY h.created_at,h.tenant_id,h.job_id LIMIT ? OFFSET ?').bind(cutoff,n,skip).all()).results;
  const rows=await select(limit,offset);
  if(rows.length<limit)rows.push(...await select(limit-rows.length,0));

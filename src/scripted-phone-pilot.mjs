@@ -3,7 +3,8 @@ import {signalProviderThrottle} from './capacity-signals.mjs';
 import {resolveCrmDb,parseJsonBody} from './core.mjs';
 import {mutationOriginAllowed} from './human-auth.mjs';
 import {beginFixedVoicePreview,advanceFixedVoicePreview,advanceContextualVoice,advanceInternalVoice} from './fixed-voice-turns.mjs';
-import {normalizePropertySurvey,surveyToCrm} from './fixed-property-survey.mjs';
+import {normalizePropertySurvey,surveyToCrm,fixedPropertyQuestions} from './fixed-property-survey.mjs';
+import {FUNDING_CONTEXT} from './funding-context.mjs';
 import {createSarvamContextualAdapter} from './sarvam-contextual.mjs';
 import {addVoiceTiming,summarizeVoiceTiming} from './voice-timing.mjs';
 import {providerFaultBlocked,recordProviderFault} from './provider-safety.mjs';
@@ -29,10 +30,15 @@ const xml=body=>new Response('<Response>'+body+'</Response>',{headers:{...header
 const end=()=>xml('<Hangup/>');
 const promptKey=(language,prompt,tenant)=> (tenant?'scripted-phone-campaigns/'+tenant:'scripted-phone-pilot')+'/'+language+'/'+prompt+'.mp3';
 export const SCRIPTED_CALLING_POLICY='ar3d-fixed-plivo-v1';
-export async function scriptedPromptsReady(env,language,tenant){
- const files=await Promise.all(PROMPTS.map(name=>env.RECORDINGS.head(promptKey(language,name,tenant))));
- return files.every(file=>file&&file.size>0&&file.size<=ANSWER_MAX_BYTES);
+export async function campaignPromptMode(env,language,tenant){
+ if(!['hi','en'].includes(language)||tenant!==undefined&&!UUID.test(tenant))return null;
+ const files=await Promise.allSettled(PROMPTS.map(name=>Promise.resolve().then(()=>env.RECORDINGS.head(promptKey(language,name,tenant)))));
+ if(files.every(file=>file.status==='fulfilled'&&file.value&&file.value.size>0&&file.value.size<=ANSWER_MAX_BYTES))return 'recorded';
+ // The authenticated owner's manual-balance mode includes standard client
+ // scripts. It never enables a missing internal acceptance-test recording.
+ return tenant&&env?.[FUNDING_CONTEXT]?.source==='manual_balance'?'builtin':null;
 }
+export const scriptedPromptsReady=async(env,language,tenant)=>Boolean(await campaignPromptMode(env,language,tenant));
 
 // Metadata-only, bounded audio audit for the current-MFA Super Admin readiness
 // page. Never opens audio bytes, changes R2, queries Plivo or authorizes dialing.
@@ -147,6 +153,26 @@ const sarvamConfigured=env=>typeof env.SARVAM_API_KEY==='string'&&!!env.SARVAM_A
 function isSarvam(row){return JSON.parse(row.survey_json).phoneMeta?.engine===sarvamEngine}
 function internalDirect(row){return !row.job_id&&JSON.parse(row.survey_json).phoneMeta?.mode==='direct_preconsented'}
 const speak=(language,text)=>'<Speak voice="'+(language==='hi'?'Polly.Aditi':'WOMAN')+'" language="'+(language==='hi'?'hi-IN':'en-US')+'">'+escapeXml(text)+'</Speak>';
+// Plivo documents Polly.Aditi for both hi-IN and en-IN in its Speak XML:
+// https://www.plivo.com/docs/voice/concepts/ssml
+const campaignSpeak=(language,text)=>'<Speak voice="Polly.Aditi" language="'+(language==='hi'?'hi-IN':'en-IN')+'">'+escapeXml(text)+'</Speak>';
+function builtinCampaignPrompt(row,name){
+ const state=JSON.parse(row.survey_json),company=state.phoneMeta?.companyName,hindi=row.language==='hi';
+ if(typeof company!=='string'||!company.trim()||company.length>160||/[\u0000-\u001f\u007f]/u.test(company))return null;
+ let text;
+ if(name==='opening')text=hindi?
+  'नमस्ते, मैं '+company+' की ओर से ए आर थ्री डी की ए आई असिस्टेंट बोल रही हूँ। यह कॉल आपकी प्रॉपर्टी की जरूरत के बारे में है। आपके जवाब रिकॉर्ड होंगे और सर्वम ए आई से प्रोसेस होंगे। सहमति देकर आगे बढ़ने के लिए 1 दबाएँ। आगे कॉल नहीं चाहिए तो 2 दबाएँ।':
+  'Hello, I am the AR3D AI assistant calling on behalf of '+company+' about your property requirements. Your answers will be recorded and processed by Sarvam AI. To agree and continue, press 1. To opt out of further calls, press 2.';
+ else if(name==='closing')text=hindi?'धन्यवाद। आपकी जानकारी दर्ज कर ली गई है। अलविदा।':'Thank you. Your details have been recorded. Goodbye.';
+ else if(name==='review')text=hindi?'धन्यवाद। आपकी अब तक की जानकारी दर्ज हुई है। हमारी टीम इसकी समीक्षा करेगी।':'Thank you. Your answers so far have been recorded for our team to review.';
+ else if(name==='repeat')text=hindi?'माफ कीजिए, कृपया दोबारा बताइए।':'Sorry, please say that again.';
+ else{
+  const field=name.startsWith('size-')?'size':name;
+  const propertyType=name==='size-home'?'flat':state.answers.propertyType||'plot';
+  text=fixedPropertyQuestions(propertyType,row.language).find(q=>q.field===field)?.text;
+ }
+ return text?campaignSpeak(row.language,text):null;
+}
 function directOpening(row){
  // Only a separate explicit pre-call recording disclosure attestation enables this greeting.
  // The separate internal and customer consent paths remain unchanged.
@@ -155,7 +181,8 @@ function directOpening(row){
 }
 
 function responseFor(config,row,{repeatCue=false,directOpeningCue=false}={}){
- const audio=name=>play(callback(config,row.id,'audio/'+name+'.mp3'));
+ const builtin=row.job_id&&JSON.parse(row.survey_json).phoneMeta?.promptMode==='builtin';
+ const audio=name=>builtin?(builtinCampaignPrompt(row,name)||'<Hangup/>'):play(callback(config,row.id,'audio/'+name+'.mp3'));
  if(row.phase==='consent'){
   const action=escapeXml(callback(config,row.id,'consent'));
   // Internal acceptance: allow time to hear the complete recorded notice and
@@ -197,7 +224,8 @@ async function responseForPhoneQuestion(config,env,row,{directOpeningCue=false}=
  let repeatCue=false;
  if(row.phase==='question'){
   const state=JSON.parse(row.survey_json);
-  if(state.attempts>0){
+  if(state.attempts>0&&row.job_id&&state.phoneMeta?.promptMode==='builtin')repeatCue=true;
+  else if(state.attempts>0){
    try{
     const key=promptKey(row.language,'repeat',row.job_id?row.tenant_id:null);
     const cue=await env.RECORDINGS.head(key);
@@ -329,7 +357,16 @@ export async function reserveCampaignQuestionnaire(control,config,job,now){
  const id=crypto.randomUUID(),survey=beginFixedVoicePreview({language:job.language,now}).state;
  // Still starts in keypad consent, never a direct/preconsented greeting.
  if(config.engine!==sarvamEngine)throw Error('speech_engine_unavailable');
- survey.phoneMeta={mode:'campaign_consent',engine:'sarvam',costMeterVersion:1,sttRoundedSeconds:0,sttFailedRequests:0};
+ let prompts={};
+ if(config.promptMode==='builtin'){
+  const company=await control.prepare("SELECT display_name FROM tenants WHERE id=? AND status='active'").bind(job.tenant_id).first();
+  const name=company?.display_name;
+  if(typeof name!=='string'||!name.trim()||name.length>160||/[\u0000-\u001f\u007f]/u.test(name))throw Error('campaign_company_name_unavailable');
+  prompts={promptMode:'builtin',companyName:name.trim()};
+ }
+ survey.phoneMeta={mode:'campaign_consent',engine:'sarvam',...prompts,costMeterVersion:1,
+  sttRoundedSeconds:0,sttFailedRequests:0,sttAudioMs:0,sttDurationUnknown:0,
+  llmRequests:0,llmInputTokens:0,llmOutputTokens:0,llmUsageUnknown:0};
  const inserted=await control.prepare(`INSERT INTO scripted_phone_pilots
    (id,tenant_id,lead_id,lead_updated_at,actor_id,language,destination,caller,expires_at,phase,survey_json,
     created_at,provider_account_id,job_id)
@@ -804,8 +841,12 @@ async function applyPhoneAnswer(config,env,row,answer,now,fetcher=fetch){
    attempt:prior.attempts+1,scope:row.job_id?'campaign':'internal'
   }));
   if(row.job_id&&result.state.status==='opted_out'){
-   await control.prepare("UPDATE scripted_phone_pilots SET phase='suppressing' WHERE id=? AND phase='transcribing'").bind(id).run();
-   return await finishCampaignOptOut(env,row,now);
+   // The last answer still used speech/interpretation even when it requested
+   // opt-out. Persist its meters in the same claim that begins suppression.
+   const survey_json=JSON.stringify({...prior,phoneMeta:{...phoneMeta,...audioMetrics,...aiMetrics,interpreter,pendingQuantity,lastAudioOutcome:answer.reason}});
+   const suppressed=await control.prepare("UPDATE scripted_phone_pilots SET phase='suppressing',survey_json=? WHERE id=? AND phase='transcribing' AND turn=?")
+    .bind(survey_json,id,turn).run();
+   return suppressed.meta.changes===1?await finishCampaignOptOut(env,{...row,survey_json},now):end();
   }
   const phase={active:'question',completed:'finishing',opted_out:'declined',needs_review:'needs_review'}[result.state.status];
   const survey_json=JSON.stringify({...result.state,phoneMeta:{...phoneMeta,...audioMetrics,...aiMetrics,interpreter,pendingQuantity,lastAudioOutcome:answer.reason==='recognized'&&result.action==='repeat'?'speech_unrecognized':answer.reason==='recognized'&&result.action==='human_review'?'speech_unrecognized':answer.reason}});

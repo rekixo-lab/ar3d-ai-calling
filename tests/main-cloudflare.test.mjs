@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  REQUIRED_COLUMNS, REQUIRED_TABLES, REQUIRED_SAFETY_TRIGGERS, REQUIRED_MINUTE_LEDGER_TRIGGERS, REQUIRED_HOLD_TRIGGERS, REQUIRED_PROVIDER_JOURNAL_TRIGGERS, REQUIRED_PURCHASE_TRIGGERS, REQUIRED_PROVIDER_SAFETY_TRIGGERS, REQUIRED_PROVIDER_RESERVE_TRIGGERS, REQUIRED_PROVIDER_RECONCILE_TRIGGERS, REQUIRED_FUNDING_SETTINGS_TRIGGERS, checkFundingSettingsTriggers, checkProviderReconcileTriggers, checkProviderReserveTriggers, checkProviderSafetyTriggers, checkPurchaseTriggers, checkProviderJournalTriggers, checkHoldTriggers, checkMinuteLedgerTriggers, getCredentials, makeMainConfig, checkTables, checkColumns, checkSafetyTriggers, inspectCloudflare, verifiedSchemaState,
+  REQUIRED_COLUMNS, REQUIRED_TABLES, REQUIRED_SAFETY_TRIGGERS, REQUIRED_MINUTE_LEDGER_TRIGGERS, REQUIRED_HOLD_TRIGGERS, REQUIRED_PROVIDER_JOURNAL_TRIGGERS, REQUIRED_PURCHASE_TRIGGERS, REQUIRED_PROVIDER_SAFETY_TRIGGERS, REQUIRED_PROVIDER_RESERVE_TRIGGERS, REQUIRED_PROVIDER_RECONCILE_TRIGGERS, REQUIRED_FUNDING_SETTINGS_TRIGGERS, REQUIRED_MANUAL_BALANCE_TRIGGERS, checkManualBalanceTriggers, checkFundingSettingsTriggers, checkProviderReconcileTriggers, checkProviderReserveTriggers, checkProviderSafetyTriggers, checkPurchaseTriggers, checkProviderJournalTriggers, checkHoldTriggers, checkMinuteLedgerTriggers, getCredentials, makeMainConfig, checkTables, checkColumns, checkSafetyTriggers, inspectCloudflare, verifiedSchemaState,
 } from '../scripts/main-cloudflare.mjs';
 
 test('new CDR cost observation is additive only and guarded by exact Calling CRM state',async()=>{
@@ -146,7 +146,7 @@ test('ready requires every required migration table', () => {
   assert.throws(() => checkColumns(['tenant_id','consent_status'],'CRM_DB','leads'), /missing columns/);
 });
 
-const mockTriggers=Object.entries({...REQUIRED_SAFETY_TRIGGERS,...REQUIRED_MINUTE_LEDGER_TRIGGERS,...REQUIRED_HOLD_TRIGGERS,...REQUIRED_PROVIDER_JOURNAL_TRIGGERS,...REQUIRED_PURCHASE_TRIGGERS,...REQUIRED_PROVIDER_SAFETY_TRIGGERS,...REQUIRED_PROVIDER_RESERVE_TRIGGERS,...REQUIRED_PROVIDER_RECONCILE_TRIGGERS,...REQUIRED_FUNDING_SETTINGS_TRIGGERS}).map(([name,parts])=>
+const mockTriggers=Object.entries({...REQUIRED_SAFETY_TRIGGERS,...REQUIRED_MINUTE_LEDGER_TRIGGERS,...REQUIRED_HOLD_TRIGGERS,...REQUIRED_PROVIDER_JOURNAL_TRIGGERS,...REQUIRED_PURCHASE_TRIGGERS,...REQUIRED_PROVIDER_SAFETY_TRIGGERS,...REQUIRED_PROVIDER_RESERVE_TRIGGERS,...REQUIRED_PROVIDER_RECONCILE_TRIGGERS,...REQUIRED_FUNDING_SETTINGS_TRIGGERS,...REQUIRED_MANUAL_BALANCE_TRIGGERS}).map(([name,parts])=>
   ({name,sql:'CREATE TRIGGER '+name+' '+parts.join(' ')+' BEGIN SELECT RAISE(ABORT, "deny"); END'}));
 function cloudflareMock({ controlTables=[],crmTables=[],controlName='ar3d-calling-control',crmName='ar3d-calling-shared-crm',leadColumns=['tenant_id','consent_status','dnd_status','interest_status','followup_at','customer_segment','plot_size_preference','visit_date_preference'],bucketName='ar3d-calling-recordings',triggers=mockTriggers }={}) {
   return async (url,opts) => {
@@ -161,7 +161,10 @@ function cloudflareMock({ controlTables=[],crmTables=[],controlName='ar3d-callin
       if(sql.includes("type='trigger'")) rows=sql.includes('trg_minute_ledger_')?triggers.filter(x=>x.name.startsWith('trg_minute_ledger_')):triggers;
       else if(sql.includes('sqlite_master')) rows=tableNames.map(name=>({name}));
       else if(sql.includes('PRAGMA')) {
-        if(sql.includes('calling_funding_settings')) rows=REQUIRED_COLUMNS.CONTROL_DB.calling_funding_settings.map(name=>({name}));
+        if(sql.includes('provider_balance_snapshots')) rows=REQUIRED_COLUMNS.CONTROL_DB.provider_balance_snapshots.map(name=>({name}));
+        else if(sql.includes('provider_balance_covered_calls')) rows=REQUIRED_COLUMNS.CONTROL_DB.provider_balance_covered_calls.map(name=>({name}));
+        else if(sql.includes('provider_manual_funding_control')) rows=REQUIRED_COLUMNS.CONTROL_DB.provider_manual_funding_control.map(name=>({name}));
+        else if(sql.includes('calling_funding_settings')) rows=REQUIRED_COLUMNS.CONTROL_DB.calling_funding_settings.map(name=>({name}));
         else if(sql.includes('calling_dispatch_settings')) rows=REQUIRED_COLUMNS.CONTROL_DB.calling_dispatch_settings.map(name=>({name}));
         else if(sql.includes('calling_company_settings')) rows=REQUIRED_COLUMNS.CONTROL_DB.calling_company_settings.map(name=>({name}));
         else if(sql.includes('calling_capacity_signals')) rows=REQUIRED_COLUMNS.CONTROL_DB.calling_capacity_signals.map(name=>({name}));
@@ -463,4 +466,38 @@ test('funding schema seeds no allowance, validates values and preserves disablem
   db.exec(readFileSync('migrations/control/0030_calling_funding_settings.sql','utf8'));
   assert.deepEqual({...db.prepare('SELECT mode,revision FROM calling_funding_settings').get()},{mode:'disabled',revision:2});
  }finally{db.close()}
+});
+
+test('manual balance migration accepts only the exact previous schema and verifies immutable coverage guards',async()=>{
+ const added=['provider_balance_snapshots','provider_balance_covered_calls','provider_manual_funding_control'];
+ const old=REQUIRED_TABLES.CONTROL_DB.filter(x=>!added.includes(x));
+ assert.equal(checkTables(old,'CONTROL_DB','preflight'),'control_manual_balances_upgrade');
+ assert.equal(verifiedSchemaState({CONTROL_DB:'control_manual_balances_upgrade',CRM_DB:'ready'}),'control_manual_balances_upgrade');
+ assert.throws(()=>checkTables(old,'CONTROL_DB','ready'),/missing tables/);
+ assert.throws(()=>checkTables(old.filter(x=>x!=='calling_funding_settings'),'CONTROL_DB','preflight'),/partial schema/);
+ assert.throws(()=>checkTables([...old,added[0]],'CONTROL_DB','preflight'),/partial schema/);
+ assert.throws(()=>verifiedSchemaState({CONTROL_DB:'control_manual_balances_upgrade',CRM_DB:'crm_cdr_upgrade'}),/mixed/);
+ const r=await inspectCloudflare({credentials:getCredentials(env),mode:'preflight',template,
+  apiFetch:cloudflareMock({controlTables:old,crmTables:REQUIRED_TABLES.CRM_DB})});
+ assert.equal(r.modes.CONTROL_DB,'control_manual_balances_upgrade');
+ for(const table of added)assert.throws(()=>checkColumns(['id'],'CONTROL_DB',table),/missing columns/);
+ await assert.rejects(inspectCloudflare({credentials:getCredentials(env),mode:'ready',template,
+  apiFetch:cloudflareMock({controlTables:REQUIRED_TABLES.CONTROL_DB,crmTables:REQUIRED_TABLES.CRM_DB,
+   triggers:mockTriggers.filter(x=>x.name!=='trg_provider_balance_cover_validate')})}),/Manual balance safety trigger/);
+ const {readFileSync,readdirSync}=await import('node:fs');
+ const {DatabaseSync}=await import('node:sqlite');
+ const db=new DatabaseSync(':memory:');
+ try{
+  for(const file of readdirSync('migrations/control').filter(x=>x.endsWith('.sql')).sort())db.exec(readFileSync('migrations/control/'+file,'utf8'));
+  for(const table of added){
+   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM '+table).get().n,0,'migration supplies no balances or implicit owner enablement');
+   checkColumns(db.prepare('PRAGMA table_info('+table+')').all().map(x=>x.name),'CONTROL_DB',table);
+  }
+  checkManualBalanceTriggers(db.prepare("SELECT name,sql FROM sqlite_master WHERE type='trigger' AND (name LIKE 'trg_provider_balance_%' OR name LIKE 'trg_provider_manual_%')").all());
+ }finally{db.close()}
+ const flow=readFileSync('.github/workflows/deploy-production.yml','utf8');
+ const migration='migrations/control/0031_manual_provider_balances.sql';
+ assert.match(flow,/schema_state == 'control_manual_balances_upgrade'\s+run: npx --yes wrangler@4 d1 execute ar3d-calling-control[^\n]*0031_manual_provider_balances\.sql/);
+ assert.equal(flow.split(migration).length-1,2,'only exact upgrade and fresh initialization apply the migration');
+ assert.match(flow,/Initialize NEW AR3D Calling Control D1 database[\s\S]*0031_manual_provider_balances\.sql[\s\S]*Initialize NEW AR3D Calling Shared CRM D1 database/);
 });
