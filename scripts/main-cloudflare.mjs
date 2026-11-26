@@ -17,13 +17,14 @@ export const PROPERTY_TABLES=Object.freeze([
 export const WHATSAPP_TABLES=Object.freeze([
   'whatsapp_rules','whatsapp_permissions','whatsapp_threads','whatsapp_messages','whatsapp_inbound_messages','whatsapp_event_receipts',
 ]);
+export const CONTROL_WHATSAPP_TABLES=Object.freeze(['whatsapp_connections','whatsapp_webhook_batches']);
 const messagingUpgradeStates=['control_whatsapp_upgrade','crm_property_upgrade','crm_whatsapp_upgrade','crm_property_whatsapp_upgrade'];
-const messagingMissingTables=state=>state==='control_whatsapp_upgrade'?['whatsapp_connections']:
+const messagingMissingTables=state=>state==='control_whatsapp_upgrade'?CONTROL_WHATSAPP_TABLES:
   state==='crm_property_upgrade'?PROPERTY_TABLES:state==='crm_whatsapp_upgrade'?WHATSAPP_TABLES:
   state==='crm_property_whatsapp_upgrade'?[...PROPERTY_TABLES,...WHATSAPP_TABLES]:[];
 export const REQUIRED_TABLES = Object.freeze({
   CONTROL_DB: Object.freeze([
-    'whatsapp_connections',
+    ...CONTROL_WHATSAPP_TABLES,
     'tenants','tenant_keys','project_links','tenant_numbers','tenant_audit_events',
     'human_users','tenant_memberships','human_sessions','human_invitations',
     'human_login_limits','human_bootstrap_claim','human_ip_login_limits','human_mfa_settings','human_mfa_challenges','human_mfa_recovery_codes','provider_event_inbox','calling_script_bindings','calling_script_versions','company_profile_versions','calling_agent_publications','shared_voice_gateway','voice_call_routes','client_account_contacts','company_change_requests','scripted_phone_pilots','tenant_credit_budgets','tenant_credit_audit','tenant_minute_ledger','tenant_minute_holds','provider_financial_journal','tenant_credit_purchases','provider_safety_events','provider_cost_reservations','provider_cost_reconciliations','calling_dispatch_settings','calling_company_settings','calling_capacity_signals','calling_funding_settings','provider_balance_snapshots','provider_balance_covered_calls','provider_manual_funding_control'
@@ -37,6 +38,7 @@ export const REQUIRED_TABLES = Object.freeze({
 export const REQUIRED_COLUMNS = Object.freeze({
   CONTROL_DB: Object.freeze({
     whatsapp_connections: Object.freeze(['tenant_id','messaging_account_id','phone_number_id','display_phone','verified_name','status','credentials_ciphertext','verify_token_hash','templates_json','webhook_verified_at','connected_at','updated_at','last_polled_at','revision']),
+    whatsapp_webhook_batches: Object.freeze(['batch_hash','signature_hash','next_group','group_count','pending_phone_ids_json','received_at','updated_at','processed_at']),
     tenants: Object.freeze(['id','plan_code','storage_mode','suspended_from_status']),
     human_users: Object.freeze(['id','global_role','password_hash']),
     human_sessions: Object.freeze(['token_hash','expires_at']),
@@ -81,7 +83,7 @@ export const REQUIRED_COLUMNS = Object.freeze({
     whatsapp_threads: Object.freeze(['tenant_id','lead_id','paused','last_inbound_at','updated_at']),
     whatsapp_messages: Object.freeze(['tenant_id','id','source_key','lead_id','campaign_id','property_id','visit_id','kind','due_at','status','reason','template_name','template_language','provider_message_id','source_at','payload_json','created_at','updated_at','submitted_at','delivered_at','read_at']),
     whatsapp_inbound_messages: Object.freeze(['tenant_id','id','lead_id','text','message_type','received_at']),
-    whatsapp_event_receipts: Object.freeze(['tenant_id','event_key','payload_json','processed_at','received_at']),
+    whatsapp_event_receipts: Object.freeze(['tenant_id','event_key','payload_json','processed_at','received_at','cursor']),
     leads: Object.freeze(['tenant_id','consent_status','dnd_status','interest_status','followup_at',
       'customer_segment','plot_size_preference','visit_date_preference']),
     conversation_simulations: Object.freeze(['tenant_id','state_json','expires_at']),
@@ -294,7 +296,7 @@ export function checkTables(tables, binding, mode) {
   const missing = expected.filter(name => !present.has(name));
   if(mode==='preflight'){
     const exact=names=>missing.length===names.length&&names.every(name=>missing.includes(name));
-    if(binding==='CONTROL_DB'&&exact(['whatsapp_connections']))return 'control_whatsapp_upgrade';
+    if(binding==='CONTROL_DB'&&exact(CONTROL_WHATSAPP_TABLES))return 'control_whatsapp_upgrade';
     if(binding==='CRM_DB'){
       if(exact([...PROPERTY_TABLES,...WHATSAPP_TABLES]))return 'crm_property_whatsapp_upgrade';
       if(exact(PROPERTY_TABLES))return 'crm_property_upgrade';

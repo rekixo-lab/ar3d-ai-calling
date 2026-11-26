@@ -4,6 +4,9 @@ import {resolveCrmDb,normalizeIndianPhone,sha256hex} from './core.mjs';
 export const WHATSAPP_CRON='*/2 * * * *';
 export const UUID=/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/i;
 export const GRAPH_VERSION='v27.0';
+// The connection alias is c. Pending signed inbound groups block this sender
+// before the corresponding customer's CRM spool has been drained.
+export const PENDING_INBOUND_SQL="EXISTS(SELECT 1 FROM whatsapp_webhook_batches b,json_each(b.pending_phone_ids_json) p WHERE b.processed_at IS NULL AND CAST(p.key AS INTEGER)>=b.next_group AND p.value=c.phone_number_id)";
 const encoder=new TextEncoder(),decoder=new TextDecoder();
 export const iso=n=>new Date(n).toISOString();
 export const randomToken=()=>Array.from(crypto.getRandomValues(new Uint8Array(32)),b=>b.toString(16).padStart(2,'0')).join('');
@@ -86,14 +89,16 @@ export function selectedTemplate(connection,name,language,{visit=false}={}){
 }
 export const defaultRules=()=>({enabled:false,enabledAt:null,firstDelayMinutes:10,secondEnabled:false,secondDelayHours:48,visitReminderEnabled:false,templateName:'',templateLanguage:'hi',followupTemplateName:'',followupTemplateLanguage:'hi',visitTemplateName:'',visitTemplateLanguage:'hi',dailyLimit:100,revision:0});
 export function publicRules(row){return row?{enabled:!!row.enabled,enabledAt:row.enabled_at,firstDelayMinutes:row.first_delay_minutes,secondEnabled:!!row.second_enabled,secondDelayHours:row.second_delay_hours,visitReminderEnabled:!!row.visit_reminder_enabled,templateName:row.template_name,templateLanguage:row.template_language,followupTemplateName:row.followup_template_name,followupTemplateLanguage:row.followup_template_language,visitTemplateName:row.visit_template_name,visitTemplateLanguage:row.visit_template_language,dailyLimit:row.daily_limit,revision:row.revision}:defaultRules();}
-export function publicConnection(row){return row?{status:row.status,messagingAccountId:row.messaging_account_id,phoneNumberId:row.phone_number_id,displayPhone:row.display_phone,verifiedName:row.verified_name,webhookVerified:!!row.webhook_verified_at,connectedAt:row.connected_at,revision:row.revision}:{status:'not_connected',webhookVerified:false,revision:0};}
+export function publicConnection(row){return row?{status:row.status,messagingAccountId:row.messaging_account_id,phoneNumberId:row.phone_number_id,displayPhone:row.display_phone,verifiedName:row.verified_name,webhookVerified:!!row.webhook_verified_at,incomingProcessing:!!row.pending_inbound,connectedAt:row.connected_at,revision:row.revision}:{status:'not_connected',webhookVerified:false,incomingProcessing:false,revision:0};}
 export async function leadEligibility(db,tid,leadId,{ignoreThread=false}={}){
  const row=await db.prepare(`SELECT l.*,p.status AS whatsapp_permission,t.paused AS thread_paused,t.last_inbound_at,
+ EXISTS(SELECT 1 FROM whatsapp_event_receipts r,json_each(r.payload_json) e WHERE r.tenant_id=l.tenant_id AND r.event_key LIKE 'batch:%' AND r.processed_at IS NULL AND CAST(e.key AS INTEGER)>=r.cursor AND json_extract(e.value,'$.kind')='message' AND json_extract(e.value,'$.value.from') IN(l.mobile_e164,replace(l.mobile_e164,'+',''))) AS pending_whatsapp_inbound,
  EXISTS(SELECT 1 FROM lead_opt_out_events o WHERE o.tenant_id=l.tenant_id AND o.lead_id=l.id) AS opted_out
  FROM leads l LEFT JOIN whatsapp_permissions p ON p.tenant_id=l.tenant_id AND p.lead_id=l.id
  LEFT JOIN whatsapp_threads t ON t.tenant_id=l.tenant_id AND t.lead_id=l.id WHERE l.tenant_id=? AND l.id=? LIMIT 1`).bind(tid,leadId).first();
  if(!row)return {reason:'Customer not found'};
  if(row.opted_out||row.consent_status==='denied'||row.dnd_status==='blocked')return {lead:row,reason:'Customer has opted out'};
+ if(row.pending_whatsapp_inbound)return {lead:row,reason:'Customer reply is awaiting webhook processing'};
  if(row.whatsapp_permission!=='granted')return {lead:row,reason:'WhatsApp permission record is missing'};
  if(!ignoreThread&&row.thread_paused)return {lead:row,reason:'Conversation is paused for salesperson follow-up'};
  return {lead:row,reason:null};

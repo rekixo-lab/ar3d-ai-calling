@@ -2,11 +2,11 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {DatabaseSync} from 'node:sqlite';
 import {readFileSync,readdirSync} from 'node:fs';
-import {REQUIRED_TABLES,REQUIRED_COLUMNS,PROPERTY_TABLES,WHATSAPP_TABLES,
+import {REQUIRED_TABLES,REQUIRED_COLUMNS,PROPERTY_TABLES,WHATSAPP_TABLES,CONTROL_WHATSAPP_TABLES,
   checkTables,checkColumns,verifiedSchemaState,makeMainConfig,getCredentials} from '../scripts/main-cloudflare.mjs';
 
 test('only the complete reviewed property/WhatsApp groups can upgrade the existing deployment',()=>{
- const control=REQUIRED_TABLES.CONTROL_DB.filter(x=>x!=='whatsapp_connections');
+ const control=REQUIRED_TABLES.CONTROL_DB.filter(x=>!CONTROL_WHATSAPP_TABLES.includes(x));
  const crm=REQUIRED_TABLES.CRM_DB.filter(x=>![...PROPERTY_TABLES,...WHATSAPP_TABLES].includes(x));
  assert.equal(checkTables(control,'CONTROL_DB','preflight'),'control_whatsapp_upgrade');
  assert.equal(checkTables(crm,'CRM_DB','preflight'),'crm_property_whatsapp_upgrade');
@@ -19,6 +19,8 @@ test('only the complete reviewed property/WhatsApp groups can upgrade the existi
  assert.equal(checkTables([...crm,...PROPERTY_TABLES],'CRM_DB','preflight'),'crm_whatsapp_upgrade');
  assert.equal(checkTables([...crm,...WHATSAPP_TABLES],'CRM_DB','preflight'),'crm_property_upgrade');
  assert.throws(()=>checkTables([...crm,'properties'],'CRM_DB','preflight'),/partial schema/);
+ assert.throws(()=>checkTables([...control,'whatsapp_connections'],'CONTROL_DB','preflight'),/partial schema/);
+ assert.throws(()=>checkTables([...control,'whatsapp_webhook_batches'],'CONTROL_DB','preflight'),/partial schema/);
  assert.throws(()=>checkTables(control.filter(x=>x!=='human_sessions'),'CONTROL_DB','preflight'),/partial schema/);
  assert.throws(()=>checkTables(crm.filter(x=>x!=='leads'),'CRM_DB','preflight'),/partial schema/);
  assert.throws(()=>checkTables(crm,'CRM_DB','ready'),/missing tables/);
@@ -27,7 +29,7 @@ test('only the complete reviewed property/WhatsApp groups can upgrade the existi
 
 test('fresh migrations satisfy every new deployment column guard and can be reapplied without seeding sends',()=>{
  for(const [kind,binding,files,tableNames] of [
-  ['control','CONTROL_DB',['0032_whatsapp_connections.sql'],['whatsapp_connections']],
+  ['control','CONTROL_DB',['0032_whatsapp_connections.sql'],CONTROL_WHATSAPP_TABLES],
   ['crm','CRM_DB',['0023_property_catalog.sql','0024_whatsapp_followups.sql'],[...PROPERTY_TABLES,...WHATSAPP_TABLES]],
  ]){
   const db=new DatabaseSync(':memory:');

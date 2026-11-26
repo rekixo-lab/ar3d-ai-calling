@@ -89,7 +89,7 @@ try{
  await page.getByRole('button',{name:'Add property',exact:true}).waitFor();
  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth+1),true,'mobile page must not overflow');
  await page.screenshot({path:'/tmp/ar3d-properties-mobile.png',fullPage:true});
- await page.getByLabel('Company',{exact:true}).selectOption(B);
+ await page.locator('.company-switch select').selectOption(B);
  await page.getByRole('heading',{name:'Viewer property',exact:true}).waitFor();
  assert.equal(await page.getByRole('button',{name:'Add property',exact:true}).count(),0);
  assert.equal(await page.getByRole('button',{name:/Edit River Garden/}).count(),0);

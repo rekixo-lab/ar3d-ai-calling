@@ -128,6 +128,10 @@ permission, opt-outs, lead state, property availability/revision, template and
 applicable rule/visit conditions. Replayed call callbacks have a unique source
 key and cannot enqueue the same sequence step twice. Replayed status webhooks
 are deduplicated; out-of-order receipts cannot regress a delivered/read state.
+Signed webhook batches retain processing progress across retries, including
+batches covering several client numbers. Pending customer replies block sends
+until processed; completed events are not applied again. Manual schedule and
+reply requests also retain an idempotency key when a network response is lost.
 
 An API acknowledgement displays **Submitted**, not **Delivered**. Delivery/read
 states depend on signed Meta events. If a network timeout or server error leaves

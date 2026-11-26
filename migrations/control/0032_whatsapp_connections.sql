@@ -17,3 +17,17 @@ CREATE TABLE IF NOT EXISTS whatsapp_connections (
  revision INTEGER NOT NULL DEFAULT 1 CHECK(revision>0)
 );
 CREATE INDEX IF NOT EXISTS idx_whatsapp_connections_dispatch ON whatsapp_connections(status,last_polled_at);
+-- Request-level progress lets multi-client webhook retries skip completed groups.
+-- This table contains hashes and provider number IDs only, never customer messages.
+CREATE TABLE IF NOT EXISTS whatsapp_webhook_batches (
+ batch_hash TEXT PRIMARY KEY CHECK(length(batch_hash)=64),
+ signature_hash TEXT NOT NULL CHECK(length(signature_hash)=64),
+ next_group INTEGER NOT NULL DEFAULT 0 CHECK(next_group>=0),
+ group_count INTEGER NOT NULL CHECK(group_count>=0),
+ pending_phone_ids_json TEXT NOT NULL CHECK(json_valid(pending_phone_ids_json) AND json_type(pending_phone_ids_json)='array'),
+ received_at TEXT NOT NULL,
+ updated_at TEXT NOT NULL,
+ processed_at TEXT,
+ CHECK(next_group<=group_count)
+);
+CREATE INDEX IF NOT EXISTS idx_whatsapp_webhook_batches_pending ON whatsapp_webhook_batches(processed_at,next_group);

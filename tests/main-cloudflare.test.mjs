@@ -162,7 +162,7 @@ function cloudflareMock({ controlTables=[],crmTables=[],controlName='ar3d-callin
       else if(sql.includes('sqlite_master')) rows=tableNames.map(name=>({name}));
       else if(sql.includes('PRAGMA')) {
         const table=sql.match(/PRAGMA table_info\(([^)]+)\)/)?.[1];
-        if(['whatsapp_connections','properties','property_assets','campaign_property_settings','campaign_properties','property_media_shares','whatsapp_rules','whatsapp_permissions','whatsapp_threads','whatsapp_messages','whatsapp_inbound_messages','whatsapp_event_receipts'].includes(table))
+        if(['whatsapp_connections','whatsapp_webhook_batches','properties','property_assets','campaign_property_settings','campaign_properties','property_media_shares','whatsapp_rules','whatsapp_permissions','whatsapp_threads','whatsapp_messages','whatsapp_inbound_messages','whatsapp_event_receipts'].includes(table))
           rows=REQUIRED_COLUMNS[control?'CONTROL_DB':'CRM_DB'][table].map(name=>({name}));
         else if(sql.includes('provider_balance_snapshots')) rows=REQUIRED_COLUMNS.CONTROL_DB.provider_balance_snapshots.map(name=>({name}));
         else if(sql.includes('provider_balance_covered_calls')) rows=REQUIRED_COLUMNS.CONTROL_DB.provider_balance_covered_calls.map(name=>({name}));

@@ -1,5 +1,5 @@
 import {getCampaignProperties,getProperty,matchCampaignProperties,createPropertyAssetShare} from './property-catalog.mjs';
-import {UUID,iso,text,json,fail,publicRules,selectedTemplate,decryptCredentials,graphRequest,fetchTemplates,leadEligibility,leadPreferences,resolveCrmDb,audit} from './whatsapp-core.mjs';
+import {UUID,iso,text,json,fail,publicRules,selectedTemplate,decryptCredentials,graphRequest,fetchTemplates,leadEligibility,leadPreferences,resolveCrmDb,audit,PENDING_INBOUND_SQL} from './whatsapp-core.mjs';
 import {applyPendingStatusEvents} from './whatsapp-webhook.mjs';
 
 export async function enqueueMessage(db,{tenantId,leadId,campaignId=null,propertyId=null,visitId=null,kind,dueAt,sourceAt,sourceKey,templateName='',templateLanguage='hi',status='scheduled',reason='',payload={},now=Date.now()}){
@@ -18,11 +18,13 @@ export async function reconcileAcceptedCalls(env,member,db,rules,{now=Date.now()
  const tid=member.tenant_id;if(!rules.enabled||!rules.enabledAt)return 0;
  const row=await db.prepare('SELECT cursor_at,cursor_job_id FROM whatsapp_rules WHERE tenant_id=?').bind(tid).first();
  const cursor=row?.cursor_at||rules.enabledAt,job=row?.cursor_job_id||'';
- const results=await db.prepare(`SELECT r.job_id,r.answers_json,r.captured_at,j.lead_id,cr.campaign_id FROM scripted_call_results r JOIN calling_jobs j ON j.tenant_id=r.tenant_id AND j.id=r.job_id JOIN calling_runs cr ON cr.tenant_id=j.tenant_id AND cr.id=j.run_id
+ const results=await db.prepare(`SELECT r.job_id,r.session_id,r.answers_json,r.captured_at,j.lead_id,cr.campaign_id FROM scripted_call_results r JOIN calling_jobs j ON j.tenant_id=r.tenant_id AND j.id=r.job_id JOIN calling_runs cr ON cr.tenant_id=j.tenant_id AND cr.id=j.run_id
  WHERE r.tenant_id=? AND r.saved_to_lead=1 AND r.captured_at>=? AND (r.captured_at>? OR (r.captured_at=? AND r.job_id>?)) ORDER BY r.captured_at,r.job_id LIMIT ?`).bind(tid,rules.enabledAt,cursor,cursor,job,limit).all();
  let queued=0;
  for(const result of results.results||[]){
   const e=await leadEligibility(db,tid,result.lead_id),answers=parse(result.answers_json);
+  const latestCall=parse(e.lead?.requirements_json).scriptedCallPilot;
+  if(!e.reason&&e.lead&&(Date.parse(e.lead.updated_at)>Date.parse(result.captured_at)+1||(latestCall?.id&&latestCall.id!==result.session_id)))e.reason='Customer record changed after this call. Salesperson review is required.';
   if(!e.reason&&e.lead.interest_status==='interested'){
    const properties=await getCampaignProperties(db,tid,result.campaign_id,{availableOnly:true});
    const match=matchCampaignProperties(properties,leadPreferences(e.lead,answers));
@@ -91,7 +93,7 @@ function indiaDayStart(now){const d=new Date(now+19800000);return new Date(Date.
 async function claimMessage(db,tid,message,lead,property,rules,now){
  const visitAt=parse(message.payload_json).visitAt||'';
  return db.prepare(`UPDATE whatsapp_messages SET status='unknown',reason='Send outcome not yet confirmed',submitted_at=?,updated_at=? WHERE tenant_id=? AND id=? AND status IN('scheduled','pending_setup') AND due_at<=?
- AND EXISTS(SELECT 1 FROM leads l JOIN whatsapp_permissions p ON p.tenant_id=l.tenant_id AND p.lead_id=l.id LEFT JOIN whatsapp_threads t ON t.tenant_id=l.tenant_id AND t.lead_id=l.id WHERE l.tenant_id=? AND l.id=? AND l.updated_at=? AND p.status='granted' AND l.consent_status!='denied' AND l.dnd_status!='blocked' AND l.interest_status NOT IN('not_interested','converted') AND (COALESCE(t.paused,0)=0 OR whatsapp_messages.kind='visit_reminder') AND NOT EXISTS(SELECT 1 FROM lead_opt_out_events o WHERE o.tenant_id=l.tenant_id AND o.lead_id=l.id))
+ AND EXISTS(SELECT 1 FROM leads l JOIN whatsapp_permissions p ON p.tenant_id=l.tenant_id AND p.lead_id=l.id LEFT JOIN whatsapp_threads t ON t.tenant_id=l.tenant_id AND t.lead_id=l.id WHERE l.tenant_id=? AND l.id=? AND l.updated_at=? AND p.status='granted' AND l.consent_status!='denied' AND l.dnd_status!='blocked' AND l.interest_status NOT IN('not_interested','converted') AND (COALESCE(t.paused,0)=0 OR whatsapp_messages.kind='visit_reminder') AND NOT EXISTS(SELECT 1 FROM lead_opt_out_events o WHERE o.tenant_id=l.tenant_id AND o.lead_id=l.id) AND NOT EXISTS(SELECT 1 FROM whatsapp_event_receipts r,json_each(r.payload_json) e WHERE r.tenant_id=l.tenant_id AND r.event_key LIKE 'batch:%' AND r.processed_at IS NULL AND CAST(e.key AS INTEGER)>=r.cursor AND json_extract(e.value,'$.kind')='message' AND json_extract(e.value,'$.value.from') IN(l.mobile_e164,replace(l.mobile_e164,'+',''))))
  AND EXISTS(SELECT 1 FROM properties p JOIN campaign_properties cp ON cp.tenant_id=p.tenant_id AND cp.property_id=p.id WHERE p.tenant_id=? AND p.id=? AND p.status='available' AND p.revision=? AND cp.campaign_id=?)
  AND (kind!='visit_reminder' OR EXISTS(SELECT 1 FROM site_visits v WHERE v.tenant_id=whatsapp_messages.tenant_id AND v.id=whatsapp_messages.visit_id AND v.lead_id=whatsapp_messages.lead_id AND v.status='confirmed' AND v.scheduled_at=? AND v.scheduled_at>?))
  AND (source_key LIKE 'manual:%' OR EXISTS(SELECT 1 FROM whatsapp_rules r WHERE r.tenant_id=whatsapp_messages.tenant_id AND r.enabled=1 AND r.revision=?))
@@ -129,6 +131,8 @@ export async function dispatchMessage(env,member,db,connection,rules,message,{no
  const template=selectedTemplate({...connection,templates_json:cached},name,language,{visit:message.kind==='visit_reminder'});
  if(!template){await setMessageState(db,tid,message.id,'pending_setup','Select a compatible approved template',now);return {sent:false};}
  let payload;try{payload=await buildTemplatePayload(env,member,eligible.lead,property,message,template,{now,origin});}catch(e){await setMessageState(db,tid,message.id,'review_required',e.message==='Approved template requires an uploaded property brochure'?e.message:'Property media is not ready for this message',now);return {sent:false};}
+ const currentConnection=await env.CONTROL_DB.prepare('SELECT c.status,c.revision,'+PENDING_INBOUND_SQL+' AS pending_inbound FROM whatsapp_connections c WHERE tenant_id=?').bind(tid).first();
+ if(currentConnection?.status!=='connected'||currentConnection.revision!==connection.revision||currentConnection.pending_inbound){await setMessageState(db,tid,message.id,'pending_setup',currentConnection?.pending_inbound?'Incoming customer messages are being processed':'WhatsApp connection changed',now);return {sent:false};}
  const claimed=await claimMessage(db,tid,message,eligible.lead,property,rules,now);if(!claimed)return {sent:false,reason:'Customer, property, visit, rules or daily limit changed'};
  try{
   const result=await graphRequest('/'+connection.phone_number_id+'/messages',credentials.accessToken,{fetcher,method:'POST',body:payload.body});
@@ -146,23 +150,34 @@ export async function dispatchMessage(env,member,db,connection,rules,message,{no
 export async function sendReply(env,member,db,data,user,{now=Date.now(),fetcher=fetch}={}){
  const tid=member.tenant_id;if(!UUID.test(data.leadId||''))return fail('invalid customer');
  const content=text(data.text,2000);if(!content)return fail('Enter a reply');
+ if(data.requestId!==undefined&&!UUID.test(data.requestId))return fail('invalid reply request ID');
+ const sourceKey='reply:'+(data.requestId||crypto.randomUUID());
+ const existing=await db.prepare('SELECT id,lead_id,status,payload_json FROM whatsapp_messages WHERE tenant_id=? AND source_key=?').bind(tid,sourceKey).first();
+ if(existing){
+  if(existing.lead_id!==data.leadId||parse(existing.payload_json).text!==content)return fail('This request ID was already used for a different reply',409);
+  return json({saved:true,id:existing.id,status:existing.status,alreadySubmitted:true,notice:'This reply was already saved. Current status: '+existing.status+'.'});
+ }
  const e=await leadEligibility(db,tid,data.leadId,{ignoreThread:true});
- if(!e.lead||e.lead.opted_out||e.lead.consent_status==='denied'||e.lead.dnd_status==='blocked')return fail('Customer is unavailable or opted out',409);
+ if(!e.lead||e.lead.opted_out||e.lead.pending_whatsapp_inbound||e.lead.consent_status==='denied'||e.lead.dnd_status==='blocked')return fail('Customer is unavailable or opted out',409);
  if(!e.lead.last_inbound_at||now-Date.parse(e.lead.last_inbound_at)>24*3600000)return fail('The customer service window is closed. Use an approved template.',409);
  const connection=await env.CONTROL_DB.prepare('SELECT * FROM whatsapp_connections WHERE tenant_id=?').bind(tid).first();
  if(connection?.status!=='connected'||!connection.webhook_verified_at)return fail('WhatsApp is not ready',409);
  const credentials=await decryptCredentials(env,tid,connection.credentials_ciphertext);
- const current=await env.CONTROL_DB.prepare('SELECT status,revision FROM whatsapp_connections WHERE tenant_id=?').bind(tid).first();
- if(current?.status!=='connected'||current.revision!==connection.revision)return fail('WhatsApp connection changed. Refresh before replying.',409);
- const id=crypto.randomUUID(),date=iso(now),sourceKey='reply:'+(UUID.test(data.requestId||'')?data.requestId:crypto.randomUUID());
+ const current=await env.CONTROL_DB.prepare('SELECT c.status,c.revision,'+PENDING_INBOUND_SQL+' AS pending_inbound FROM whatsapp_connections c WHERE tenant_id=?').bind(tid).first();
+ if(current?.status!=='connected'||current.revision!==connection.revision||current.pending_inbound)return fail(current?.pending_inbound?'Incoming customer messages are being processed. Refresh before replying.':'WhatsApp connection changed. Refresh before replying.',409);
+ const id=crypto.randomUUID(),date=iso(now);
  // Claim the paid send in the same SQLite statement as the final contact/window/limit check.
  // A STOP arriving during connection lookup or decryption must prevent this INSERT.
  const claimed=await db.prepare(`INSERT INTO whatsapp_messages(tenant_id,id,source_key,lead_id,kind,due_at,status,reason,source_at,payload_json,created_at,updated_at,submitted_at)
  SELECT ?,?,?,?,'reply',?,'unknown','Send outcome not yet confirmed',?,?,?,?,?
- WHERE EXISTS(SELECT 1 FROM leads l JOIN whatsapp_threads t ON t.tenant_id=l.tenant_id AND t.lead_id=l.id LEFT JOIN whatsapp_permissions p ON p.tenant_id=l.tenant_id AND p.lead_id=l.id WHERE l.tenant_id=? AND l.id=? AND l.mobile_e164=? AND l.updated_at=? AND l.consent_status!='denied' AND l.dnd_status!='blocked' AND COALESCE(p.status,'unknown')!='revoked' AND t.last_inbound_at>? AND t.last_inbound_at<=? AND NOT EXISTS(SELECT 1 FROM lead_opt_out_events o WHERE o.tenant_id=l.tenant_id AND o.lead_id=l.id))
+ WHERE EXISTS(SELECT 1 FROM leads l JOIN whatsapp_threads t ON t.tenant_id=l.tenant_id AND t.lead_id=l.id LEFT JOIN whatsapp_permissions p ON p.tenant_id=l.tenant_id AND p.lead_id=l.id WHERE l.tenant_id=? AND l.id=? AND l.mobile_e164=? AND l.updated_at=? AND l.consent_status!='denied' AND l.dnd_status!='blocked' AND COALESCE(p.status,'unknown')!='revoked' AND t.last_inbound_at>? AND t.last_inbound_at<=? AND NOT EXISTS(SELECT 1 FROM lead_opt_out_events o WHERE o.tenant_id=l.tenant_id AND o.lead_id=l.id) AND NOT EXISTS(SELECT 1 FROM whatsapp_event_receipts r,json_each(r.payload_json) e WHERE r.tenant_id=l.tenant_id AND r.event_key LIKE 'batch:%' AND r.processed_at IS NULL AND CAST(e.key AS INTEGER)>=r.cursor AND json_extract(e.value,'$.kind')='message' AND json_extract(e.value,'$.value.from') IN(l.mobile_e164,replace(l.mobile_e164,'+',''))))
  AND (SELECT COUNT(*) FROM whatsapp_messages m WHERE m.tenant_id=? AND m.submitted_at>=? AND m.status IN('unknown','submitted','delivered','read','replied'))<COALESCE((SELECT daily_limit FROM whatsapp_rules WHERE tenant_id=?),100)
  ON CONFLICT(tenant_id,source_key) DO NOTHING RETURNING id`).bind(tid,id,sourceKey,data.leadId,date,date,JSON.stringify({text:content}),date,date,date,tid,data.leadId,e.lead.mobile_e164,e.lead.updated_at,iso(now-24*3600000),iso(now+60000),tid,indiaDayStart(now),tid).first();
- if(!claimed)return fail('Customer contact status, reply window or daily limit changed. Refresh before replying.',409);
+ if(!claimed){
+  const raced=await db.prepare('SELECT id,lead_id,status,payload_json FROM whatsapp_messages WHERE tenant_id=? AND source_key=?').bind(tid,sourceKey).first();
+  if(raced&&raced.lead_id===data.leadId&&parse(raced.payload_json).text===content)return json({saved:true,id:raced.id,status:raced.status,alreadySubmitted:true,notice:'This reply was already saved. Current status: '+raced.status+'.'});
+  return fail('Customer contact status, reply window or daily limit changed. Refresh before replying.',409);
+ }
  try{
   const result=await graphRequest('/'+connection.phone_number_id+'/messages',credentials.accessToken,{fetcher,method:'POST',body:{messaging_product:'whatsapp',recipient_type:'individual',to:e.lead.mobile_e164.replace(/^\+/,''),type:'text',text:{preview_url:false,body:content}}});
   const providerId=result.messages?.[0]?.id;if(typeof providerId!=='string'||providerId.length>250)throw Error('No provider acknowledgement');
@@ -174,7 +189,7 @@ export async function runWhatsAppCron(env,{now=Date.now(),fetcher=fetch,maxTenan
  if(!Number.isSafeInteger(now)||now<0)throw Error('invalid WhatsApp cron timestamp');
  // Keep this independent cron within a free-tier D1 invocation budget.
  maxTenants=1;maxSends=1;
- const rows=await env.CONTROL_DB.prepare("SELECT c.*,t.id AS tenant_id,t.display_name,t.storage_mode,t.dedicated_binding,t.status AS tenant_status FROM whatsapp_connections c JOIN tenants t ON t.id=c.tenant_id WHERE c.status='connected' AND c.webhook_verified_at IS NOT NULL AND t.status IN('trial','active') ORDER BY COALESCE(c.last_polled_at,''),c.tenant_id LIMIT ?").bind(maxTenants).all();
+ const rows=await env.CONTROL_DB.prepare("SELECT c.*,t.id AS tenant_id,t.display_name,t.storage_mode,t.dedicated_binding,t.status AS tenant_status FROM whatsapp_connections c JOIN tenants t ON t.id=c.tenant_id WHERE c.status='connected' AND c.webhook_verified_at IS NOT NULL AND t.status IN('trial','active') AND NOT("+PENDING_INBOUND_SQL+") ORDER BY COALESCE(c.last_polled_at,''),c.tenant_id LIMIT ?").bind(maxTenants).all();
  let sent=0,queued=0,checked=0;
  for(const connection of rows.results||[]){
   const tid=connection.tenant_id;

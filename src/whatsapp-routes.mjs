@@ -1,6 +1,6 @@
 import {mutationOriginAllowed} from './human-auth.mjs';
 import {getCampaignProperties,getProperty,matchCampaignProperties} from './property-catalog.mjs';
-import {UUID,iso,text,validId,validLanguage,validTemplateName,json,fail,boundedText,memberFor,encryptCredentials,decryptCredentials,graphRequest,fetchTemplates,templatesFor,selectedTemplate,publicRules,publicConnection,leadEligibility,leadPreferences,audit,resolveCrmDb,sha256hex,randomToken} from './whatsapp-core.mjs';
+import {UUID,iso,text,validId,validLanguage,validTemplateName,json,fail,boundedText,memberFor,encryptCredentials,decryptCredentials,graphRequest,fetchTemplates,templatesFor,selectedTemplate,publicRules,publicConnection,leadEligibility,leadPreferences,audit,resolveCrmDb,sha256hex,randomToken,PENDING_INBOUND_SQL} from './whatsapp-core.mjs';
 import {enqueueMessage,sendReply} from './whatsapp-dispatch.mjs';
 export {WHATSAPP_CRON} from './whatsapp-core.mjs';
 export {handleWhatsAppWebhook} from './whatsapp-webhook.mjs';
@@ -20,7 +20,7 @@ function validRuleInput(r){
 async function overview(req,env,user,member,db,tid,{now}){
  const q=text(new URL(req.url).searchParams.get('q'),80);
  const [connection,rules,messages,inbox,permissions,leads,campaigns,visits,threads]=await Promise.all([
-  env.CONTROL_DB.prepare('SELECT * FROM whatsapp_connections WHERE tenant_id=?').bind(tid).first(),
+  env.CONTROL_DB.prepare('SELECT c.*,'+PENDING_INBOUND_SQL+' AS pending_inbound FROM whatsapp_connections c WHERE tenant_id=?').bind(tid).first(),
   db.prepare('SELECT * FROM whatsapp_rules WHERE tenant_id=?').bind(tid).first(),
   db.prepare(`SELECT m.id,m.lead_id AS leadId,l.name AS leadName,m.kind,m.status,m.due_at AS dueAt,m.reason,m.property_id AS propertyId,m.campaign_id AS campaignId,m.provider_message_id AS providerMessageId,m.created_at AS createdAt,m.delivered_at AS deliveredAt,m.read_at AS readAt FROM whatsapp_messages m JOIN leads l ON l.tenant_id=m.tenant_id AND l.id=m.lead_id WHERE m.tenant_id=? ORDER BY m.created_at DESC,m.id DESC LIMIT 50`).bind(tid).all(),
   db.prepare('SELECT i.id,i.lead_id AS leadId,l.name AS leadName,i.text,i.message_type AS messageType,i.received_at AS receivedAt FROM whatsapp_inbound_messages i JOIN leads l ON l.tenant_id=i.tenant_id AND l.id=i.lead_id WHERE i.tenant_id=? ORDER BY i.received_at DESC,i.id DESC LIMIT 50').bind(tid).all(),
@@ -86,7 +86,15 @@ async function permission(db,tid,data,user,{now}){
 }
 async function schedule(env,db,tid,data,user,{now}){
  if(!UUID.test(data.leadId||'')||!UUID.test(data.campaignId||'')||!UUID.test(data.propertyId||'')||!['property_details','followup','visit_reminder'].includes(data.kind))return fail('Select a customer, campaign and its property');
- const due=Date.parse(data.dueAt);if(!Number.isFinite(due)||due<now-60000||due>now+30*86400000)return fail('Schedule within the next 30 days');
+ if(data.requestId!==undefined&&!UUID.test(data.requestId))return fail('invalid scheduling request ID');
+ const due=Date.parse(data.dueAt);if(!Number.isFinite(due))return fail('invalid schedule time');
+ const sourceKey='manual:'+(data.requestId||crypto.randomUUID());
+ const existing=await db.prepare('SELECT id,lead_id,campaign_id,property_id,visit_id,kind,due_at,status FROM whatsapp_messages WHERE tenant_id=? AND source_key=?').bind(tid,sourceKey).first();
+ if(existing){
+  if(existing.lead_id!==data.leadId||existing.campaign_id!==data.campaignId||existing.property_id!==data.propertyId||existing.kind!==data.kind||existing.due_at!==iso(due)||(existing.visit_id||null)!==(data.visitId||null))return fail('This request ID was already used for a different schedule',409);
+  return json({saved:true,id:existing.id,status:existing.status,alreadyScheduled:true,notice:'This schedule was already saved. Its current status is shown.'});
+ }
+ if(due<now-60000||due>now+30*86400000)return fail('Schedule within the next 30 days');
  const eligibility=await leadEligibility(db,tid,data.leadId,{ignoreThread:data.kind==='visit_reminder'});if(eligibility.reason)return fail(eligibility.reason,409);
  if(['not_interested','converted'].includes(eligibility.lead.interest_status))return fail('This customer is not eligible for prospect follow-ups',409);
  const selected=await getCampaignProperties(db,tid,data.campaignId,{availableOnly:true});
@@ -103,7 +111,12 @@ async function schedule(env,db,tid,data,user,{now}){
  const templateName=data.kind==='visit_reminder'?rules.visitTemplateName:data.kind==='followup'?(rules.followupTemplateName||rules.templateName):rules.templateName;
  const templateLanguage=data.kind==='visit_reminder'?rules.visitTemplateLanguage:data.kind==='followup'&&rules.followupTemplateName?rules.followupTemplateLanguage:rules.templateLanguage;
  const ready=connection?.status==='connected'&&connection.webhook_verified_at&&selectedTemplate(connection,templateName,templateLanguage,{visit:!!visit});
- const id=await enqueueMessage(db,{tenantId:tid,leadId:data.leadId,campaignId:data.campaignId,propertyId:property.id,visitId:visit?.id,kind:data.kind,dueAt:iso(due),sourceAt:iso(now),sourceKey:'manual:'+crypto.randomUUID(),templateName,templateLanguage,status:ready?'scheduled':'pending_setup',reason:ready?'':'Complete WhatsApp connection and template setup',payload:visit?{visitAt:visit.scheduled_at}:{},now});
+ const id=await enqueueMessage(db,{tenantId:tid,leadId:data.leadId,campaignId:data.campaignId,propertyId:property.id,visitId:visit?.id,kind:data.kind,dueAt:iso(due),sourceAt:iso(now),sourceKey,templateName,templateLanguage,status:ready?'scheduled':'pending_setup',reason:ready?'':'Complete WhatsApp connection and template setup',payload:visit?{visitAt:visit.scheduled_at}:{},now});
+ if(!id){
+  const raced=await db.prepare('SELECT id,lead_id,campaign_id,property_id,visit_id,kind,due_at,status FROM whatsapp_messages WHERE tenant_id=? AND source_key=?').bind(tid,sourceKey).first();
+  if(!raced||raced.lead_id!==data.leadId||raced.campaign_id!==data.campaignId||raced.property_id!==data.propertyId||raced.kind!==data.kind||raced.due_at!==iso(due)||(raced.visit_id||null)!==(data.visitId||null))return fail('This request ID was already used for a different schedule',409);
+  return json({saved:true,id:raced.id,status:raced.status,alreadyScheduled:true,notice:'This schedule was already saved.'});
+ }
  await audit(db,tid,user.id,'whatsapp.message_scheduled',id,now).run();return json({saved:true,id,status:ready?'scheduled':'pending_setup',notice:ready?'Message scheduled. Delivery is checked at send time.':'Schedule saved; waiting for WhatsApp setup. No message was sent.'},201);
 }
 export async function handleWhatsAppRequest(req,env,user,{now=Date.now(),fetcher=fetch}={}){

@@ -4,7 +4,7 @@ import {DatabaseSync} from 'node:sqlite';
 import {readFileSync,readdirSync} from 'node:fs';
 import {encryptCredentials,decryptCredentials,verifySignature,normalizeTemplate,publicRules,iso,hex,graphRequest,leadPreferences} from '../src/whatsapp-core.mjs';
 import {handleWhatsAppRequest,handleWhatsAppWebhook,runWhatsAppCron} from '../src/whatsapp-routes.mjs';
-import {enqueueMessage,dispatchMessage,reconcileAcceptedCalls,reconcileVisits} from '../src/whatsapp-dispatch.mjs';
+import {enqueueMessage,dispatchMessage,reconcileAcceptedCalls,reconcileVisits,sendReply} from '../src/whatsapp-dispatch.mjs';
 import {statusTransition,applyPendingStatusEvents} from '../src/whatsapp-webhook.mjs';
 
 const T='11111111-1111-4111-8111-111111111111',OTHER='22222222-2222-4222-8222-222222222222',L='33333333-3333-4333-8333-333333333333',C='44444444-4444-4444-8444-444444444444',P='55555555-5555-4555-8555-555555555555',V='66666666-6666-4666-8666-666666666666';
@@ -51,7 +51,10 @@ async function ready(f,{enabled=true}={}){
 const request=(data,method='POST')=>new Request('https://aicalling.ar3dstudio.in/v1/human/whatsapp'+(method==='GET'?'?tenantId='+data.tenantId:''),{method,headers:{origin:'https://aicalling.ar3dstudio.in','content-type':'application/json'},body:method==='POST'?JSON.stringify(data):undefined});
 async function job(f,opts={}){const id=await enqueueMessage(f.db,{tenantId:T,leadId:L,campaignId:C,propertyId:P,kind:'property_details',dueAt:AT,sourceAt:AT,sourceKey:'manual:'+crypto.randomUUID(),templateName:'property_details',templateLanguage:'hi',now:NOW,...opts});return f.db.sqlite.prepare('SELECT * FROM whatsapp_messages WHERE tenant_id=? AND id=?').get(T,id);}
 async function signedWebhook(f,value,{secret='a'.repeat(32),now=NOW}={}){
- const raw=JSON.stringify({object:'whatsapp_business_account',entry:[{id:'123456789',changes:[{field:'messages',value:{metadata:{phone_number_id:'987654321'},...value}}]}]});
+ return signedEnvelope(f,{object:'whatsapp_business_account',entry:[{id:'123456789',changes:[{field:'messages',value:{metadata:{phone_number_id:'987654321'},...value}}]}]},{secret,now});
+}
+async function signedEnvelope(f,payload,{secret='a'.repeat(32),now=NOW}={}){
+ const raw=JSON.stringify(payload);
  const key=await crypto.subtle.importKey('raw',new TextEncoder().encode(secret),{name:'HMAC',hash:'SHA-256'},false,['sign']);
  const signature='sha256='+hex(await crypto.subtle.sign('HMAC',key,new TextEncoder().encode(raw)));
  return handleWhatsAppWebhook(new Request('https://aicalling.ar3dstudio.in/v1/provider/whatsapp',{method:'POST',headers:{'content-type':'application/json','x-hub-signature-256':signature},body:raw}),f.env,{now});
@@ -137,7 +140,7 @@ test('signed replies pause generic follow-up; duplicate webhook is idempotent; S
 test('statuses received before send acknowledgement are durable and do not regress read to sent',async()=>{
  const f=fixture();await ready(f);const m=await job(f);
  await signedWebhook(f,{statuses:[{id:'wamid.early',status:'read',timestamp:String(NOW/1000),recipient_id:'919876543210'}]});
- assert.equal(f.db.sqlite.prepare('SELECT processed_at FROM whatsapp_event_receipts').get().processed_at,null);
+ assert.equal(f.db.sqlite.prepare("SELECT processed_at FROM whatsapp_event_receipts WHERE event_key LIKE 'status:%'").get().processed_at,null);
  f.db.sqlite.prepare("UPDATE whatsapp_messages SET status='submitted',provider_message_id='wamid.early' WHERE id=?").run(m.id);
  await applyPendingStatusEvents(f.db,T,{now:NOW});assert.equal(f.db.sqlite.prepare('SELECT status FROM whatsapp_messages').get().status,'read');
  await signedWebhook(f,{statuses:[{id:'wamid.early',status:'sent',timestamp:String((NOW+1000)/1000),recipient_id:'919876543210'}]});
@@ -189,7 +192,7 @@ test('manual reply is submitted inside the window, with a durable idempotency ke
  const data={tenantId:T,action:'reply',leadId:L,text:'Our salesperson will help you.',requestId:crypto.randomUUID()};let calls=0;
  const opts={now:NOW,fetcher:async()=>{calls++;return Response.json({messages:[{id:'wamid.human-reply'}]});}};
  assert.equal((await handleWhatsAppRequest(request(data),f.env,user,opts)).status,200);
- assert.equal((await handleWhatsAppRequest(request(data),f.env,user,opts)).status,409);assert.equal(calls,1);
+ assert.equal((await handleWhatsAppRequest(request(data),f.env,user,opts)).status,200);assert.equal(calls,1);
 });
 test('visit time changes during template verification prevent stale reminder delivery',async()=>{
  const f=fixture(),connection=await ready(f),visitAt=iso(NOW+3600000);
@@ -216,4 +219,121 @@ test('Meta-paused templates are checked before submission, not trusted from cach
   posts++;return Response.json({messages:[{id:'never'}]});
  }});
  assert.equal(result.sent,false);assert.equal(posts,0);assert.equal(f.db.sqlite.prepare('SELECT status FROM whatsapp_messages').get().status,'pending_setup');
+});
+test('manual schedule uses a stable request ID and reconciles retry without creating a second row',async()=>{
+ const f=fixture();await ready(f);
+ const data={tenantId:T,action:'schedule',requestId:crypto.randomUUID(),leadId:L,campaignId:C,propertyId:P,kind:'property_details',dueAt:AT};
+ const one=await handleWhatsAppRequest(request(data),f.env,user,{now:NOW});const first=await one.json();assert.equal(one.status,201);
+ const two=await handleWhatsAppRequest(request(data),f.env,user,{now:NOW+120000});const second=await two.json();assert.equal(two.status,200);assert.equal(second.id,first.id);
+ assert.equal(f.db.sqlite.prepare('SELECT COUNT(*) AS n FROM whatsapp_messages').get().n,1);
+ assert.equal((await handleWhatsAppRequest(request({...data,kind:'followup'}),f.env,user,{now:NOW})).status,409);
+});
+test('large signed STOP batches resume from durable cursor below 50 queries on every retry',async t=>{
+ const f=fixture();await ready(f);
+ const messages=Array.from({length:12},(_,i)=>{
+  const mobile=i?'+91'+String(9000000000+i):'+919876543210';
+  if(i)f.db.sqlite.prepare("INSERT INTO leads(tenant_id,id,name,mobile_e164,source_type,created_at,updated_at) VALUES(?,?,'Batch customer',?,'website',?,?)").run(T,crypto.randomUUID(),mobile,AT,AT);
+  return {id:'batched-stop-'+i,from:mobile.slice(1),timestamp:String(NOW/1000),type:'text',text:{body:'STOP'}};
+ });
+ let status=503,tries=0,maxQueries=0;
+ while(status!==200&&tries++<10){f.db.reset();f.control.reset();const r=await signedWebhook(f,{messages});status=r.status;const count=f.db.queries+f.control.queries;maxQueries=Math.max(maxQueries,count);assert.ok(count<=50,'batch query count '+count);}
+ assert.equal(status,200);assert.equal(tries,4);assert.equal(f.db.sqlite.prepare('SELECT COUNT(*) AS n FROM whatsapp_inbound_messages').get().n,12);
+ assert.equal(f.db.sqlite.prepare("SELECT COUNT(*) AS n FROM leads WHERE consent_status='denied'").get().n,12);
+ const batch=f.db.sqlite.prepare("SELECT cursor,processed_at,payload_json FROM whatsapp_event_receipts WHERE event_key LIKE 'batch:%'").get();assert.equal(batch.cursor,12);assert.ok(batch.processed_at);assert.equal(batch.payload_json,'{}');
+ assert.ok(maxQueries<=50);
+ t.diagnostic('Maximum D1 queries per signed STOP batch attempt: '+maxQueries);
+});
+test('50 status events also make durable progress without repeating all earlier SQL writes',async()=>{
+ const f=fixture();await ready(f);
+ const statuses=Array.from({length:50},(_,i)=>({id:'wamid.batch.'+i,status:'delivered',timestamp:String(NOW/1000),recipient_id:'919876543210'}));
+ let status=503,tries=0;
+ while(status!==200&&tries++<20){f.db.reset();f.control.reset();status=(await signedWebhook(f,{statuses})).status;assert.ok(f.db.queries+f.control.queries<=50);}
+ assert.equal(status,200);assert.equal(f.db.sqlite.prepare("SELECT COUNT(*) AS n FROM whatsapp_event_receipts WHERE event_key LIKE 'status:%'").get().n,50);
+});
+test('pending signed customer messages block dispatch until their durable batch tail is processed',async()=>{
+ const f=fixture(),connection=await ready(f),m=await job(f);
+ const pending=[{kind:'message',value:{id:'pending-stop',from:'919876543210',timestamp:String(NOW/1000),type:'text',text:{body:'STOP'}}}];
+ f.db.sqlite.prepare('INSERT INTO whatsapp_event_receipts(tenant_id,event_key,received_at,payload_json) VALUES(?,?,?,?)').run(T,'batch:verified-test',AT,JSON.stringify(pending));
+ let network=0;const r=await dispatchMessage(f.env,f.member,f.db,connection,publicRules(f.db.sqlite.prepare('SELECT * FROM whatsapp_rules').get()),m,{now:NOW,fetcher:async()=>{network++;}});
+ assert.equal(r.sent,false);assert.equal(network,0);
+});
+test('worst-case cron with accepted call, visit, brochure and status replay stays below 50 queries',async t=>{
+ const f=fixture();await ready(f);
+ f.db.sqlite.prepare("UPDATE whatsapp_rules SET second_enabled=1,visit_reminder_enabled=1,visit_template_name='property_details'").run();
+ f.db.sqlite.prepare("INSERT INTO property_assets(tenant_id,id,property_id,kind,file_name,content_type,size_bytes,object_key,created_by,created_at) VALUES(?,?,?,'brochure','brochure.pdf','application/pdf',100,'property/test/brochure.pdf','client-a',?)").run(T,'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',P,AT);
+ for(let i=0;i<2;i++){
+  const old=await job(f,{dueAt:iso(NOW-3600000),sourceKey:'manual:old-'+i});
+  f.db.sqlite.prepare("UPDATE whatsapp_messages SET status='submitted',provider_message_id=? WHERE id=?").run('wamid.old.'+i,old.id);
+  f.db.sqlite.prepare('INSERT INTO whatsapp_event_receipts(tenant_id,event_key,received_at,payload_json) VALUES(?,?,?,?)').run(T,'status:old-'+i,AT,JSON.stringify({id:'wamid.old.'+i,status:'delivered',at:AT,recipient:'919876543210'}));
+ }
+ const visitAt=iso(NOW+3600000);
+ f.db.sqlite.prepare("INSERT INTO site_visits(tenant_id,id,lead_id,scheduled_at,status,created_at) VALUES(?,?,?,?,'confirmed',?)").run(T,V,L,visitAt,AT);
+ await job(f,{kind:'visit_reminder',visitId:V,status:'cancelled',payload:{visitAt:iso(NOW+1800000)},dueAt:iso(NOW+1800000)});
+ const run='77777777-7777-4777-8777-777777777777',jobId='88888888-8888-4888-8888-888888888888';
+ f.db.sqlite.prepare("INSERT INTO calling_runs(tenant_id,id,campaign_id,state,created_by,created_at,updated_at) VALUES(?,?,?,'completed','client-a',?,?)").run(T,run,C,AT,AT);
+ f.db.sqlite.prepare("INSERT INTO calling_jobs(tenant_id,id,run_id,lead_id,state,created_at,updated_at) VALUES(?,?,?,?,'completed',?,?)").run(T,jobId,run,L,AT,AT);
+ f.db.sqlite.prepare("INSERT INTO scripted_call_results(tenant_id,job_id,session_id,answers_json,saved_to_lead,captured_at) VALUES(?,?,'session',?,1,?)").run(T,jobId,JSON.stringify({propertyType:'plot',location:'Raipur',budgetInr:3000000}),AT);
+ await job(f,{dueAt:iso(NOW-1000)});
+ f.db.reset();f.control.reset();let posts=0;
+ const result=await runWhatsAppCron(f.env,{now:NOW,fetcher:async(url,init)=>{
+  if(init.method==='GET')return Response.json({data:[{id:'123',name:'property_details',status:'APPROVED',language:'hi',category:'MARKETING',components:[{type:'HEADER',format:'DOCUMENT'},{type:'BODY',text:template().body}]}]});
+  posts++;return Response.json({messages:[{id:'wamid.worst-case'}]});
+ }});
+ const queries=f.db.queries+f.control.queries;
+ assert.equal(posts,1);assert.equal(result.whatsapp.submitted,1);assert.ok(queries<=50,'queries='+queries);
+ t.diagnostic('Worst-case WhatsApp cron D1 queries, including post-ack replay: '+queries);
+});
+test('stale accepted calls and missing permission become visible review tasks, never scheduled sends',async()=>{
+ for(const mode of ['staff_edit','newer_call','missing_permission']){
+  const f=fixture();await ready(f);
+  const run='77777777-7777-4777-8777-777777777777',jobId='88888888-8888-4888-8888-888888888888';
+  f.db.sqlite.prepare("INSERT INTO calling_runs(tenant_id,id,campaign_id,state,created_by,created_at,updated_at) VALUES(?,?,?,'completed','client-a',?,?)").run(T,run,C,AT,AT);
+  f.db.sqlite.prepare("INSERT INTO calling_jobs(tenant_id,id,run_id,lead_id,state,created_at,updated_at) VALUES(?,?,?,?,'completed',?,?)").run(T,jobId,run,L,AT,AT);
+  f.db.sqlite.prepare("INSERT INTO scripted_call_results(tenant_id,job_id,session_id,answers_json,saved_to_lead,captured_at) VALUES(?,?,'original-session',?,1,?)").run(T,jobId,JSON.stringify({propertyType:'plot',location:'Raipur',budgetInr:3000000}),AT);
+  if(mode==='staff_edit')f.db.sqlite.prepare('UPDATE leads SET updated_at=?,plot_size_preference=?').run(iso(NOW+1000),'5000 sqft');
+  if(mode==='newer_call')f.db.sqlite.prepare('UPDATE leads SET requirements_json=?').run(JSON.stringify({scriptedCallPilot:{id:'newer-session',answers:{propertyType:'flat'}}}));
+  if(mode==='missing_permission')f.db.sqlite.prepare('DELETE FROM whatsapp_permissions').run();
+  const rules=publicRules(f.db.sqlite.prepare('SELECT * FROM whatsapp_rules').get());
+  assert.equal(await reconcileAcceptedCalls(f.env,f.member,f.db,rules,{now:NOW+2000}),0);
+  const message=f.db.sqlite.prepare('SELECT status,reason FROM whatsapp_messages').get();assert.equal(message.status,'review_required');
+  assert.match(message.reason,mode==='missing_permission'?/permission record/:/record changed/);
+  assert.equal(await reconcileAcceptedCalls(f.env,f.member,f.db,rules,{now:NOW+3000}),0);
+  assert.equal(f.db.sqlite.prepare('SELECT COUNT(*) AS n FROM whatsapp_messages').get().n,1);
+ }
+});
+test('global webhook cursor reaches all 13 connected groups and blocks unspooled pending senders',async t=>{
+ const f=fixture();await ready(f);const changes=[],clients=[];
+ for(let i=0;i<13;i++){
+  const tenantId=i?crypto.randomUUID():T,leadId=i?crypto.randomUUID():L,phoneId=String(987654321+i),mobile=i?'+91'+String(9000000000+i):'+919876543210';
+  if(i){
+   f.control.sqlite.prepare("INSERT INTO tenants(id,slug,display_name,plan_code,storage_mode,status,created_at,updated_at) VALUES(?,?,?,'starter','shared','active',?,?)").run(tenantId,'webhook-client-'+i,'Client '+i,AT,AT);
+   const credentials=await encryptCredentials(f.env,tenantId,{accessToken:'test-token-'.repeat(8),appSecret:'a'.repeat(32)});
+   f.control.sqlite.prepare("INSERT INTO whatsapp_connections(tenant_id,messaging_account_id,phone_number_id,display_phone,status,credentials_ciphertext,verify_token_hash,webhook_verified_at,connected_at,updated_at) VALUES(?,'123456789',?,?,'connected',?,?,?,?,?)").run(tenantId,phoneId,mobile,credentials,'verify-'+i,AT,AT,AT);
+   f.db.sqlite.prepare("INSERT INTO leads(tenant_id,id,name,mobile_e164,source_type,created_at,updated_at) VALUES(?,?,'Customer',?,'website',?,?)").run(tenantId,leadId,mobile,AT,AT);
+  }
+  clients.push({tenantId,leadId,phoneId,mobile});
+  changes.push({field:'messages',value:{metadata:{phone_number_id:phoneId},messages:[{id:'multi-client-stop-'+i,from:mobile.slice(1),timestamp:String(NOW/1000),type:'text',text:{body:'STOP'}}]}});
+ }
+ const payload={object:'whatsapp_business_account',entry:[{id:'123456789',changes}]};
+ f.db.reset();f.control.reset();let response=await signedEnvelope(f,payload),tries=1,maxQueries=f.db.queries+f.control.queries;assert.equal(response.status,503);assert.ok(maxQueries<=50);
+ const last=clients.at(-1);
+ assert.equal(f.db.sqlite.prepare('SELECT COUNT(*) AS n FROM whatsapp_event_receipts WHERE tenant_id=?').get(last.tenantId).n,0,'group13 has not reached its CRM spool yet');
+ f.db.sqlite.prepare('INSERT INTO whatsapp_threads(tenant_id,lead_id,paused,last_inbound_at,updated_at) VALUES(?,?,1,?,?)').run(last.tenantId,last.leadId,AT,AT);
+ let sends=0;
+ const reply=await sendReply(f.env,{tenant_id:last.tenantId,storage_mode:'shared',display_name:'Client13'},f.db,{leadId:last.leadId,text:'Please see these details'},user,{now:NOW,fetcher:async()=>{sends++;return Response.json({messages:[{id:'never'}]});}});
+ assert.equal(reply.status,409);assert.equal(sends,0);
+ while(response.status!==200&&tries++<20){f.db.reset();f.control.reset();response=await signedEnvelope(f,payload);const count=f.db.queries+f.control.queries;maxQueries=Math.max(maxQueries,count);assert.ok(count<=50,'queries='+count);}
+ assert.equal(response.status,200);assert.equal(f.db.sqlite.prepare("SELECT COUNT(*) AS n FROM leads WHERE consent_status='denied'").get().n,13);
+ const global=f.control.sqlite.prepare('SELECT next_group,group_count,processed_at,pending_phone_ids_json FROM whatsapp_webhook_batches').get();assert.equal(global.next_group,13);assert.equal(global.group_count,13);assert.ok(global.processed_at);assert.ok(!global.pending_phone_ids_json.includes(last.mobile));
+ f.db.reset();f.control.reset();assert.equal((await signedEnvelope(f,payload)).status,200);assert.equal(f.db.queries+f.control.queries,1);
+ t.diagnostic('13 connected groups completed in '+tries+' attempts; maximum queries='+maxQueries);
+});
+test('36 unknown phone groups cannot starve the known STOP at the end of a valid batch',async()=>{
+ const f=fixture();await ready(f);
+ const unknown=Array.from({length:36},(_,i)=>({field:'messages',value:{metadata:{phone_number_id:String(800000000+i)},messages:[{id:'unknown-'+i,from:'919111111111',timestamp:String(NOW/1000),type:'text',text:{body:'STOP'}}]}}));
+ const known={field:'messages',value:{metadata:{phone_number_id:'987654321'},messages:[{id:'known-after-unknowns',from:'919876543210',timestamp:String(NOW/1000),type:'text',text:{body:'STOP'}}]}};
+ const payload={object:'whatsapp_business_account',entry:[{id:'123456789',changes:unknown.slice(0,20)},{id:'123456789',changes:[...unknown.slice(20),known]}]};
+ f.db.reset();f.control.reset();const response=await signedEnvelope(f,payload);assert.equal(response.status,200);assert.ok(f.db.queries+f.control.queries<=50);
+ assert.equal(f.db.sqlite.prepare('SELECT consent_status FROM leads WHERE tenant_id=? AND id=?').get(T,L).consent_status,'denied');
+ assert.equal(f.control.sqlite.prepare('SELECT next_group FROM whatsapp_webhook_batches').get().next_group,37);
 });

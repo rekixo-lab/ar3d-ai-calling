@@ -90,5 +90,6 @@ CREATE TABLE IF NOT EXISTS whatsapp_event_receipts (
  received_at TEXT NOT NULL,
  payload_json TEXT NOT NULL DEFAULT '{}' CHECK(json_valid(payload_json)),
  processed_at TEXT,
+ cursor INTEGER NOT NULL DEFAULT 0 CHECK(cursor>=0),
  PRIMARY KEY(tenant_id,event_key)
 );
