@@ -3,7 +3,8 @@ import {handleUnavailableInboundVoice} from './plivo-inbound-unavailable.mjs';
 import {handleHumanRequest} from './human-routes.mjs';
 import {handleCallingCron} from './calling-schedule.mjs';
 import {handlePublicPropertyMedia} from './property-catalog.mjs';
-import {handleWhatsAppWebhook,runWhatsAppCron,WHATSAPP_CRON} from './whatsapp-routes.mjs';
+import {handleWhatsAppWebhook} from './whatsapp-routes.mjs';
+import {enqueueWhatsAppTick,handleWhatsAppQueue} from './whatsapp-queue.mjs';
 import {
   checkSlug,checkName,checkStorageMode,normalizeIndianPhone,
   resolveCrmDb,newApiKey,sha256hex,parseJsonBody,SOURCES
@@ -225,11 +226,18 @@ export default {
       return fail('internal server error',500);
     }
   },
-  async scheduled(controller,env){
-    // A separate invocation keeps messaging work outside the voice dispatch
-    // query budget. Unconnected accounts never make outbound API requests.
-    if(controller?.cron===WHATSAPP_CRON)
-      return runWhatsAppCron(env,{now:controller.scheduledTime??Date.now(),maxTenants:1,maxSends:1});
-    return handleCallingCron(controller,env);
+  async scheduled(controller,env,ctx){
+    // Reuse the existing minute trigger without spending another cron slot.
+    // Enqueueing has no SQL work; the queue consumer gets its own invocation.
+    const tick=enqueueWhatsAppTick(controller,env);
+    if(typeof ctx?.waitUntil==='function'){
+      ctx.waitUntil(tick);
+      return handleCallingCron(controller,env);
+    }
+    const [calling]=await Promise.all([handleCallingCron(controller,env),tick]);
+    return calling;
+  },
+  async queue(batch,env){
+    return handleWhatsAppQueue(batch,env);
   }
 };

@@ -9,6 +9,9 @@ test('only the complete reviewed property/WhatsApp groups can upgrade the existi
  const control=REQUIRED_TABLES.CONTROL_DB.filter(x=>!CONTROL_WHATSAPP_TABLES.includes(x));
  const crm=REQUIRED_TABLES.CRM_DB.filter(x=>![...PROPERTY_TABLES,...WHATSAPP_TABLES].includes(x));
  assert.equal(checkTables(control,'CONTROL_DB','preflight'),'control_whatsapp_upgrade');
+ const queueUpgrade=[...control,'whatsapp_connections','whatsapp_webhook_batches'];
+ assert.equal(checkTables(queueUpgrade,'CONTROL_DB','preflight'),'control_whatsapp_queue_upgrade');
+ assert.equal(verifiedSchemaState({CONTROL_DB:'control_whatsapp_queue_upgrade',CRM_DB:'ready'}),'whatsapp_queue_upgrade');
  assert.equal(checkTables(crm,'CRM_DB','preflight'),'crm_property_whatsapp_upgrade');
  assert.equal(verifiedSchemaState({CONTROL_DB:'control_whatsapp_upgrade',CRM_DB:'crm_property_whatsapp_upgrade'}),'property_whatsapp_upgrade');
  for(const c of ['ready','control_whatsapp_upgrade']){
@@ -29,7 +32,7 @@ test('only the complete reviewed property/WhatsApp groups can upgrade the existi
 
 test('fresh migrations satisfy every new deployment column guard and can be reapplied without seeding sends',()=>{
  for(const [kind,binding,files,tableNames] of [
-  ['control','CONTROL_DB',['0032_whatsapp_connections.sql'],CONTROL_WHATSAPP_TABLES],
+  ['control','CONTROL_DB',['0032_whatsapp_connections.sql','0033_whatsapp_dispatch_ticks.sql'],CONTROL_WHATSAPP_TABLES],
   ['crm','CRM_DB',['0023_property_catalog.sql','0024_whatsapp_followups.sql'],[...PROPERTY_TABLES,...WHATSAPP_TABLES]],
  ]){
   const db=new DatabaseSync(':memory:');
@@ -48,15 +51,26 @@ test('fresh migrations satisfy every new deployment column guard and can be reap
  }
 });
 
-test('two bounded schedules are required; a duplicate or unrecognized event cannot replace either',()=>{
+test('one existing schedule and the bounded WhatsApp queue are required; unrelated resources are refused',()=>{
  const template=JSON.parse(readFileSync('wrangler.example.jsonc','utf8'));
  const creds=getCredentials({CLOUDFLARE_API_TOKEN:'synthetic-token-for-tests-only',CLOUDFLARE_ACCOUNT_ID:'a'.repeat(32),
   CONTROL_DB_ID:'11111111-1111-4111-8111-111111111111',CRM_DB_ID:'22222222-2222-4222-8222-222222222222'});
- assert.deepEqual(makeMainConfig(template,creds).triggers.crons,['* * * * *','*/2 * * * *']);
- for(const crons of [['* * * * *'],['*/2 * * * *'],['* * * * *','* * * * *'],['* * * * *','*/3 * * * *']])
+ assert.deepEqual(makeMainConfig(template,creds).triggers.crons,['* * * * *']);
+ assert.equal(makeMainConfig(template,creds).queues.consumers[0].queue,'ar3d-calling-whatsapp');
+ for(const crons of [[],['*/2 * * * *'],['* * * * *','* * * * *'],['* * * * *','*/2 * * * *']])
   assert.throws(()=>makeMainConfig({...template,triggers:{crons}},creds),/Unsafe/);
+ for(const change of [
+  t=>{delete t.queues;},
+  t=>{t.queues.producers[0].queue='another-app';},
+  t=>{t.queues.consumers[0].queue='another-app';},
+  t=>{t.queues.consumers[0].max_batch_size=100;},
+  t=>{t.queues.consumers[0].max_concurrency=10;},
+  t=>{t.queues.consumers.push({...t.queues.consumers[0]});},
+ ]){const t=structuredClone(template);change(t);assert.throws(()=>makeMainConfig(t,creds),/Unsafe/);}
  const workflow=readFileSync('.github/workflows/deploy-production.yml','utf8');
  for(const file of ['0032_whatsapp_connections.sql','0023_property_catalog.sql','0024_whatsapp_followups.sql'])
   assert.equal(workflow.split(file).length-1,2,'fresh initialization and reviewed upgrade both need '+file);
  assert.match(workflow,/property_whatsapp_upgrade[\s\S]*0032_whatsapp_connections\.sql[\s\S]*0023_property_catalog\.sql[\s\S]*0024_whatsapp_followups\.sql/);
+ assert.equal(workflow.split('0033_whatsapp_dispatch_ticks.sql').length-1,3,'tick storage supports new, existing and full feature upgrades');
+ assert.match(workflow,/ensure-whatsapp-queue\.mjs[\s\S]*Deploy only the new AR3D AI Calling Worker/);
 });

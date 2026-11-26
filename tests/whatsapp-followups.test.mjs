@@ -6,6 +6,7 @@ import {encryptCredentials,decryptCredentials,verifySignature,normalizeTemplate,
 import {handleWhatsAppRequest,handleWhatsAppWebhook,runWhatsAppCron} from '../src/whatsapp-routes.mjs';
 import {enqueueMessage,dispatchMessage,reconcileAcceptedCalls,reconcileVisits,sendReply} from '../src/whatsapp-dispatch.mjs';
 import {statusTransition,applyPendingStatusEvents} from '../src/whatsapp-webhook.mjs';
+import {handleWhatsAppQueue,WHATSAPP_TICK_QUEUE} from '../src/whatsapp-queue.mjs';
 
 const T='11111111-1111-4111-8111-111111111111',OTHER='22222222-2222-4222-8222-222222222222',L='33333333-3333-4333-8333-333333333333',C='44444444-4444-4444-8444-444444444444',P='55555555-5555-4555-8555-555555555555',V='66666666-6666-4666-8666-666666666666';
 const NOW=Date.parse('2026-11-26T12:00:00.000Z'),AT=iso(NOW),user={id:'client-a',globalRole:'user'};
@@ -257,7 +258,7 @@ test('pending signed customer messages block dispatch until their durable batch 
  let network=0;const r=await dispatchMessage(f.env,f.member,f.db,connection,publicRules(f.db.sqlite.prepare('SELECT * FROM whatsapp_rules').get()),m,{now:NOW,fetcher:async()=>{network++;}});
  assert.equal(r.sent,false);assert.equal(network,0);
 });
-test('worst-case cron with accepted call, visit, brochure and status replay stays below 50 queries',async t=>{
+test('worst-case queue dispatch with accepted call, visit, brochure and status replay stays below 50 queries',async t=>{
  const f=fixture();await ready(f);
  f.db.sqlite.prepare("UPDATE whatsapp_rules SET second_enabled=1,visit_reminder_enabled=1,visit_template_name='property_details'").run();
  f.db.sqlite.prepare("INSERT INTO property_assets(tenant_id,id,property_id,kind,file_name,content_type,size_bytes,object_key,created_by,created_at) VALUES(?,?,?,'brochure','brochure.pdf','application/pdf',100,'property/test/brochure.pdf','client-a',?)").run(T,'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',P,AT);
@@ -275,13 +276,15 @@ test('worst-case cron with accepted call, visit, brochure and status replay stay
  f.db.sqlite.prepare("INSERT INTO scripted_call_results(tenant_id,job_id,session_id,answers_json,saved_to_lead,captured_at) VALUES(?,?,'session',?,1,?)").run(T,jobId,JSON.stringify({propertyType:'plot',location:'Raipur',budgetInr:3000000}),AT);
  await job(f,{dueAt:iso(NOW-1000)});
  f.db.reset();f.control.reset();let posts=0;
- const result=await runWhatsAppCron(f.env,{now:NOW,fetcher:async(url,init)=>{
+ let acknowledged=0;
+ const queueBatch={queue:WHATSAPP_TICK_QUEUE,messages:[{body:{version:1,type:'ar3d.whatsapp.tick',slotStartMs:NOW},ack(){acknowledged++;},retry(){throw Error('unexpected retry');}}]};
+ const result=await handleWhatsAppQueue(queueBatch,f.env,{now:NOW,fetcher:async(url,init)=>{
   if(init.method==='GET')return Response.json({data:[{id:'123',name:'property_details',status:'APPROVED',language:'hi',category:'MARKETING',components:[{type:'HEADER',format:'DOCUMENT'},{type:'BODY',text:template().body}]}]});
   posts++;return Response.json({messages:[{id:'wamid.worst-case'}]});
  }});
  const queries=f.db.queries+f.control.queries;
- assert.equal(posts,1);assert.equal(result.whatsapp.submitted,1);assert.ok(queries<=50,'queries='+queries);
- t.diagnostic('Worst-case WhatsApp cron D1 queries, including post-ack replay: '+queries);
+ assert.equal(posts,1);assert.equal(result.whatsappQueue.processed,1);assert.equal(acknowledged,1);assert.ok(queries<=50,'queries='+queries);
+ t.diagnostic('Worst-case WhatsApp queue D1 queries, including tick dedupe and post-ack replay: '+queries);
 });
 test('stale accepted calls and missing permission become visible review tasks, never scheduled sends',async()=>{
  for(const mode of ['staff_edit','newer_call','missing_permission']){

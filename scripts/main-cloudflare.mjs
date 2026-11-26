@@ -17,9 +17,10 @@ export const PROPERTY_TABLES=Object.freeze([
 export const WHATSAPP_TABLES=Object.freeze([
   'whatsapp_rules','whatsapp_permissions','whatsapp_threads','whatsapp_messages','whatsapp_inbound_messages','whatsapp_event_receipts',
 ]);
-export const CONTROL_WHATSAPP_TABLES=Object.freeze(['whatsapp_connections','whatsapp_webhook_batches']);
-const messagingUpgradeStates=['control_whatsapp_upgrade','crm_property_upgrade','crm_whatsapp_upgrade','crm_property_whatsapp_upgrade'];
+export const CONTROL_WHATSAPP_TABLES=Object.freeze(['whatsapp_connections','whatsapp_webhook_batches','whatsapp_dispatch_ticks']);
+const messagingUpgradeStates=['control_whatsapp_upgrade','control_whatsapp_queue_upgrade','crm_property_upgrade','crm_whatsapp_upgrade','crm_property_whatsapp_upgrade'];
 const messagingMissingTables=state=>state==='control_whatsapp_upgrade'?CONTROL_WHATSAPP_TABLES:
+  state==='control_whatsapp_queue_upgrade'?['whatsapp_dispatch_ticks']:
   state==='crm_property_upgrade'?PROPERTY_TABLES:state==='crm_whatsapp_upgrade'?WHATSAPP_TABLES:
   state==='crm_property_whatsapp_upgrade'?[...PROPERTY_TABLES,...WHATSAPP_TABLES]:[];
 export const REQUIRED_TABLES = Object.freeze({
@@ -39,6 +40,7 @@ export const REQUIRED_COLUMNS = Object.freeze({
   CONTROL_DB: Object.freeze({
     whatsapp_connections: Object.freeze(['tenant_id','messaging_account_id','phone_number_id','display_phone','verified_name','status','credentials_ciphertext','verify_token_hash','templates_json','webhook_verified_at','connected_at','updated_at','last_polled_at','revision']),
     whatsapp_webhook_batches: Object.freeze(['batch_hash','signature_hash','next_group','group_count','pending_phone_ids_json','received_at','updated_at','processed_at']),
+    whatsapp_dispatch_ticks: Object.freeze(['slot_start_ms','claimed_at','finished_at','outcome']),
     tenants: Object.freeze(['id','plan_code','storage_mode','suspended_from_status']),
     human_users: Object.freeze(['id','global_role','password_hash']),
     human_sessions: Object.freeze(['token_hash','expires_at']),
@@ -135,17 +137,22 @@ export function makeMainConfig(template, credentials) {
   const onlyApprovedCaller = template?.vars &&
     Object.keys(template.vars).length === 1 &&
     template.vars.AR3D_PLIVO_CALLER_NUMBER === '+918065491333';
-  // Voice/auth and WhatsApp each have their own bounded invocation so their
-  // D1 query budgets do not compete. No unrelated schedules are accepted.
-  // Reject arbitrary schedules or queue/event consumers targeting other services.
+  // Reuse the existing minute schedule. WhatsApp runs through one dedicated
+  // queue consumer, keeping its D1 budget separate without another cron slot.
   const onlyCallingCrons = template?.triggers &&
     Object.keys(template.triggers).length === 1 &&
     Array.isArray(template.triggers.crons) &&
-    template.triggers.crons.length === 2 &&
-    template.triggers.crons[0] === '* * * * *' &&
-    template.triggers.crons[1] === '*/2 * * * *';
+    template.triggers.crons.length === 1 &&
+    template.triggers.crons[0] === '* * * * *';
+  const exactRow=(row,expected)=>row&&Object.keys(row).length===Object.keys(expected).length&&
+    Object.entries(expected).every(([key,value])=>row[key]===value);
+  const onlyWhatsAppQueue=template?.queues&&Object.keys(template.queues).length===2&&
+    Array.isArray(template.queues.producers)&&template.queues.producers.length===1&&
+    exactRow(template.queues.producers[0],{binding:'WHATSAPP_TICKS',queue:'ar3d-calling-whatsapp'})&&
+    Array.isArray(template.queues.consumers)&&template.queues.consumers.length===1&&
+    exactRow(template.queues.consumers[0],{queue:'ar3d-calling-whatsapp',max_batch_size:1,max_batch_timeout:1,max_retries:2,max_concurrency:1,retry_delay:60});
   if (template?.name !== 'ar3d-ai-calling' || template.main !== './src/index.mjs' ||
-      template.route || !onlyCallingDomain || !onlyCallingCrons || !onlyApprovedCaller || template.services ||
+      template.route || !onlyCallingDomain || !onlyCallingCrons || !onlyWhatsAppQueue || !onlyApprovedCaller || template.services ||
       !Array.isArray(template.d1_databases) || template.d1_databases.length !== 2 ||
       !Array.isArray(template.r2_buckets) || template.r2_buckets.length !== 1) {
     throw Error('Unsafe Worker template: wrong project, routes, resources or entry point.');
@@ -297,6 +304,7 @@ export function checkTables(tables, binding, mode) {
   if(mode==='preflight'){
     const exact=names=>missing.length===names.length&&names.every(name=>missing.includes(name));
     if(binding==='CONTROL_DB'&&exact(CONTROL_WHATSAPP_TABLES))return 'control_whatsapp_upgrade';
+    if(binding==='CONTROL_DB'&&exact(['whatsapp_dispatch_ticks']))return 'control_whatsapp_queue_upgrade';
     if(binding==='CRM_DB'){
       if(exact([...PROPERTY_TABLES,...WHATSAPP_TABLES]))return 'crm_property_whatsapp_upgrade';
       if(exact(PROPERTY_TABLES))return 'crm_property_upgrade';
@@ -472,7 +480,8 @@ export function verifiedSchemaState(modes) {
   // These are whole, explicitly reviewed additive groups on the complete
   // prior Calling schema. A completed group can be resumed after a failed
   // deployment; arbitrary partial tables or unrelated upgrades still fail.
-  if(['ready','control_whatsapp_upgrade'].includes(modes?.CONTROL_DB)&&
+  if(modes?.CONTROL_DB==='control_whatsapp_queue_upgrade'&&modes?.CRM_DB==='ready')return 'whatsapp_queue_upgrade';
+  if(['ready','control_whatsapp_upgrade','control_whatsapp_queue_upgrade'].includes(modes?.CONTROL_DB)&&
      ['ready','crm_property_upgrade','crm_whatsapp_upgrade','crm_property_whatsapp_upgrade'].includes(modes?.CRM_DB)&&
      (modes.CONTROL_DB!=='ready'||modes.CRM_DB!=='ready'))return 'property_whatsapp_upgrade';
   if(modes?.CONTROL_DB==='control_credit_upgrade'&&modes?.CRM_DB==='crm_staff_cdr_upgrade')return 'credit_staff_cdr_upgrade';

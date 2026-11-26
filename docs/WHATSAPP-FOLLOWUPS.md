@@ -115,13 +115,18 @@ or rescheduled appointment cannot use the old reminder. A customer reply stops
 the generic nurture sequence; expected confirmed-visit communication is handled
 separately from that sequence.
 
-The outbox is polled every two minutes in its own Worker invocation, separate
-from the existing voice scheduler. The initial batch is deliberately bounded
+The existing minute scheduler publishes a WhatsApp tick every two minutes to
+the dedicated `ar3d-calling-whatsapp` queue. Its consumer runs in its own Worker
+invocation, separate from voice dispatch. This uses the existing cron slot;
+voice dispatch still runs every minute. The initial batch is deliberately bounded
 to one tenant and one send per tick, with clients rotated fairly. This is a
 maximum of 30 submissions per hour across the deployment, not a bulk-volume
 service promise. The configured delay is the earliest due time; a backlog can
-delay delivery. Increase capacity only with a measured D1 query budget or a
-separate queue deployment. Daily limits are limits, not guaranteed throughput.
+delay delivery. Increase capacity only after measuring the consumer's D1 query
+budget and provider limits. Daily limits are limits, not guaranteed throughput.
+Each two-minute slot is durably claimed once. Duplicate deliveries and ticks
+older than two minutes do not dispatch again; the next fresh tick scans the
+durable outbox. A queue outage does not stop voice dispatch.
 
 Immediately before an API send, the application checks current tenant/number,
 permission, opt-outs, lead state, property availability/revision, template and
@@ -145,10 +150,17 @@ account. Deploying this feature seeds no credentials, permissions or messages.
 ## Deployment and verification
 
 The production workflow verifies existing Calling database identities, columns
-and voice safeguards before applying additive Control migration 0032 and CRM
-migrations 0023/0024. It accepts only the complete reviewed migration groups;
-unknown partial schemas still stop deployment. All three additions are
+and voice safeguards before applying additive Control migrations 0032/0033 and
+CRM migrations 0023/0024. It accepts only the complete reviewed migration groups;
+unknown partial schemas still stop deployment. All four additions are
 idempotent and do not alter existing leads, voice permissions or balances.
+
+Deployment creates or verifies only the dedicated WhatsApp tick queue and binds
+it as `WHATSAPP_TICKS`, with one message and one consumer invocation at a time.
+The existing Cloudflare deployment token needs Queues read/edit access. The
+queue helper refuses a paused queue or another application's producers or
+consumer; it does not change the account plan or another queue. No new secret
+or per-client backend variable is required.
 
 Automated verification uses synthetic data and stubbed provider responses. It
 does not send a paid message or call a real customer. A live Meta connection and

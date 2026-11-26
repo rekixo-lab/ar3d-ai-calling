@@ -74,8 +74,12 @@ jobs:
         if: github.event_name == 'push' && steps.schema.outputs.schema_state == 'property_whatsapp_upgrade'
         run: |
           npx --yes wrangler@4 d1 execute ar3d-calling-control --remote --yes --config wrangler.jsonc --file migrations/control/0032_whatsapp_connections.sql
+          npx --yes wrangler@4 d1 execute ar3d-calling-control --remote --yes --config wrangler.jsonc --file migrations/control/0033_whatsapp_dispatch_ticks.sql
           npx --yes wrangler@4 d1 execute ar3d-calling-shared-crm --remote --yes --config wrangler.jsonc --file migrations/crm/0023_property_catalog.sql
           npx --yes wrangler@4 d1 execute ar3d-calling-shared-crm --remote --yes --config wrangler.jsonc --file migrations/crm/0024_whatsapp_followups.sql
+      - name: Add WhatsApp queue tick deduplication
+        if: github.event_name == 'push' && steps.schema.outputs.schema_state == 'whatsapp_queue_upgrade'
+        run: npx --yes wrangler@4 d1 execute ar3d-calling-control --remote --yes --config wrangler.jsonc --file migrations/control/0033_whatsapp_dispatch_ticks.sql
       # Isolated Calling CRM v10: immutable blocked intent proposal records.
       # Never touches leads, dial triggers, provider credentials or other apps.
       - name: Upgrade isolated Calling CRM blocked intent proposals only
@@ -185,6 +189,7 @@ jobs:
           npx --yes wrangler@4 d1 execute ar3d-calling-control --remote --yes --config wrangler.jsonc --file migrations/control/0030_calling_funding_settings.sql
           npx --yes wrangler@4 d1 execute ar3d-calling-control --remote --yes --config wrangler.jsonc --file migrations/control/0031_manual_provider_balances.sql
           npx --yes wrangler@4 d1 execute ar3d-calling-control --remote --yes --config wrangler.jsonc --file migrations/control/0032_whatsapp_connections.sql
+          npx --yes wrangler@4 d1 execute ar3d-calling-control --remote --yes --config wrangler.jsonc --file migrations/control/0033_whatsapp_dispatch_ticks.sql
       - name: Initialize NEW AR3D Calling Shared CRM D1 database
         if: (github.event_name == 'push' && steps.schema.outputs.schema_state == 'fresh') || (github.event_name == 'workflow_dispatch' && inputs.operation == 'initialize')
         run: |
@@ -227,6 +232,9 @@ jobs:
         id: auth
         if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.operation == 'deploy')
         run: node scripts/guarded-worker-recovery.mjs
+      - name: Ensure isolated WhatsApp tick queue without changing the account plan
+        if: (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.operation == 'deploy')) && steps.auth.outputs.recovered != 'true'
+        run: node scripts/ensure-whatsapp-queue.mjs
       - name: Deploy only the new AR3D AI Calling Worker
         id: publish
         if: (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.operation == 'deploy')) && steps.auth.outputs.recovered != 'true'
