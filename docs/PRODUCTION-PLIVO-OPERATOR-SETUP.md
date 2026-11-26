@@ -97,7 +97,7 @@ The rented **080 local number is restricted to authorized service and transactio
 
 **Keep `AR3D_SCRIPTED_CAMPAIGNS_ENABLED` unset/disabled.** The app intentionally requires a completed signed internal call, provider approval and independently verified customer consent/suppression, appropriate campaign purpose and proper client audio pack before campaign dispatch. Never modify CRM safety triggers to bypass these rules.
 
-The 100/200/300/400/500 AR3D credits are **provisional budget labels**, not actual fundable Plivo minutes. Per-client charged balance, automatic deductions, approved WhatsApp sends and automatic no-answer calls are still separate work requiring carrier/provider/consent and correct currency/funding. Reminders currently prepare drafts only.
+The 100/200/300/400/500 AR3D credits are **provisional budget labels**, not actual fundable Plivo minutes. WhatsApp has a separate direct Meta connection, permission evidence and billing setup described in [WhatsApp follow-ups](WHATSAPP-FOLLOWUPS.md). Plivo/Sarvam balances do not fund WhatsApp messages. The existing visit reminder preview remains a copy-only draft; delivery is handled through the dedicated WhatsApp workspace after setup. Automatic no-answer calls remain separate work.
 
 ## Final acceptance
 

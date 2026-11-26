@@ -2,6 +2,8 @@ import {handleScriptedPhoneCallback} from './scripted-phone-pilot.mjs';
 import {handleUnavailableInboundVoice} from './plivo-inbound-unavailable.mjs';
 import {handleHumanRequest} from './human-routes.mjs';
 import {handleCallingCron} from './calling-schedule.mjs';
+import {handlePublicPropertyMedia} from './property-catalog.mjs';
+import {handleWhatsAppWebhook,runWhatsAppCron,WHATSAPP_CRON} from './whatsapp-routes.mjs';
 import {
   checkSlug,checkName,checkStorageMode,normalizeIndianPhone,
   resolveCrmDb,newApiKey,sha256hex,parseJsonBody,SOURCES
@@ -168,6 +170,10 @@ export default {
   async fetch(req,env){
     const path=new URL(req.url).pathname;
     if(path==='/health'&&isGet(req))return json({service:'AR3D AI Calling',status:'foundation'});
+    const propertyMedia=await handlePublicPropertyMedia(req,env);
+    if(propertyMedia)return propertyMedia;
+    const whatsAppWebhook=await handleWhatsAppWebhook(req,env);
+    if(whatsAppWebhook)return whatsAppWebhook;
     // A fixed Answer URL is mandatory for a Plivo Voice Application.
     // This intentionally does not accept or redirect inbound callers.
     const inboundUnavailable=handleUnavailableInboundVoice(req);
@@ -220,6 +226,10 @@ export default {
     }
   },
   async scheduled(controller,env){
+    // A separate invocation keeps messaging work outside the voice dispatch
+    // query budget. Unconnected accounts never make outbound API requests.
+    if(controller?.cron===WHATSAPP_CRON)
+      return runWhatsAppCron(env,{now:controller.scheduledTime??Date.now(),maxTenants:1,maxSends:1});
     return handleCallingCron(controller,env);
   }
 };

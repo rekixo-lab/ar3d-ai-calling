@@ -68,6 +68,14 @@ jobs:
           else
             echo "::error::Unsupported operation"; exit 1
           fi
+      # Additive property/WhatsApp tables only. No credentials, messaging
+      # permissions, enabled rules or customer messages are seeded.
+      - name: Add client properties and WhatsApp follow-up storage
+        if: github.event_name == 'push' && steps.schema.outputs.schema_state == 'property_whatsapp_upgrade'
+        run: |
+          npx --yes wrangler@4 d1 execute ar3d-calling-control --remote --yes --config wrangler.jsonc --file migrations/control/0032_whatsapp_connections.sql
+          npx --yes wrangler@4 d1 execute ar3d-calling-shared-crm --remote --yes --config wrangler.jsonc --file migrations/crm/0023_property_catalog.sql
+          npx --yes wrangler@4 d1 execute ar3d-calling-shared-crm --remote --yes --config wrangler.jsonc --file migrations/crm/0024_whatsapp_followups.sql
       # Isolated Calling CRM v10: immutable blocked intent proposal records.
       # Never touches leads, dial triggers, provider credentials or other apps.
       - name: Upgrade isolated Calling CRM blocked intent proposals only
@@ -176,6 +184,7 @@ jobs:
           npx --yes wrangler@4 d1 execute ar3d-calling-control --remote --yes --config wrangler.jsonc --file migrations/control/0028_calling_dispatch_settings.sql
           npx --yes wrangler@4 d1 execute ar3d-calling-control --remote --yes --config wrangler.jsonc --file migrations/control/0030_calling_funding_settings.sql
           npx --yes wrangler@4 d1 execute ar3d-calling-control --remote --yes --config wrangler.jsonc --file migrations/control/0031_manual_provider_balances.sql
+          npx --yes wrangler@4 d1 execute ar3d-calling-control --remote --yes --config wrangler.jsonc --file migrations/control/0032_whatsapp_connections.sql
       - name: Initialize NEW AR3D Calling Shared CRM D1 database
         if: (github.event_name == 'push' && steps.schema.outputs.schema_state == 'fresh') || (github.event_name == 'workflow_dispatch' && inputs.operation == 'initialize')
         run: |
@@ -193,6 +202,8 @@ jobs:
           npx --yes wrangler@4 d1 execute ar3d-calling-shared-crm --remote --yes --config wrangler.jsonc --file migrations/crm/0020_lead_staff_assignments.sql
           npx --yes wrangler@4 d1 execute ar3d-calling-shared-crm --remote --yes --config wrangler.jsonc --file migrations/crm/0021_verified_provider_call_costs.sql
           npx --yes wrangler@4 d1 execute ar3d-calling-shared-crm --remote --yes --config wrangler.jsonc --file migrations/crm/0022_parallel_company_calls.sql
+          npx --yes wrangler@4 d1 execute ar3d-calling-shared-crm --remote --yes --config wrangler.jsonc --file migrations/crm/0023_property_catalog.sql
+          npx --yes wrangler@4 d1 execute ar3d-calling-shared-crm --remote --yes --config wrangler.jsonc --file migrations/crm/0024_whatsapp_followups.sql
       - name: Install Super Admin team tables in verified Calling Control
         if: github.event_name == 'push' || inputs.operation == 'initialize' || inputs.operation == 'deploy'
         run: npx --yes wrangler@4 d1 execute ar3d-calling-control --remote --yes --config wrangler.jsonc --file migrations/control/0029_super_admin_team.sql

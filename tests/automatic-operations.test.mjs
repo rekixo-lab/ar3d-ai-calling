@@ -41,7 +41,7 @@ test('Cloudflare scheduled cleanup uses four auth tables and leaves CRM alone',a
 });
 test('Unknown schedules and DBs fail closed before touching customer data',async()=>{
   const f=dbFixture();
-  await assert.rejects(worker.scheduled({cron:'*/2 * * * *',scheduledTime:NOW},f.env),/unknown/);
+  await assert.rejects(worker.scheduled({cron:'*/3 * * * *',scheduledTime:NOW},f.env),/unknown/);
   await assert.rejects(pruneExpiredAuth(f.env,{cron:'every minute',now:NOW}),/unauthorized/);
   await assert.rejects(pruneExpiredAuth({}, {now:NOW}),/unauthorized/);
   await assert.rejects(pruneExpiredAuth(f.env,{now:-2}),/unauthorized/);
