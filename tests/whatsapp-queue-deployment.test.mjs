@@ -116,7 +116,7 @@ test('documented optional success and null empty collections retain exact list, 
   assert.deepEqual(failed.calls.map(c=>c.method),['GET']);
  }
  const wrong=scripted([Response.json({result:[queue()]}),Response.json({result:queue({queue_id:OTHER})})]);
- await assert.rejects(ensureWhatsAppQueue(credentials,wrong),/different or invalid/);
+ await assert.rejects(ensureWhatsAppQueue(credentials,wrong),/different (?:or invalid|queue identity)/);
 });
 test('a server-capped declared page size cannot hide a later matching queue',async()=>{
  const s=scripted([
