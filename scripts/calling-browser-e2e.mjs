@@ -50,6 +50,30 @@ try{
   await sidebar.locator('.sidebar-credit-value').getByText('100m 00s',{exact:true}).waitFor({timeout:25000});
   await page.locator('.minute-wallet').first().getByText('100m 00s',{exact:true}).first().waitFor();
  }
+ // Multi-industry draft UI: a real authenticated client/editor on the isolated
+ // SQLite test database. No provider, CRM mutation, customer communication or dial.
+ if(viewport.width===1440){
+  const beforeJobs=f.r.db.prepare('SELECT COUNT(*) AS n FROM calling_jobs').get().n;
+  const beforeCalls=f.r.db.prepare('SELECT COUNT(*) AS n FROM calls').get().n;
+  await page.getByRole('link',{name:'My AI Agents',exact:true}).click();
+  await page.locator('#agents').getByRole('heading',{name:'My AI Agents',exact:true}).waitFor();
+  await page.getByLabel('New AI template').selectOption('school_admission_v1');
+  await page.getByRole('button',{name:'Create AI draft',exact:true}).click();
+  await page.getByLabel('Agent name',{exact:true}).waitFor();
+  await page.getByLabel('Agent name',{exact:true}).fill('Fictional admissions assistant');
+  await page.getByLabel('AI Greeting',{exact:true}).fill('Welcome to our synthetic school. Are you interested in admission?');
+  await page.getByRole('button',{name:'Preview AI script (no call)'}).click();
+  await page.getByRole('heading',{name:'Text preview — no call'}).waitFor();
+  await page.getByText('Welcome to our synthetic school. Are you interested in admission?',{exact:true}).waitFor();
+  await page.getByRole('button',{name:'Save AI draft',exact:true}).click();
+  await page.getByText('Draft saved (revision 2). It is still not published or callable.',{exact:true}).waitFor();
+  const record=f.c.db.prepare('SELECT name,status,revision FROM ai_flow_definitions WHERE tenant_id=?').get(tid);
+  assert.equal(record?.name,'Fictional admissions assistant');
+  assert.equal(record?.status,'draft');assert.equal(record?.revision,2);
+  assert.equal(f.r.db.prepare('SELECT COUNT(*) AS n FROM calling_jobs').get().n,beforeJobs);
+  assert.equal(f.r.db.prepare('SELECT COUNT(*) AS n FROM calls').get().n,beforeCalls);
+  assert.equal(f.c.db.prepare('SELECT COUNT(*) AS n FROM voice_call_routes').get().n,0);
+ }
  // AI Testing uses an authenticated browser preview, never live phone or CRM.
  const aiLeadCount=f.r.db.prepare('SELECT COUNT(*) AS n FROM leads').get().n;
  const aiCallsBefore=f.r.db.prepare('SELECT COUNT(*) AS n FROM calls').get().n;

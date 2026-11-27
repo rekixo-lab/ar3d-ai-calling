@@ -68,6 +68,11 @@ jobs:
           else
             echo "::error::Unsupported operation"; exit 1
           fi
+      # Draft-only multi-industry tables in isolated Calling Control D1.
+      # No voice, CRM, provider, billing or customer data is changed.
+      - name: Install draft-only multi-industry AI Agent storage
+        if: github.event_name == 'push' && steps.schema.outputs.schema_state == 'control_industry_drafts_upgrade'
+        run: npx --yes wrangler@4 d1 execute ar3d-calling-control --remote --yes --config wrangler.jsonc --file migrations/control/0034_multi_industry_drafts.sql
       # Additive property/WhatsApp tables only. No credentials, messaging
       # permissions, enabled rules or customer messages are seeded.
       - name: Add client properties and WhatsApp follow-up storage
@@ -190,6 +195,7 @@ jobs:
           npx --yes wrangler@4 d1 execute ar3d-calling-control --remote --yes --config wrangler.jsonc --file migrations/control/0031_manual_provider_balances.sql
           npx --yes wrangler@4 d1 execute ar3d-calling-control --remote --yes --config wrangler.jsonc --file migrations/control/0032_whatsapp_connections.sql
           npx --yes wrangler@4 d1 execute ar3d-calling-control --remote --yes --config wrangler.jsonc --file migrations/control/0033_whatsapp_dispatch_ticks.sql
+          npx --yes wrangler@4 d1 execute ar3d-calling-control --remote --yes --config wrangler.jsonc --file migrations/control/0034_multi_industry_drafts.sql
       - name: Initialize NEW AR3D Calling Shared CRM D1 database
         if: (github.event_name == 'push' && steps.schema.outputs.schema_state == 'fresh') || (github.event_name == 'workflow_dispatch' && inputs.operation == 'initialize')
         run: |

@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import {readFileSync} from 'node:fs';
 import {
   REQUIRED_COLUMNS, REQUIRED_TABLES, REQUIRED_SAFETY_TRIGGERS, REQUIRED_MINUTE_LEDGER_TRIGGERS, REQUIRED_HOLD_TRIGGERS, REQUIRED_PROVIDER_JOURNAL_TRIGGERS, REQUIRED_PURCHASE_TRIGGERS, REQUIRED_PROVIDER_SAFETY_TRIGGERS, REQUIRED_PROVIDER_RESERVE_TRIGGERS, REQUIRED_PROVIDER_RECONCILE_TRIGGERS, REQUIRED_FUNDING_SETTINGS_TRIGGERS, REQUIRED_MANUAL_BALANCE_TRIGGERS, checkManualBalanceTriggers, checkFundingSettingsTriggers, checkProviderReconcileTriggers, checkProviderReserveTriggers, checkProviderSafetyTriggers, checkPurchaseTriggers, checkProviderJournalTriggers, checkHoldTriggers, checkMinuteLedgerTriggers, getCredentials, makeMainConfig, checkTables, checkColumns, checkSafetyTriggers, inspectCloudflare, verifiedSchemaState,
 } from '../scripts/main-cloudflare.mjs';
@@ -164,7 +165,7 @@ function cloudflareMock({ controlTables=[],crmTables=[],controlName='ar3d-callin
       else if(sql.includes('sqlite_master')) rows=tableNames.map(name=>({name}));
       else if(sql.includes('PRAGMA')) {
         const table=sql.match(/PRAGMA table_info\(([^)]+)\)/)?.[1];
-        if(['whatsapp_connections','whatsapp_webhook_batches','whatsapp_dispatch_ticks','properties','property_assets','campaign_property_settings','campaign_properties','property_media_shares','whatsapp_rules','whatsapp_permissions','whatsapp_threads','whatsapp_messages','whatsapp_inbound_messages','whatsapp_event_receipts'].includes(table))
+        if(['whatsapp_connections','whatsapp_webhook_batches','whatsapp_dispatch_ticks','tenant_industry_profiles','ai_flow_definitions','properties','property_assets','campaign_property_settings','campaign_properties','property_media_shares','whatsapp_rules','whatsapp_permissions','whatsapp_threads','whatsapp_messages','whatsapp_inbound_messages','whatsapp_event_receipts'].includes(table))
           rows=REQUIRED_COLUMNS[control?'CONTROL_DB':'CRM_DB'][table].map(name=>({name}));
         else if(sql.includes('provider_balance_snapshots')) rows=REQUIRED_COLUMNS.CONTROL_DB.provider_balance_snapshots.map(name=>({name}));
         else if(sql.includes('provider_balance_covered_calls')) rows=REQUIRED_COLUMNS.CONTROL_DB.provider_balance_covered_calls.map(name=>({name}));
@@ -505,4 +506,19 @@ test('manual balance migration accepts only the exact previous schema and verifi
  assert.match(flow,/schema_state == 'control_manual_balances_upgrade'\s+run: npx --yes wrangler@4 d1 execute ar3d-calling-control[^\n]*0031_manual_provider_balances\.sql/);
  assert.equal(flow.split(migration).length-1,2,'only exact upgrade and fresh initialization apply the migration');
  assert.match(flow,/Initialize NEW AR3D Calling Control D1 database[\s\S]*0031_manual_provider_balances\.sql[\s\S]*Initialize NEW AR3D Calling Shared CRM D1 database/);
+});
+
+
+test('multi-industry draft storage is an exact isolated Control D1-only upgrade',()=>{
+ const controlOld=REQUIRED_TABLES.CONTROL_DB.filter(x=>!['tenant_industry_profiles','ai_flow_definitions'].includes(x));
+ assert.equal(checkTables(controlOld,'CONTROL_DB','preflight'),'control_industry_drafts_upgrade');
+ assert.equal(verifiedSchemaState({CONTROL_DB:'control_industry_drafts_upgrade',CRM_DB:'ready'}),'control_industry_drafts_upgrade');
+ assert.throws(()=>checkTables(controlOld,'CONTROL_DB','ready'),/missing tables/);
+ assert.throws(()=>checkTables(controlOld.filter(x=>x!=='tenants'),'CONTROL_DB','preflight'),/partial schema/);
+ assert.throws(()=>verifiedSchemaState({CONTROL_DB:'control_industry_drafts_upgrade',CRM_DB:'crm_staff_upgrade'}));
+ assert.equal(checkTables(REQUIRED_TABLES.CONTROL_DB,'CONTROL_DB','ready'),'ready');
+ assert.equal(checkTables(REQUIRED_TABLES.CRM_DB,'CRM_DB','ready'),'ready');
+ const schema=readFileSync('migrations/control/0034_multi_industry_drafts.sql','utf8');
+ assert.match(schema,/status TEXT NOT NULL DEFAULT 'draft' CHECK\(status='draft'\)/);
+ assert.doesNotMatch(schema,/CREATE TABLE.*calling_jobs|UPDATE\s+leads|INSERT\s+INTO\s+calling/i);
 });
