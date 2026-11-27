@@ -87,7 +87,7 @@ async function responseJson(response){
  finally{reader.releaseLock()}
 }
 async function request(credentials,path,{fetcher,method='GET',body,stage}={}){
- if(!/^(list-page-(?:[1-9]|1[0-9]|2[01])|create|detail)$/.test(stage||''))stop('Cloudflare queue request stage is invalid.');
+ if(!/^(list-page-(?:[1-9]|1[0-9]|2[01])|create|detail|consumer-detail)$/.test(stage||''))stop('Cloudflare queue request stage is invalid.');
  let response;
  try{
   response=await fetcher(API+'/accounts/'+credentials.account+'/queues'+path,{
@@ -145,7 +145,33 @@ export async function findWhatsAppQueue(credentials,{fetcher=fetch}={}){
 }
 async function detail(credentials,queue,{fetcher}){
  const data=await request(credentials,'/'+queue.queue_id,{fetcher,stage:'detail'});
- return validateWhatsAppQueue(data.result,{expectedId:queue.queue_id});
+ const value=data.result;
+ // Cloudflare's queue summary can omit optional consumer identity fields.
+ // Only a verified consumer ID may be followed with the documented read-only
+ // consumer GET, and the full response must match our exact worker identity.
+ if(!record(value)||value.queue_id!==queue.queue_id||value.queue_name!==WHATSAPP_QUEUE_NAME)
+  stop('Cloudflare returned a different queue identity; deployment was stopped.');
+ const consumers=relationshipList(value,'consumers');
+ if(consumers.length>2)stop('WhatsApp queue has too many consumers to safely verify.');
+ const verified=[];
+ for(const consumer of consumers){
+  if(!record(consumer)||consumer.type!=='worker')
+   stop('WhatsApp queue has an unexpected consumer type.');
+  if(consumer.script_name===undefined){
+   if(!ID.test(consumer.consumer_id||''))stop('Cloudflare queue consumer identity was omitted; deployment was stopped.');
+   const response=await request(credentials,'/'+queue.queue_id+'/consumers/'+consumer.consumer_id,{fetcher,stage:'consumer-detail'});
+   const full=response.result;
+   if(!record(full)||full.consumer_id!==consumer.consumer_id||full.type!=='worker'||full.script_name!==CALLING_WORKER_NAME||
+     full.queue_name!==undefined&&full.queue_name!==WHATSAPP_QUEUE_NAME||
+     ![undefined,null,''].includes(full.dead_letter_queue))
+    stop('Cloudflare queue consumer detail did not confirm the dedicated Worker; deployment was stopped.');
+   if(consumer.queue_name!==undefined&&consumer.queue_name!==WHATSAPP_QUEUE_NAME||
+     ![undefined,null,''].includes(consumer.dead_letter_queue))
+    stop('Cloudflare queue summary contained a foreign relationship; deployment was stopped.');
+   verified.push({...consumer,...full});
+  }else verified.push(consumer);
+ }
+ return validateWhatsAppQueue({...value,consumers:verified},{expectedId:queue.queue_id});
 }
 /** The only write is POST /queues with this one fixed queue_name. */
 export async function ensureWhatsAppQueue(credentials,{fetcher=fetch}={}){

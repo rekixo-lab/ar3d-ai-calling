@@ -116,7 +116,7 @@ test('documented optional success and null empty collections retain exact list, 
   assert.deepEqual(failed.calls.map(c=>c.method),['GET']);
  }
  const wrong=scripted([Response.json({result:[queue()]}),Response.json({result:queue({queue_id:OTHER})})]);
- await assert.rejects(ensureWhatsAppQueue(credentials,wrong),/different or invalid/);
+ await assert.rejects(ensureWhatsAppQueue(credentials,wrong),/different (?:or invalid|queue identity)/);
 });
 test('a server-capped declared page size cannot hide a later matching queue',async()=>{
  const s=scripted([
@@ -162,4 +162,32 @@ test('queue rejection diagnostics reveal only safe field categories, never forei
  assert.throws(()=>validateWhatsAppQueue(q),e=>e.message.includes('[type=worker; worker=other; queue=other; dead_letter=configured]')&&!e.message.includes(foreign)&&!e.message.includes('private-queue')&&!e.message.includes('private-dlq'));
  const missing=queue({consumers:[{script_name:CALLING_WORKER_NAME}],consumers_total_count:1});
  assert.throws(()=>validateWhatsAppQueue(missing),e=>e.message.includes('type=missing')&&!e.message.includes(CALLING_WORKER_NAME));
+});
+
+test('queue summary consumer ID is resolved using read-only consumer detail before trusting ownership',async()=>{
+ const id='d'.repeat(32);
+ const partial=queue({consumers:[{consumer_id:id,type:'worker'}],consumers_total_count:1});
+ const full={consumer_id:id,type:'worker',script_name:CALLING_WORKER_NAME,queue_name:WHATSAPP_QUEUE_NAME,dead_letter_queue:null};
+ const steps=scripted([list([partial]),ok(partial),ok(full)]);
+ const result=await ensureWhatsAppQueue(credentials,steps);
+ assert.equal(result.consumerCount,1);assert.equal(result.created,false);
+ assert.deepEqual(steps.calls.map(x=>x.method),['GET','GET','GET']);
+ assert.ok(steps.calls[2].url.endsWith('/queues/'+Q+'/consumers/'+id));
+});
+test('foreign consumer detail, missing IDs and differing IDs never pass the queue guard',async()=>{
+ const id='d'.repeat(32),partial=queue({consumers:[{consumer_id:id,type:'worker'}],consumers_total_count:1});
+ for(const variant of [
+  {consumer_id:id,type:'worker',script_name:'foreign-worker'},
+  {consumer_id:'e'.repeat(32),type:'worker',script_name:CALLING_WORKER_NAME},
+  {consumer_id:id,type:'worker',script_name:CALLING_WORKER_NAME,dead_letter_queue:'secret-dead-letter'},
+  {consumer_id:id,type:'http_pull',script_name:CALLING_WORKER_NAME}
+ ]){
+  const x=scripted([list([partial]),ok(partial),ok(variant)]);
+  await assert.rejects(ensureWhatsAppQueue(credentials,x));
+  assert.ok(x.calls.every(c=>c.method==='GET'));
+ }
+ const missing=queue({consumers:[{type:'worker'}],consumers_total_count:1});
+ const x=scripted([list([missing]),ok(missing)]);
+ await assert.rejects(ensureWhatsAppQueue(credentials,x),/identity was omitted/);
+ assert.equal(x.calls.length,2);
 });
