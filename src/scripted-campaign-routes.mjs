@@ -1,4 +1,5 @@
 import {requireMembership,mutationOriginAllowed,currentSuperAdminMfa} from './human-auth.mjs';
+import {commercialCapacityRows} from './commercial-capacity.mjs';
 import {readDispatchPause,changeDispatchPause} from './calling-dispatch-pause.mjs';
 import {resolveCrmDb,parseJsonBody} from './core.mjs';
 import {scriptedCampaignConfiguration,dispatchSettings,providerThrottledUntil} from './scripted-campaign-dispatch.mjs';
@@ -117,7 +118,7 @@ export async function handleScriptedCallingRequest(req,env,user,{now=Date.now()}
    }else if(Object.keys(d).length)return fail('invalid_query');
    const settings=await dispatchSettings(env);
    let liveCalls=null,unknownCalls=null;
-   try{const counts=await env.CRM_DB.prepare("SELECT COUNT(CASE WHEN state IN('reserved','submitted') THEN 1 END) AS live,COUNT(CASE WHEN state='unknown' THEN 1 END) AS uncertain FROM calling_jobs WHERE state IN('reserved','submitted','unknown')").first();liveCalls=Number(counts?.live);unknownCalls=Number(counts?.uncertain)}catch{}
+   try{const counts=await env.CRM_DB.prepare("SELECT COUNT(CASE WHEN state IN('reserved','submitted') THEN 1 END) AS live,COUNT(CASE WHEN state='unknown' THEN 1 END) AS uncertain FROM ("+commercialCapacityRows+")").first();liveCalls=Number(counts?.live);unknownCalls=Number(counts?.uncertain)}catch{}
    const until=await providerThrottledUntil(env);
    return json({maxConcurrent:settings.maxConcurrent,maxPerCompany:settings.maxPerCompany,saved:settings.saved,updatedAt:settings.updatedAt,
     liveCalls,unknownCalls,occupiedSlots:liveCalls===null||unknownCalls===null?null:liveCalls+unknownCalls,sarvamPausedUntil:until>now?new Date(until).toISOString():null,queryBudget:settings.queryBudget});

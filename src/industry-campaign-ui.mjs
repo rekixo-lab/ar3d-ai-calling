@@ -70,8 +70,19 @@ function industryCampaignPanel(tenantId,content,{admin=false,editable=false}={})
      node('p',{class:'muted',text:out.manifestSha256?'Approved audio manifest recorded · '+out.manifestSha256.slice(0,12):'Approved audio pack is required before preparing jobs.'}),controls);
     for(const j of out.jobs){
      const x=r.recipients.find(x=>x.leadId===j.leadId);
-     const line=div('card',node('p',{text:(x?.name||'CRM contact '+j.leadId.slice(0,8))+' · '+j.state+(j.state==='prepared'&&!j.current?' · stale / not eligible':'')+' · review v'+j.reviewRevision}));
-     if((admin||editable)&&j.state==='prepared'){
+     const line=div('card',node('p',{text:(x?.name||'CRM contact '+j.leadId.slice(0,8))+' · '+j.state+(j.state==='prepared'&&!j.current?' · stale / not eligible':'')+' · review v'+j.reviewRevision+' · funding admission '+j.admissionState.replaceAll('_',' ')}));
+     if(admin&&j.state==='prepared'&&j.current&&j.admissionState==='not_released'){
+      const reference=input('industryAdmission-'+j.id,'text','Reviewed funding authorization reference');reference.maxLength=160;
+      const duration=node('select',{class:'field','aria-label':'Maximum call duration'},[90,120,150,180].map(n=>node('option',{value:String(n),text:String(n)+' seconds'})));duration.value='180';
+      const expiry=input('industryAdmissionExpiry-'+j.id,'datetime-local','Funding admission expires');
+      const authorize=btn('Authorize funding admission (no calls)',async()=>{
+       if(!active(id,stamp)||reference.value.trim().length<10||!expiry.value)return asError(Error('Enter reviewed funding reference and expiry.'));
+       if(!confirm('Authorize only a future bounded funding reservation for this exact reviewed job. This does not start a call or grant permission to dial.'))return;
+       authorize.disabled=true;try{await api('/v1/human/industry-admission/'+encodeURIComponent(j.id),'POST',{tenantId,jobId:j.id,manifestSha256:out.manifestSha256,maxSeconds:Number(duration.value),expiresAt:new Date(expiry.value).toISOString(),approvalReference:reference.value.trim(),acknowledgeFundingOnly:true});if(active(id,stamp))await loadRecipients()}catch(e){asError(e)}finally{authorize.disabled=false}
+      },true);
+      line.append(lab('Funding review reference',reference),lab('Maximum call duration',duration),lab('Admission expiry (within one hour)',expiry),authorize);
+     }
+     if((admin||editable)&&j.state==='prepared'&&!['claiming','funded','unknown'].includes(j.admissionState)){
       const why=input('industryCancel-'+j.id,'text','Reason for cancelling prepared job');why.maxLength=160;
       const cancel=btn('Cancel prepared job',async()=>{
        if(!active(id,stamp)||why.value.trim().length<4)return asError(Error('Enter a cancellation reason.'));

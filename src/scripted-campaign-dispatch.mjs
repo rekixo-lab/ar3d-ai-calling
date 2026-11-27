@@ -1,4 +1,5 @@
 import {resolveCrmDb} from './core.mjs';
+import {sharedCapacityCount,sharedTenantCapacityCount,sharedTenantUnknown} from './commercial-capacity.mjs';
 import {campaignDispatchInterlock,dispatchPausePredicate} from './calling-dispatch-pause.mjs';
 import {moneyBudgetConfig,providerBudgetPosition,reserveBudgetedMinutes} from './provider-cost-reservations.mjs';
 import {minutePosition,closeMinuteHold,fundingCap,fundingPosition,affordableCallSeconds,BILLING_PULSE_SECONDS} from './minute-holds.mjs';
@@ -215,6 +216,7 @@ export async function dialNextForTenant(env,db,tid,config,{apiFetch=fetch,now=Da
   WHERE j.tenant_id=? AND j.state='queued' AND j.flow_id=? AND r.state='running'
   AND v.expires_at>? AND v.reviewed_at>=?
   AND v.reviewed_at>COALESCE((SELECT MAX(h.reserved_at) FROM calling_jobs h WHERE h.tenant_id=j.tenant_id AND h.lead_id=j.lead_id),'')
+  AND NOT EXISTS(SELECT 1 FROM industry_funded_admissions a WHERE a.tenant_id=j.tenant_id AND a.lead_id=j.lead_id AND a.state IN('claiming','funded','unknown'))
   ORDER BY j.created_at,j.id LIMIT 1`).bind(tid,SCRIPTED_CALLING_POLICY,at,policy.updated_at).first();
  if(!job){
   await db.prepare(`UPDATE calling_runs SET state='completed',updated_at=? WHERE tenant_id=? AND state='running'
@@ -241,7 +243,7 @@ export async function dialNextForTenant(env,db,tid,config,{apiFetch=fetch,now=Da
  // Prepaid minutes and provider ceilings (below) are the only volume limits.
  let reserved;
  try{
-  reserved=await db.prepare("UPDATE calling_jobs SET state='reserved',reserved_at=?,updated_at=?,account_sid=?,caller_id=?,flow_id=?,destination=? WHERE tenant_id=? AND id=? AND state='queued' AND EXISTS(SELECT 1 FROM calling_runs r WHERE r.tenant_id=calling_jobs.tenant_id AND r.id=calling_jobs.run_id AND r.state='running') AND EXISTS(SELECT 1 FROM calling_policies p WHERE p.tenant_id=? AND p.enabled=1 AND p.expires_at>? AND p.updated_at=? AND p.flow_id=?) AND EXISTS(SELECT 1 FROM calling_clearances v JOIN leads l ON l.tenant_id=v.tenant_id AND l.id=v.lead_id WHERE v.tenant_id=? AND v.lead_id=? AND v.purpose=? AND v.expires_at>? AND v.reviewed_at>=? AND v.reviewed_at>COALESCE((SELECT MAX(h.reserved_at) FROM calling_jobs h WHERE h.tenant_id=v.tenant_id AND h.lead_id=v.lead_id),'') AND l.consent_status!='denied' AND l.dnd_status!='blocked' AND l.mobile_e164=? AND l.updated_at=? AND NOT EXISTS(SELECT 1 FROM lead_opt_out_events o WHERE o.tenant_id=l.tenant_id AND o.lead_id=l.id)) AND NOT EXISTS(SELECT 1 FROM calling_jobs x WHERE x.tenant_id=? AND x.state='unknown') AND (SELECT COUNT(*) FROM calling_jobs x WHERE x.tenant_id=? AND x.state IN('reserved','submitted'))<? AND (SELECT COUNT(*) FROM calling_jobs g WHERE g.state IN('reserved','submitted','unknown'))<?")
+  reserved=await db.prepare("UPDATE calling_jobs SET state='reserved',reserved_at=?,updated_at=?,account_sid=?,caller_id=?,flow_id=?,destination=? WHERE tenant_id=? AND id=? AND state='queued' AND EXISTS(SELECT 1 FROM calling_runs r WHERE r.tenant_id=calling_jobs.tenant_id AND r.id=calling_jobs.run_id AND r.state='running') AND EXISTS(SELECT 1 FROM calling_policies p WHERE p.tenant_id=? AND p.enabled=1 AND p.expires_at>? AND p.updated_at=? AND p.flow_id=?) AND EXISTS(SELECT 1 FROM calling_clearances v JOIN leads l ON l.tenant_id=v.tenant_id AND l.id=v.lead_id WHERE v.tenant_id=? AND v.lead_id=? AND v.purpose=? AND v.expires_at>? AND v.reviewed_at>=? AND v.reviewed_at>COALESCE((SELECT MAX(h.reserved_at) FROM calling_jobs h WHERE h.tenant_id=v.tenant_id AND h.lead_id=v.lead_id),'') AND l.consent_status!='denied' AND l.dnd_status!='blocked' AND l.mobile_e164=? AND l.updated_at=? AND NOT EXISTS(SELECT 1 FROM lead_opt_out_events o WHERE o.tenant_id=l.tenant_id AND o.lead_id=l.id)) AND NOT EXISTS(SELECT 1 FROM industry_funded_admissions a WHERE a.tenant_id=calling_jobs.tenant_id AND a.lead_id=calling_jobs.lead_id AND a.state IN('claiming','funded','unknown')) AND "+sharedTenantUnknown+" AND "+sharedTenantCapacityCount+"<? AND "+sharedCapacityCount+"<?")
   .bind(at,at,config.authId,config.caller,policy.flow_id,job.destination,tid,job.id,tid,at,policy.updated_at,SCRIPTED_CALLING_POLICY,tid,job.lead_id,job.purpose,at,policy.updated_at,job.destination,job.lead_updated_at,tid,tid,maxPerCompany,maxGlobalConcurrent).run();
  }catch{return {state:'quota_or_concurrent_change'}} // e.g. a legacy one-call-per-company index
  if(Number(reserved.meta?.changes)!==1)return {state:'quota_or_concurrent_change'};
@@ -318,10 +320,10 @@ export async function runScriptedCampaignCron(baseEnv,{now=Date.now(),apiFetch=f
  // Shared-CRM companies only; dedicated CRM databases are not provisioned.
  const active=new Set(((await env.CONTROL_DB.prepare("SELECT id FROM tenants WHERE status='active' AND storage_mode='shared'").all()).results||[]).map(r=>r.id));
  // Reconcile already-submitted shared CRM jobs even when their tenant is suspended.
- const inflight=((await db.prepare(`SELECT tenant_id,id,state,reserved_at,flow_id,lead_id,destination,run_id FROM calling_jobs
-  WHERE state IN('reserved','submitted','unknown') ORDER BY reserved_at LIMIT 5000`).all()).results||[]);
+ const inflight=((await db.prepare(`SELECT tenant_id,id,state,reserved_at,flow_id,lead_id,destination,run_id,'legacy' AS source FROM calling_jobs
+  WHERE state IN('reserved','submitted','unknown') UNION ALL SELECT tenant_id,job_id AS id,CASE state WHEN 'unknown' THEN 'unknown' ELSE 'reserved' END,claimed_at AS reserved_at,NULL,lead_id,NULL,NULL,'industry' AS source FROM industry_funded_admissions WHERE state IN('claiming','funded','unknown') ORDER BY reserved_at LIMIT 5000`).all()).results||[]);
  const byTenant=new Map();
- for(const j of inflight){if(!byTenant.has(j.tenant_id))byTenant.set(j.tenant_id,[]);byTenant.get(j.tenant_id).push(j)}
+ for(const j of inflight){if(j.source==='industry')continue;if(!byTenant.has(j.tenant_id))byTenant.set(j.tenant_id,[]);byTenant.get(j.tenant_id).push(j)}
  // 1. Close finished calls first so their lines are free for new customers.
  let reconciled=0;
  for(const tid of rotate([...byTenant.keys()],now)){
@@ -329,6 +331,7 @@ export async function runScriptedCampaignCron(baseEnv,{now=Date.now(),apiFetch=f
   try{reconciled+=await reconcileTenantJobs(env,db,tid,byTenant.get(tid),now,meter)}catch{console.error('AR3D campaign reconcile unavailable')}
  }
  const live=new Map(),uncertain=new Set();let globalLive=0,unknownSlots=0;
+ for(const j of inflight){if(j.source!=='industry')continue;if(j.state==='unknown'){uncertain.add(j.tenant_id);unknownSlots++}else{live.set(j.tenant_id,(live.get(j.tenant_id)||0)+1);globalLive++}}
  for(const [tid,jobs] of byTenant)for(const j of jobs){
   if(j.done)continue;
   if(j.state==='unknown'){uncertain.add(tid);unknownSlots++;continue}

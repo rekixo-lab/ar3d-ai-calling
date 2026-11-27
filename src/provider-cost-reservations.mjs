@@ -1,6 +1,7 @@
 // Explicit, operator-reviewed conservative money envelopes, not live cash
 // balances or verified tariffs. All values use integer millionths of currency.
 import {FUNDING_CONTEXT} from './funding-context.mjs';
+import {dispatchPausePredicate} from './calling-dispatch-pause.mjs';
 import {MANUAL_CALLING_COSTS} from './manual-calling-costs.mjs';
 const int=(n,min,max)=>Number.isSafeInteger(n)&&n>=min&&n<=max;
 function number(raw,min,max){return typeof raw==='string'&&/^\d{1,12}$/.test(raw)&&int(Number(raw),min,max)?Number(raw):null;}
@@ -106,7 +107,7 @@ export async function reserveBudgetedMinutes(db,{tenantId,job,maxSeconds,now=Dat
  AND ?>=?+COALESCE((SELECT SUM(CASE WHEN state='held' THEN reserved_seconds ELSE charged_seconds END) FROM tenant_minute_holds),0)
  AND NOT EXISTS(SELECT 1 FROM tenant_minute_holds h WHERE h.state='held' AND NOT EXISTS(SELECT 1 FROM provider_cost_reservations r WHERE r.tenant_id=h.tenant_id AND r.job_id=h.job_id))
  AND NOT EXISTS(SELECT 1 FROM provider_safety_events e WHERE kind='blocked' AND sequence=(SELECT MAX(sequence) FROM provider_safety_events WHERE provider=e.provider))
- AND ${costCondition} RETURNING tenant_id,job_id,reserved_seconds`)
+ AND ${dispatchPausePredicate} AND ${costCondition} RETURNING tenant_id,job_id,reserved_seconds`)
  .bind(...(manual?rows.values:[]),job,maxSeconds,p.currency,pm,s.currency,sm,new Date(now).toISOString(),tenantId,...guardValues,tenantId,job,maxSeconds,globalCap,maxSeconds,...(manual?[]:[p.currency,s.currency]),p.capMicros,pm,s.capMicros,sm).first();
  // D1 meta.changes includes the AFTER INSERT trigger's minute-hold row. Use
  // this statement's returned identity, so a successful two-row write is not
