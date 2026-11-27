@@ -880,7 +880,7 @@ test('legacy signed callbacks reject ambiguous parameters and mismatched unbound
   assert.equal((await cb('answer',{...details,RequestUUID:'different-request'})).status,403);
   await cb('hangup',{...details,ALegRequestUUID:'different-request',Duration:'5'});
   assert.equal(f.c.db.prepare('SELECT hangup_at FROM scripted_phone_pilots WHERE job_id IS NOT NULL').get().hangup_at,null);
-  assert.match(await (await cb('answer',details)).text(),/GetDigits/);
+  assert.match(await (await cb('answer',{...details,'SIP-H-To':'sip:fictional@example.invalid;tag=opaque','X-PH-Test':'Sample'})).text(),/GetDigits/);
   const expiry=f.c.db.prepare('SELECT expires_at FROM scripted_phone_pilots WHERE job_id IS NOT NULL').get().expires_at;
   assert.equal((await cb('hangup',{Duration:'20'},expiry+1)).status,204);
   assert.ok(f.c.db.prepare('SELECT hangup_at FROM scripted_phone_pilots WHERE job_id IS NOT NULL').get().hangup_at);

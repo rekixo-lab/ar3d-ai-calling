@@ -524,7 +524,7 @@ async function verifiedPlivoGet(req,config,url){
  const pairs=[...url.searchParams];
  if(!/^[\x21-\x7e]{1,128}$/.test(nonce)||signature.length>512||pairs.length>45||
     new Set(pairs.map(([name])=>name)).size!==pairs.length||
-    pairs.some(([name,value])=>!/^[A-Za-z][A-Za-z0-9_]{0,63}$/.test(name)||/[&\u0000-\u001f\u007f]/u.test(value)))return false;
+    pairs.some(([name,value])=>!/^[A-Za-z][A-Za-z0-9_.-]{0,127}$/.test(name)||/[&\u0000-\u001f\u007f]/u.test(value)))return false;
  pairs.sort(([a],[b])=>a<b?-1:a>b?1:0);
  const query=pairs.map(([name,value])=>name+'='+value).join('&');
  const payload=url.origin+url.pathname+(query?'?'+query:'')+'.'+nonce;
