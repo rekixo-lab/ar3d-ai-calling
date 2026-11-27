@@ -194,9 +194,24 @@ async function detail(credentials,queue,{fetcher}){
      stop('Cloudflare queue consumer listing cannot be reconciled with the queue identity; deployment was stopped.');
    }
    const item=listed.find(x=>x.consumer_id===consumer.consumer_id);
-   if(!safeConsumerFields(item,consumer.consumer_id)||item.script_name!==CALLING_WORKER_NAME)
+   if(!safeConsumerFields(item,consumer.consumer_id)||
+      item.script_name!==undefined&&item.script_name!==CALLING_WORKER_NAME)
     stop('Cloudflare consumer listing did not confirm the dedicated Worker; deployment was stopped.'+consumerShape(item,consumer.consumer_id));
-   ownerName=item.script_name;
+   if(item.script_name===undefined){
+    // Some Cloudflare accounts omit the *optional* script_name in all three
+    // read-only API views. Permit only a narrowly corroborated deployment:
+    // exactly one Worker consumer (same ID in summary/GET/LIST), a verified
+    // queue name from the consumer LIST, and exactly one producer explicitly
+    // named as our own Worker. A foreign name, a second consumer, any DLQ or
+    // unknown producer still stops the deployment.
+    const producers=relationshipList(value,'producers');
+    if(consumers.length!==1||item.queue_name!==WHATSAPP_QUEUE_NAME||
+       !safeConsumerFields(full,consumer.consumer_id)||
+       producers.length!==1||producers[0]?.type!=='worker'||
+       producers[0]?.script!==CALLING_WORKER_NAME)
+     stop('Cloudflare omitted the consumer Worker name and dedicated producer corroboration failed; deployment was stopped.');
+    ownerName=CALLING_WORKER_NAME;
+   }else ownerName=item.script_name;
   }
   verified.push({...consumer,...full,consumer_id:consumer.consumer_id,type:'worker',script_name:ownerName});
  }
