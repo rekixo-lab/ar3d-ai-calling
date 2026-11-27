@@ -24,7 +24,8 @@ async function stageRow(db,id,c){
  return row;
 }
 async function active(env,row,now){
- if(row.dispatch_state!=='submitted'||row.ended||now>=row.claimed_at+(row.max_seconds+15)*1000)fail('school_stage_closed');
+ const latest=await env.CONTROL_DB.prepare('SELECT d.dispatch_state,d.phase,e.ended FROM school_stage_dispatches d LEFT JOIN school_internal_provider_evidence e ON e.permit_id=d.permit_id WHERE d.permit_id=? AND d.provider_account=?').bind(row.permit_id,row.provider_account).first();
+ if(env.AR3D_SCHOOL_STAGE_ENABLED!=='approved'||latest?.dispatch_state!=='submitted'||latest.ended||latest.phase==='ended'||now>=row.claimed_at+(row.max_seconds+15)*1000)fail('school_stage_closed');
  const f=await readActiveSchoolPermit(env,row.tenant_id,row.permit_id,now);
  if(f.row.audio_state!=='ready'||f.row.manifest_sha256!==row.manifest_sha256)fail('school_stage_closed');
  return f;
@@ -79,7 +80,8 @@ async function privateAudio(req,env,c,now){
 }
 // Only authenticated exact provider metadata, not caller-supplied RecordUrl,
 // can select recording media. No recording/transcript stored by this runtime.
-async function recognize(c,record,call,language,fetcher){
+async function recognize(c,record,call,language,fetcher,ensure){
+ await ensure();
  const meta=await fetcher('https://api.plivo.com/v1/Account/'+c.authId+'/Recording/'+record+'/',{
   headers:{Authorization:c.authorization},redirect:'manual',signal:AbortSignal.timeout(5000)});
  if(!meta.ok)fail('school_stage_recording_unavailable');
@@ -90,9 +92,11 @@ async function recognize(c,record,call,language,fetcher){
  const u=new URL(d.recording_url),path='/v1/Account/'+c.authId+'/Recording/'+record+'.'+d.recording_format;
  if(!['https://media.plivo.com','https://aps1.media.plivo.com'].includes(u.origin)||u.pathname!==path||
   u.username||u.password||u.hash||u.search)fail('school_stage_recording_url_invalid');
+ await ensure();
  const media=await fetcher(u.href,{headers:{Authorization:c.authorization},redirect:'manual',signal:AbortSignal.timeout(5000)});
  if(!media.ok||!supportsAnswerAudio(answerContentType(media.headers)))fail('school_stage_recording_unavailable');
  const bytes=await readBoundedBytes(media,ANSWER_MAX_BYTES);
+ await ensure();
  const result=await transcribeSarvamRecordedAnswer(c.sttKey,bytes,language==='en'?'en':'hi',answerContentType(media.headers),fetcher);
  // Internal connectivity test only: no raw speech retained; explicit stop words end.
  const text=result.text?.trim();
@@ -142,7 +146,7 @@ export async function handleSchoolStageRequest(req,env,{clock=Date.now,fetcher=f
    .bind(JSON.stringify([...seen,hash]),id,row.turn,row.recordings_json,now).run();
   if(lock.meta.changes!==1)return end();
   let ok=false;
-  try{await active(env,row,clock());ok=await recognize(c,record,row.call_uuid,f.graph.language,fetcher)}catch{}
+  try{await active(env,row,clock());ok=await recognize(c,record,row.call_uuid,f.graph.language,fetcher,()=>active(env,row,clock()))}catch{}
   let valid=false;try{await active(env,row,clock());valid=true}catch{}
   const nextTurn=row.turn+1,nodes=linearSchoolNodes(f.graph),phase=ok&&valid?(nextTurn===nodes.questions.length?'finished':'question'):'ended';
   const changed=await db.prepare("UPDATE school_stage_dispatches SET phase=?,turn=? WHERE permit_id=? AND phase='processing' AND turn=?")
