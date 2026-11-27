@@ -47,6 +47,8 @@ function industryAgentPanel(tenantId,content,role){
  const closing=node('textarea',{class:'field',rows:'2','aria-label':'AI Closing',maxlength:'450'});
  const questionLabel=lab('Questions (one per line, up to 12)',questions);
  const preview=div('card');
+ const fictionalAnswers=node('textarea',{class:'field',rows:'3','aria-label':'Fictional conversation answers',maxlength:'2000'});
+ const simulation=div('card');
  const saveButton=btn('Save AI draft',async()=>{
   if(!editable||!activeDraft)return;
   let config;
@@ -66,12 +68,38 @@ function industryAgentPanel(tenantId,content,role){
    if(err?.status===409&&enabled())status.textContent='Someone edited this agent. Refresh drafts to avoid overwriting their work.';
   }finally{saveButton.disabled=!editable}
  });
+ const simulateButton=btn('Run fictional conversation (no calls)',async()=>{
+  if(!activeDraft)return;
+  let draft;
+  try{draft=editorValue()}catch(err){asError(err);return}
+  if(JSON.stringify(draft)!==JSON.stringify(activeDraft.config)){
+   asError(Error('Save draft changes first, then run the fictional conversation.'));return;
+  }
+  const answers=fictionalAnswers.value.split(/\r?\n/).map(x=>x.trim()).filter(Boolean);
+  if(answers.length>12||answers.some(x=>x.length>160)){
+   asError(Error('Use up to 12 fictional answers (160 characters each).'));return;
+  }
+  const expected=activeDraft.id;
+  simulateButton.disabled=true;
+  try{
+   const out=await api('/v1/human/ai-flows/'+encodeURIComponent(expected)+'/simulate','POST',{tenantId,answers});
+   if(!enabled()||activeDraft?.id!==expected)return;
+   simulation.replaceChildren(title('Fictional conversation result','h3'),
+    node('p',{class:'note',text:out.notice||'Text-only simulation: no calls.'}),
+    node('p',{class:'muted',text:'Status: '+out.status+' · answers used: '+out.answersUsed}),
+    ...(out.transcript||[]).map(t=>node('p',{class:'muted',text:(t.speaker==='draft_ai'?'Draft AI: ':'Fictional customer: ')+t.text})),
+    ...(out.effects||[]).map(e=>node('p',{class:'muted',text:'Would do (not executed): '+e})));
+  }catch(err){if(enabled())asError(err)}
+  finally{simulateButton.disabled=false}
+ },true);
  const refreshButton=btn('Refresh AI drafts',()=>load().catch(asError),true);
  const previewButton=btn('Preview AI script (no call)',()=>{updatePreview();preview.scrollIntoView({block:'nearest'})},true);
  const controls=div('formrow',previewButton,editable?saveButton:null,refreshButton);
  const advisory=node('p',{class:'muted',text:'This text preview uses no AI provider, customer data, microphone, phone call or CRM write. Finance/banking agents are demonstration drafts requiring separate compliance and recipient-verification work.'});
  editBox.append(title('Draft editor','h3'),lab('Agent name',name),div('formrow',lab('Mode',mode),lab('Language',language)),
-  lab('Greeting',greeting),questionLabel,lab('Closing',closing),controls,advisory,preview);
+  lab('Greeting',greeting),questionLabel,lab('Closing',closing),controls,advisory,preview,
+  lab('Fictional answers (one per line; no customer information)',fictionalAnswers),
+  simulateButton,simulation);
  function editorValue(){
   const raw=questions.value.split(/\r?\n/).map(x=>x.trim()).filter(Boolean);
   if(raw.length>12||raw.some(x=>x.length>250))throw Error('Enter no more than 12 questions of 250 characters each.');
@@ -97,6 +125,7 @@ function industryAgentPanel(tenantId,content,role){
  }
  function showEditor(){
   activeDraft=drafts.find(x=>x.id===activeId)||null;
+  fictionalAnswers.value='';simulation.replaceChildren();
   editBox.hidden=!activeDraft;
   if(!activeDraft)return;
   const c=activeDraft.config,t=templates.find(x=>x.id===c.templateId);
@@ -107,6 +136,8 @@ function industryAgentPanel(tenantId,content,role){
   const readonly=!editable;
   for(const field of [name,mode,language,greeting,questions,closing])field.disabled=readonly;
   saveButton.disabled=readonly;
+  simulateButton.disabled=readonly;
+  fictionalAnswers.disabled=readonly;
   questionLabel.hidden=mode.value==='announcement';
   mode.onchange=()=>{questionLabel.hidden=mode.value==='announcement';updatePreview()};
   for(const field of [name,language,greeting,questions,closing])field.oninput=updatePreview;
