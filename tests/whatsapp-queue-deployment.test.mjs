@@ -212,6 +212,38 @@ test('when consumer detail omits script_name, separately list and match the exac
  assert.deepEqual(s.calls.map(x=>x.method),['GET','GET','GET','GET']);
  assert.ok(s.calls[3].url.endsWith('/queues/'+Q+'/consumers'));
 });
+test('optional Worker name omitted everywhere is accepted ONLY with one matching dedicated producer',async()=>{
+ const id='d'.repeat(32);
+ const consumer={consumer_id:id,type:'worker'};
+ const summary=queue({consumers:[consumer],consumers_total_count:1,
+  producers:[{type:'worker',script:CALLING_WORKER_NAME}],producers_total_count:1});
+ const view={consumer_id:id,type:'worker',queue_name:WHATSAPP_QUEUE_NAME};
+ const s=scripted([list([summary]),ok(summary),ok(view),ok([view])]);
+ const result=await ensureWhatsAppQueue(credentials,s);
+ assert.equal(result.consumerCount,1);assert.equal(result.producerCount,1);
+ assert.ok(s.calls.every(x=>x.method==='GET'));
+ for(const change of [
+  {producers:[{type:'worker',script:'foreign-worker'}]},
+  {producers:[]},
+  {producers:[{type:'worker',script:CALLING_WORKER_NAME},{type:'worker',script:'foreign'}]},
+  {consumers:[consumer,{consumer_id:'e'.repeat(32),type:'worker'}]}
+ ]){
+  const q=queue({...summary,...change,consumers_total_count:change.consumers?.length??1,producers_total_count:change.producers?.length??1});
+  const steps=scripted([list([q]),ok(q),ok(view),ok([view])]);
+  await assert.rejects(ensureWhatsAppQueue(credentials,steps));
+  assert.ok(steps.calls.every(x=>x.method==='GET'));
+ }
+ for(const bad of [
+  {consumer_id:id,type:'worker'},
+  {consumer_id:id,type:'worker',queue_name:'foreign'},
+  {consumer_id:id,type:'worker',queue_name:WHATSAPP_QUEUE_NAME,dead_letter_queue:'foreign-dlq'}
+ ]){
+  const steps=scripted([list([summary]),ok(summary),ok(view),ok([bad])]);
+  await assert.rejects(ensureWhatsAppQueue(credentials,steps));
+  assert.ok(steps.calls.every(x=>x.method==='GET'));
+ }
+});
+
 test('list fallback never trusts a foreign script, mismatched ID, changed type, missing script or configured DLQ',async()=>{
  const id='d'.repeat(32);
  const summary=queue({consumers:[{consumer_id:id,type:'worker'}],consumers_total_count:1});
