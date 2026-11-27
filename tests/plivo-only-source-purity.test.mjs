@@ -44,7 +44,14 @@ test('Plivo calling remains intact, gated and unknown provider webhooks are reje
  assert.match(migrations,/CREATE TABLE calling_jobs/);
  assert.match(migrations,/CREATE UNIQUE INDEX calling_one_inflight/);
  assert.match(readFileSync('migrations/crm/0022_parallel_company_calls.sql','utf8'),/DROP INDEX IF EXISTS calling_one_inflight/);
- assert.match(campaign,/NOT EXISTS\(SELECT 1 FROM calling_jobs x WHERE x\.tenant_id=\? AND x\.state='unknown'\)/);
+ const capacity=readFileSync('src/commercial-capacity.mjs','utf8');
+ assert.match(campaign,/sharedTenantUnknown/);
+ assert.match(campaign,/sharedTenantCapacityCount/);
+ assert.match(campaign,/sharedCapacityCount/);
+ assert.match(capacity,/FROM calling_jobs WHERE state IN\('reserved','submitted','unknown'\) UNION ALL SELECT/);
+ assert.match(capacity,/FROM industry_funded_admissions WHERE/);
+ assert.match(capacity,/NOT EXISTS\(SELECT 1 FROM \("/);
+ assert.match(capacity,/WHERE tenant_id=\? AND state='unknown'\)/);
  assert.match(schema,/trg_no_call_launch/);
  assert.match(workflow,/0011_scripted_campaign_dispatch\.sql/);
  assert.doesNotMatch(workflow,/d1 execute[^\n]*(?:0008_[^\/]*receipts|0009_operator_self_test_calls|0010_[^\/]*status_checks|0009_voicebot_review_queue|0012_verified_voicebot_turns)/);

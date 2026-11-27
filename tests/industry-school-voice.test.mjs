@@ -433,7 +433,7 @@ async function admissionFixture(){
  const f=await approvedQueueFixture();try{
   assert.equal((await f.queue('/prepare',f.data,client,'POST')).status,201);
   const prepared=(await (await f.queue()).json()).jobs[0],id=prepared.id;
-  const savedBucket=f.env.RECORDINGS;await setupProperty(f);f.env.RECORDINGS=savedBucket;
+  const savedBucket=f.env.RECORDINGS;await setupProperty(f);f.env.RECORDINGS={...savedBucket,async head(){return {size:42}}};
   Object.assign(f.env,{AR3D_INDUSTRY_SCHOOL_FUNDED_ADMISSION:'approved',AR3D_INDUSTRY_SCHOOL_VOICE_ENABLED:'enabled',AR3D_MAX_CONCURRENT_CALLS:'1'});
   const input={tenantId:tid,jobId:id,manifestSha256:f.data.manifestSha256,maxSeconds:180,expiresAt:iso(now+1800000),approvalReference:'Fictional reviewed funding admission',acknowledgeFundingOnly:true};
   const authorize=(d=input,user=admin)=>handleIndustryAdmission(req('/v1/human/industry-admission/'+id,d),f.env,user,{now});
@@ -461,7 +461,7 @@ test('funded industry admission shares wallet and carrier capacity with property
  const f=await admissionFixture();try{
   assert.equal((await f.authorize()).status,201);
   const results=await Promise.all([f.claim(),f.claim()]);
-  assert.equal(results.filter(x=>x.state==='funded').length,1);
+  assert.equal(results.filter(x=>x.state==='funded').length,1,JSON.stringify(results));
   const r=f.r.db.prepare('SELECT * FROM industry_funded_admissions').get();assert.equal(r.state,'funded');
   const held=f.c.db.prepare('SELECT * FROM tenant_minute_holds WHERE job_id=?').get(f.prepared.id);assert.equal(held.reserved_seconds,180);assert.equal(held.state,'held');
   const cost=f.c.db.prepare('SELECT * FROM provider_cost_reservations WHERE job_id=?').get(f.prepared.id);assert.equal(cost.reserved_seconds,180);
