@@ -55,7 +55,7 @@ export function industryRecipientReviewStatus(r,now){
 }
 function viewRecipient(r,now,isAdmin){
  return {leadId:r.leadId,name:r.name,destinationLast4:r.mobile_e164.slice(-4),revision:r.revision??0,status:industryRecipientReviewStatus(r,now),
-  expiresAt:r.expires_at||null,reviewedAt:r.reviewed_at||null,...(isAdmin?{consentReference:r.consent_ref||null,dndReference:r.dnd_ref||null,reason:r.reason||null}:{}),callable:false};
+  expiresAt:r.expires_at||null,reviewedAt:r.reviewed_at||null,...(isAdmin?{leadUpdatedAt:r.updated_at,consentReference:r.consent_ref||null,dndReference:r.dnd_ref||null,reason:r.reason||null}:{}),callable:false};
 }
 const audit=(db,tid,user,action,target,at,conditional=false)=>db.prepare("INSERT INTO crm_audit_events(tenant_id,id,actor,action,target_id,created_at) SELECT ?,?,?,?,?,?"+(conditional?' WHERE changes()>0':'')).bind(tid,crypto.randomUUID(),'human:'+user.id,action,target,at);
 const paging=u=>{
@@ -152,12 +152,12 @@ export async function handleIndustryCampaigns(req,env,user,{now=Date.now()}={}){
    ]);
    return result[0]?.meta?.changes===data.leadIds.length?reply({added:data.leadIds.length,dispatchReady:false},201):fail('industry_candidates_changed_or_unavailable',409);
   }
-  if(!isAdmin)return fail('current_super_admin_mfa_required',403);
   const clear=data.decision==='cleared',revoke=data.decision==='revoked';
+  if(clear&&!isAdmin)return fail('current_super_admin_mfa_required',403);
   if(!uuid(data.leadId)||!Number.isSafeInteger(data.baseRevision)||data.baseRevision<0||data.baseRevision>=1000||
     (!clear&&!revoke))return fail('invalid_industry_review');
-  if(clear&&(!exact(data,['tenantId','leadId','baseRevision','decision','consentReference','dndReference','expiresAt','acknowledgeGuardianAndPurpose'])||
-    data.acknowledgeGuardianAndPurpose!==true||!text(data.consentReference,4,160)||!text(data.dndReference,4,160)||
+  if(clear&&(!exact(data,['tenantId','leadId','baseRevision','decision','consentReference','dndReference','expiresAt','expectedLeadUpdatedAt','expectedDestinationLast4','acknowledgeGuardianAndPurpose'])||
+    data.acknowledgeGuardianAndPurpose!==true||!text(data.expectedLeadUpdatedAt,1,80)||!/^\d{4}$/.test(data.expectedDestinationLast4||'')||!text(data.consentReference,4,160)||!text(data.dndReference,4,160)||
     typeof data.expiresAt!=='string'||!/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$/.test(data.expiresAt)||
     !Number.isFinite(Date.parse(data.expiresAt))||iso(Date.parse(data.expiresAt))!==data.expiresAt||Date.parse(data.expiresAt)<=now||Date.parse(data.expiresAt)>now+90*86400000))
    return fail('invalid_industry_clearance');
@@ -172,8 +172,8 @@ export async function handleIndustryCampaigns(req,env,user,{now=Date.now()}={}){
     FROM industry_campaign_candidates a JOIN industry_campaigns c ON c.tenant_id=a.tenant_id AND c.id=a.campaign_id JOIN leads l ON l.tenant_id=a.tenant_id AND l.id=a.lead_id
     WHERE a.tenant_id=? AND a.campaign_id=? AND a.lead_id=? AND c.archived_at IS NULL
     AND COALESCE((SELECT MAX(v.revision) FROM industry_recipient_reviews v WHERE v.tenant_id=a.tenant_id AND v.campaign_id=a.campaign_id AND v.lead_id=a.lead_id),0)=?
-    AND (?=0 OR (NOT ${suppressed} AND l.mobile_e164 GLOB '+91[6-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]'))`)
-    .bind(data.baseRevision,data.decision,+clear,+clear,clear?data.consentReference.trim():null,clear?data.dndReference.trim():null,clear?data.expiresAt:null,revoke?data.reason.trim():null,user.id,at,tid,campaign.id,data.leadId,data.baseRevision,+clear),
+    AND (?=0 OR (l.updated_at=? AND substr(l.mobile_e164,-4)=? AND NOT ${suppressed} AND l.mobile_e164 GLOB '+91[6-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]'))`)
+    .bind(data.baseRevision,data.decision,+clear,+clear,clear?data.consentReference.trim():null,clear?data.dndReference.trim():null,clear?data.expiresAt:null,revoke?data.reason.trim():null,user.id,at,tid,campaign.id,data.leadId,data.baseRevision,+clear,clear?data.expectedLeadUpdatedAt:null,clear?data.expectedDestinationLast4:null),
    audit(db,tid,user,'industry.recipient_'+data.decision,data.leadId,at,true)
   ]);
   return result[0]?.meta?.changes===1?reply({revision:data.baseRevision+1,decision:data.decision,dispatchReady:false}):fail('industry_recipient_changed_or_suppressed',409);
