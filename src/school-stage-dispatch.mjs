@@ -69,6 +69,7 @@ export async function dispatchSchoolStageCall(env,user,input,{clock=Date.now,fet
  SELECT id,tenant_id,?,?,?,?,?,?,?,? FROM school_internal_pilot_permits
  WHERE id=? AND tenant_id=? AND stopped_at IS NULL AND expires_at>=? AND audio_state='ready' AND manifest_sha256=?
  AND NOT EXISTS(SELECT 1 FROM school_stage_dispatches WHERE permit_id=? OR provider_account<>?)
+ AND NOT EXISTS(SELECT 1 FROM school_stage_dispatches d LEFT JOIN school_internal_provider_evidence e ON e.permit_id=d.permit_id WHERE d.dispatch_state IN ('claimed','unknown') OR (d.dispatch_state='submitted' AND COALESCE(e.ended,0)=0))
  AND ? >= ?+COALESCE((SELECT SUM(plivo_reserved_usd_micros) FROM school_stage_dispatches),0)
  AND ? >= ?+COALESCE((SELECT SUM(sarvam_reserved_inr_micros) FROM school_stage_dispatches),0)`)
   .bind(c.authId,input.manifestSha256,user.id,c.fundingRef,c.plivoReserve,c.sarvamReserve,seconds,claimAt,input.permitId,input.tenantId,claimAt+(seconds+15)*1000,input.manifestSha256,input.permitId,c.authId,c.plivoCap,c.plivoReserve,c.sarvamCap,c.sarvamReserve).run();
