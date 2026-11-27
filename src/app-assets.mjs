@@ -2627,13 +2627,43 @@ async function companyAdminPanel(main,client=null){
   div('formrow',lab('Choose company',company)));card.append(area);main.append(card);
  function load(){
   if(!company.value){area.replaceChildren(node('p',{class:'muted',text:'Create a client before editing a company profile.'}));return}
-  const requests=div('stack'),profile=div('stack');
-  area.replaceChildren(requests,profile);
+  const requests=div('stack'),profile=div('stack'),industryLaunch=div('stack');
+  area.replaceChildren(requests,profile,industryLaunch);
+  adminIndustryLaunchPanel(industryLaunch,company.value).catch(asError);
   adminCompanyChangesPanel(requests,company.value).catch(asError);
   companyProfileEditor(company.value,profile,true,company.selectedOptions[0]?.textContent||'').catch(asError);
  }
  company.addEventListener('change',load);
  await findCompany();
+}
+async function adminIndustryLaunchPanel(content,tenantId){
+ const card=div('card',title('Industry production configuration review','h3'),
+  node('p',{class:'note',text:'Review the exact frozen School script for production preparation. This does not authorize calls, provider requests or credit spending.'}));
+ content.append(card);
+ const area=div('stack'),status=node('p',{class:'muted',role:'status'});card.append(status,area);
+ async function load(){
+  status.textContent='Loading School launch requests…';
+  const out=await api('/v1/human/industry-launch-requests?tenantId='+encodeURIComponent(tenantId));
+  if(!card.isConnected)return;
+  status.textContent=out.requests.length+' request(s). School dispatch is not connected.';
+  area.replaceChildren(...out.requests.map(r=>{
+   const c=r.config||{},reference=node('textarea',{class:'field',rows:'2',maxlength:'300','aria-label':'Production review reference'}),ack=node('input',{type:'checkbox'});
+   const item=div('card',title(c.name||'School Admission','h3'),node('p',{class:'muted',text:r.state.replaceAll('_',' ')+' · '+r.digest.slice(0,12)}),
+    node('p',{text:c.greeting||''}),...(c.questions||[]).map(q=>node('p',{text:q})),node('p',{text:c.closing||''}));
+   if(r.reviewReference)item.append(node('p',{class:'muted',text:r.reviewReference}));
+   if(r.state==='requested'){
+    const decide=async decision=>{
+     if(!ack.checked||reference.value.trim().length<3){asError(Error('Enter a review reference and acknowledge that calling remains disabled.'));return}
+     await api('/v1/human/industry-launch-requests/'+encodeURIComponent(r.id)+'/review','POST',{tenantId,decision,reference:reference.value.trim(),acknowledgeNoCalling:true});await load();
+    };
+    item.append(lab('Review reference / reason',reference),node('label',{class:'row'},[ack,'I reviewed the script and understand this does not enable live calls.']),
+     div('formrow',btn('Mark configuration reviewed',()=>decide('configuration_reviewed').catch(asError),true),btn('Reject configuration',()=>decide('rejected').catch(asError),true)));
+   }
+   return item;
+  }));
+ }
+ card.append(btn('Refresh production review requests',()=>load().catch(asError),true));
+ await load();
 }
 async function companyProfileEditor(tenantId,content,admin=false,companyLabel=''){
  const card=div(admin?'stack':'card',title('Company Knowledge','h3'));content.append(card);
