@@ -96,6 +96,20 @@ export async function getSession(req,db){
     WHERE s.token_hash=? AND s.revoked_at IS NULL AND s.expires_at>?
       AND u.status='active' LIMIT 1`).bind(digest,Date.now()).first();
 }
+// Revalidate the actual session, account and MFA enrollment for privileged
+// operations; a role in a previously loaded user object alone is insufficient.
+// This is session-level MFA, not a fresh TOTP challenge for each mutation.
+export async function currentSuperAdminMfa(db,user,now=Date.now()){
+ if(!db||user?.globalRole!=='super_admin'||typeof user.id!=='string'||!user.id||
+    typeof user.token_hash!=='string'||!/^[a-f0-9]{64}$/.test(user.token_hash)||!Number.isSafeInteger(now))return false;
+ return !!await db.prepare(`SELECT 1 AS ok FROM human_sessions s
+  JOIN human_users u ON u.id=s.user_id
+  JOIN human_mfa_settings m ON m.user_id=u.id
+  WHERE u.id=? AND u.global_role='super_admin' AND u.status='active'
+  AND s.token_hash=? AND s.revoked_at IS NULL AND s.expires_at>?
+  AND m.enabled_at IS NOT NULL AND s.created_at>=m.enabled_at LIMIT 1`)
+  .bind(user.id,user.token_hash,now).first();
+}
 export async function newSession(db,userId,{passwordOnly=false}={}){
   const token=randomSecret(),digest=await sha256hex(token),createdAt=new Date().toISOString();
   // Recheck enrollment in the same statement as password-only session issuance.

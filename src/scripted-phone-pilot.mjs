@@ -1,7 +1,7 @@
 // Shared phone questionnaire with a separately approved internal pilot and customer campaigns.
 import {signalProviderThrottle} from './capacity-signals.mjs';
 import {isSchoolVoiceSession,serveSchoolVoiceAudio,handleSchoolVoiceCallback} from './industry-school-voice-callback.mjs';
-import {resolveCrmDb,parseJsonBody} from './core.mjs';
+import {resolveCrmDb,parseJsonBody,sha256hex} from './core.mjs';
 import {mutationOriginAllowed} from './human-auth.mjs';
 import {beginFixedVoicePreview,advanceFixedVoicePreview,advanceContextualVoice,advanceInternalVoice} from './fixed-voice-turns.mjs';
 import {normalizePropertySurvey,surveyToCrm,fixedPropertyQuestions} from './fixed-property-survey.mjs';
@@ -523,7 +523,8 @@ async function verifiedPlivoGet(req,config,url){
  const signature=req.headers.get('X-Plivo-Signature-V3')||'';
  const pairs=[...url.searchParams];
  if(!/^[\x21-\x7e]{1,128}$/.test(nonce)||signature.length>512||pairs.length>45||
-    new Set(pairs.map(([name])=>name)).size!==pairs.length)return false;
+    new Set(pairs.map(([name])=>name)).size!==pairs.length||
+    pairs.some(([name,value])=>!/^[A-Za-z][A-Za-z0-9_.-]{0,127}$/.test(name)||/[&\u0000-\u001f\u007f]/u.test(value)))return false;
  pairs.sort(([a],[b])=>a<b?-1:a>b?1:0);
  const query=pairs.map(([name,value])=>name+'='+value).join('&');
  const payload=url.origin+url.pathname+(query?'?'+query:'')+'.'+nonce;
@@ -880,14 +881,16 @@ export async function handleScriptedPhoneCallback(req,env,{now=Date.now(),fetche
   if(step==='audio'){
    if(!arg?.endsWith('.mp3')||!AUDIO_PROMPTS.has(arg.slice(0,-4))||url.search)return error('not_found',404);
    // Scoped to the random pilot ID; serves prerecorded questions only.
-   const row=await control.prepare('SELECT language,tenant_id,job_id,survey_json FROM scripted_phone_pilots WHERE id=? AND expires_at>? AND provider_account_id=?')
+   const row=await control.prepare('SELECT language,tenant_id,job_id,survey_json FROM scripted_phone_pilots WHERE id=? AND expires_at>? AND provider_account_id=? AND hangup_at IS NULL')
     .bind(id,now,config.authId).first();
+   if(row?.job_id&&(env.AR3D_SCRIPTED_CAMPAIGNS_ENABLED!=='enabled'||env.AR3D_CAMPAIGN_SARVAM_DISCLOSURE!=='approved'))return error('not_found',404);
    const audio=row&&!isSchoolVoiceSession(row)?await env.RECORDINGS.get(promptKey(row.language,arg.slice(0,-4),row.job_id?row.tenant_id:null)):null;
    if(!audio||audio.size<1||audio.size>ANSWER_MAX_BYTES)return error('not_found',404);
    return new Response(audio.body,{headers:{...headers,'Content-Type':'audio/mpeg','Content-Length':String(audio.size)}});
   }
   if(!await verifiedPlivoGet(req,config,url))return error('invalid_provider_signature',403);
   const params=url.searchParams,call=params.get('CallUUID'),requestId=params.get('ALegRequestUUID')||params.get('RequestUUID');
+  if(params.has('ALegRequestUUID')&&params.has('RequestUUID')&&params.get('ALegRequestUUID')!==params.get('RequestUUID'))return error('call_identity_mismatch',403);
   if(!ID.test(call||''))return error('invalid_call_reference',400);
   const row=await control.prepare('SELECT * FROM scripted_phone_pilots WHERE id=?').bind(id).first();
   if(!row||row.provider_account_id!==config.authId||row.caller!==config.caller)return end();
@@ -895,7 +898,9 @@ export async function handleScriptedPhoneCallback(req,env,{now=Date.now(),fetche
    if(row.expires_at<=now&&(step!=='hangup'||now-row.expires_at>86400000))return end();
    return await handleSchoolVoiceCallback(env,config,row,step,arg,params,{now,fetcher,finishOptOut:finishCampaignOptOut});
   }
-  if(row.expires_at<=now)return end();
+  // Signed terminal evidence may arrive after the normal speech-session TTL.
+  // No new speech or recording is permitted in the bounded late window.
+  if(row.expires_at<=now&&(step!=='hangup'||now-row.expires_at>86400000))return end();
   // A previously reserved call must still be able to report its signed hangup
   // after enrollment/lead eligibility changes. The immutable call identity is
   // checked below. Other internal steps recheck the enrolled destination.
@@ -906,8 +911,17 @@ export async function handleScriptedPhoneCallback(req,env,{now=Date.now(),fetche
    if(!target||row.destination!==target.destination)return end();
   }
   // Preserve signed hangup and settlement for historical calls, but do not process their audio through a different provider.
+  // Previously bound STOP must remain actionable even if the operator disables
+  // speech or the call ended concurrently. It never authorizes a new turn.
+  if(step!=='hangup'&&row.job_id&&row.provider_call_id===call&&row.phase==='suppressing')return await finishCampaignOptOut(env,row,now);
+  if(row.job_id&&row.provider_call_id===call&&step==='consent'&&!arg&&params.get('Digits')==='2'&&row.turn===0&&['consent','question','ended'].includes(row.phase)){
+   const stopped=await control.prepare("UPDATE scripted_phone_pilots SET phase='suppressing' WHERE id=? AND provider_call_id=? AND turn=0 AND phase IN('consent','question','ended')").bind(id,call).run();
+   if(stopped.meta.changes===1)return await finishCampaignOptOut(env,row,now);
+   return end();
+  }
+  if(step!=='hangup'&&row.hangup_at!==null)return end();
   if(step!=='hangup'&&(!isSarvam(row)||!sarvamConfigured(env)))return end();
-  if(row.job_id&&step==='answer'&&(env.AR3D_SCRIPTED_CAMPAIGNS_ENABLED!=='enabled'||env.AR3D_CAMPAIGN_SARVAM_DISCLOSURE!=='approved'))return end();
+  if(row.job_id&&step!=='hangup'&&(env.AR3D_SCRIPTED_CAMPAIGNS_ENABLED!=='enabled'||env.AR3D_CAMPAIGN_SARVAM_DISCLOSURE!=='approved'))return end();
   if(step==='answer'&&!arg){
    if(!ID.test(requestId||'')||params.get('Direction')!=='outbound'||
       normalizePhone(params.get('To'))!==normalizePhone(row.destination)||
@@ -917,7 +931,7 @@ export async function handleScriptedPhoneCallback(req,env,{now=Date.now(),fetche
    if(row.provider_call_id)return row.provider_call_id===call&&row.phase===phase&&row.turn===0?
     responseForPhoneQuestion(config,env,row,{directOpeningCue:direct}):end();
    const claim=await control.prepare(`UPDATE scripted_phone_pilots SET provider_call_id=?,provider_request_id=?,phase=?
-    WHERE id=? AND phase IN('requested','unknown') AND provider_call_id IS NULL
+    WHERE id=? AND phase IN('requested','unknown') AND provider_call_id IS NULL AND hangup_at IS NULL
     AND (provider_request_id IS NULL OR provider_request_id=?)`).bind(call,requestId,phase,id,requestId).run();
    return claim.meta.changes===1?responseForPhoneQuestion(config,env,{...row,provider_call_id:call,phase},{directOpeningCue:direct}):end();
   }
@@ -926,23 +940,26 @@ export async function handleScriptedPhoneCallback(req,env,{now=Date.now(),fetche
    const matchesDestination=params.get('Direction')==='outbound'&&
     normalizePhone(params.get('To'))===normalizePhone(row.destination)&&
     normalizePhone(params.get('From'))===normalizePhone(row.caller);
-   if(row.provider_call_id?row.provider_call_id!==call:!matchedRequest&&!matchesDestination)return end();
+   // If the accepted request is known, matching phone numbers cannot replace
+   // its identity. Before a request UUID exists, signed target + UUID are required.
+   if(row.provider_call_id?row.provider_call_id!==call:row.provider_request_id?!matchedRequest:!matchesDestination||!ID.test(requestId||''))return end();
    const seconds=params.get('Duration');
    const durationSeconds=/^\d{1,3}$/.test(seconds||'')?Number(seconds):null;
    await control.prepare(`UPDATE scripted_phone_pilots SET hangup_at=COALESCE(hangup_at,?),
     duration_seconds=COALESCE(duration_seconds,?),provider_call_id=COALESCE(provider_call_id,?),
     phase=CASE WHEN phase IN('requested','unknown','consent','question') THEN 'ended' ELSE phase END
-    WHERE id=?`).bind(now,durationSeconds,call,id).run();
+    WHERE id=? AND (provider_call_id IS NULL OR provider_call_id=?)
+      AND (provider_call_id IS NOT NULL OR provider_request_id IS NULL OR provider_request_id=?)`).bind(now,durationSeconds,call,id,call,requestId).run();
+   if(row.job_id&&row.provider_call_id===call&&row.phase==='suppressing')await finishCampaignOptOut(env,row,now);
    return new Response(null,{status:204,headers});
   }
   if(row.provider_call_id!==call)return end();
-  if(row.phase==='suppressing'&&row.job_id)return await finishCampaignOptOut(env,row,now);
   if(terminal.has(row.phase))return responseFor(config,row);
   if(step==='consent'&&!arg){
-   if(row.phase!=='consent')return row.phase==='question'&&row.turn===0?responseFor(config,row):end();
+   if(row.phase!=='consent')return row.phase==='question'&&row.turn===0&&params.get('Digits')==='1'?responseFor(config,row):end();
    const digits=params.get('Digits');
    const phase=digits==='1'?'question':digits==='2'&&row.job_id?'suppressing':'declined';
-   const changed=await control.prepare("UPDATE scripted_phone_pilots SET phase=? WHERE id=? AND phase='consent'").bind(phase,id).run();
+   const changed=await control.prepare("UPDATE scripted_phone_pilots SET phase=? WHERE id=? AND phase='consent' AND provider_call_id=? AND hangup_at IS NULL").bind(phase,id,call).run();
    if(changed.meta.changes!==1)return end();
    return phase==='suppressing'?await finishCampaignOptOut(env,row,now):responseFor(config,{...row,phase});
   }
@@ -953,9 +970,22 @@ export async function handleScriptedPhoneCallback(req,env,{now=Date.now(),fetche
   if(turn!==row.turn)return end();
   if(row.phase==='transcribing')return error('answer_processing',503);
   if(row.phase!=='question')return end();
-  const lock=await control.prepare("UPDATE scripted_phone_pilots SET phase='transcribing' WHERE id=? AND phase='question' AND turn=?")
-   .bind(id,turn).run();
+  // Claim a hashed recording ID before any paid speech call. A provider
+  // retry with the same RecordingID under a *different* turn cannot be billed
+  // or interpreted as a second customer answer. Keep no recording URL/ID.
+  const doc=JSON.parse(row.survey_json),record=params.get('RecordingID');
+  const claimed=doc.phoneMeta?.claimedRecordingDigests??[];
+  if(!Array.isArray(claimed)||claimed.length>25||claimed.some(h=>typeof h!=='string'||!/^[a-f0-9]{64}$/.test(h))||new Set(claimed).size!==claimed.length)return end();
+  let digests=claimed;
+  if(ID.test(record||'')){
+   const hash=await sha256hex('ar3d:legacy-recording:v1:'+record);
+   if(claimed.includes(hash)||claimed.length>=25)return end();
+   digests=[...claimed,hash];
+  }
+  const raw=JSON.stringify({...doc,phoneMeta:{...doc.phoneMeta,claimedRecordingDigests:digests}});
+  const lock=await control.prepare("UPDATE scripted_phone_pilots SET phase='transcribing',survey_json=? WHERE id=? AND phase='question' AND turn=? AND provider_call_id=? AND survey_json=? AND hangup_at IS NULL")
+   .bind(raw,id,turn,call,row.survey_json).run();
   if(lock.meta.changes!==1)return error('answer_processing',503);
-  return applyPhoneAnswer(config,env,row,await recordingAnswer(config,env,row,params,fetcher),now,fetcher);
+  return applyPhoneAnswer(config,env,{...row,survey_json:raw},await recordingAnswer(config,env,row,params,fetcher),now,fetcher);
  }catch{return error('scripted_phone_callback_unavailable',503)}
 }
