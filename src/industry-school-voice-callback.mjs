@@ -78,6 +78,7 @@ async function speechXML(config,row,c,now){
 async function latestRow(env,id){return env.CONTROL_DB.prepare('SELECT * FROM scripted_phone_pilots WHERE id=?').bind(id).first()}
 function sameActiveRow(old,fresh){return !!fresh&&fresh.hangup_at===null&&fresh.phase===old.phase&&fresh.turn===old.turn&&fresh.survey_json===old.survey_json&&fresh.provider_call_id===old.provider_call_id}
 export async function serveSchoolVoiceAudio(req,env,config,id,arg,now){
+ const clock=clockFrom(now);
  try{
   const url=new URL(req.url),q=url.searchParams,node=/^([a-z][a-z0-9_]{0,31})\.mp3$/.exec(arg||'')?.[1];
   if(!node||[...q].length!==2||q.getAll('expires').length!==1||q.getAll('sig').length!==1)return error('school_audio_unavailable',404);
@@ -91,7 +92,9 @@ export async function serveSchoolVoiceAudio(req,env,config,id,arg,now){
   const c=await current(env,row,now);
   if(expires>c.deadline||!schoolVoiceNodes(c.plan,c.v).includes(node))return error('school_audio_unavailable',404);
   const bytes=await readSchoolAudioAsset(env.RECORDINGS,c.scope,{manifest:c.v.manifest,manifestSha256:c.v.manifestSha256},node);
-  if(!sameActiveRow(row,await latestRow(env,id)))return error('school_audio_unavailable',404);
+  const fresh=await latestRow(env,id),after=clock();
+  if(!sameActiveRow(row,fresh)||expires<=after)return error('school_audio_unavailable',404);
+  await current(env,fresh,after);
   return new Response(bytes,{headers:{...headers,'Content-Type':'audio/mpeg','Content-Length':String(bytes.length)}});
  }catch{return error('school_audio_unavailable',404)}
 }
@@ -143,7 +146,7 @@ async function changePhase(env,row,phase,doc=row.survey_json){
  */
 export async function handleSchoolVoiceCallback(env,config,row,step,arg,params,{now,fetcher,finishOptOut}){
  const clock=clockFrom(now),control=env.CONTROL_DB,call=params.get('CallUUID');
- if(!idRE.test(call||''))return error('school_call_identity',403);
+ if(!row.job_id||!idRE.test(call||''))return error('school_call_identity',403);
  if(step==='hangup'&&!arg){
   // Preserve signed termination evidence even if consent/enablement was revoked.
   if(row.provider_call_id?row.provider_call_id!==call:!requestMatches(row,params)||!targetMatches(row,params))return end();
@@ -170,6 +173,7 @@ export async function handleSchoolVoiceCallback(env,config,row,step,arg,params,{
   if(step==='consent'&&!arg){
    if(row.phase!=='consent')return row.phase==='question'&&row.turn===0&&params.get('Digits')==='1'?speechXML(config,row,c,clock()):end();
    const digit=params.get('Digits'),phase=digit==='1'?'question':digit==='2'?'suppressing':'declined';
+   if(phase==='question'&&await providerFaultBlocked(control))return end();
    const nextDoc={...c.doc,industryVoice:{...c.v,status:digit==='1'?'active':digit==='2'?'opted_out':'declined'}};
    const next=await changePhase(env,row,phase,nextDoc);
    if(!next)return end();
