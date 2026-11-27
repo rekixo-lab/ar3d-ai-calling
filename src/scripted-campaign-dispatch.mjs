@@ -1,5 +1,5 @@
 import {resolveCrmDb} from './core.mjs';
-import {commercialCapacityRows,sharedCapacityCount,sharedTenantCapacityCount,sharedTenantUnknown} from './commercial-capacity.mjs';
+import {sharedCapacityCount,sharedTenantCapacityCount,sharedTenantUnknown} from './commercial-capacity.mjs';
 import {campaignDispatchInterlock,dispatchPausePredicate} from './calling-dispatch-pause.mjs';
 import {moneyBudgetConfig,providerBudgetPosition,reserveBudgetedMinutes} from './provider-cost-reservations.mjs';
 import {minutePosition,closeMinuteHold,fundingCap,fundingPosition,affordableCallSeconds,BILLING_PULSE_SECONDS} from './minute-holds.mjs';

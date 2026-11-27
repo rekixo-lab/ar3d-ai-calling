@@ -437,7 +437,7 @@ async function admissionFixture(){
   Object.assign(f.env,{AR3D_INDUSTRY_SCHOOL_FUNDED_ADMISSION:'approved',AR3D_INDUSTRY_SCHOOL_VOICE_ENABLED:'enabled',AR3D_MAX_CONCURRENT_CALLS:'1'});
   const input={tenantId:tid,jobId:id,manifestSha256:f.data.manifestSha256,maxSeconds:180,expiresAt:iso(now+1800000),approvalReference:'Fictional reviewed funding admission',acknowledgeFundingOnly:true};
   const authorize=(d=input,user=admin)=>handleIndustryAdmission(req('/v1/human/industry-admission/'+id,d),f.env,user,{now});
-  const claim=()=>claimFundedIndustryAdmission(f.env,{tenantId:tid,jobId:id,now});
+  const claim=()=>claimFundedIndustryAdmission(f.env,{tenantId:tid,jobId:id,now:now+1000});
   return {...f,prepared,input,authorize,claim};
  }catch(e){f.close();throw e}
 }
@@ -485,4 +485,26 @@ test('property in-flight and uncertain calls block School admission, and pause b
    assert.equal(f.c.db.prepare('SELECT COUNT(*) AS n FROM tenant_minute_holds').get().n,0);
   }finally{f.close()}
  }
+});
+
+test('revocation immediately after the exact funded reservation releases unused minutes only once',async()=>{
+ const f=await admissionFixture();try{
+  assert.equal((await f.authorize()).status,201);
+  const db=f.c.wrap;
+  f.env.CONTROL_DB={...db,prepare(sql){
+   const st=db.prepare(sql);
+   if(!sql.includes('INSERT INTO provider_cost_reservations'))return st;
+   return {...st,bind(...args){const q=st.bind(...args);return {...q,async first(){
+    const row=await q.first();
+    if(row)f.r.db.prepare("UPDATE leads SET consent_status='denied',dnd_status='blocked' WHERE tenant_id=? AND id=?").run(tid,lead);
+    return row;
+   }}}};
+  }};
+  const r=await f.claim();assert.equal(r.state,'blocked');
+  const h=f.c.db.prepare('SELECT state,charged_seconds,evidence_ref FROM tenant_minute_holds WHERE job_id=?').get(f.prepared.id);
+  assert.equal(h.state,'released');assert.equal(h.charged_seconds,0);assert.equal(h.evidence_ref,'industry-admission-not-submitted:'+f.prepared.id);
+  assert.equal(f.r.db.prepare('SELECT state FROM industry_funded_admissions').get().state,'blocked');
+  assert.equal((await f.claim()).state,'release_unavailable');
+  assert.equal(f.r.db.prepare('SELECT COUNT(*) AS n FROM ('+commercialCapacityRows+')').get().n,0);
+ }finally{f.close()}
 });

@@ -78,7 +78,7 @@ export async function claimFundedIndustryAdmission(baseEnv,{tenantId:tid,jobId:i
  if(baseEnv.AR3D_INDUSTRY_SCHOOL_FUNDED_ADMISSION!=='approved'||baseEnv.AR3D_INDUSTRY_SCHOOL_VOICE_ENABLED!=='enabled'||baseEnv.AR3D_SCRIPTED_CAMPAIGNS_ENABLED!=='enabled'||baseEnv.AR3D_CAMPAIGN_SARVAM_DISCLOSURE!=='approved'||!inCallingWindow(now))return stopped('disabled_or_outside_hours');
  const started=Date.now(),clock=()=>now+Math.max(0,Date.now()-started),db=baseEnv.CRM_DB;
  const r=await load(db,tid,id);
- if(r?.state!=='released'||!deadline(r.expires_at,now,r.max_seconds))return stopped('release_unavailable');
+ if(r?.state!=='released'||!Number.isFinite(Date.parse(r.approved_at))||Date.parse(r.approved_at)>now||!deadline(r.expires_at,now,r.max_seconds))return stopped('release_unavailable');
  const env=await resolveFundingEnv(baseEnv);
  if(!fundedDispatchApproved(env)||!await approvedCampaignPhone(env))return stopped('funding_or_provider_approval_required');
  const gate=await campaignDispatchInterlock(env.CONTROL_DB);
