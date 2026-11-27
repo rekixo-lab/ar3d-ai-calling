@@ -81,7 +81,7 @@ export async function handleIndustryFlowSnapshots(req,env,user,{now=Date.now()}=
    if(!await db.prepare("SELECT id FROM tenants WHERE id=? AND status IN('active','trial')").bind(tid).first())
     return fail('tenant_unavailable',404);
   }else {
-   const write=(p.kind==='collection'&&method==='POST')||p.kind==='simulate';
+   const write=(p.kind==='collection'&&method==='POST')||p.kind==='simulate'||p.kind==='voice-turn-preview';
    if(!await requireMembership(db,user,tid,write))return fail('forbidden',403);
   }
   if(p.kind==='collection'&&method==='GET'){
