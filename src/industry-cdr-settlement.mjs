@@ -1,4 +1,4 @@
-// Internal-only industry minute settlement. Not a route or scheduled job.
+// Internal-only industry minute settlement. Invoked by the bounded School recovery scheduler.
 // No call creation, retry or provider-money reconciliation. Capacity release
 // is a separate internal operation and is not called by the CDR adapter.
 import {sha256hex} from './core.mjs';
@@ -38,6 +38,7 @@ async function readTerminal(env,tid,id,now){
     v.reviewRevision!==j.review_revision||v.reviewExpiresAt!==j.review_expires_at||
     v.manifest?.tenantId!==tid||v.manifest.snapshotId!==j.snapshot_id||v.manifest.graphSha256!==j.graph_sha256||
     await sha256hex('ar3d:industry-audio-pack:v1:'+JSON.stringify(v.manifest))!==j.manifest_sha256)return null;
+ if(m.dispatchVersion===1&&!await env.CRM_DB.prepare("SELECT 1 AS ok FROM industry_dispatch_releases WHERE tenant_id=? AND job_id=? AND session_id=? AND state IN('posting','submitted','unknown')").bind(tid,id,s.id).first())return null;
  const collision=await env.CRM_DB.prepare("SELECT 1 AS found FROM calling_jobs WHERE provider_call_sid=? UNION ALL SELECT 1 AS found FROM verified_provider_call_costs WHERE provider_call_uuid=? LIMIT 1")
   .bind(s.provider_call_id,s.provider_call_id).first();
  if(collision)return null;
@@ -80,7 +81,7 @@ export async function settleIndustryCallCdr(env,{tenantId:tid,jobId:id,now=Date.
   if(!same(current,final))return denied('terminal_evidence_changed');
   const result=await closeMinuteHold(env.CONTROL_DB,{tenantId:tid,job:id,billedSeconds:cdr.billed_duration,
    kind:'verified_cdr',evidenceRef:'plivo-cdr:'+final.callUuid,now});
-  return {state:result.ok?'settled':result.state,recorded:out[0]?.meta?.changes===1,
+  return {state:result.ok?'settled':result.state==='settled'?'settlement_evidence_conflict':result.state,recorded:out[0]?.meta?.changes===1,
    clientCreditsDebited:result.ok&&cdr.billed_duration>0&&!result.replayed,
    chargedSeconds:result.ok?cdr.billed_duration:null,replayed:result.replayed===true,capacityReleased:false};
  }catch{return denied('settlement_unavailable')}

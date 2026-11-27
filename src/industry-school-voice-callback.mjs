@@ -37,6 +37,7 @@ function enabled(env){
 async function current(env,row,now){
  if(!enabled(env)||row.hangup_at!==null||row.expires_at<=now)fail('school_voice_disabled');
  const doc=parse(row),v=doc.industryVoice;
+ if(doc.phoneMeta.dispatchVersion===1&&!await env.CRM_DB.prepare("SELECT 1 AS ok FROM industry_dispatch_releases WHERE tenant_id=? AND job_id=? AND session_id=? AND state IN('posting','submitted','unknown')").bind(row.tenant_id,row.job_id,row.id).first())fail('school_dispatch_claim_unavailable');
  const hold=await env.CONTROL_DB.prepare("SELECT h.reserved_seconds,t.display_name FROM tenant_minute_holds h JOIN provider_cost_reservations p ON p.tenant_id=h.tenant_id AND p.job_id=h.job_id JOIN tenants t ON t.id=h.tenant_id WHERE h.tenant_id=? AND h.job_id=? AND h.state='held' AND h.reserved_seconds=p.reserved_seconds AND t.status='active'").bind(row.tenant_id,row.job_id).first();
  const created=Date.parse(row.created_at),company=hold?.display_name;
  if(!hold||!Number.isSafeInteger(hold.reserved_seconds)||hold.reserved_seconds<30||hold.reserved_seconds>600||
@@ -148,6 +149,18 @@ async function changePhase(env,row,phase,doc=row.survey_json){
 export async function handleSchoolVoiceCallback(env,config,row,step,arg,params,{now,fetcher,finishOptOut}){
  const clock=clockFrom(now),control=env.CONTROL_DB,call=params.get('CallUUID');
  if(!row.job_id||!idRE.test(call||''))return error('school_call_identity',403);
+ // Signed callback may arrive before POST response or after loss of it.
+ // Only an exact managed posting claim and signed outbound identity may bind.
+ if(!row.provider_request_id&&!arg&&['answer','hangup'].includes(step)){
+  let managed=false;try{managed=parse(row).phoneMeta.dispatchVersion===1}catch{}
+  const a=params.get('ALegRequestUUID'),b=params.get('RequestUUID'),request=a||b;
+  if(managed&&idRE.test(request||'')&&(!a||!b||a===b)&&targetMatches(row,params)&&
+     await env.CRM_DB.prepare("SELECT 1 AS ok FROM industry_dispatch_releases WHERE tenant_id=? AND job_id=? AND session_id=? AND state IN('posting','submitted','unknown')").bind(row.tenant_id,row.job_id,row.id).first()){
+   await control.prepare("UPDATE scripted_phone_pilots SET provider_request_id=? WHERE id=? AND provider_request_id IS NULL AND provider_call_id IS NULL AND phase IN('requested','unknown') AND hangup_at IS NULL").bind(request,row.id).run();
+   row=await latestRow(env,row.id);
+   if(!row)return end();
+  }
+ }
  if(step==='hangup'&&!arg){
   // Preserve signed termination evidence even if consent/enablement was revoked.
   if(row.provider_call_id?row.provider_call_id!==call:!requestMatches(row,params)||!targetMatches(row,params))return end();

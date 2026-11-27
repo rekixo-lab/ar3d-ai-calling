@@ -1,5 +1,5 @@
 export const industryCampaignJs=String.raw`
-// Production-only School campaigns. No start/dial control until funded runtime exists.
+// School preparation and separately authorized production dispatch.
 function industryCampaignPanel(tenantId,content,{admin=false,editable=false}={}){
  const card=div('card',title('School production campaigns','h3'),
   node('p',{class:'note',text:'Select a reviewed frozen School agent, add existing CRM contacts, and review each guardian’s permission for School Admission. These records do not start calls or reserve credits.'}));
@@ -66,12 +66,25 @@ function industryCampaignPanel(tenantId,content,{admin=false,editable=false}={})
     const baseQueue='/v1/human/industry-queue/'+encodeURIComponent(id),out=await api(baseQueue+query+'&offset='+jobOffset);
     if(!active(id,stamp))return;
     const controls=div('stack'),eligible=r.recipients.filter(x=>x.status==='review_current'&&!x.preparationBlocked&&!out.jobs.some(j=>j.leadId===x.leadId&&(j.state==='prepared'||j.reviewRevision===x.revision)));
-    queueBox.replaceChildren(title('Prepared calling jobs','h3'),node('p',{class:'note',text:'Preparation only. No carrier submission, credit reservation or automatic future dialing.'}),
+    queueBox.replaceChildren(title('Prepared calling jobs','h3'),node('p',{class:'note',text:out.dispatchEnabled?'Only explicitly authorized jobs enter the funded calling scheduler. Review every selected recipient.':'Preparation only. Production dispatch is disabled; no prepared or funding-only job will dial.'}),
      node('p',{class:'muted',text:out.manifestSha256?'Approved audio manifest recorded · '+out.manifestSha256.slice(0,12):'Approved audio pack is required before preparing jobs.'}),controls);
+    const releaseSelection=new Set();
     for(const j of out.jobs){
      const x=r.recipients.find(x=>x.leadId===j.leadId);
-     const line=div('card',node('p',{text:(x?.name||'CRM contact '+j.leadId.slice(0,8))+' · '+j.state+(j.terminalState==='settled'?' · settled / capacity released':j.state==='prepared'&&!j.current?' · stale / not eligible':'')+' · review v'+j.reviewRevision+' · funding admission '+j.admissionState.replaceAll('_',' ')}));
-     if(admin&&j.state==='prepared'&&j.current&&j.admissionState==='not_released'){
+     const line=div('card',node('p',{text:(x?.name||'CRM contact '+j.leadId.slice(0,8))+' · '+j.state+(j.terminalState==='settled'?' · settled / capacity released':j.terminalState==='not_submitted'?' · not submitted / unused reserve released':j.state==='prepared'&&!j.current?' · stale / not eligible':'')+' · review v'+j.reviewRevision+' · funding admission '+j.admissionState.replaceAll('_',' ')+' · dispatch '+(j.dispatchState||'not_authorized').replaceAll('_',' ')}));
+     if(admin&&out.dispatchEnabled&&j.current&&j.dispatchState==='not_authorized'&&['not_released','released','funded'].includes(j.admissionState)){
+      const pick=node('input',{type:'checkbox','aria-label':'Select reviewed job for explicit dispatch authorization'});
+      pick.addEventListener('change',()=>{if(pick.checked)releaseSelection.add(j.id);else releaseSelection.delete(j.id)});
+      line.append(lab('Select for dispatch authorization',pick));
+     }
+     if(j.terminalState==='settled'){
+      line.append(node('p',{text:'Connected '+(j.connectedSeconds??0)+'s · charged '+(j.chargedSeconds??0)+'s'}));
+      const resultBox=div('stack'),showResult=btn('View School call result',async()=>{
+       showResult.disabled=true;try{const x=await api('/v1/human/industry-results/'+encodeURIComponent(j.id)+query);if(!active(id,stamp))return;
+        resultBox.replaceChildren(node('p',{text:'Result: '+x.status.replaceAll('_',' ')}),...x.answers.map(a=>node('p',{text:a.question+' — '+a.answer})));}catch(e){asError(e)}finally{showResult.disabled=false}
+      },true);line.append(showResult,resultBox);
+     }
+     if(admin&&j.state==='prepared'&&j.current&&j.admissionState==='not_released'&&(!j.dispatchState||j.dispatchState==='not_authorized')){
       const reference=input('industryAdmission-'+j.id,'text','Reviewed funding authorization reference');reference.maxLength=160;
       const duration=node('select',{class:'field','aria-label':'Maximum call duration'},[90,120,150,180].map(n=>node('option',{value:String(n),text:String(n)+' seconds'})));duration.value='180';
       const expiry=input('industryAdmissionExpiry-'+j.id,'datetime-local','Funding admission expires');
@@ -91,6 +104,21 @@ function industryCampaignPanel(tenantId,content,{admin=false,editable=false}={})
       line.append(lab('Cancellation reason',why),cancel);
      }
      controls.append(line);
+    }
+    if(admin&&out.dispatchEnabled&&!archived){
+     const ref=input('industryDispatchReference','text','Explicit reviewed calling approval');ref.maxLength=160;
+     const seconds=node('select',{class:'field','aria-label':'Maximum call duration'},[90,120,150,180].map(n=>node('option',{value:String(n),text:String(n)+' seconds'})));seconds.value='180';
+     const expiry=input('industryDispatchExpiry','datetime-local','Dispatch authorization expires');
+     const release=btn('Authorize selected School calls',async()=>{
+      if(!active(id,stamp)||!releaseSelection.size||ref.value.trim().length<10||!expiry.value)return asError(Error('Select reviewed jobs and enter the explicit calling approval and expiry.'));
+      if(!confirm('Authorize real outbound calls to '+releaseSelection.size+' reviewed recipients, with shared wallet and provider costs. The scheduler will place calls only within the authorized window. Continue?'))return;
+      release.disabled=true;try{
+       const response=await api('/v1/human/industry-dispatch-release','POST',{tenantId,campaignId:id,jobIds:[...releaseSelection],manifestSha256:out.manifestSha256,maxSeconds:Number(seconds.value),expiresAt:new Date(expiry.value).toISOString(),approvalReference:ref.value.trim(),acknowledgeDialing:true});
+       notice(response.authorized+' jobs explicitly authorized. No immediate call; the bounded scheduler will recheck all conditions.');
+       if(active(id,stamp))await loadRecipients();
+      }catch(e){asError(e)}finally{release.disabled=false}
+     });
+     controls.append(lab('Calling approval reference',ref),lab('Maximum duration (must match any existing funding approval)',seconds),lab('Dispatch expiry (within one hour)',expiry),release);
     }
     const previousJobs=btn('Previous prepared jobs',()=>{if(!queueLoading){jobOffset=Math.max(0,jobOffset-50);loadJobs().catch(asError)}},true);
     const nextJobs=btn('Next prepared jobs',()=>{if(!queueLoading){jobOffset+=50;loadJobs().catch(asError)}},true);

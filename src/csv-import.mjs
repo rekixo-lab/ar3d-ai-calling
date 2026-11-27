@@ -76,10 +76,24 @@ function parseVisitDate(raw,line){
     throw Error('CSV row '+line+': invalid visit preference date');
   return raw;
 }
-export function parseLeadCsv(csv){
-  const rows=csvCells(csv),head=rows.shift().map(normalizeHeader);
+export const IMPORT_FIELDS=Object.freeze(Object.keys(HEADERS));
+export function parseLeadCsv(csv,{columnMap,headersOnly=false}={}){
+  const rows=csvCells(csv),rawHead=rows.shift(),head=rawHead.map(normalizeHeader);
+  if(headersOnly){
+    if(rows.some(row=>row.length!==head.length))throw Error('CSV column count mismatch');
+    if(rawHead.some(x=>x.length>160||/[\u0000-\u001f\u007f]/u.test(x)))throw Error('Invalid import header');
+    return {columns:rawHead.map((label,index)=>({index,label:label||'Column '+(index+1)})),fields:[...IMPORT_FIELDS]};
+  }
   const positions={};
-  for(const [field,aliases] of Object.entries(HEADERS)){
+  if(columnMap!==undefined){
+    if(!columnMap||typeof columnMap!=='object'||Array.isArray(columnMap)||
+       Object.keys(columnMap).some(k=>!IMPORT_FIELDS.includes(k))||
+       !Object.hasOwn(columnMap,'name')||!Object.hasOwn(columnMap,'mobile')||
+       Object.values(columnMap).some(i=>!Number.isInteger(i)||i<0||i>=head.length)||
+       new Set(Object.values(columnMap)).size!==Object.values(columnMap).length)
+      throw Error('Invalid column mapping: select distinct Name and Mobile columns and optional supported fields');
+    for(const field of IMPORT_FIELDS)positions[field]=Object.hasOwn(columnMap,field)?columnMap[field]:-1;
+  }else for(const [field,aliases] of Object.entries(HEADERS)){
     const found=head.map((v,i)=>aliases.includes(v)?i:-1).filter(i=>i!==-1);
     if(found.length>1)throw Error('Duplicate CSV header for '+field);
     positions[field]=found[0]??-1;

@@ -80,7 +80,7 @@ export async function readIndustryRecipientScope(env,{tenantId,campaignId,leadId
  const recipient=await db.prepare(recipientSelect+" WHERE a.tenant_id=? AND a.campaign_id=? AND a.lead_id=?").bind(tenantId,campaignId,leadId).first();
  const status=industryRecipientReviewStatus(recipient,now);
  if(status!=='review_current')throw Error('industry_recipient_'+status);
- return {campaignId,tenantId,leadId,purpose:campaign.purpose,snapshotId:campaign.snapshot_id,digest:campaign.graph_sha256,
+ return {campaignId,tenantId,leadId,launchRequestId:campaign.launch_request_id,purpose:campaign.purpose,snapshotId:campaign.snapshot_id,digest:campaign.graph_sha256,
   graph:snapshot.graph,reviewRevision:recipient.revision,destination:recipient.mobile_e164,leadUpdatedAt:recipient.updated_at,
   expiresAt:recipient.expires_at,dispatchReady:false};
 }

@@ -159,7 +159,7 @@ function asCsv(rows){
       const s=String(row[i]??'');return /[",\r\n]/.test(s)?'"'+s.replace(/"/g,'""')+'"':s;
     }).join(',')}).join('\n');
 }
-export async function parseLeadXlsx(bytes){
+export async function parseLeadXlsx(bytes,options){
   const entries=zipIndex(bytes);
   const read=async(path,required=true)=>{
     const entry=entries.get(path);if(!entry){if(required)fail('missing '+path);return ''}
@@ -172,13 +172,13 @@ export async function parseLeadXlsx(bytes){
   const strings=rawStrings?partsXml(rawStrings,'si').map(textRuns):[];
   const sheet=await read(sheetPath);
   const csv=asCsv(sheetCells(sheet,strings));
-  try{return parseLeadCsv(csv)}catch(e){fail(e.message)}
+  try{return parseLeadCsv(csv,options)}catch(e){fail(e.message)}
 }
-export async function parseLeadXlsxBase64(raw){
+export async function parseLeadXlsxBase64(raw,options){
   if(typeof raw!=='string'||raw.length>Math.ceil(MAX_XLSX_BYTES/3)*4||raw.length<24||!/^[A-Za-z0-9+/]+={0,2}$/.test(raw)||raw.length%4!==0)
     fail('invalid or oversized base64 data');
   let value;try{value=atob(raw)}catch{fail('invalid base64 data')}
   if(value.length>MAX_XLSX_BYTES)fail('XLSX exceeds 1 MB');
   const bytes=Uint8Array.from(value,c=>c.charCodeAt(0));
-  return parseLeadXlsx(bytes);
+  return parseLeadXlsx(bytes,options);
 }

@@ -2791,7 +2791,8 @@ async function crmWorkflow(tenantId,content,role,refreshContent=content){
     content.prepend(upload);
     const template=btn('Download customer Excel template (CSV)',()=>{const href=URL.createObjectURL(new Blob(['Name,Mobile\r\n'],{type:'text/csv;charset=utf-8'}));const a=node('a',{href,download:'ar3d-customer-template.csv'});document.body.append(a);a.click();a.remove();URL.revokeObjectURL(href)},true);upload.append(template);
     const picker=node('input',{class:'field',type:'file',accept:'.csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}),previewBox=div(''),csvBox=div('formrow',lab('Excel .xlsx or CSV file',picker));
-    let importData=null,requestId=null;
+    let importData=null,requestId=null,columnSelects=null;
+    const mapBox=div('stack');
     const importName=input('importCampaignName','text','Campaign name');
     importName.maxLength=80;
     const importLanguage=node('select',{class:'field'},[node('option',{value:'hi',text:'Hindi'}),node('option',{value:'en',text:'English'})]);
@@ -2806,25 +2807,45 @@ async function crmWorkflow(tenantId,content,role,refreshContent=content){
       let raw='';for(let i=0;i<bytes.length;i+=16384)raw+=String.fromCharCode(...bytes.subarray(i,i+16384));
       return {tenantId,format:'xlsx',xlsxBase64:btoa(raw)};
     }
+    function invalidateImport(){
+      importData=null;requestId=null;importActions.hidden=true;commitBtn.disabled=true;campaignBtn.disabled=true;previewBox.replaceChildren();
+    }
+    const inspectBtn=btn('Inspect & map columns',async()=>{
+      if(inspectBtn.disabled)return;
+      inspectBtn.disabled=true;previewBtn.disabled=true;picker.disabled=true;invalidateImport();mapBox.replaceChildren();columnSelects=null;
+      try{
+        const file=picker.files?.[0];if(!file)throw Error('Choose an Excel or CSV file');
+        const result=await api('/v1/human/import/columns','POST',await makeImportPayload(file));
+        columnSelects=new Map();
+        const labels={name:'Customer name (required)',mobile:'Mobile number (required)',location:'Location',budgetMin:'Minimum budget',budgetMax:'Maximum budget',requirement:'Requirements',customerSegment:'Customer type',plotSize:'Plot size',visitDate:'Visit preference'};
+        for(const field of result.fields){
+          const select=node('select',{class:'field','aria-label':labels[field]||field},[node('option',{value:'',text:'Not mapped'}),...result.columns.map(c=>node('option',{value:String(c.index),text:(c.index+1)+'. '+c.label}))]);
+          columnSelects.set(field,select);select.addEventListener('change',invalidateImport);mapBox.append(lab(labels[field]||field,select));
+        }
+        mapBox.prepend(node('p',{class:'note',text:'Choose Name and Mobile, plus optional fields. Unmapped columns are ignored; do not import private bank, account or identity details as contact requirements.'}));
+      }catch(e){columnSelects=null;mapBox.replaceChildren();asError(e)}
+      finally{inspectBtn.disabled=false;previewBtn.disabled=false;picker.disabled=false}
+    },true);
     const previewBtn=btn('Validate & Preview',async()=>{
       if(previewBtn.disabled)return;
-      previewBtn.disabled=true;picker.disabled=true;commitBtn.disabled=true;campaignBtn.disabled=true;importActions.hidden=true;
+      previewBtn.disabled=true;inspectBtn.disabled=true;picker.disabled=true;commitBtn.disabled=true;campaignBtn.disabled=true;importActions.hidden=true;
       try{
         const file=picker.files?.[0];if(!file)throw Error('Choose an Excel or CSV file');
         importData=await makeImportPayload(file);
+        if(columnSelects){const mapping=Object.fromEntries([...columnSelects].filter(([,select])=>select.value!=='').map(([field,select])=>[field,Number(select.value)]));importData.columnMap=mapping;}
         const result=await api('/v1/human/import/preview','POST',importData);
         previewBox.replaceChildren(node('p',{class:'success',text:result.rows+' valid rows; '+result.existingCount+' existing in CRM; '+result.wouldInsert+' potentially new.'}),
           table(['Name','Mobile','Customer type','Plot size','Visit preference'],result.preview.map(r=>
             [r.name,r.mobile,r.customerSegment,r.plotSizePreference||'—',r.visitDatePreference||'—'])));
         requestId=crypto.randomUUID();importActions.hidden=false;commitBtn.disabled=false;campaignBtn.disabled=false;
       }catch(e){importData=null;importActions.hidden=true;commitBtn.disabled=true;campaignBtn.disabled=true;previewBox.replaceChildren();asError(e)}
-      finally{previewBtn.disabled=false;picker.disabled=false}
+      finally{previewBtn.disabled=false;inspectBtn.disabled=false;picker.disabled=false}
     });
     async function commit(makeCampaign){
       if(importData===null)return;
       const name=importName.value.trim();
       if(makeCampaign&&!name)return notice('Enter a campaign name.',true);
-      commitBtn.disabled=true;campaignBtn.disabled=true;previewBtn.disabled=true;picker.disabled=true;
+      commitBtn.disabled=true;campaignBtn.disabled=true;previewBtn.disabled=true;inspectBtn.disabled=true;picker.disabled=true;
       try{
         const data=makeCampaign?{...importData,campaign:{name,language:importLanguage.value,requestId}}:importData;
         const result=await api('/v1/human/import/commit','POST',data);
@@ -2834,7 +2855,7 @@ async function crmWorkflow(tenantId,content,role,refreshContent=content){
         }else notice('Import finished: '+result.inserted+' new, '+result.skipped+' duplicates. No calls placed.');
         await renderClient(tenantId,refreshContent);
       }catch(e){asError(e);commitBtn.disabled=false;campaignBtn.disabled=false}
-      finally{previewBtn.disabled=false;picker.disabled=false}
+      finally{previewBtn.disabled=false;inspectBtn.disabled=false;picker.disabled=false}
     }
     const commitBtn=btn('Save customers only',()=>commit(false),true);
     const campaignBtn=btn('Import & prepare campaign',()=>commit(true));
@@ -2843,9 +2864,9 @@ async function crmWorkflow(tenantId,content,role,refreshContent=content){
     const importActions=div('stack',commitBtn,prepare);
     importActions.hidden=true;
     picker.addEventListener('change',()=>{
-      importData=null;requestId=null;prepare.open=false;importActions.hidden=true;commitBtn.disabled=true;campaignBtn.disabled=true;previewBox.replaceChildren();
+      importData=null;requestId=null;columnSelects=null;mapBox.replaceChildren();prepare.open=false;importActions.hidden=true;commitBtn.disabled=true;campaignBtn.disabled=true;previewBox.replaceChildren();
     });
-    csvBox.append(previewBtn);upload.append(csvBox,previewBox,importActions);
+    csvBox.append(inspectBtn,previewBtn);upload.append(csvBox,mapBox,previewBox,importActions);
     upload.append(node('p',{class:'muted',text:'A prepared campaign needs calling clearance before any customer is dialed.'}));
   }
   content.append(workflow);

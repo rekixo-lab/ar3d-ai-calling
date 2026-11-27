@@ -59,7 +59,7 @@ async function resolve(env,user,tenantId,write=false){
 export async function handleCrmRequest(req,env,user){
   const u=new URL(req.url),path=u.pathname,method=req.method;
   if(!path.startsWith('/v1/human/'))return null;
-  const importMatch=path==='/v1/human/import/preview'||path==='/v1/human/import/commit';
+  const importMatch=['/v1/human/import/preview','/v1/human/import/commit','/v1/human/import/columns'].includes(path);
   const leadMatch=path.match(/^\/v1\/human\/leads\/([0-9a-f-]{36})$/i);
   const optOutMatch=path.match(/^\/v1\/human\/leads\/([0-9a-f-]{36})\/opt-out$/i);
   // Manual single-customer POST belongs to the authenticated addLead handler in
@@ -78,7 +78,11 @@ export async function handleCrmRequest(req,env,user){
       if(d.format!==undefined&&!['csv','xlsx'].includes(d.format))return fail('Unsupported import format');
       if(isXlsx&&typeof d.xlsxBase64!=='string')return fail('XLSX file data required');
       if(!isXlsx&&typeof d.csv!=='string')return fail('CSV text required');
-      const rows=isXlsx?await parseLeadXlsxBase64(d.xlsxBase64):parseLeadCsv(d.csv),{db,tid}=access;
+      const headersOnly=path.endsWith('/columns');
+      if(headersOnly&&(d.columnMap!==undefined||d.campaign!==undefined))return fail('Invalid column inspection request');
+      const options={columnMap:d.columnMap,headersOnly};
+      const rows=isXlsx?await parseLeadXlsxBase64(d.xlsxBase64,options):parseLeadCsv(d.csv,options),{db,tid}=access;
+      if(headersOnly)return json({...rows,notice:'Map only supported CRM fields. No records, consent or calls are created.'});
       const campaign=d.campaign;
       if(campaign!==undefined&&(!campaign||typeof campaign!=='object'||Array.isArray(campaign)||
          Object.keys(campaign).some(key=>!['name','language','requestId'].includes(key))||

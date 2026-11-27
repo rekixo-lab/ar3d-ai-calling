@@ -130,3 +130,24 @@ test('Invalid followup datetime, visit in past and oversize CSV rejected',async(
   const huge=await worker.fetch(request('/v1/human/import/preview','POST',{tenantId,csv:'A'.repeat(513000)}),env);
   assert.equal(huge.status,400);
 });
+
+test('explicit CRM column mapping supports arbitrary headings without inferring consent or private fields',()=>{
+ const source='Phone Contact,Guardian,Class request,Account balance\n9876543210,Synthetic guardian,Grade 4,50000';
+ const columns=parseLeadCsv(source,{headersOnly:true});assert.equal(columns.columns.length,4);
+ const rows=parseLeadCsv(source,{columnMap:{name:1,mobile:0,requirement:2}});
+ assert.equal(rows[0].name,'Synthetic guardian');assert.equal(rows[0].mobile,'+919876543210');assert.equal(rows[0].requirement,'Grade 4');
+ assert.ok(!JSON.stringify(rows).includes('50000'));
+ for(const columnMap of [{name:1,mobile:1},{name:1,mobile:99},{name:1,mobile:0,consent:2},{name:1,mobile:0,accountBalance:3},{name:1},{name:'1',mobile:0}])assert.throws(()=>parseLeadCsv(source,{columnMap}),/Invalid column mapping/);
+});
+test('mapped CSV preview and commit use identical validation; inspection cannot write CRM',async()=>{
+ const e=fakeEnvironment();
+ const data={tenantId,format:'csv',csv:'Guardian,Contact\nSynthetic guardian,9876543210'};
+ let r=await worker.fetch(request('/v1/human/import/columns','POST',data),e.env);
+ assert.equal(r.status,200,await r.clone().text());assert.equal((await r.json()).columns[1].label,'Contact');
+ assert.ok(!e.log.some(x=>/INSERT INTO leads/i.test(x.sql)));
+ for(const action of ['preview','commit']){
+  r=await worker.fetch(request('/v1/human/import/'+action,'POST',{...data,columnMap:{name:0,mobile:0}}),e.env);assert.equal(r.status,400);
+ }
+ r=await worker.fetch(request('/v1/human/import/preview','POST',{...data,columnMap:{name:0,mobile:1}}),e.env);
+ assert.equal(r.status,200,await r.clone().text());assert.equal((await r.json()).preview[0].name,'Synthetic guardian');
+});
