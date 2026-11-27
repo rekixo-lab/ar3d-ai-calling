@@ -122,7 +122,7 @@ export function simulateFlowGraph(flow,{answers=[]}={}){
  if(!Array.isArray(answers)||answers.length>12||answers.some(a=>typeof a!=='string'||a.length>160||textBad.test(a)))
   throw Error('invalid_fictional_answers');
  const byId=new Map(flow.nodes.map(n=>[n.id,n]));
- const transcript=[],effects=[],state={lastAnswer:'',answersUsed:0},limit=50;
+ const transcript=[],effects=[],state={fields:Object.create(null),answersUsed:0},limit=50;
  let id=flow.start,status='simulation_incomplete';
  for(let step=0;step<limit;step++){
   const n=byId.get(id);
@@ -137,9 +137,11 @@ export function simulateFlowGraph(flow,{answers=[]}={}){
       n.type==='ask_choice'&&!n.choices.includes(reply)){
     status='invalid_fictional_answer';break;
    }
-   transcript.push({speaker:'fictional_customer',text:reply});state.lastAnswer=reply;id=n.next;continue;
+   transcript.push({speaker:'fictional_customer',text:reply});state.fields[n.field]=reply;id=n.next;continue;
   }
-  if(n.type==='branch_exact'){id=Object.hasOwn(n.branches,state.lastAnswer)?n.branches[state.lastAnswer]:n.otherwise;continue}
+  if(n.type==='branch_exact'){
+    const selected=state.fields[n.source];id=Object.hasOwn(n.branches,selected)?n.branches[selected]:n.otherwise;continue;
+   }
   if(n.type==='verify_recipient'){
    // NO real identity evidence can exist in this local-only simulation.
    effects.push('recipient_not_verified_in_demo');id=n.onFailure;continue;

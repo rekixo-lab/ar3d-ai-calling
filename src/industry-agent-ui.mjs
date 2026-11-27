@@ -54,6 +54,9 @@ function industryAgentPanel(tenantId,content,role){
  const frozenChoice=node('select',{class:'field','aria-label':'Frozen AI versions'});
  const frozenNotice=node('p',{class:'muted',role:'status',text:'Choose a saved draft to view frozen versions.'});
  const frozenResult=div('card');
+ const virtualTurnBox=div('card');
+ const virtualTurnResult=div('card');
+ const virtualTurnStatus=node('p',{class:'muted',role:'status',text:'Choose a frozen version and enter fictional answers to preview each virtual voice turn.'});
  const saveButton=btn('Save AI draft',async()=>{
   if(!editable||!activeDraft)return;
   let config;
@@ -132,6 +135,34 @@ function industryAgentPanel(tenantId,content,role){
   }catch(err){if(enabled())asError(err)}
   finally{frozenRehearsal.disabled=!editable||!frozenChoice.value}
  },true);
+ const virtualTurnButton=btn('Preview virtual voice turns (no calls)',async()=>{
+  if(!editable||!activeDraft||!frozenChoice.value)return;
+  const draftId=activeDraft.id,version=frozenChoice.value;
+  const answers=fictionalAnswers.value.split(/\r?\n/).map(x=>x.trim()).filter(Boolean);
+  if(answers.length>12||answers.some(x=>x.length>160)){
+   asError(Error('Use up to 12 fictional answers of 160 characters each.'));return;
+  }
+  virtualTurnButton.disabled=true;
+  try{
+   const out=await api('/v1/human/ai-flow-snapshots/'+encodeURIComponent(version)+'/voice-turn-preview',
+    'POST',{tenantId,answers});
+   if(!enabled()||activeDraft?.id!==draftId||frozenChoice.value!==version)return;
+   virtualTurnStatus.textContent='Virtual voice preview: '+out.status+' · '+out.answersUsed+
+    ' fictional answers · '+out.providerRequests+' real provider requests';
+   virtualTurnResult.replaceChildren(title('Virtual voice adapter commands (text only)','h3'),
+    node('p',{class:'muted',text:out.notice}),
+    ...(out.commands||[]).map(cmd=>node('p',{class:'muted',text:
+     cmd.kind==='would_speak_reviewed_text'?'AI would speak: '+cmd.text:
+     cmd.kind==='await_fictional_reply'?'Waiting for fictional reply #'+cmd.questionIndex:
+     'Virtual preview would end here.'})),
+    ...(out.effects||[]).map(x=>node('p',{class:'muted',text:'Not executed: '+x})));
+  }catch(err){if(enabled())asError(err)}
+  finally{virtualTurnButton.disabled=!editable||!frozenChoice.value}
+ },true);
+ virtualTurnButton.disabled=true;
+ virtualTurnBox.append(title('Virtual voice-turn preview — NO CALLS','h3'),
+  node('p',{class:'muted',text:'Add one fictional answer per line above, then preview the next voice turn. This is a virtual adapter contract only: no Plivo, Sarvam, R2, audio, CRM or credits are used.'}),
+  virtualTurnButton,virtualTurnStatus,virtualTurnResult);
  const refreshSnapshots=btn('Refresh frozen versions',()=>{
   if(activeDraft)loadSnapshots(activeDraft.id).catch(asError);
  },true);
@@ -142,6 +173,7 @@ function industryAgentPanel(tenantId,content,role){
     text:'Draft r'+x.draftRevision+' · '+x.review+' · '+x.digest.slice(0,8)})));
   frozenChoice.value=snapshots.some(x=>x.id===keep)?keep:'';
   frozenRehearsal.disabled=!editable||!frozenChoice.value;
+  virtualTurnButton.disabled=!editable||!frozenChoice.value;
  }
  async function loadSnapshots(draftId,selectId){
   const version=++snapshotSequence;
@@ -154,13 +186,14 @@ function industryAgentPanel(tenantId,content,role){
  }
  frozenChoice.addEventListener('change',()=>{
   frozenRehearsal.disabled=!editable||!frozenChoice.value;
-  frozenResult.replaceChildren();
+  virtualTurnButton.disabled=!editable||!frozenChoice.value;
+  frozenResult.replaceChildren();virtualTurnResult.replaceChildren();
  });
  snapshotsBox.append(title('Immutable simulation versions','h3'),
   node('p',{class:'muted',text:'Freeze a draft revision for review. Even a reviewed version cannot dial customers.'}),
   editable?freezeButton:null,lab('Frozen versions',frozenChoice),
   div('formrow',editable?frozenRehearsal:null,refreshSnapshots),
-  frozenNotice,frozenResult);
+  frozenNotice,frozenResult,virtualTurnBox);
  const refreshButton=btn('Refresh AI drafts',()=>load().catch(asError),true);
  const previewButton=btn('Preview AI script (no call)',()=>{updatePreview();preview.scrollIntoView({block:'nearest'})},true);
  const controls=div('formrow',previewButton,editable?saveButton:null,refreshButton);
@@ -194,7 +227,7 @@ function industryAgentPanel(tenantId,content,role){
  }
  function showEditor(){
   activeDraft=drafts.find(x=>x.id===activeId)||null;
-  fictionalAnswers.value='';simulation.replaceChildren();frozenResult.replaceChildren();
+  fictionalAnswers.value='';simulation.replaceChildren();frozenResult.replaceChildren();virtualTurnResult.replaceChildren();
   snapshots=[];snapshotSequence++;frozenChoice.replaceChildren();
   editBox.hidden=!activeDraft;
   if(!activeDraft)return;
@@ -207,7 +240,7 @@ function industryAgentPanel(tenantId,content,role){
   for(const field of [name,mode,language,greeting,questions,closing])field.disabled=readonly;
   saveButton.disabled=readonly;
   simulateButton.disabled=readonly;
-  freezeButton.disabled=readonly;frozenChoice.disabled=readonly;
+  freezeButton.disabled=readonly;frozenChoice.disabled=readonly;virtualTurnButton.disabled=readonly;
   fictionalAnswers.disabled=readonly;
   questionLabel.hidden=mode.value==='announcement';
   mode.onchange=()=>{questionLabel.hidden=mode.value==='announcement';updatePreview()};

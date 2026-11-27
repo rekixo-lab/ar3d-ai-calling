@@ -79,6 +79,22 @@ try{
   await page.getByRole('button',{name:'Rehearse frozen version (no calls)',exact:true}).click();
   await page.getByRole('heading',{name:'Frozen fictional rehearsal',exact:true}).waitFor();
   await page.getByText('Simulation only · simulated_complete · Draft r2',{exact:true}).waitFor();
+  // Simulate the *next* virtual speech turn from an immutable snapshot.
+  // These are text-only would-speak/would-wait instructions, not Plivo commands.
+  await page.getByLabel('Fictional conversation answers').fill('');
+  await page.getByRole('button',{name:'Preview virtual voice turns (no calls)',exact:true}).click();
+  await page.getByRole('heading',{name:'Virtual voice adapter commands (text only)',exact:true}).waitFor();
+  await page.getByText('Virtual voice preview: awaiting_fictional_reply · 0 fictional answers · 0 real provider requests',{exact:true}).waitFor();
+  await page.getByText('Waiting for fictional reply #1',{exact:true}).waitFor();
+  await page.getByLabel('Fictional conversation answers').fill('Yes');
+  await page.getByRole('button',{name:'Preview virtual voice turns (no calls)',exact:true}).click();
+  await page.getByText('Virtual voice preview: awaiting_fictional_reply · 1 fictional answers · 0 real provider requests',{exact:true}).waitFor();
+  await page.getByText('Waiting for fictional reply #2',{exact:true}).waitFor();
+  await page.getByLabel('Fictional conversation answers').fill(['Yes','Class 5','Please call me'].join('\n'));
+  await page.getByRole('button',{name:'Preview virtual voice turns (no calls)',exact:true}).click();
+  await page.getByText('Virtual voice preview: virtual_preview_complete · 3 fictional answers · 0 real provider requests',{exact:true}).waitFor();
+  await page.getByText('Virtual preview would end here.',{exact:true}).waitFor();
+
   assert.equal(f.c.db.prepare('SELECT COUNT(*) AS n FROM ai_flow_snapshots').get().n,1);
   assert.equal(f.c.db.prepare('SELECT COUNT(*) AS n FROM ai_flow_preview_reviews').get().n,0);
 
