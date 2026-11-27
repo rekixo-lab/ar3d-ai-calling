@@ -87,7 +87,7 @@ async function responseJson(response){
  finally{reader.releaseLock()}
 }
 async function request(credentials,path,{fetcher,method='GET',body,stage}={}){
- if(!/^(list-page-(?:[1-9]|1[0-9]|2[01])|create|detail|consumer-detail)$/.test(stage||''))stop('Cloudflare queue request stage is invalid.');
+ if(!/^(list-page-(?:[1-9]|1[0-9]|2[01])|create|detail|consumer-detail|consumer-list)$/.test(stage||''))stop('Cloudflare queue request stage is invalid.');
  let response;
  try{
   response=await fetcher(API+'/accounts/'+credentials.account+'/queues'+path,{
@@ -112,7 +112,7 @@ async function request(credentials,path,{fetcher,method='GET',body,stage}={}){
  // and relationship validation remain mandatory below.
  if(!record(data)||data.success!==undefined&&data.success!==true||
   data.errors!==undefined&&data.errors!==null&&(!Array.isArray(data.errors)||data.errors.length)||
-  (stage.startsWith('list-page-')?!Array.isArray(data.result):!record(data.result)))
+  ((stage.startsWith('list-page-')||stage==='consumer-list')?!Array.isArray(data.result):!record(data.result)))
   throw new QueueEnsureError('Cloudflare did not confirm the queue request; deployment was stopped.'+diagnostic,{status:response.status,kind:'response'});
  return data;
 }
@@ -143,33 +143,62 @@ export async function findWhatsAppQueue(credentials,{fetcher=fetch}={}){
  }
  stop('Cloudflare queue listing exceeded the bounded account inventory; deployment was stopped.');
 }
+function consumerShape(value,expectedId){
+ const label=(v,w)=>v===undefined?'missing':v===null?'null':v===w?'expected':'other';
+ return ' [id='+label(value?.consumer_id,expectedId)+
+  '; type='+label(value?.type,'worker')+
+  '; worker='+label(value?.script_name,CALLING_WORKER_NAME)+
+  '; queue='+label(value?.queue_name,WHATSAPP_QUEUE_NAME)+
+  '; dead_letter='+(value?.dead_letter_queue===undefined?'missing':value?.dead_letter_queue===null?'null':value.dead_letter_queue===''?'empty':'configured')+']';
+}
+function safeConsumerFields(value,consumerId){
+ return record(value)&&
+  (value.consumer_id===undefined||value.consumer_id===consumerId)&&
+  (value.type===undefined||value.type==='worker')&&
+  (value.queue_name===undefined||value.queue_name===WHATSAPP_QUEUE_NAME)&&
+  [undefined,null,''].includes(value.dead_letter_queue);
+}
 async function detail(credentials,queue,{fetcher}){
  const data=await request(credentials,'/'+queue.queue_id,{fetcher,stage:'detail'});
  const value=data.result;
- // Cloudflare's queue summary can omit optional consumer identity fields.
- // Only a verified consumer ID may be followed with the documented read-only
- // consumer GET, and the full response must match our exact worker identity.
  if(!record(value)||value.queue_id!==queue.queue_id||value.queue_name!==WHATSAPP_QUEUE_NAME)
   stop('Cloudflare returned a different queue identity; deployment was stopped.');
  const consumers=relationshipList(value,'consumers');
  if(consumers.length>2)stop('WhatsApp queue has too many consumers to safely verify.');
  const verified=[];
+ let listed;
  for(const consumer of consumers){
   if(!record(consumer)||consumer.type!=='worker')
    stop('WhatsApp queue has an unexpected consumer type.');
-  if(consumer.script_name===undefined){
-   if(!ID.test(consumer.consumer_id||''))stop('Cloudflare queue consumer identity was omitted; deployment was stopped.');
-   const response=await request(credentials,'/'+queue.queue_id+'/consumers/'+consumer.consumer_id,{fetcher,stage:'consumer-detail'});
-   const full=response.result;
-   if(!record(full)||full.consumer_id!==consumer.consumer_id||full.type!=='worker'||full.script_name!==CALLING_WORKER_NAME||
-     full.queue_name!==undefined&&full.queue_name!==WHATSAPP_QUEUE_NAME||
-     ![undefined,null,''].includes(full.dead_letter_queue))
-    stop('Cloudflare queue consumer detail did not confirm the dedicated Worker; deployment was stopped.');
-   if(consumer.queue_name!==undefined&&consumer.queue_name!==WHATSAPP_QUEUE_NAME||
-     ![undefined,null,''].includes(consumer.dead_letter_queue))
-    stop('Cloudflare queue summary contained a foreign relationship; deployment was stopped.');
-   verified.push({...consumer,...full});
-  }else verified.push(consumer);
+  if(consumer.script_name!==undefined){verified.push(consumer);continue;}
+  if(!ID.test(consumer.consumer_id||''))
+   stop('Cloudflare queue consumer identity was omitted; deployment was stopped.');
+  if(!safeConsumerFields(consumer,consumer.consumer_id))
+   stop('Cloudflare queue summary contained a foreign relationship; deployment was stopped.');
+  const response=await request(credentials,'/'+queue.queue_id+'/consumers/'+consumer.consumer_id,{fetcher,stage:'consumer-detail'});
+  const full=response.result;
+  if(!safeConsumerFields(full,consumer.consumer_id)||full.script_name!==undefined&&full.script_name!==CALLING_WORKER_NAME)
+   stop('Cloudflare queue consumer detail is not the dedicated Worker; deployment was stopped.'+consumerShape(full,consumer.consumer_id));
+  // Cloudflare documents consumer_id, type, script_name and queue_name as
+  // optional in GET replies. The URL supplies the exact consumer identity.
+  // If GET omits the script name as well, independently verify through the
+  // read-only consumer LIST endpoint, matching all consumer IDs before use.
+  let ownerName=full.script_name;
+  if(ownerName===undefined){
+   if(listed===undefined){
+    const listing=await request(credentials,'/'+queue.queue_id+'/consumers',{fetcher,stage:'consumer-list'});
+    listed=listing.result;
+    if(!Array.isArray(listed)||listed.length!==consumers.length||listed.length>2||
+       new Set(listed.map(x=>x?.consumer_id)).size!==listed.length||
+       listed.some(x=>!record(x)||!consumers.some(c=>c.consumer_id===x.consumer_id)))
+     stop('Cloudflare queue consumer listing cannot be reconciled with the queue identity; deployment was stopped.');
+   }
+   const item=listed.find(x=>x.consumer_id===consumer.consumer_id);
+   if(!safeConsumerFields(item,consumer.consumer_id)||item.script_name!==CALLING_WORKER_NAME)
+    stop('Cloudflare consumer listing did not confirm the dedicated Worker; deployment was stopped.'+consumerShape(item,consumer.consumer_id));
+   ownerName=item.script_name;
+  }
+  verified.push({...consumer,...full,consumer_id:consumer.consumer_id,type:'worker',script_name:ownerName});
  }
  return validateWhatsAppQueue({...value,consumers:verified},{expectedId:queue.queue_id});
 }
