@@ -86,6 +86,24 @@ test('rejects extra replies, malformed choices, control characters and privacy g
  assert.deepEqual(runVirtualVoiceTurns(branch,{answers:['yes']}).effects,['hypothetical_human_task:admission_callback']);
  assert.deepEqual(runVirtualVoiceTurns(branch,{answers:['no']}).effects,['hypothetical_outcome:not_interested']);
  assert.throws(()=>runVirtualVoiceTurns(branch,{answers:['maybe']}),/fictional_voice_choice/);
+
+ // Declared source wins even when a different field was answered more recently.
+ const later={...g,nodes:[
+  {id:'start',type:'greeting',text:'Fictional admissions',next:'first'},
+  {id:'first',type:'ask_choice',text:'Admission interest?',field:'interest',
+   choices:['yes','no'],next:'second'},
+  {id:'second',type:'ask_choice',text:'Campus?',field:'campus',
+   choices:['north','south'],next:'decide'},
+  {id:'decide',type:'branch_exact',source:'interest',branches:{yes:'task'},otherwise:'reject'},
+  {id:'task',type:'create_human_task',kind:'admission_callback',next:'end'},
+  {id:'reject',type:'save_reviewed_outcome',outcome:'not_interested',next:'end'},
+  {id:'end',type:'end_call'}
+ ]};
+ assert.deepEqual(runVirtualVoiceTurns(later,{answers:['yes','north']}).effects,
+  ['hypothetical_human_task:admission_callback']);
+ assert.deepEqual(runVirtualVoiceTurns(later,{answers:['no','south']}).effects,
+  ['hypothetical_outcome:not_interested']);
+
  const base=compileDraftToFlow(defaultIndustryAgentDraft('finance_due_notice_v1'));
  const finance={...base,nodes:[
   {id:'start',type:'greeting',text:'Generic service notification',next:'verify'},

@@ -29,7 +29,8 @@ export function runVirtualVoiceTurns(flow,{answers=[]}={}){
   throw Error('invalid_fictional_voice_answers');
  const byId=new Map(flow.nodes.map(n=>[n.id,n]));
  const transcript=[],commands=[],effects=[];
- let cursor=flow.start,lastReply='',used=0;
+ let cursor=flow.start,used=0;
+ const fictionalFields=Object.create(null);
  for(let steps=0;steps<48;steps++){
   const node=byId.get(cursor);
   if(!node)throw Error('invalid_virtual_voice_graph');
@@ -53,11 +54,12 @@ export function runVirtualVoiceTurns(flow,{answers=[]}={}){
     throw Error('invalid_fictional_voice_choice');
    used++;
    transcript.push({speaker:'fictional_person',text:reply});
-   lastReply=reply;
+   fictionalFields[node.field]=reply;
    cursor=node.next;continue;
   }
   if(node.type==='branch_exact'){
-   cursor=Object.hasOwn(node.branches,lastReply)?node.branches[lastReply]:node.otherwise;
+   const selected=fictionalFields[node.source];
+   cursor=Object.hasOwn(node.branches,selected)?node.branches[selected]:node.otherwise;
    continue;
   }
   if(node.type==='verify_recipient'){
