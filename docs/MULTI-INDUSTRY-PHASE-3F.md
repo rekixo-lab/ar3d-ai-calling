@@ -57,7 +57,7 @@ or migrations directory. No remote commands run in regular CI.
 ## Initialize fictional operator flow (while all paid flags remain disabled)
 
 Configure independent stage auth secrets MFA_ENCRYPTION_KEY,
-LOGIN_RATE_LIMIT_SECRET and MFA_RECOVERY_PEPPER as required by existing auth.
+and LOGIN_RATE_LIMIT_SECRET as required by existing auth.
 Set a random stage-only AR3D_SCHOOL_STAGE_BOOTSTRAP_TOKEN (>=32 chars) and
 temporarily enable AR3D_SCHOOL_STAGE_BOOTSTRAP_ENABLED=approved in Worker settings.
 POST /v1/human/bootstrap with Authorization Bearer stage bootstrap token,
