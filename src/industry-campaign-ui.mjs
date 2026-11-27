@@ -70,7 +70,7 @@ function industryCampaignPanel(tenantId,content,{admin=false,editable=false}={})
      node('p',{class:'muted',text:out.manifestSha256?'Approved audio manifest recorded · '+out.manifestSha256.slice(0,12):'Approved audio pack is required before preparing jobs.'}),controls);
     for(const j of out.jobs){
      const x=r.recipients.find(x=>x.leadId===j.leadId);
-     const line=div('card',node('p',{text:(x?.name||'CRM contact '+j.leadId.slice(0,8))+' · '+j.state+(j.state==='prepared'&&!j.current?' · stale / not eligible':'')+' · review v'+j.reviewRevision+' · funding admission '+j.admissionState.replaceAll('_',' ')}));
+     const line=div('card',node('p',{text:(x?.name||'CRM contact '+j.leadId.slice(0,8))+' · '+j.state+(j.terminalState==='settled'?' · settled / capacity released':j.state==='prepared'&&!j.current?' · stale / not eligible':'')+' · review v'+j.reviewRevision+' · funding admission '+j.admissionState.replaceAll('_',' ')}));
      if(admin&&j.state==='prepared'&&j.current&&j.admissionState==='not_released'){
       const reference=input('industryAdmission-'+j.id,'text','Reviewed funding authorization reference');reference.maxLength=160;
       const duration=node('select',{class:'field','aria-label':'Maximum call duration'},[90,120,150,180].map(n=>node('option',{value:String(n),text:String(n)+' seconds'})));duration.value='180';

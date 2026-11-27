@@ -13,7 +13,7 @@ import {handleSchoolAudioPreparation,readApprovedSchoolAudioPack} from '../src/i
 import {handleIndustryCallQueue,readPreparedIndustryJob} from '../src/industry-call-queue.mjs';
 import {handleIndustryAdmission,claimFundedIndustryAdmission} from '../src/industry-funded-admission.mjs';
 import {commercialCapacityRows} from '../src/commercial-capacity.mjs';
-import {settleIndustryCallCdr} from '../src/industry-cdr-settlement.mjs';
+import {settleIndustryCallCdr,closeSettledIndustryCapacity} from '../src/industry-cdr-settlement.mjs';
 import {runScriptedCampaignCron} from '../src/scripted-campaign-dispatch.mjs';
 import {setup as setupProperty,route as callingRoute} from './helpers/calling-fixture.mjs';
 const version='abababab-abab-4bab-8bab-abababababab',flow='cdcdcdcd-cdcd-4dcd-8dcd-cdcdcdcdcdcd';
@@ -582,4 +582,75 @@ test('School CDR rejects provider identity mismatch and preserves holds for unsu
    assert.equal(f.r.db.prepare('SELECT COUNT(*) AS n FROM verified_industry_call_costs').get().n,mode==='mismatch'?0:1);
   }finally{f.close()}
  }
+});
+
+test('settled industry closure is atomic and replay-safe; only the exact closed slot disappears',async()=>{
+ const f=await industryCdrFixture();try{
+  const close=(overrides={})=>closeSettledIndustryCapacity(f.env,{tenantId:tid,jobId:f.id,now:f.hangup+180000,...overrides});
+  assert.equal((await close()).state,'terminal_receipt_unavailable');
+  assert.equal(f.reads(),0);
+  const occupied=()=>f.r.db.prepare('SELECT COUNT(*) AS n FROM ('+commercialCapacityRows+')').get().n;
+  assert.equal(occupied(),1);
+  assert.equal((await f.settle()).state,'settled');
+  assert.equal(occupied(),1,'settlement alone must not drop a slot');
+  const closed=await Promise.all([close(),close()]);
+  assert.ok(closed.every(x=>x.state==='closed'&&x.capacityReleased&&!x.clientCreditsDebited),JSON.stringify(closed));
+  assert.equal(closed.filter(x=>!x.replayed).length,1);
+  assert.equal(f.reads(),1,'closure makes no provider GET');
+  assert.equal(occupied(),0);
+  assert.equal(f.hold().charged_seconds,60);
+  assert.equal(f.r.db.prepare('SELECT COUNT(*) AS n FROM industry_terminal_closures').get().n,1);
+  assert.equal(f.r.db.prepare("SELECT COUNT(*) AS n FROM crm_audit_events WHERE action='industry.capacity_closed'").get().n,1);
+  assert.throws(()=>f.r.db.prepare('UPDATE industry_terminal_closures SET billed_seconds=90').run(),/immutable/);
+  assert.throws(()=>f.r.db.prepare('DELETE FROM industry_terminal_closures').run(),/immutable/);
+  assert.equal((await f.claim()).state,'release_unavailable');
+  assert.equal((await f.queue('/cancel',{tenantId:tid,jobId:f.id,reason:'Synthetic terminal cancellation'},client,'POST')).status,409);
+  const out=await (await f.queue('',{tenantId:tid},client,'GET',f.hangup+180000)).json();
+  assert.equal(out.jobs[0].terminalState,'settled');assert.equal(out.jobs[0].capacityReleased,true);
+  assert.equal(out.jobs[0].current,false);assert.equal(out.dispatchReady,false);
+  // The real property scheduler uses the same occupancy and overlap SQL.
+  // This is a mocked, fictional carrier POST, not a live call.
+  let posts=0;
+  const r=await runScriptedCampaignCron(f.env,{now:f.hangup+180000,apiFetch:async(url,opts)=>{
+   assert.equal(opts.method,'POST');assert.equal(opts.redirect,'manual');posts++;
+   return Response.json({request_uuid:'synthetic-property-after-industry-closure'},{status:202});
+  },settings:{maxConcurrent:1,maxPerCompany:1,queryBudget:950}});
+  assert.equal(r.dialed,1,JSON.stringify(r));assert.equal(posts,1);
+  assert.equal(occupied(),1,'the new property call now owns the shared slot');
+ }finally{f.close()}
+});
+test('unsettled, conflicting or unsigned industry evidence never releases capacity',async()=>{
+ for(const mode of ['overreserve','pulse','foreign','unsigned','wrong-hold','not-settled']){
+  const f=await industryCdrFixture();try{
+   const close=(overrides={})=>closeSettledIndustryCapacity(f.env,{tenantId:tid,jobId:f.id,now:f.hangup+180000,...overrides});
+   if(mode==='overreserve')assert.equal((await f.settle({...f.good,billed_duration:210})).state,'over_reserve_review');
+   else if(mode==='pulse')assert.equal((await f.settle({...f.good,billed_duration:61})).state,'billing_pulse_review');
+   else if(mode==='not-settled'){
+    // A valid immutable observation is not proof the Control hold closed.
+    f.r.db.prepare('INSERT INTO verified_industry_call_costs(tenant_id,job_id,session_id,provider_request_id,provider_call_uuid,reported_amount,billed_seconds,call_seconds,hangup_at,verified_at) VALUES(?,?,?,?,?,?,?,?,?,?)')
+     .run(tid,f.id,session,request,call,f.good.total_amount,60,40,f.hangup,iso(f.hangup+120000));
+   }else if(mode==='wrong-hold'){
+    f.r.db.prepare('INSERT INTO verified_industry_call_costs(tenant_id,job_id,session_id,provider_request_id,provider_call_uuid,reported_amount,billed_seconds,call_seconds,hangup_at,verified_at) VALUES(?,?,?,?,?,?,?,?,?,?)')
+     .run(tid,f.id,session,request,call,f.good.total_amount,60,40,f.hangup,iso(f.hangup+120000));
+    f.c.db.prepare("UPDATE tenant_minute_holds SET state='settled',charged_seconds=60,evidence_ref='wrong-evidence',closed_at=? WHERE tenant_id=? AND job_id=?").run(iso(f.hangup+120000),tid,f.id);
+   }else{
+    assert.equal((await f.settle()).state,'settled');
+    if(mode==='unsigned')f.c.db.prepare('UPDATE scripted_phone_pilots SET hangup_at=NULL WHERE id=?').run(session);
+   }
+   const r=await close(mode==='foreign'?{tenantId:'99999999-9999-4999-8999-999999999999'}:{});
+   assert.equal(r.capacityReleased,false,mode+': '+JSON.stringify(r));
+   assert.equal(f.r.db.prepare('SELECT COUNT(*) AS n FROM industry_terminal_closures').get().n,0);
+   assert.equal(f.r.db.prepare('SELECT COUNT(*) AS n FROM ('+commercialCapacityRows+')').get().n,1);
+  }finally{f.close()}
+ }
+});
+test('terminal closure SQL independently rejects missing or mismatched immutable CDR receipt',async()=>{
+ const f=await industryCdrFixture();try{
+  const insert=(seconds=60)=>f.r.db.prepare('INSERT INTO industry_terminal_closures(tenant_id,job_id,session_id,provider_call_uuid,hangup_at,billed_seconds,settled_at,closed_at) VALUES(?,?,?,?,?,?,?,?)')
+   .run(tid,f.id,session,call,f.hangup,seconds,iso(f.hangup+120000),iso(f.hangup+180000));
+  assert.throws(()=>insert(),/invalid industry terminal evidence|FOREIGN KEY/);
+  assert.equal((await f.settle()).state,'settled');
+  assert.throws(()=>insert(90),/invalid industry terminal evidence/);
+  assert.equal(f.r.db.prepare('SELECT COUNT(*) AS n FROM industry_terminal_closures').get().n,0);
+ }finally{f.close()}
 });
