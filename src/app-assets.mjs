@@ -2468,7 +2468,30 @@ function callingCapacityPanel(main){
   catch(err){asError(err)}finally{save.disabled=false}});
  api('/v1/human/calling/capacity').then(show).catch(()=>{info.textContent='Capacity unavailable. Sign in again with current two-factor authentication.'});
 }
+function callingEmergencyPausePanel(main){
+ const card=div('card',title('Emergency calling pause'));
+ const status=node('p',{class:'muted',role:'status',text:'Loading dispatch interlock…'});
+ const reason=input('dispatchPauseReason','text','Incident or review reference (no personal data)');
+ reason.minLength=10;reason.maxLength=160;reason.required=true;
+ const toggle=node('button',{class:'btn',type:'submit',text:'Pause new campaign calls'});toggle.disabled=true;
+ const form=node('form',{class:'stack'},[lab('Reason for dispatch pause or resume',reason),toggle]);
+ card.append(node('p',{class:'note',text:'Stops NEW customer campaign calls across all companies. Already accepted calls may finish; hangup, opt-out and billing reconciliation continue. Resume does not grant credits or consent.'}),status,form);main.append(card);
+ let current=null,busy=false;
+ const show=d=>{current=d;status.textContent=d.paused?'New campaign calls paused globally · '+d.reason:'No operator pause. All funding, provider and consent checks still apply.';
+  toggle.textContent=d.paused?'Resume new campaign calls':'Pause new campaign calls';toggle.disabled=busy;};
+ async function refresh(){try{show(await api('/v1/human/calling/emergency-pause'))}catch{current=null;status.textContent='Dispatch pause status unavailable. Current Super Admin MFA required.';toggle.disabled=true}}
+ form.addEventListener('submit',async e=>{
+  e.preventDefault();if(busy||!current||reason.value.trim().length<10)return;
+  const pause=!current.paused;
+  if(!confirm(pause?'Pause all NEW customer campaign calls? Existing accepted calls may finish.':'Remove the operator pause? Eligible funded, approved campaigns may resume.'))return;
+  busy=true;toggle.disabled=true;
+  try{show(await api('/v1/human/calling/emergency-pause','POST',{paused:pause,expectedRevision:current.revision,reason:reason.value.trim()}));reason.value='';notice(pause?'New campaign calls paused.':'Operator pause removed.')}
+  catch(err){asError(err);await refresh()}finally{busy=false;toggle.disabled=!current}
+ });
+ refresh();
+}
 async function callingAdminPanel(main,client=null){
+ callingEmergencyPausePanel(main);
  const tools=node('details',{class:'card'},node('summary',{text:'Internal test and platform settings'}));
  tools.append(scriptedPhonePilotPanel());
  callingCapacityPanel(tools);

@@ -8,7 +8,8 @@ import {normalizePropertySurvey,surveyToCrm,fixedPropertyQuestions} from './fixe
 import {FUNDING_CONTEXT} from './funding-context.mjs';
 import {createSarvamContextualAdapter} from './sarvam-contextual.mjs';
 import {addVoiceTiming,summarizeVoiceTiming} from './voice-timing.mjs';
-import {providerFaultBlocked,recordProviderFault} from './provider-safety.mjs';
+import {recordProviderFault} from './provider-safety.mjs';
+import {campaignDispatchInterlock} from './calling-dispatch-pause.mjs';
 import {ANSWER_MAX_BYTES,answerContentType,readBoundedBytes,supportsAnswerAudio,speechFailureCode,transcribeSarvamRecordedAnswer} from './scripted-speech.mjs';
 
 const ADMIN='/v1/human/scripted-phone-pilot',HOOK='/v1/provider/plivo/scripted-pilot';
@@ -382,11 +383,12 @@ export async function submitScriptedPhone(control,config,id,destination,maxSecon
  // ring_timeout stops unanswered ringing; hangup_on_ring schedules a hangup
  // from the start of ringing even if the recipient has answered (6000).
  try{
-  if(commercial&&await providerFaultBlocked(control)){
+  const gate=commercial?await campaignDispatchInterlock(control):{paused:false,providerBlocked:false};
+  if(gate.providerBlocked){
    const stopped=await control.prepare("UPDATE scripted_phone_pilots SET phase='rejected' WHERE id=? AND phase='requested' AND provider_request_id IS NULL AND provider_call_id IS NULL").bind(id).run();
    return stopped.meta.changes===1?'rejected':'unknown';
   }
-  if(commercial&&beforeSubmit&&!await beforeSubmit()){
+  if(gate.paused||(commercial&&beforeSubmit&&!await beforeSubmit())){
    // No carrier POST has been attempted. Release only an untouched session.
    const stopped=await control.prepare("UPDATE scripted_phone_pilots SET phase='rejected',survey_json=json_set(survey_json,'$.phoneMeta.preSubmissionBlocked',1) WHERE id=? AND phase='requested' AND provider_request_id IS NULL AND provider_call_id IS NULL").bind(id).run();
    return stopped.meta.changes===1?'cancelled':'unknown';

@@ -463,6 +463,8 @@ try{
 
  // Platform capacity card: matches Plivo/Sarvam limits, shared fairly by all companies.
  await adminPage.getByRole('heading',{name:'Calling capacity',exact:true}).waitFor();
+ await adminPage.getByRole('heading',{name:'Emergency calling pause',exact:true}).waitFor();
+ await adminPage.getByText('No operator pause. All funding, provider and consent checks still apply.',{exact:true}).waitFor();
  await adminPage.getByText(/Occupied calling slots: 0 \/ 8 · Reserved\/submitted: 0 · Uncertain: 0/).waitFor();
  await adminPage.getByLabel('Calls at once, all companies (1–2000)',{exact:true}).fill('40');
  await adminPage.getByLabel('Calls at once, one company (1–500)',{exact:true}).fill('5');
