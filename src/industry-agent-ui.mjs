@@ -8,6 +8,7 @@ function industryAgentPanel(tenantId,content,role){
  const profileBox=div('card'),listBox=div('card'),editBox=div('card');
  content.append(card,profileBox,listBox,editBox);
  let templates=[],drafts=[],activeId='',activeDraft=null,profileRevision=0,sequence=0;
+ let snapshots=[],snapshotSequence=0;
  const enabled=()=>card.isConnected&&content.isConnected;
  const choose=node('select',{class:'field','aria-label':'New AI template'});
  const business=node('select',{class:'field','aria-label':'Business industry'});
@@ -49,6 +50,10 @@ function industryAgentPanel(tenantId,content,role){
  const preview=div('card');
  const fictionalAnswers=node('textarea',{class:'field',rows:'3','aria-label':'Fictional conversation answers',maxlength:'2000'});
  const simulation=div('card');
+ const snapshotsBox=div('card');
+ const frozenChoice=node('select',{class:'field','aria-label':'Frozen AI versions'});
+ const frozenNotice=node('p',{class:'muted',role:'status',text:'Choose a saved draft to view frozen versions.'});
+ const frozenResult=div('card');
  const saveButton=btn('Save AI draft',async()=>{
   if(!editable||!activeDraft)return;
   let config;
@@ -92,6 +97,70 @@ function industryAgentPanel(tenantId,content,role){
   }catch(err){if(enabled())asError(err)}
   finally{simulateButton.disabled=false}
  },true);
+ const freezeButton=btn('Freeze draft for simulation review',async()=>{
+  if(!editable||!activeDraft)return;
+  try{
+   if(JSON.stringify(editorValue())!==JSON.stringify(activeDraft.config))
+    throw Error('Save your latest edits before freezing.');
+  }catch(err){asError(err);return}
+  const source=activeDraft.id;freezeButton.disabled=true;
+  try{
+   const r=await api('/v1/human/ai-flow-snapshots','POST',
+    {tenantId,flowId:source,baseRevision:activeDraft.revision});
+   if(!enabled()||activeDraft?.id!==source)return;
+   await loadSnapshots(source,r.snapshot.id);
+  }catch(err){if(enabled())asError(err)}
+  finally{freezeButton.disabled=!editable}
+ },true);
+ const frozenRehearsal=btn('Rehearse frozen version (no calls)',async()=>{
+  if(!editable||!activeDraft||!frozenChoice.value)return;
+  const expected=activeDraft.id,version=frozenChoice.value;
+  const answers=fictionalAnswers.value.split(/\r?\n/).map(x=>x.trim()).filter(Boolean);
+  if(answers.length>12||answers.some(x=>x.length>160)){
+   asError(Error('Enter up to 12 fictional replies of 160 characters each.'));return;
+  }
+  frozenRehearsal.disabled=true;
+  try{
+   const r=await api('/v1/human/ai-flow-snapshots/'+encodeURIComponent(version)+'/simulate',
+    'POST',{tenantId,answers});
+   if(!enabled()||activeDraft?.id!==expected||frozenChoice.value!==version)return;
+   frozenResult.replaceChildren(title('Frozen fictional rehearsal','h3'),
+    node('p',{class:'note',text:'Simulation only · '+r.status+' · Draft r'+r.snapshot.draftRevision}),
+    ...r.transcript.map(x=>node('p',{class:'muted',
+     text:(x.speaker==='draft_ai'?'Draft AI: ':'Fictional person: ')+x.text})),
+    node('p',{class:'muted',text:'No phone call, AI provider, account lookup or wallet charge.'}));
+  }catch(err){if(enabled())asError(err)}
+  finally{frozenRehearsal.disabled=!editable||!frozenChoice.value}
+ },true);
+ const refreshSnapshots=btn('Refresh frozen versions',()=>{
+  if(activeDraft)loadSnapshots(activeDraft.id).catch(asError);
+ },true);
+ function renderSnapshots(selectId){
+  const keep=selectId||frozenChoice.value;
+  frozenChoice.replaceChildren(node('option',{value:'',text:'Choose a frozen version'}),
+   ...snapshots.map(x=>node('option',{value:x.id,
+    text:'Draft r'+x.draftRevision+' · '+x.review+' · '+x.digest.slice(0,8)})));
+  frozenChoice.value=snapshots.some(x=>x.id===keep)?keep:'';
+  frozenRehearsal.disabled=!editable||!frozenChoice.value;
+ }
+ async function loadSnapshots(draftId,selectId){
+  const version=++snapshotSequence;
+  const out=await api('/v1/human/ai-flow-snapshots?tenantId='+encodeURIComponent(tenantId)+
+   '&flowId='+encodeURIComponent(draftId));
+  if(version!==snapshotSequence||!enabled()||activeDraft?.id!==draftId)return;
+  snapshots=out.snapshots||[];
+  renderSnapshots(selectId);
+  frozenNotice.textContent=snapshots.length+' immutable simulation version(s). None may make live calls.';
+ }
+ frozenChoice.addEventListener('change',()=>{
+  frozenRehearsal.disabled=!editable||!frozenChoice.value;
+  frozenResult.replaceChildren();
+ });
+ snapshotsBox.append(title('Immutable simulation versions','h3'),
+  node('p',{class:'muted',text:'Freeze a draft revision for review. Even a reviewed version cannot dial customers.'}),
+  editable?freezeButton:null,lab('Frozen versions',frozenChoice),
+  div('formrow',editable?frozenRehearsal:null,refreshSnapshots),
+  frozenNotice,frozenResult);
  const refreshButton=btn('Refresh AI drafts',()=>load().catch(asError),true);
  const previewButton=btn('Preview AI script (no call)',()=>{updatePreview();preview.scrollIntoView({block:'nearest'})},true);
  const controls=div('formrow',previewButton,editable?saveButton:null,refreshButton);
@@ -99,7 +168,7 @@ function industryAgentPanel(tenantId,content,role){
  editBox.append(title('Draft editor','h3'),lab('Agent name',name),div('formrow',lab('Mode',mode),lab('Language',language)),
   lab('Greeting',greeting),questionLabel,lab('Closing',closing),controls,advisory,preview,
   lab('Fictional answers (one per line; no customer information)',fictionalAnswers),
-  simulateButton,simulation);
+  simulateButton,simulation,snapshotsBox);
  function editorValue(){
   const raw=questions.value.split(/\r?\n/).map(x=>x.trim()).filter(Boolean);
   if(raw.length>12||raw.some(x=>x.length>250))throw Error('Enter no more than 12 questions of 250 characters each.');
@@ -125,7 +194,8 @@ function industryAgentPanel(tenantId,content,role){
  }
  function showEditor(){
   activeDraft=drafts.find(x=>x.id===activeId)||null;
-  fictionalAnswers.value='';simulation.replaceChildren();
+  fictionalAnswers.value='';simulation.replaceChildren();frozenResult.replaceChildren();
+  snapshots=[];snapshotSequence++;frozenChoice.replaceChildren();
   editBox.hidden=!activeDraft;
   if(!activeDraft)return;
   const c=activeDraft.config,t=templates.find(x=>x.id===c.templateId);
@@ -137,11 +207,13 @@ function industryAgentPanel(tenantId,content,role){
   for(const field of [name,mode,language,greeting,questions,closing])field.disabled=readonly;
   saveButton.disabled=readonly;
   simulateButton.disabled=readonly;
+  freezeButton.disabled=readonly;frozenChoice.disabled=readonly;
   fictionalAnswers.disabled=readonly;
   questionLabel.hidden=mode.value==='announcement';
   mode.onchange=()=>{questionLabel.hidden=mode.value==='announcement';updatePreview()};
   for(const field of [name,language,greeting,questions,closing])field.oninput=updatePreview;
   updatePreview();
+  loadSnapshots(activeDraft.id).catch(err=>{if(enabled())frozenNotice.textContent='Could not load frozen versions.'});
  }
  async function load(selectId){
   const version=++sequence;

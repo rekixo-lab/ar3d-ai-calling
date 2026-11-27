@@ -74,6 +74,14 @@ try{
   await page.getByRole('button',{name:'Run fictional conversation (no calls)'}).click();
   await page.getByRole('heading',{name:'Fictional conversation result'}).waitFor();
   await page.getByText('Status: simulated_complete · answers used: 3').waitFor();
+  await page.getByRole('button',{name:'Freeze draft for simulation review',exact:true}).click();
+  await page.getByText('1 immutable simulation version(s). None may make live calls.',{exact:true}).waitFor();
+  await page.getByRole('button',{name:'Rehearse frozen version (no calls)',exact:true}).click();
+  await page.getByRole('heading',{name:'Frozen fictional rehearsal',exact:true}).waitFor();
+  await page.getByText('Simulation only · simulated_complete · Draft r2',{exact:true}).waitFor();
+  assert.equal(f.c.db.prepare('SELECT COUNT(*) AS n FROM ai_flow_snapshots').get().n,1);
+  assert.equal(f.c.db.prepare('SELECT COUNT(*) AS n FROM ai_flow_preview_reviews').get().n,0);
+
   assert.equal(f.c.db.prepare('SELECT COUNT(*) AS n FROM ai_flow_definitions').get().n,1);
   assert.equal(f.r.db.prepare('SELECT COUNT(*) AS n FROM calling_jobs').get().n,beforeJobs);
   assert.equal(f.r.db.prepare('SELECT COUNT(*) AS n FROM calls').get().n,beforeCalls);

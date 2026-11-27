@@ -133,7 +133,8 @@ test('browser includes editor without provider or calling APIs; syntax is valid'
  const vm=await import('node:vm');
  assert.doesNotThrow(()=>new vm.Script(js));
  assert.match(js,/My AI Agents/);assert.match(js,/industryAgentPanel\(id,section,d.role\)/);
- const begin=js.indexOf('function industryAgentPanel('),end=js.indexOf('function industryAgentPanel(')+12000;
+ const begin=js.indexOf('function industryAgentPanel('),end=js.indexOf('\n}\n',begin)+3;
+ assert.ok(end>begin,'complete AI Agent editor function present');
  const panel=js.slice(begin,end);
  for(const endpoint of ['/v1/human/industry-templates','/v1/human/industry-profiles','/v1/human/ai-flows'])
   assert.ok(panel.includes(endpoint));
