@@ -15,3 +15,7 @@ __pycache__/
 *.sql.enc
 *.enc
 *.bin
+
+# Generated, local-only School stage deployment plan
+wrangler.school-stage.generated.json
+.school-stage-migrations/
