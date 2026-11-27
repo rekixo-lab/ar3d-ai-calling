@@ -17,7 +17,7 @@ export async function schoolTarget(env,tenantId){
  const hash=Array.from(new Uint8Array(await crypto.subtle.sign('HMAC',key,enc.encode('ar3d:school:target:v1:'+JSON.stringify([tenantId,caller,recipient])))),b=>b.toString(16).padStart(2,'0')).join('');
  return {caller,recipient,hash};
 }
-async function mfa(db,user,now){
+export async function requireSchoolPilotMfa(db,user,now){
  if(user?.globalRole!=='super_admin'||typeof user.id!=='string'||typeof user.token_hash!=='string'||!safeTime(now))fail('school_pilot_mfa_required');
  const row=await db.prepare("SELECT 1 AS allowed FROM human_mfa_settings m JOIN human_sessions s ON s.user_id=m.user_id JOIN human_users u ON u.id=m.user_id WHERE u.global_role='super_admin' AND m.user_id=? AND s.token_hash=? AND m.enabled_at IS NOT NULL AND s.created_at>=m.enabled_at AND s.revoked_at IS NULL AND s.expires_at>? LIMIT 1").bind(user.id,user.token_hash,now).first();
  if(!row)fail('school_pilot_mfa_required');
@@ -33,7 +33,7 @@ export async function reviewedSchoolGraph(db,tenantId,snapshotId){
  return {graph,graphJson:row.graph_json,graphSha256:row.graph_sha256};
 }
 export async function approveSchoolInternalPilot(env,user,input,{now=Date.now()}={}){
- const db=env.CONTROL_DB;await mfa(db,user,now);
+ const db=env.CONTROL_DB;await requireSchoolPilotMfa(db,user,now);
  if(env.AR3D_SCHOOL_PILOT_APPROVAL_ENABLED!=='approved')fail('school_pilot_approval_disabled');
  if(!exact(input,['tenantId','snapshotId','evidenceRef','expiresAt','maxAudioChars','maxCallSeconds','confirm'])||
   input.confirm!=='ONE_OPTED_IN_STAFF_DEVICE_ONLY_NO_CUSTOMER_CALLS'||
@@ -52,7 +52,7 @@ export async function approveSchoolInternalPilot(env,user,input,{now=Date.now()}
  return {permitId:id,expiresAt:input.expiresAt,maxAudioChars:input.maxAudioChars,maxCallSeconds:input.maxCallSeconds,liveCall:false};
 }
 export async function stopSchoolInternalPilot(env,user,tenantId,permitId,{now=Date.now()}={}){
- const db=env.CONTROL_DB;await mfa(db,user,now);
+ const db=env.CONTROL_DB;await requireSchoolPilotMfa(db,user,now);
  if(!uuid(tenantId)||!uuid(permitId))fail('invalid_school_pilot_permit');
  const r=await db.prepare('UPDATE school_internal_pilot_permits SET stopped_at=?,stopped_by=? WHERE tenant_id=? AND id=? AND stopped_at IS NULL').bind(now,user.id,tenantId,permitId).run();
  return {stopped:r.meta.changes===1,liveCall:false,notice:'Blocks future permit work; not a carrier hangup API.'};
