@@ -10,6 +10,7 @@ import {handleIndustryCampaigns,readIndustryRecipientScope} from '../src/industr
 import {audioSha,schoolVoicePlan,buildSchoolAudioPack,validateSchoolAudioPack,readSchoolAudioAsset,beginSchoolVoiceSession,advanceSchoolVoice,schoolVoiceNodes} from '../src/industry-school-voice-plan.mjs';
 import {handleScriptedPhoneCallback} from '../src/scripted-phone-pilot.mjs';
 import {handleSchoolAudioPreparation,readApprovedSchoolAudioPack} from '../src/industry-school-audio-preparation.mjs';
+import {handleIndustryCallQueue,readPreparedIndustryJob} from '../src/industry-call-queue.mjs';
 const version='abababab-abab-4bab-8bab-abababababab',flow='cdcdcdcd-cdcd-4dcd-8dcd-cdcdcdcdcdcd';
 const session='56565656-5656-4565-8565-565656565656',job='78787878-7878-4787-8787-787878787878';
 const call='12121212-1212-4212-8212-121212121212',request='34343434-3434-4343-8343-343434343434';
@@ -359,6 +360,67 @@ test('School TTS never follows a redirect or persists invalid audio; a revoked g
    assert.equal(count,1);assert.equal(f.objects.size,0);
    const row=f.c.db.prepare('SELECT * FROM school_audio_preparations').get();
    assert.equal(row.state,'failed');assert.equal(row.attempted_nodes,1);assert.equal(row.reserved_micros,f.input.expectedCostMicros);
+  }finally{f.close()}
+ }
+});
+
+async function approvedQueueFixture(){
+ const f=await prepFixture();try{
+  assert.equal((await f.api('/prepare',f.input,admin,'POST')).status,201);
+  const d=await f.get(),review={tenantId:tid,manifestSha256:d.manifestSha256,decision:'approved',reference:'Synthetic independent review',acknowledgeListened:true};
+  assert.equal((await f.api('/review',review,f.reviewer,'POST')).status,200);
+  const base='/v1/human/industry-queue/'+f.scope.campaignId;
+  const queue=(op='',data={tenantId:tid},user=client,method='GET',time=now)=>handleIndustryCallQueue(req(base+op,data,method),f.env,user,{now:time});
+  const data={tenantId:tid,manifestSha256:d.manifestSha256,recipients:[{leadId:lead,reviewRevision:f.scope.reviewRevision}],acknowledgePreparationOnly:true};
+  return {...f,queue,data};
+ }catch(e){f.close();throw e}
+}
+test('purpose-aware queue pins exact audio and review, blocks duplicate/cross-tenant selection and never creates a call or hold',async()=>{
+ const f=await approvedQueueFixture();try{
+  assert.equal((await f.queue('/prepare',f.data,admin,'POST')).status,403);
+  assert.equal((await f.queue('/prepare',f.data,{id:'viewer',globalRole:'user'},'POST')).status,403);
+  assert.equal((await f.queue('',{tenantId:'22222222-2222-4222-8222-222222222222'})).status,403);
+  assert.equal((await f.queue('/prepare',{...f.data,manifestSha256:'f'.repeat(64)},client,'POST')).status,409);
+  assert.equal((await f.queue('/prepare',{...f.data,recipients:[...f.data.recipients,{leadId:'44444444-4444-4444-8444-444444444444',reviewRevision:1}]},client,'POST')).status,409);
+  assert.equal(f.r.db.prepare('SELECT COUNT(*) AS n FROM industry_call_jobs').get().n,0);
+  const r=await Promise.all([f.queue('/prepare',f.data,client,'POST'),f.queue('/prepare',f.data,client,'POST')]);
+  assert.deepEqual(r.map(x=>x.status).sort(),[201,409]);
+  const out=await (await f.queue()).json();assert.equal(out.jobs.length,1);assert.equal(out.jobs[0].current,true);assert.equal(out.dispatchReady,false);
+  assert.ok(!JSON.stringify(out).includes(f.scope.destination));
+  const recipientList=async()=>await (await handleIndustryCampaigns(req('/v1/human/industry-campaigns/'+f.scope.campaignId+'/recipients',{tenantId:tid},'GET'),f.env,client,{now})).json();
+  assert.equal((await recipientList()).recipients[0].preparationBlocked,true);
+  const job=await readPreparedIndustryJob(f.env,{tenantId:tid,jobId:out.jobs[0].id,now});
+  assert.equal(job.scope.reviewRevision,f.scope.reviewRevision);assert.equal(job.pack.manifestSha256,f.data.manifestSha256);assert.equal(job.dispatchReady,false);
+  assert.equal(f.c.db.prepare('SELECT COUNT(*) AS n FROM tenant_minute_holds').get().n,0);
+  assert.equal(f.c.db.prepare('SELECT COUNT(*) AS n FROM provider_cost_reservations').get().n,0);
+  assert.equal(f.c.db.prepare('SELECT COUNT(*) AS n FROM scripted_phone_pilots').get().n,0);
+  assert.equal(f.r.db.prepare('SELECT COUNT(*) AS n FROM calling_jobs').get().n,0);
+  assert.throws(()=>f.r.db.prepare("UPDATE industry_call_jobs SET manifest_sha256=?").run('a'.repeat(64)),/immutable/);
+  assert.throws(()=>f.r.db.prepare("DELETE FROM industry_call_jobs").run(),/immutable/);
+  assert.equal((await f.queue('/cancel',{tenantId:tid,jobId:job.jobId,reason:'Fictional cancelled preparation'},client,'POST')).status,200);
+  await assert.rejects(readPreparedIndustryJob(f.env,{tenantId:tid,jobId:job.jobId,now}),/not_prepared/);
+  assert.equal((await recipientList()).recipients[0].preparationBlocked,true,'same immutable review revision cannot be prepared again');
+  assert.equal((await f.queue('/prepare',f.data,client,'POST')).status,409);
+ }finally{f.close()}
+});
+test('prepared industry job loses freshness on review revocation, opt-out, changed lead or missing audio',async()=>{
+ for(const change of ['revoke','optout','changed','audio','archive','expired']){
+  const f=await approvedQueueFixture();try{
+   assert.equal((await f.queue('/prepare',f.data,client,'POST')).status,201);
+   const job=(await (await f.queue()).json()).jobs[0],id=f.scope.campaignId;
+   if(change==='revoke'){
+    const r=await handleIndustryCampaigns(req('/v1/human/industry-campaigns/'+id+'/review',{tenantId:tid,leadId:lead,baseRevision:f.scope.reviewRevision,decision:'revoked',reason:'Synthetic revocation'}),f.env,client,{now});
+    assert.equal(r.status,200);
+   }else if(change==='optout')f.r.db.prepare("UPDATE leads SET consent_status='denied',dnd_status='blocked' WHERE tenant_id=? AND id=?").run(tid,lead);
+   else if(change==='changed')f.r.db.prepare("UPDATE leads SET updated_at=? WHERE tenant_id=? AND id=?").run(iso(now+1),tid,lead);
+   else if(change==='audio')f.objects.clear();
+   else if(change==='archive')f.r.db.prepare("UPDATE industry_campaigns SET archived_at=?,archived_by='client' WHERE tenant_id=? AND id=?").run(at,tid,id);
+   const time=change==='expired'?Date.parse(f.scope.expiresAt)+1:now;
+   await assert.rejects(readPreparedIndustryJob(f.env,{tenantId:tid,jobId:job.id,now:time}));
+   const out=await (await f.queue('',{tenantId:tid},client,'GET',time)).json();
+   // GET reports recorded manifest approval, not actual R2 integrity. The
+   // server-only reader always checks the bytes before returning a pack.
+   if(change!=='audio')assert.equal(out.jobs[0].current,false,change);
   }finally{f.close()}
  }
 });

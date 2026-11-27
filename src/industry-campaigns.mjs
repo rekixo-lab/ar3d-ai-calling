@@ -16,7 +16,9 @@ const blocked=['shared_funded_dispatch_adapter','production_voice_runtime','prov
 const latestJoin="LEFT JOIN industry_recipient_reviews v ON v.tenant_id=a.tenant_id AND v.campaign_id=a.campaign_id AND v.lead_id=a.lead_id AND v.revision=(SELECT MAX(r.revision) FROM industry_recipient_reviews r WHERE r.tenant_id=a.tenant_id AND r.campaign_id=a.campaign_id AND r.lead_id=a.lead_id)";
 const suppressed="(l.consent_status='denied' OR l.dnd_status='blocked' OR EXISTS(SELECT 1 FROM lead_opt_out_events o WHERE o.tenant_id=l.tenant_id AND o.lead_id=l.id))";
 const recipientSelect=`SELECT a.lead_id AS leadId,l.name,l.mobile_e164,l.updated_at,l.consent_status,l.dnd_status,
- ${suppressed} AS suppressed,v.revision,v.decision,v.destination,v.lead_updated_at,v.expires_at,v.consent_ref,v.dnd_ref,v.reason,v.reviewed_at
+ ${suppressed} AS suppressed,v.revision,v.decision,v.destination,v.lead_updated_at,v.expires_at,v.consent_ref,v.dnd_ref,v.reason,v.reviewed_at,
+ EXISTS(SELECT 1 FROM industry_call_jobs j WHERE j.tenant_id=a.tenant_id AND j.lead_id=a.lead_id AND
+  (j.state='prepared' OR (j.campaign_id=a.campaign_id AND j.review_revision=v.revision))) AS preparation_blocked
  FROM industry_campaign_candidates a JOIN leads l ON l.tenant_id=a.tenant_id AND l.id=a.lead_id ${latestJoin}`;
 async function readBody(req){
  if(req.headers.get('content-type')?.split(';')[0].trim()!=='application/json'||Number(req.headers.get('content-length'))>8192||!req.body)throw Error('invalid_industry_payload');
@@ -56,7 +58,7 @@ export function industryRecipientReviewStatus(r,now){
 const targetDigest=(tid,campaignId,r)=>sha256hex('ar3d:industry-review-target:v1:'+JSON.stringify([tid,campaignId,r.leadId,r.mobile_e164,r.updated_at]));
 async function viewRecipient(r,now,isAdmin,tid,campaignId){
  return {leadId:r.leadId,name:r.name,destinationLast4:r.mobile_e164.slice(-4),revision:r.revision??0,status:industryRecipientReviewStatus(r,now),
-  expiresAt:r.expires_at||null,reviewedAt:r.reviewed_at||null,...(isAdmin?{reviewTarget:await targetDigest(tid,campaignId,r),consentReference:r.consent_ref||null,dndReference:r.dnd_ref||null,reason:r.reason||null}:{}),callable:false};
+  expiresAt:r.expires_at||null,reviewedAt:r.reviewed_at||null,preparationBlocked:r.preparation_blocked===1,...(isAdmin?{reviewTarget:await targetDigest(tid,campaignId,r),consentReference:r.consent_ref||null,dndReference:r.dnd_ref||null,reason:r.reason||null}:{}),callable:false};
 }
 const audit=(db,tid,user,action,target,at,conditional=false)=>db.prepare("INSERT INTO crm_audit_events(tenant_id,id,actor,action,target_id,created_at) SELECT ?,?,?,?,?,?"+(conditional?' WHERE changes()>0':'')).bind(tid,crypto.randomUUID(),'human:'+user.id,action,target,at);
 const paging=u=>{
