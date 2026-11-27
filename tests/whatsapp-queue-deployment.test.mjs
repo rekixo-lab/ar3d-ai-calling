@@ -156,3 +156,10 @@ test('existing worker with null dead-letter metadata is safe; actual DLQ remains
  assert.deepEqual(s.calls.map(x=>x.method),['GET','GET']);
  assert.throws(()=>validateWhatsAppQueue(queue({consumers:[{type:'worker',script_name:CALLING_WORKER_NAME,dead_letter_queue:'foreign-dlq'}],consumers_total_count:1})),/unexpected consumer/);
 });
+
+test('queue rejection diagnostics reveal only safe field categories, never foreign worker identities',()=>{
+ const foreign='secret-worker-name',q=queue({consumers:[{type:'worker',script_name:foreign,queue_name:'private-queue',dead_letter_queue:'private-dlq'}],consumers_total_count:1});
+ assert.throws(()=>validateWhatsAppQueue(q),e=>e.message.includes('[type=worker; worker=other; queue=other; dead_letter=configured]')&&!e.message.includes(foreign)&&!e.message.includes('private-queue')&&!e.message.includes('private-dlq'));
+ const missing=queue({consumers:[{script_name:CALLING_WORKER_NAME}],consumers_total_count:1});
+ assert.throws(()=>validateWhatsAppQueue(missing),e=>e.message.includes('type=missing')&&!e.message.includes(CALLING_WORKER_NAME));
+});
