@@ -923,3 +923,17 @@ test('legacy keypad opt-out survives hangup, suspension and campaign disablement
   assert.deepEqual(Object.values(f.r.db.prepare('SELECT consent_status,dnd_status FROM leads WHERE id=?').get(lead)),['denied','blocked']);
  }finally{f.close()}
 });
+
+test('legacy pending suppression preserves signed hangup before completing STOP',async()=>{
+ const f=fixture();try{
+  await setup(f);let hook;const config=await approvedCampaignPhone(f.env);
+  await tickScriptedTenant(f.env,f.r.wrap,tid,config,{now,apiFetch:async(_url,opts)=>{hook=JSON.parse(opts.body).answer_url.replace(/\/answer$/,'');return accepted()}});
+  const cb=(step,params={})=>handleScriptedPhoneCallback(signed(hook+'/'+step,{CallUUID:callId,...params},f.env.PLIVO_AUTH_TOKEN),f.env,{now});
+  await cb('answer',{ALegRequestUUID:'synthetic-plivo-request-123',To:internalNumber,From:config.caller,Direction:'outbound'});
+  f.c.db.prepare("UPDATE scripted_phone_pilots SET phase='suppressing' WHERE job_id IS NOT NULL").run();
+  assert.equal((await cb('hangup',{Duration:'10'})).status,204);
+  const row=f.c.db.prepare('SELECT phase,hangup_at,duration_seconds FROM scripted_phone_pilots WHERE job_id IS NOT NULL').get();
+  assert.equal(row.phase,'declined');assert.equal(row.hangup_at,now);assert.equal(row.duration_seconds,10);
+  assert.equal(f.r.db.prepare('SELECT COUNT(*) AS n FROM lead_opt_out_events').get().n,1);
+ }finally{f.close()}
+});
