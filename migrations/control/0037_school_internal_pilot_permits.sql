@@ -14,7 +14,8 @@ CREATE TABLE IF NOT EXISTS school_internal_pilot_permits (
  stopped_at INTEGER, stopped_by TEXT REFERENCES human_users(id),
  CHECK(expires_at>created_at AND expires_at<=created_at+3600000),
  CHECK((stopped_at IS NULL)=(stopped_by IS NULL)),
- CHECK((audio_state='ready' AND manifest_json IS NOT NULL AND json_valid(manifest_json) AND length(manifest_sha256)=64)
+ CHECK(stopped_at IS NULL OR stopped_at>=created_at),
+ CHECK((audio_state='ready' AND manifest_json IS NOT NULL AND json_valid(manifest_json) AND manifest_sha256 IS NOT NULL AND length(manifest_sha256)=64 AND manifest_sha256 NOT GLOB '*[^0-9a-f]*')
  OR (audio_state<>'ready' AND manifest_json IS NULL AND manifest_sha256 IS NULL)),
  FOREIGN KEY(tenant_id,snapshot_id) REFERENCES ai_flow_snapshots(tenant_id,id)
 );
