@@ -199,3 +199,55 @@ test('keypad or speech opt-out uses global suppression, no transcript or propert
   }finally{f.close()}
  }
 });
+
+test('spoken STOP persists after a concurrent signed hangup during the claimed STT',async()=>{
+ const f=await setup();try{
+  await consent(f);const c=counts();
+  const fetcher=speechProvider(f,c,{answer:'do not call me again',beforeStt:async()=>{
+   const hang=await route(f,signed(f,'hangup',{Duration:'15'}));assert.equal(hang.status,204);
+   assert.equal(row(f).phase,'needs_review');
+  }});
+  const r=await route(f,answerReq(f,0),fetcher);
+  assert.match(await r.text(),/<Hangup\/>/);
+  assert.equal(row(f).phase,'declined');assert.ok(row(f).hangup_at);
+  assert.equal(state(f).industryVoice.status,'opted_out');assert.equal(state(f).industryVoice.answers.length,0);
+  assert.equal(state(f).phoneMeta.sttRoundedSeconds,2);assert.equal(state(f).phoneMeta.sttFailedRequests,0);
+  const l=f.r.db.prepare('SELECT consent_status,dnd_status FROM leads WHERE tenant_id=? AND id=?').get(tid,lead);
+  assert.deepEqual([l.consent_status,l.dnd_status],['denied','blocked']);
+  await route(f,answerReq(f,0),fetcher);
+  assert.equal(c.stt,1);assert.equal(f.r.db.prepare('SELECT COUNT(*) AS n FROM lead_opt_out_events').get().n,1);
+ }finally{f.close()}
+});
+test('signed keypad STOP remains valid after consent-stage hangup and campaign archive',async()=>{
+ const f=await setup();try{
+  await route(f,signed(f,'answer'));
+  assert.equal((await route(f,signed(f,'hangup',{Duration:'9'}))).status,204);
+  assert.equal(row(f).phase,'ended');
+  f.r.db.prepare('UPDATE industry_campaigns SET archived_at=?,archived_by=? WHERE tenant_id=? AND id=?').run(at,'client',tid,f.scope.campaignId);
+  await route(f,signed(f,'consent',{Digits:'2'}));await route(f,signed(f,'consent',{Digits:'2'}));
+  assert.equal(row(f).phase,'declined');assert.equal(state(f).industryVoice.status,'opted_out');
+  assert.equal(f.r.db.prepare('SELECT COUNT(*) AS n FROM lead_opt_out_events').get().n,1);
+ }finally{f.close()}
+});
+test('admission refusal closes politely; bare no for other questions is not reinterpreted',async()=>{
+ const f=await setup();try{
+  const c=counts();await consent(f);
+  const response=await route(f,answerReq(f,0),speechProvider(f,c,{answer:'जी नहीं'}));
+  const body=await response.text();assert.match(body,/<Hangup\/>/);assert.doesNotMatch(body,/<Record |<Play>/);
+  assert.equal(row(f).phase,'declined');assert.equal(state(f).industryVoice.status,'declined');
+  assert.equal(f.r.db.prepare('SELECT COUNT(*) AS n FROM lead_opt_out_events').get().n,0);
+  const other={...f.plan,questions:f.plan.questions.map((q,i)=>i===0?{...q,text:'Have you visited the campus before?'}:q)};
+  const next=advanceSchoolVoice(other,f.doc.industryVoice,{recordingSha256:'a'.repeat(64),text:'no'});
+  assert.equal(next.index,1);assert.equal(next.status,'active');
+ }finally{f.close()}
+});
+test('ordinary speech received after hangup stores metering but no answer or further prompt',async()=>{
+ const f=await setup();try{
+  await consent(f);const c=counts();
+  const r=await route(f,answerReq(f,0),speechProvider(f,c,{answer:'yes',beforeStt:()=>route(f,signed(f,'hangup',{Duration:'15'}))}));
+  assert.doesNotMatch(await r.text(),/<Record |<Play>/);
+  assert.equal(row(f).phase,'needs_review');assert.equal(row(f).turn,1);
+  assert.equal(state(f).industryVoice.answers.length,0);
+  assert.equal(state(f).phoneMeta.sttRoundedSeconds,2);
+ }finally{f.close()}
+});

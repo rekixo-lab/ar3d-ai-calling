@@ -67,6 +67,7 @@ async function mediaURL(config,row,node,now,deadline){
 async function speechXML(config,row,c,now){
  if(row.hangup_at!==null||now>=c.deadline)return end();
  if(row.phase==='needs_review')return xml(say(row.language,row.language==='en'?'Thank you. Our team can review the information received. Goodbye.':'धन्यवाद। हमारी टीम प्राप्त जानकारी की समीक्षा कर सकती है। अलविदा।')+'<Hangup/>');
+ if(row.phase==='declined')return xml(say(row.language,row.language==='en'?'Thank you for your time. Goodbye.':'आपके समय के लिए धन्यवाद। अलविदा।')+'<Hangup/>');
  if(row.phase!=='question'&&row.phase!=='completed')return end();
  const nodes=schoolVoiceNodes(c.plan,c.v);
  if(!nodes.length)return end();
@@ -168,16 +169,27 @@ export async function handleSchoolVoiceCallback(env,config,row,step,arg,params,{
     .bind(call,row.id,row.provider_request_id,row.survey_json).run();
    return claimed.meta.changes===1?notice(config,{...row,provider_call_id:call,phase:'consent'},c):end();
   }
+  // A signed keypad STOP on the bound call is suppression, not permission
+  // to record or speak. Honor it even when a simultaneous hangup/revocation
+  // invalidates normal continuation. CAS still binds the exact prior document.
+  if(step==='consent'&&!arg&&params.get('Digits')==='2'&&row.provider_call_id===call&&row.turn===0&&['consent','ended','question'].includes(row.phase)){
+   const prior=parse(row);
+   const doc={...prior,industryVoice:{...prior.industryVoice,status:'opted_out'}},raw=JSON.stringify(doc);
+   const saved=await control.prepare("UPDATE scripted_phone_pilots SET phase='suppressing',survey_json=? WHERE id=? AND provider_call_id=? AND turn=0 AND survey_json=? AND phase IN('consent','ended','question')")
+    .bind(raw,row.id,call,row.survey_json).run();
+   if(saved.meta.changes===1)return await finishOptOut(env,{...row,phase:'suppressing',survey_json:raw},now);
+   const fresh=await latestRow(env,row.id);
+   return fresh?.provider_call_id===call&&fresh.phase==='suppressing'?await finishOptOut(env,fresh,now):end();
+  }
   if(row.provider_call_id!==call||row.hangup_at!==null)return end();
   const c=await current(env,row,clock());
   if(step==='consent'&&!arg){
    if(row.phase!=='consent')return row.phase==='question'&&row.turn===0&&params.get('Digits')==='1'?speechXML(config,row,c,clock()):end();
-   const digit=params.get('Digits'),phase=digit==='1'?'question':digit==='2'?'suppressing':'declined';
+   const digit=params.get('Digits'),phase=digit==='1'?'question':'declined';
    if(phase==='question'&&await providerFaultBlocked(control))return end();
-   const nextDoc={...c.doc,industryVoice:{...c.v,status:digit==='1'?'active':digit==='2'?'opted_out':'declined'}};
+   const nextDoc={...c.doc,industryVoice:{...c.v,status:digit==='1'?'active':'declined'}};
    const next=await changePhase(env,row,phase,nextDoc);
    if(!next)return end();
-   if(phase==='suppressing')return finishOptOut(env,next,now);
    return phase==='question'?speechXML(config,next,{...c,doc:nextDoc,v:nextDoc.industryVoice},clock()):end();
   }
   if(step!=='turn'||!/^\d{1,2}$/.test(arg||''))return end();
@@ -211,9 +223,23 @@ export async function handleSchoolVoiceCallback(env,config,row,step,arg,params,{
   if(!active&&next.status!=='opted_out')next={...c.v,turn:next.turn,recordings:next.recordings,status:'needs_review'};
   const phase=next.status==='opted_out'?'suppressing':next.status==='active'?'question':next.status;
   const doc={...pending,industryVoice:next,phoneMeta:meta},raw=JSON.stringify(doc);
-  const saved=await control.prepare("UPDATE scripted_phone_pilots SET phase=?,survey_json=?,turn=? WHERE id=? AND phase='transcribing' AND turn=? AND survey_json=? AND hangup_at IS NULL")
-   .bind(phase,raw,next.turn,row.id,row.turn,claimed.survey_json).run();
-  if(saved.meta.changes!==1)return end();
+  // After hangup, only STOP can change a session to suppressing. The exact
+  // pending document, call and turn prove this is the already-claimed answer.
+  const predicate=phase==='suppressing'?
+   "((phase='transcribing' AND hangup_at IS NULL) OR (phase='needs_review' AND hangup_at IS NOT NULL))":
+   "phase='transcribing' AND hangup_at IS NULL";
+  const saved=await control.prepare("UPDATE scripted_phone_pilots SET phase=?,survey_json=?,turn=? WHERE id=? AND provider_call_id=? AND turn=? AND survey_json=? AND "+predicate)
+   .bind(phase,raw,next.turn,row.id,call,row.turn,claimed.survey_json).run();
+  if(saved.meta.changes!==1){
+   if(phase!=='suppressing'){
+    // A late non-STOP answer cannot authorize continuation or save personal
+    // responses. Preserve confirmed STT costs and the consumed turn only.
+    const stopped={...pending,phoneMeta:meta,industryVoice:{...c.v,turn:next.turn,recordings:next.recordings,status:'needs_review'}};
+    await control.prepare("UPDATE scripted_phone_pilots SET survey_json=?,turn=? WHERE id=? AND provider_call_id=? AND turn=? AND survey_json=? AND phase='needs_review' AND hangup_at IS NOT NULL")
+     .bind(JSON.stringify(stopped),next.turn,row.id,call,row.turn,claimed.survey_json).run();
+   }
+   return end();
+  }
   const after={...claimed,phase,survey_json:raw,turn:next.turn};
   if(phase==='suppressing')return finishOptOut(env,after,now);
   if(!active)return end();

@@ -1,6 +1,7 @@
 // Production School voice plan: frozen graph + exact content-addressed MP3 pack.
 // No provider request, call submission, credit mutation or storage write.
 import {validateFlowGraph} from './call-flow-dsl.mjs';
+import {INDUSTRY_TEMPLATES} from './industry-template-catalog.mjs';
 import {sha256hex} from './core.mjs';
 import {readBoundedBytes} from './scripted-speech.mjs';
 export const SCHOOL_VOICE_MODE='industry_school_v1';
@@ -84,6 +85,8 @@ export async function beginSchoolVoiceSession(scope,pack){
 }
 const stop=/(?:stop calling|don['’]?t call|do not call|remove my number|unsubscribe|opt.?out|कॉल मत|फोन मत|नंबर हटा|नम्बर हटा|(?:कॉल|फोन)\s+(?:बंद|न\s+कर)|(?:call|phone)\s+(?:mat|nahi|nahin)\s+kar)/iu;
 const endCall=/^(?:stop|hang up|end call|not interested|बात नहीं करनी|कॉल बंद करो|फोन बंद करो|अभी बात नहीं करनी|रुचि नहीं है)[।.!?\s]*$/iu;
+const admissionInterest=INDUSTRY_TEMPLATES.find(t=>t.id==='school_admission_v1').questions[0];
+const refusal=/^(?:no|no thanks|no thank you|not interested|nahi|nahin|नहीं|नही|जी नहीं|जी नही|नहीं चाहिए|नही चाहिए|नहीं धन्यवाद)[।.!?\s]*$/iu;
 const repeat=/^(?:repeat|again|say again|pardon|hello|hi|दोबारा बोलिए|फिर से पूछिए|सुनाई नहीं दिया|हेलो|नमस्ते|हम्म)[।.!?\s]*$/iu;
 const sensitive=/(?:[\d०-९][\s-]*?){6}|[\w.+-]+@[\w.-]+\.[a-z]{2,}|\b(?:otp|aadhaar|aadhar|pan card|pin number|password|cvv)\b|आधार|पासवर्ड|ओटीपी/iu;
 export function validateSchoolVoiceProgress(state,plan){
@@ -108,6 +111,9 @@ export function advanceSchoolVoice(plan,state,{recordingSha256,text,technicalFai
  if(value&&endCall.test(value)){next.status='declined';return next}
  if(technicalFailure){next.status='needs_review';return next}
  const question=plan.questions[state.index];
+ // The default admission-interest question has a defined negative outcome.
+ // Do not infer what a bare 'no' means for an arbitrary client-edited question.
+ if(value&&question.text===admissionInterest&&refusal.test(value)){next.status='declined';return next}
  if(!value||value.length>question.maxLength||bad.test(value)||sensitive.test(value)||repeat.test(value)||/[?？]/u.test(value)){
   if(state.attempt===1||next.turn>=2*plan.questions.length){next.status='needs_review';return next}
   next.attempt=1;return next;
