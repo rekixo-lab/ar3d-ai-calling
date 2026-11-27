@@ -2462,7 +2462,7 @@ function callingCapacityPanel(main){
   div('formrow',lab('Calls at once, all companies (1–2000)',maxAll),lab('Calls at once, one company (1–500)',maxCompany),save),info]);
  card.append(form);main.append(card);
  const show=d=>{maxAll.value=String(d.maxConcurrent);maxCompany.value=String(d.maxPerCompany);
-  info.textContent='Live calls now: '+(d.liveCalls??'—')+' / '+d.maxConcurrent+(d.sarvamPausedUntil?' · New calls paused until '+formatIst(d.sarvamPausedUntil)+' (Sarvam rate limit)':'')+(d.saved?' · Saved '+formatIst(d.updatedAt):' · Default, not saved yet')};
+  info.textContent='Occupied calling slots: '+(d.occupiedSlots??d.liveCalls??'—')+' / '+d.maxConcurrent+' · Reserved/submitted: '+(d.liveCalls??'—')+' · Uncertain: '+(d.unknownCalls??'—')+(d.sarvamPausedUntil?' · New calls paused until '+formatIst(d.sarvamPausedUntil)+' (Sarvam rate limit)':'')+(d.saved?' · Saved '+formatIst(d.updatedAt):' · Default, not saved yet')};
  form.addEventListener('submit',async e=>{e.preventDefault();save.disabled=true;
   try{show(await api('/v1/human/calling/capacity','POST',{maxConcurrent:Number(maxAll.value),maxPerCompany:Number(maxCompany.value)}));notice('Calling capacity saved.')}
   catch(err){asError(err)}finally{save.disabled=false}});

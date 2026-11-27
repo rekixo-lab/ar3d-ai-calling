@@ -103,11 +103,11 @@ export async function handleScriptedCallingRequest(req,env,user,{now=Date.now()}
      .bind(d.maxConcurrent,d.maxPerCompany,user.id,new Date(now).toISOString()).run();
    }else if(Object.keys(d).length)return fail('invalid_query');
    const settings=await dispatchSettings(env);
-   let liveCalls=null;
-   try{liveCalls=Number((await env.CRM_DB.prepare("SELECT COUNT(*) AS n FROM calling_jobs WHERE state IN('reserved','submitted')").first())?.n)}catch{}
+   let liveCalls=null,unknownCalls=null;
+   try{const counts=await env.CRM_DB.prepare("SELECT COUNT(CASE WHEN state IN('reserved','submitted') THEN 1 END) AS live,COUNT(CASE WHEN state='unknown' THEN 1 END) AS uncertain FROM calling_jobs WHERE state IN('reserved','submitted','unknown')").first();liveCalls=Number(counts?.live);unknownCalls=Number(counts?.uncertain)}catch{}
    const until=await providerThrottledUntil(env);
    return json({maxConcurrent:settings.maxConcurrent,maxPerCompany:settings.maxPerCompany,saved:settings.saved,updatedAt:settings.updatedAt,
-    liveCalls,sarvamPausedUntil:until>now?new Date(until).toISOString():null,queryBudget:settings.queryBudget});
+    liveCalls,unknownCalls,occupiedSlots:liveCalls===null||unknownCalls===null?null:liveCalls+unknownCalls,sarvamPausedUntil:until>now?new Date(until).toISOString():null,queryBudget:settings.queryBudget});
   }
   if(!UUID.test(d.tenantId||''))return fail('invalid_tenant');
   let member;

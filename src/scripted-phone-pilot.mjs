@@ -115,8 +115,8 @@ async function currentMfa(db,user,now){
   AND s.revoked_at IS NULL AND s.expires_at>? LIMIT 1`).bind(user.id,user.token_hash,now).first();
 }
 
-async function pilotCrm(env,tenantId){
- const tenant=await env.CONTROL_DB.prepare("SELECT id,storage_mode,dedicated_binding FROM tenants WHERE id=? AND status IN('trial','active')")
+async function pilotCrm(env,tenantId,{suppressionOnly=false}={}){
+ const tenant=await env.CONTROL_DB.prepare("SELECT id,storage_mode,dedicated_binding FROM tenants WHERE id=? AND status IN('trial','active'"+(suppressionOnly?",'suspended'":"")+")")
   .bind(tenantId).first();
  return tenant?resolveCrmDb(env,tenant):null;
 }
@@ -377,13 +377,18 @@ export async function reserveCampaignQuestionnaire(control,config,job,now){
  return id;
 }
 
-export async function submitScriptedPhone(control,config,id,destination,maxSeconds,fetcher,{commercial=false}={}){
+export async function submitScriptedPhone(control,config,id,destination,maxSeconds,fetcher,{commercial=false,beforeSubmit=null}={}){
  // ring_timeout stops unanswered ringing; hangup_on_ring schedules a hangup
  // from the start of ringing even if the recipient has answered (6000).
  try{
   if(commercial&&await providerFaultBlocked(control)){
    const stopped=await control.prepare("UPDATE scripted_phone_pilots SET phase='rejected' WHERE id=? AND phase='requested' AND provider_request_id IS NULL AND provider_call_id IS NULL").bind(id).run();
    return stopped.meta.changes===1?'rejected':'unknown';
+  }
+  if(commercial&&beforeSubmit&&!await beforeSubmit()){
+   // No carrier POST has been attempted. Release only an untouched session.
+   const stopped=await control.prepare("UPDATE scripted_phone_pilots SET phase='rejected',survey_json=json_set(survey_json,'$.phoneMeta.preSubmissionBlocked',1) WHERE id=? AND phase='requested' AND provider_request_id IS NULL AND provider_call_id IS NULL").bind(id).run();
+   return stopped.meta.changes===1?'cancelled':'unknown';
   }
   const response=await fetcher('https://api.plivo.com/v1/Account/'+config.authId+'/Call/',{
    method:'POST',redirect:'manual',signal:AbortSignal.timeout(8000),
@@ -613,7 +618,8 @@ async function saveVerifiedPilot(env,row,now){
 }
 
 async function saveCampaignOptOut(env,row,now){
- const db=await pilotCrm(env,row.tenant_id),at=iso(now);
+ // A suspended company still must honor an already-authorized customer's STOP.
+ const db=await pilotCrm(env,row.tenant_id,{suppressionOnly:true}),at=iso(now);
  if(!db)throw Error('scripted_crm_unavailable');
  await db.batch([
   db.prepare(`INSERT OR IGNORE INTO lead_opt_out_events(tenant_id,id,lead_id,source,actor,created_at)
