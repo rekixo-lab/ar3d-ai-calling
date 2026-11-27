@@ -20,6 +20,7 @@ export const WHATSAPP_TABLES=Object.freeze([
 export const CONTROL_WHATSAPP_TABLES=Object.freeze(['whatsapp_connections','whatsapp_webhook_batches','whatsapp_dispatch_ticks']);
 export const INDUSTRY_DRAFT_TABLES=Object.freeze(['tenant_industry_profiles','ai_flow_definitions']);
 export const INDUSTRY_SNAPSHOT_TABLES=Object.freeze(['ai_flow_snapshots','ai_flow_preview_reviews']);
+export const INDUSTRY_CAMPAIGN_TABLES=Object.freeze(['industry_campaigns','industry_campaign_candidates','industry_recipient_reviews']);
 const messagingUpgradeStates=['control_whatsapp_upgrade','control_whatsapp_queue_upgrade','crm_property_upgrade','crm_whatsapp_upgrade','crm_property_whatsapp_upgrade'];
 const messagingMissingTables=state=>state==='control_whatsapp_upgrade'?CONTROL_WHATSAPP_TABLES:
   state==='control_whatsapp_queue_upgrade'?['whatsapp_dispatch_ticks']:
@@ -33,7 +34,7 @@ export const REQUIRED_TABLES = Object.freeze({
     'human_login_limits','human_bootstrap_claim','human_ip_login_limits','human_mfa_settings','human_mfa_challenges','human_mfa_recovery_codes','provider_event_inbox','calling_script_bindings','calling_script_versions','company_profile_versions','calling_agent_publications','shared_voice_gateway','voice_call_routes','client_account_contacts','company_change_requests','scripted_phone_pilots','tenant_credit_budgets','tenant_credit_audit','tenant_minute_ledger','tenant_minute_holds','provider_financial_journal','tenant_credit_purchases','provider_safety_events','provider_cost_reservations','provider_cost_reconciliations','calling_dispatch_settings','calling_company_settings','calling_capacity_signals','calling_funding_settings','provider_balance_snapshots','provider_balance_covered_calls','provider_manual_funding_control'
   ]),
   CRM_DB: Object.freeze([
-    ...PROPERTY_TABLES,...WHATSAPP_TABLES,
+    ...PROPERTY_TABLES,...WHATSAPP_TABLES,...INDUSTRY_CAMPAIGN_TABLES,
     'leads','agents','calls','site_visits','crm_audit_events',
     'lead_notes','conversation_simulations','lead_opt_out_events','lead_consent_evidence','call_campaign_drafts','call_campaign_candidates','call_intent_proposals','calling_policies','calling_clearances','calling_runs','calling_jobs','scripted_call_results','lead_staff_assignments','verified_provider_call_costs',
   ]),
@@ -82,6 +83,9 @@ export const REQUIRED_COLUMNS = Object.freeze({
     provider_manual_funding_control: Object.freeze(['id','enabled','revision','updated_by','updated_at']),
   }),
   CRM_DB: Object.freeze({
+    industry_campaigns:Object.freeze(['tenant_id','id','launch_request_id','snapshot_id','graph_sha256','purpose','name','created_by','created_at','archived_by','archived_at']),
+    industry_campaign_candidates:Object.freeze(['tenant_id','campaign_id','lead_id','added_by','added_at']),
+    industry_recipient_reviews:Object.freeze(['tenant_id','campaign_id','lead_id','revision','decision','destination','lead_updated_at','consent_ref','dnd_ref','expires_at','reason','reviewed_by','reviewed_at']),
     properties: Object.freeze(['tenant_id','id','name','property_type','city','city_aliases_json','locality','locality_aliases_json','address','map_url','price_min_inr','price_max_inr','price_basis','size_min','size_max','size_unit','bhk','description','amenities','contact_name','contact_phone','website_url','status','revision','last_write_id','created_by','updated_by','created_at','updated_at']),
     property_assets: Object.freeze(['tenant_id','id','property_id','kind','file_name','content_type','size_bytes','object_key','active','created_by','created_at']),
     campaign_property_settings: Object.freeze(['tenant_id','campaign_id','revision','last_write_id','updated_by','updated_at']),
@@ -312,6 +316,22 @@ export function checkIndustryLaunchTriggers(records){
   if(parts.some(part=>!rows.get(name)?.includes(part)))throw Error('Industry launch request safety trigger missing or invalid: '+name);
  }
 }
+export const REQUIRED_INDUSTRY_CAMPAIGN_TRIGGERS=Object.freeze({
+ trg_industry_campaign_guard:Object.freeze(['before update','on industry_campaigns','old.archived_at is not null','raise(abort']),
+ trg_industry_campaign_no_delete:Object.freeze(['before delete','on industry_campaigns','raise(abort']),
+ trg_industry_candidate_no_update:Object.freeze(['before update','on industry_campaign_candidates','raise(abort']),
+ trg_industry_candidate_no_delete:Object.freeze(['before delete','on industry_campaign_candidates','raise(abort']),
+ trg_industry_review_no_update:Object.freeze(['before update','on industry_recipient_reviews','raise(abort']),
+ trg_industry_review_no_delete:Object.freeze(['before delete','on industry_recipient_reviews','raise(abort']),
+ trg_industry_review_sequence:Object.freeze(['before insert','on industry_recipient_reviews','max(r.revision)','raise(abort'])
+});
+export function checkIndustryCampaignTriggers(records){
+ if(!Array.isArray(records))throw Error('Invalid industry campaign trigger inspection.');
+ const rows=new Map(records.map(r=>[r?.name,String(r?.sql||'').toLowerCase().replace(/\s+/g,' ').trim()]));
+ for(const [name,parts] of Object.entries(REQUIRED_INDUSTRY_CAMPAIGN_TRIGGERS)){
+  if(parts.some(p=>!rows.get(name)?.includes(p)))throw Error('Industry campaign safety trigger missing or invalid: '+name);
+ }
+}
 export function checkSafetyTriggers(records,{allowCallIntentUpgrade=false}={}) {
   if (!Array.isArray(records)) throw Error('Invalid CRM trigger inspection result.');
   const triggers = new Map(records.map(row => [row?.name, String(row?.sql || '')
@@ -342,6 +362,7 @@ export function checkTables(tables, binding, mode) {
     if(binding==='CONTROL_DB'&&exact(CONTROL_WHATSAPP_TABLES))return 'control_whatsapp_upgrade';
     if(binding==='CONTROL_DB'&&exact(['whatsapp_dispatch_ticks']))return 'control_whatsapp_queue_upgrade';
     if(binding==='CRM_DB'){
+      if(exact(INDUSTRY_CAMPAIGN_TABLES))return 'crm_industry_campaign_upgrade';
       if(exact([...PROPERTY_TABLES,...WHATSAPP_TABLES]))return 'crm_property_whatsapp_upgrade';
       if(exact(PROPERTY_TABLES))return 'crm_property_upgrade';
       if(exact(WHATSAPP_TABLES))return 'crm_whatsapp_upgrade';
@@ -428,11 +449,12 @@ export async function inspectCloudflare({ credentials, mode, apiFetch = fetch, t
     modes[binding] = state;
     if ([...messagingUpgradeStates,'control_industry_drafts_upgrade','control_industry_snapshots_upgrade','control_industry_launch_upgrade','control_client_accounts_upgrade','control_publication_upgrade','control_profile_upgrade',
          'control_script_upgrade','crm_dispatch_upgrade','ready','crm_call_intent_upgrade',
-         'crm_scripted_results_upgrade','control_company_change_upgrade',
+         'crm_scripted_results_upgrade','crm_industry_campaign_upgrade','control_company_change_upgrade',
          'control_scripted_pilot_upgrade','control_dispatch_settings_upgrade','control_funding_settings_upgrade','control_manual_balances_upgrade','control_credit_upgrade','control_minute_ledger_upgrade','control_minute_holds_upgrade','control_provider_journal_upgrade','control_credit_purchase_upgrade','control_provider_safety_upgrade','control_provider_reserve_upgrade','control_provider_reconcile_upgrade','crm_staff_upgrade','crm_cdr_upgrade','crm_staff_cdr_upgrade'].includes(state)) {
       if (binding === 'CRM_DB') {
         const triggers = await query(id, "SELECT name,sql FROM sqlite_master WHERE type='trigger' AND name LIKE 'trg_%'");
         checkSafetyTriggers(triggers,{allowCallIntentUpgrade:state === 'crm_call_intent_upgrade'});
+        if(names.includes('industry_campaigns'))checkIndustryCampaignTriggers(triggers);
       }
       if(binding==='CONTROL_DB'&&presentMinuteLedger(names)){
         const triggers=await query(id,"SELECT name,sql FROM sqlite_master WHERE type='trigger' AND name LIKE 'trg_minute_ledger_%'");
@@ -480,6 +502,7 @@ export async function inspectCloudflare({ credentials, mode, apiFetch = fetch, t
       }
       for (const table of Object.keys(REQUIRED_COLUMNS[binding])) {
         if(messagingMissingTables(state).includes(table))continue;
+        if(state==='crm_industry_campaign_upgrade'&&INDUSTRY_CAMPAIGN_TABLES.includes(table))continue;
          if(state==='control_industry_drafts_upgrade'&&INDUSTRY_DRAFT_TABLES.includes(table))continue;
          if(state==='control_industry_snapshots_upgrade'&&INDUSTRY_SNAPSHOT_TABLES.includes(table))continue;
          if(state==='control_industry_launch_upgrade'&&table==='industry_launch_requests')continue;
@@ -527,6 +550,8 @@ export function verifiedSchemaState(modes) {
   // These are whole, explicitly reviewed additive groups on the complete
   // prior Calling schema. A completed group can be resumed after a failed
   // deployment; arbitrary partial tables or unrelated upgrades still fail.
+  if(modes?.CONTROL_DB==='control_industry_launch_upgrade'&&modes?.CRM_DB==='crm_industry_campaign_upgrade')return 'industry_launch_campaign_upgrade';
+  if(modes?.CONTROL_DB==='ready'&&modes?.CRM_DB==='crm_industry_campaign_upgrade')return 'crm_industry_campaign_upgrade';
   if(modes?.CONTROL_DB==='control_industry_launch_upgrade'&&modes?.CRM_DB==='ready')return 'control_industry_launch_upgrade';
   if(modes?.CONTROL_DB==='control_industry_snapshots_upgrade'&&modes?.CRM_DB==='ready')return 'control_industry_snapshots_upgrade';
   if(modes?.CONTROL_DB==='control_industry_drafts_upgrade'&&modes?.CRM_DB==='ready')return 'control_industry_drafts_upgrade';

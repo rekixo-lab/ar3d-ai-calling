@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import {
-  REQUIRED_COLUMNS, REQUIRED_TABLES, REQUIRED_SAFETY_TRIGGERS, INDUSTRY_SNAPSHOT_TABLES, REQUIRED_INDUSTRY_SNAPSHOT_TRIGGERS, checkIndustrySnapshotTriggers, REQUIRED_INDUSTRY_LAUNCH_TRIGGERS, checkIndustryLaunchTriggers, REQUIRED_MINUTE_LEDGER_TRIGGERS, REQUIRED_HOLD_TRIGGERS, REQUIRED_PROVIDER_JOURNAL_TRIGGERS, REQUIRED_PURCHASE_TRIGGERS, REQUIRED_PROVIDER_SAFETY_TRIGGERS, REQUIRED_PROVIDER_RESERVE_TRIGGERS, REQUIRED_PROVIDER_RECONCILE_TRIGGERS, REQUIRED_FUNDING_SETTINGS_TRIGGERS, REQUIRED_MANUAL_BALANCE_TRIGGERS, checkManualBalanceTriggers, checkFundingSettingsTriggers, checkProviderReconcileTriggers, checkProviderReserveTriggers, checkProviderSafetyTriggers, checkPurchaseTriggers, checkProviderJournalTriggers, checkHoldTriggers, checkMinuteLedgerTriggers, getCredentials, makeMainConfig, checkTables, checkColumns, checkSafetyTriggers, inspectCloudflare, verifiedSchemaState,
+  REQUIRED_COLUMNS, REQUIRED_TABLES, REQUIRED_SAFETY_TRIGGERS, INDUSTRY_SNAPSHOT_TABLES, REQUIRED_INDUSTRY_SNAPSHOT_TRIGGERS, checkIndustrySnapshotTriggers, REQUIRED_INDUSTRY_LAUNCH_TRIGGERS, checkIndustryLaunchTriggers, INDUSTRY_CAMPAIGN_TABLES, REQUIRED_INDUSTRY_CAMPAIGN_TRIGGERS, checkIndustryCampaignTriggers, REQUIRED_MINUTE_LEDGER_TRIGGERS, REQUIRED_HOLD_TRIGGERS, REQUIRED_PROVIDER_JOURNAL_TRIGGERS, REQUIRED_PURCHASE_TRIGGERS, REQUIRED_PROVIDER_SAFETY_TRIGGERS, REQUIRED_PROVIDER_RESERVE_TRIGGERS, REQUIRED_PROVIDER_RECONCILE_TRIGGERS, REQUIRED_FUNDING_SETTINGS_TRIGGERS, REQUIRED_MANUAL_BALANCE_TRIGGERS, checkManualBalanceTriggers, checkFundingSettingsTriggers, checkProviderReconcileTriggers, checkProviderReserveTriggers, checkProviderSafetyTriggers, checkPurchaseTriggers, checkProviderJournalTriggers, checkHoldTriggers, checkMinuteLedgerTriggers, getCredentials, makeMainConfig, checkTables, checkColumns, checkSafetyTriggers, inspectCloudflare, verifiedSchemaState,
 } from '../scripts/main-cloudflare.mjs';
 
 test('new CDR cost observation is additive only and guarded by exact Calling CRM state',async()=>{
@@ -149,7 +149,7 @@ test('ready requires every required migration table', () => {
   assert.throws(() => checkColumns(['tenant_id','consent_status'],'CRM_DB','leads'), /missing columns/);
 });
 
-const mockTriggers=Object.entries({...REQUIRED_SAFETY_TRIGGERS,...REQUIRED_INDUSTRY_SNAPSHOT_TRIGGERS,...REQUIRED_INDUSTRY_LAUNCH_TRIGGERS,...REQUIRED_MINUTE_LEDGER_TRIGGERS,...REQUIRED_HOLD_TRIGGERS,...REQUIRED_PROVIDER_JOURNAL_TRIGGERS,...REQUIRED_PURCHASE_TRIGGERS,...REQUIRED_PROVIDER_SAFETY_TRIGGERS,...REQUIRED_PROVIDER_RESERVE_TRIGGERS,...REQUIRED_PROVIDER_RECONCILE_TRIGGERS,...REQUIRED_FUNDING_SETTINGS_TRIGGERS,...REQUIRED_MANUAL_BALANCE_TRIGGERS}).map(([name,parts])=>
+const mockTriggers=Object.entries({...REQUIRED_SAFETY_TRIGGERS,...REQUIRED_INDUSTRY_SNAPSHOT_TRIGGERS,...REQUIRED_INDUSTRY_LAUNCH_TRIGGERS,...REQUIRED_INDUSTRY_CAMPAIGN_TRIGGERS,...REQUIRED_MINUTE_LEDGER_TRIGGERS,...REQUIRED_HOLD_TRIGGERS,...REQUIRED_PROVIDER_JOURNAL_TRIGGERS,...REQUIRED_PURCHASE_TRIGGERS,...REQUIRED_PROVIDER_SAFETY_TRIGGERS,...REQUIRED_PROVIDER_RESERVE_TRIGGERS,...REQUIRED_PROVIDER_RECONCILE_TRIGGERS,...REQUIRED_FUNDING_SETTINGS_TRIGGERS,...REQUIRED_MANUAL_BALANCE_TRIGGERS}).map(([name,parts])=>
   ({name,sql:'CREATE TRIGGER '+name+' '+parts.join(' ')+' BEGIN SELECT RAISE(ABORT, "deny"); END'}));
 function cloudflareMock({ controlTables=[],crmTables=[],controlName='ar3d-calling-control',crmName='ar3d-calling-shared-crm',leadColumns=['tenant_id','consent_status','dnd_status','interest_status','followup_at','customer_segment','plot_size_preference','visit_date_preference'],bucketName='ar3d-calling-recordings',triggers=mockTriggers }={}) {
   return async (url,opts) => {
@@ -165,7 +165,7 @@ function cloudflareMock({ controlTables=[],crmTables=[],controlName='ar3d-callin
       else if(sql.includes('sqlite_master')) rows=tableNames.map(name=>({name}));
       else if(sql.includes('PRAGMA')) {
         const table=sql.match(/PRAGMA table_info\(([^)]+)\)/)?.[1];
-        if(['whatsapp_connections','whatsapp_webhook_batches','whatsapp_dispatch_ticks','tenant_industry_profiles','ai_flow_definitions','ai_flow_snapshots','ai_flow_preview_reviews','industry_launch_requests','properties','property_assets','campaign_property_settings','campaign_properties','property_media_shares','whatsapp_rules','whatsapp_permissions','whatsapp_threads','whatsapp_messages','whatsapp_inbound_messages','whatsapp_event_receipts'].includes(table))
+        if(['whatsapp_connections','whatsapp_webhook_batches','whatsapp_dispatch_ticks','tenant_industry_profiles','ai_flow_definitions','ai_flow_snapshots','ai_flow_preview_reviews','industry_launch_requests','industry_campaigns','industry_campaign_candidates','industry_recipient_reviews','properties','property_assets','campaign_property_settings','campaign_properties','property_media_shares','whatsapp_rules','whatsapp_permissions','whatsapp_threads','whatsapp_messages','whatsapp_inbound_messages','whatsapp_event_receipts'].includes(table))
           rows=REQUIRED_COLUMNS[control?'CONTROL_DB':'CRM_DB'][table].map(name=>({name}));
         else if(sql.includes('provider_balance_snapshots')) rows=REQUIRED_COLUMNS.CONTROL_DB.provider_balance_snapshots.map(name=>({name}));
         else if(sql.includes('provider_balance_covered_calls')) rows=REQUIRED_COLUMNS.CONTROL_DB.provider_balance_covered_calls.map(name=>({name}));
@@ -569,4 +569,16 @@ test('industry launch reviews are an exact additive production schema upgrade',(
  assert.throws(()=>verifiedSchemaState({CONTROL_DB:'control_industry_launch_upgrade',CRM_DB:'crm_staff_upgrade'}),/mixed or invalid/);
  const rows=mockTriggers.filter(x=>Object.hasOwn(REQUIRED_INDUSTRY_LAUNCH_TRIGGERS,x.name));
  checkIndustryLaunchTriggers(rows);assert.throws(()=>checkIndustryLaunchTriggers(rows.slice(1)),/Industry launch request safety trigger/);
+});
+
+test('industry campaign CRM upgrade accepts only the exact reviewed schema group',()=>{
+ const prior=REQUIRED_TABLES.CRM_DB.filter(t=>!INDUSTRY_CAMPAIGN_TABLES.includes(t));
+ assert.equal(checkTables(prior,'CRM_DB','preflight'),'crm_industry_campaign_upgrade');
+ assert.throws(()=>checkTables([...prior,'industry_campaigns'],'CRM_DB','preflight'),/partial schema/);
+ assert.throws(()=>checkTables(prior,'CRM_DB','ready'),/missing tables/);
+ assert.equal(verifiedSchemaState({CONTROL_DB:'ready',CRM_DB:'crm_industry_campaign_upgrade'}),'crm_industry_campaign_upgrade');
+ assert.equal(verifiedSchemaState({CONTROL_DB:'control_industry_launch_upgrade',CRM_DB:'crm_industry_campaign_upgrade'}),'industry_launch_campaign_upgrade');
+ assert.throws(()=>verifiedSchemaState({CONTROL_DB:'control_credit_upgrade',CRM_DB:'crm_industry_campaign_upgrade'}),/mixed or invalid/);
+ const rows=mockTriggers.filter(t=>Object.hasOwn(REQUIRED_INDUSTRY_CAMPAIGN_TRIGGERS,t.name));
+ checkIndustryCampaignTriggers(rows);assert.throws(()=>checkIndustryCampaignTriggers(rows.slice(1)),/Industry campaign safety trigger/);
 });

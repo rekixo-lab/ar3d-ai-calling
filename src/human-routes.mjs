@@ -26,6 +26,7 @@ import {handleIndustryAgentRequest} from './industry-agent-routes.mjs';
 import {handleIndustryFlowSimulation} from './industry-flow-simulation-routes.mjs';
 import {handleIndustryFlowSnapshots} from './industry-flow-snapshots.mjs';
 import {handleIndustryLaunchRequests} from './industry-launch-requests.mjs';
+import {handleIndustryCampaigns} from './industry-campaigns.mjs';
 import {handleAuditRequest} from './audit-routes.mjs';
 import {handleVisitStatusRequest} from './visit-status-routes.mjs';
 import {handleCampaignRequest} from './campaign-routes.mjs';
@@ -349,6 +350,8 @@ export async function handleHumanRequest(req,env){
     if(campaignResponse)return campaignResponse;
     const visitResponse=await handleVisitStatusRequest(req,env,user);
     if(visitResponse)return visitResponse;
+    const industryCampaign=await handleIndustryCampaigns(req,env,user);
+    if(industryCampaign)return industryCampaign;
     const launchRequest=await handleIndustryLaunchRequests(req,env,user);
     if(launchRequest)return launchRequest;
     const frozenResult=await handleIndustryFlowSnapshots(req,env,user);
