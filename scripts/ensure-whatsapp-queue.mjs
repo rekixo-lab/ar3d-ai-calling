@@ -55,10 +55,12 @@ export function validateWhatsAppQueue(queue,{expectedId}={}){
   stop('Cloudflare returned a different or invalid WhatsApp queue; deployment was stopped.');
  const consumers=relationshipList(queue,'consumers'),producers=relationshipList(queue,'producers');
  for(const consumer of consumers){
-  if(!record(consumer)||consumer.type!=='worker'||consumer.script_name!==CALLING_WORKER_NAME||
-   consumer.queue_name!==undefined&&consumer.queue_name!==WHATSAPP_QUEUE_NAME||
-   consumer.dead_letter_queue!==undefined&&consumer.dead_letter_queue!==null&&consumer.dead_letter_queue!=='')
-   stop('WhatsApp queue has an unexpected consumer or dead-letter destination; deployment was stopped.');
+  const kind=!record(consumer)?'invalid':consumer.type===undefined?'missing':consumer.type==='worker'?'worker':'other';
+  const owner=!record(consumer)?'invalid':consumer.script_name===undefined?'missing':consumer.script_name===CALLING_WORKER_NAME?'expected':'other';
+  const boundQueue=!record(consumer)?'invalid':consumer.queue_name===undefined?'missing':consumer.queue_name===WHATSAPP_QUEUE_NAME?'expected':'other';
+  const deadLetter=!record(consumer)?'invalid':consumer.dead_letter_queue===undefined?'missing':consumer.dead_letter_queue===null?'null':consumer.dead_letter_queue===''?'empty':'configured';
+  if(kind!=='worker'||owner!=='expected'||!['expected','missing'].includes(boundQueue)||!['missing','null','empty'].includes(deadLetter))
+   stop('WhatsApp queue has an unexpected consumer or dead-letter destination; deployment was stopped. [type='+kind+'; worker='+owner+'; queue='+boundQueue+'; dead_letter='+deadLetter+']');
  }
  for(const producer of producers){
   if(!record(producer)||producer.type!=='worker'||producer.script!==CALLING_WORKER_NAME)
