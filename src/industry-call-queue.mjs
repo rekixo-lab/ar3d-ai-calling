@@ -40,6 +40,7 @@ const audit=(db,tid,user,action,target,at)=>db.prepare("INSERT INTO crm_audit_ev
 // This is read-only and explicitly NOT a dial authorization.
 export async function readPreparedIndustryJob(env,{tenantId,jobId,now=Date.now()}){
  if(!uuid(tenantId)||!uuid(jobId))fail('industry_queue_invalid_scope');
+ const started=Date.now(),clock=()=>now+Math.max(0,Date.now()-started);
  const db=env.CRM_DB,j=await db.prepare("SELECT * FROM industry_call_jobs WHERE tenant_id=? AND id=? AND state='prepared'").bind(tenantId,jobId).first();
  if(!j)fail('industry_job_not_prepared');
  const scope=await readIndustryRecipientScope(env,{tenantId,campaignId:j.campaign_id,leadId:j.lead_id,now});
@@ -47,9 +48,9 @@ export async function readPreparedIndustryJob(env,{tenantId,jobId,now=Date.now()
  if(!c||scope.snapshotId!==j.snapshot_id||scope.digest!==j.graph_sha256||scope.reviewRevision!==j.review_revision||scope.expiresAt!==j.review_expires_at||scope.purpose!==j.purpose)fail('industry_job_scope_changed');
  const pack=await readApprovedSchoolAudioPack(env,{tenantId,launchId:c.launch_request_id});
  if(pack.manifestSha256!==j.manifest_sha256||pack.snapshotId!==j.snapshot_id||pack.graphSha256!==j.graph_sha256)fail('industry_job_audio_changed');
- const fresh=await readIndustryRecipientScope(env,{tenantId,campaignId:j.campaign_id,leadId:j.lead_id,now});
+ const fresh=await readIndustryRecipientScope(env,{tenantId,campaignId:j.campaign_id,leadId:j.lead_id,now:clock()});
  const still=await db.prepare("SELECT id FROM industry_call_jobs WHERE tenant_id=? AND id=? AND state='prepared'").bind(tenantId,jobId).first();
- if(!still||fresh.reviewRevision!==j.review_revision||fresh.expiresAt!==j.review_expires_at||fresh.destination!==scope.destination||fresh.leadUpdatedAt!==scope.leadUpdatedAt||fresh.digest!==scope.digest)fail('industry_job_scope_changed');
+ if(!still||Date.parse(fresh.expiresAt)<=clock()||fresh.reviewRevision!==j.review_revision||fresh.expiresAt!==j.review_expires_at||fresh.destination!==scope.destination||fresh.leadUpdatedAt!==scope.leadUpdatedAt||fresh.digest!==scope.digest)fail('industry_job_scope_changed');
  return {jobId,scope:fresh,pack,dispatchReady:false};
 }
 export async function handleIndustryCallQueue(req,env,user,{now=Date.now()}={}){

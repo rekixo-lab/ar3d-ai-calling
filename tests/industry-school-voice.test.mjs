@@ -387,6 +387,8 @@ test('purpose-aware queue pins exact audio and review, blocks duplicate/cross-te
   assert.deepEqual(r.map(x=>x.status).sort(),[201,409]);
   const out=await (await f.queue()).json();assert.equal(out.jobs.length,1);assert.equal(out.jobs[0].current,true);assert.equal(out.dispatchReady,false);
   assert.ok(!JSON.stringify(out).includes(f.scope.destination));
+  const recipientList=async()=>await (await handleIndustryCampaigns(req('/v1/human/industry-campaigns/'+f.scope.campaignId+'/recipients',{tenantId:tid},'GET'),f.env,client,{now})).json();
+  assert.equal((await recipientList()).recipients[0].preparationBlocked,true);
   const job=await readPreparedIndustryJob(f.env,{tenantId:tid,jobId:out.jobs[0].id,now});
   assert.equal(job.scope.reviewRevision,f.scope.reviewRevision);assert.equal(job.pack.manifestSha256,f.data.manifestSha256);assert.equal(job.dispatchReady,false);
   assert.equal(f.c.db.prepare('SELECT COUNT(*) AS n FROM tenant_minute_holds').get().n,0);
@@ -397,6 +399,7 @@ test('purpose-aware queue pins exact audio and review, blocks duplicate/cross-te
   assert.throws(()=>f.r.db.prepare("DELETE FROM industry_call_jobs").run(),/immutable/);
   assert.equal((await f.queue('/cancel',{tenantId:tid,jobId:job.jobId,reason:'Fictional cancelled preparation'},client,'POST')).status,200);
   await assert.rejects(readPreparedIndustryJob(f.env,{tenantId:tid,jobId:job.jobId,now}),/not_prepared/);
+  assert.equal((await recipientList()).recipients[0].preparationBlocked,true,'same immutable review revision cannot be prepared again');
   assert.equal((await f.queue('/prepare',f.data,client,'POST')).status,409);
  }finally{f.close()}
 });

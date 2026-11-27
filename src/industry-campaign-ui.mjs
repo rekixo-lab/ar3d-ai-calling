@@ -58,13 +58,14 @@ function industryCampaignPanel(tenantId,content,{admin=false,editable=false}={})
    }
    list.append(item);
   }
-  const showQueue=btn('Load prepared calling jobs',async()=>{
-   if(!active(id,stamp))return;
-   showQueue.disabled=true;
+  let jobOffset=0,queueLoading=false;
+  const loadJobs=async()=>{
+   if(!active(id,stamp)||queueLoading)return;
+   queueLoading=true;showQueue.disabled=true;
    try{
-    const baseQueue='/v1/human/industry-queue/'+encodeURIComponent(id),out=await api(baseQueue+query);
+    const baseQueue='/v1/human/industry-queue/'+encodeURIComponent(id),out=await api(baseQueue+query+'&offset='+jobOffset);
     if(!active(id,stamp))return;
-    const controls=div('stack'),eligible=r.recipients.filter(x=>x.status==='review_current'&&!out.jobs.some(j=>j.leadId===x.leadId&&j.state==='prepared'));
+    const controls=div('stack'),eligible=r.recipients.filter(x=>x.status==='review_current'&&!x.preparationBlocked&&!out.jobs.some(j=>j.leadId===x.leadId&&(j.state==='prepared'||j.reviewRevision===x.revision)));
     queueBox.replaceChildren(title('Prepared calling jobs','h3'),node('p',{class:'note',text:'Preparation only. No carrier submission, credit reservation or automatic future dialing.'}),
      node('p',{class:'muted',text:out.manifestSha256?'Approved audio manifest recorded · '+out.manifestSha256.slice(0,12):'Approved audio pack is required before preparing jobs.'}),controls);
     for(const j of out.jobs){
@@ -80,7 +81,10 @@ function industryCampaignPanel(tenantId,content,{admin=false,editable=false}={})
      }
      controls.append(line);
     }
-    if(out.hasMore)controls.append(node('p',{class:'muted',text:'First 50 jobs shown. The API supports paginated job history.'}));
+    const previousJobs=btn('Previous prepared jobs',()=>{if(!queueLoading){jobOffset=Math.max(0,jobOffset-50);loadJobs().catch(asError)}},true);
+    const nextJobs=btn('Next prepared jobs',()=>{if(!queueLoading){jobOffset+=50;loadJobs().catch(asError)}},true);
+    previousJobs.disabled=jobOffset===0;nextJobs.disabled=!out.hasMore;
+    controls.append(node('p',{class:'muted',text:'Showing '+out.jobs.length+' job(s) · page '+(Math.floor(jobOffset/50)+1)+'. Current status means local evidence and recorded audio approval, not fresh R2 byte verification.'}),div('formrow',previousJobs,nextJobs));
     if(editable&&!admin&&!archived&&out.tenantActive&&out.manifestSha256&&eligible.length){
      const selected=new Map();
      for(const x of eligible){
@@ -95,8 +99,9 @@ function industryCampaignPanel(tenantId,content,{admin=false,editable=false}={})
      },true);
      controls.append(prepare);
     }
-   }catch(e){asError(e)}finally{showQueue.disabled=false}
-  },true);
+   }catch(e){asError(e)}finally{queueLoading=false;showQueue.disabled=false}
+  };
+  const showQueue=btn('Load prepared calling jobs',loadJobs,true);
   list.append(showQueue);
   if(!r.recipients.length)list.append(node('p',{class:'muted',text:'No recipients added.'}));
   const prev=btn('Previous recipients',()=>{recipientOffset=Math.max(0,recipientOffset-50);loadRecipients().catch(asError)},true),next=btn('Next recipients',()=>{recipientOffset+=50;loadRecipients().catch(asError)},true);
