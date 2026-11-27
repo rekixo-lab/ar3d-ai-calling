@@ -191,3 +191,53 @@ test('foreign consumer detail, missing IDs and differing IDs never pass the queu
  await assert.rejects(ensureWhatsAppQueue(credentials,x),/identity was omitted/);
  assert.equal(x.calls.length,2);
 });
+
+test('consumer detail may omit its own ID but must explicitly confirm the expected Worker',async()=>{
+ const id='d'.repeat(32);
+ const summary=queue({consumers:[{consumer_id:id,type:'worker'}],consumers_total_count:1});
+ const full={type:'worker',script_name:CALLING_WORKER_NAME,queue_name:WHATSAPP_QUEUE_NAME};
+ const s=scripted([list([summary]),ok(summary),ok(full)]);
+ const result=await ensureWhatsAppQueue(credentials,s);
+ assert.equal(result.consumerCount,1);
+ assert.deepEqual(s.calls.map(x=>x.method),['GET','GET','GET']);
+});
+test('when consumer detail omits script_name, separately list and match the exact consumer IDs',async()=>{
+ const id='d'.repeat(32);
+ const summary=queue({consumers:[{consumer_id:id,type:'worker'}],consumers_total_count:1});
+ const detail={consumer_id:id,type:'worker'};
+ const listed={consumer_id:id,type:'worker',script_name:CALLING_WORKER_NAME,queue_name:WHATSAPP_QUEUE_NAME};
+ const s=scripted([list([summary]),ok(summary),ok(detail),ok([listed])]);
+ const result=await ensureWhatsAppQueue(credentials,s);
+ assert.equal(result.consumerCount,1);
+ assert.deepEqual(s.calls.map(x=>x.method),['GET','GET','GET','GET']);
+ assert.ok(s.calls[3].url.endsWith('/queues/'+Q+'/consumers'));
+});
+test('list fallback never trusts a foreign script, mismatched ID, changed type, missing script or configured DLQ',async()=>{
+ const id='d'.repeat(32);
+ const summary=queue({consumers:[{consumer_id:id,type:'worker'}],consumers_total_count:1});
+ for(const consumer of [
+  {consumer_id:id,type:'worker',script_name:'another-worker'},
+  {consumer_id:'e'.repeat(32),type:'worker',script_name:CALLING_WORKER_NAME},
+  {consumer_id:id,type:'http_pull',script_name:CALLING_WORKER_NAME},
+  {consumer_id:id,type:'worker'},
+  {consumer_id:id,type:'worker',script_name:CALLING_WORKER_NAME,dead_letter_queue:'other-queue'}
+ ]){
+  const s=scripted([list([summary]),ok(summary),ok({consumer_id:id,type:'worker'}),ok([consumer])]);
+  await assert.rejects(ensureWhatsAppQueue(credentials,s));
+  assert.ok(s.calls.every(c=>c.method==='GET'));
+ }
+ const noList=scripted([list([summary]),ok(summary),ok({consumer_id:id,type:'worker'}),ok({unexpected:'object'})]);
+ await assert.rejects(ensureWhatsAppQueue(credentials,noList));
+ assert.ok(noList.calls.every(c=>c.method==='GET'));
+});
+test('consumer diagnostics never reveal the actual foreign worker or queue identifiers',async()=>{
+ const id='d'.repeat(32);
+ const summary=queue({consumers:[{consumer_id:id,type:'worker'}],consumers_total_count:1});
+ const bad={consumer_id:id,type:'worker',script_name:'private-other-worker',queue_name:'private-queue',dead_letter_queue:'secret-dlq'};
+ const env={CLOUDFLARE_ACCOUNT_ID:credentials.account,CLOUDFLARE_API_TOKEN:credentials.token,CONTROL_DB_ID:credentials.control,CRM_DB_ID:credentials.crm};
+ const s=scripted([list([summary]),ok(summary),ok(bad)]),messages=[];
+ assert.equal(await runEnsureWhatsAppQueueCli(env,{...s,log:x=>messages.push(x),error:x=>messages.push(x)}),1);
+ assert.equal(messages.length,1);
+ assert.match(messages[0],/worker=other; queue=other; dead_letter=configured/);
+ for(const secret of ['private-other-worker','private-queue','secret-dlq',credentials.token,credentials.account,id])assert.ok(!messages[0].includes(secret));
+});
