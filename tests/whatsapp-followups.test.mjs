@@ -340,3 +340,18 @@ test('36 unknown phone groups cannot starve the known STOP at the end of a valid
  assert.equal(f.db.sqlite.prepare('SELECT consent_status FROM leads WHERE tenant_id=? AND id=?').get(T,L).consent_status,'denied');
  assert.equal(f.control.sqlite.prepare('SELECT next_group FROM whatsapp_webhook_batches').get().next_group,37);
 });
+
+// A pending configuration must not monopolize the single per-tick send slot.
+test('ready WhatsApp messages are not starved by older pending-setup messages',async()=>{
+ const f=fixture();await ready(f);
+ const older=await job(f,{status:'pending_setup',dueAt:iso(NOW-60000)});
+ const readyMessage=await job(f,{status:'scheduled',dueAt:iso(NOW-30000)});
+ let posts=0;
+ const result=await runWhatsAppCron(f.env,{now:NOW,fetcher:async(_url,init)=>{
+  if(init.method==='GET')return templateResponse();
+  posts++;return Response.json({messages:[{id:'wamid.fair-queue'}]});
+ }});
+ assert.equal(result.whatsapp.submitted,1);assert.equal(posts,1);
+ assert.equal(f.db.sqlite.prepare('SELECT status FROM whatsapp_messages WHERE id=?').get(readyMessage.id).status,'submitted');
+ assert.equal(f.db.sqlite.prepare('SELECT status FROM whatsapp_messages WHERE id=?').get(older.id).status,'pending_setup');
+});

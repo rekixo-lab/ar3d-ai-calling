@@ -65,7 +65,7 @@ export async function handleVisitStatusRequest(req,env,user){
     const at=new Date().toISOString();
     const res=await db.batch([
       db.prepare('UPDATE site_visits SET status=? WHERE tenant_id=? AND id=? AND status=?').bind(d.status,tid,id,row.status),
-      db.prepare("INSERT INTO crm_audit_events(tenant_id,id,actor,action,target_id,created_at) SELECT ?,?,'human:'||?,'visit.status_changed',id,? FROM site_visits WHERE tenant_id=? AND id=? AND status=?")
+      db.prepare("INSERT INTO crm_audit_events(tenant_id,id,actor,action,target_id,created_at) SELECT ?,?,'human:'||?,'visit.status_changed',id,? FROM site_visits WHERE tenant_id=? AND id=? AND status=? AND changes()=1")
         .bind(tid,crypto.randomUUID(),user.id,at,tid,id,d.status)
     ]);
     if(Number(res[0]?.meta?.changes||0)!==1)return reply({error:'visit changed; refresh'},409);

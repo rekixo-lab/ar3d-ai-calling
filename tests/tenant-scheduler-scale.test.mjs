@@ -139,3 +139,19 @@ test('Sarvam 429 during a live answer is retried once and pauses new dispatch',a
  const src=readFileSync('src/scripted-phone-pilot.mjs','utf8');
  assert.match(src,/e\?\.message!=='sarvam_http_429'[\s\S]*signalProviderThrottle\(env,'sarvam'\)[\s\S]*transcribeSarvamRecordedAnswer/);
 });
+
+// Two independently triggered cron invocations must respect one global provider ceiling.
+test('overlapping schedulers cannot exceed the shared live call ceiling',async()=>{
+ const f=fixture();
+ try{
+  seed(f,3,1);
+  const log=[],settings={maxConcurrent:1,maxPerCompany:1,queryBudget:950};
+  const results=await Promise.all([
+   runScriptedCampaignCron(f.env,{now:anchor,apiFetch:plivo(log),settings}),
+   runScriptedCampaignCron(f.env,{now:anchor,apiFetch:plivo(log),settings})
+  ]);
+  assert.ok(results.every(x=>x.queriesUsed<=settings.queryBudget));
+  assert.equal(log.length,1,'only one Plivo request allowed across both cron invocations');
+  assert.equal(f.r.db.prepare("SELECT COUNT(*) AS n FROM calling_jobs WHERE state IN('reserved','submitted')").get().n,1);
+ }finally{f.close()}
+});
