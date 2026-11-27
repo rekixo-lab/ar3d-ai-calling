@@ -13,11 +13,12 @@ function req(action='suspend',reason='Security review requires temporary suspens
     headers:{cookie,origin:'https://example.test','content-type':'application/json'},
     body:JSON.stringify({reason})});
 }
-function fixture({globalRole='super_admin',status='trial',prior=null,mode='shared',available=true}={}){
+function fixture({globalRole='super_admin',status='trial',prior=null,mode='shared',available=true,currentMfa=true}={}){
   const log=[];
   const db={prepare(sql){return {bind(...params){log.push({sql,params});return {
     async first(){
-      if(sql.includes('FROM human_sessions'))return {id:'user1',email:'admin@example.test',globalRole};
+      if(sql.includes('JOIN human_mfa_settings'))return currentMfa?{ok:1}:null;
+      if(sql.includes('FROM human_sessions'))return {id:'user1',email:'admin@example.test',globalRole,token_hash:'a'.repeat(64)};
       if(sql.includes('FROM tenants WHERE id=?'))return params[0]===tenantId?
         {id:tenantId,status,suspended_from_status:prior,storage_mode:mode,dedicated_binding:mode==='dedicated'?'DEDICATED_DB_TEST':null}:null;
       return null;
@@ -81,6 +82,7 @@ test('stale tenant transition does not create a second misleading audit event',a
  const {handleTenantLifecycleRequest}=await import('../src/tenant-lifecycle-routes.mjs');
  const f=realFixture();
  try{
+  const current=Date.now();f.c.db.prepare("UPDATE human_sessions SET created_at=?,expires_at=? WHERE user_id='admin'").run(new Date(current).toISOString(),current+3600000);
   const base=f.c.wrap;
   f.env.CONTROL_DB={...base,async batch(queries){
    // Another request committed the same state before this optimistic batch.
@@ -92,4 +94,12 @@ test('stale tenant transition does not create a second misleading audit event',a
   assert.equal(res.status,409);
   assert.equal(f.c.db.prepare("SELECT COUNT(*) AS n FROM tenant_audit_events WHERE tenant_id=? AND action='tenant.suspended'").get(tid).n,0);
  }finally{f.close()}
+});
+
+test('tenant suspend and resume refuse password-only sessions before tenant mutations',async()=>{
+ for(const action of ['suspend','resume']){
+  const f=fixture({currentMfa:false,status:action==='resume'?'suspended':'active',prior:'active'});
+  assert.equal((await worker.fetch(req(action),f.env)).status,403);
+  assert.ok(!f.log.some(x=>/UPDATE tenants|INSERT INTO tenant_audit_events/.test(x.sql)));
+ }
 });

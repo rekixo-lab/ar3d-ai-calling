@@ -1,6 +1,6 @@
 // One-screen client onboarding: does not create a password, send mail or dial anyone.
 import {checkName,normalizeIndianPhone,sha256hex,parseJsonBody} from './core.mjs';
-import {validEmail,randomSecret} from './human-auth.mjs';
+import {validEmail,randomSecret,currentSuperAdminMfa,mutationOriginAllowed} from './human-auth.mjs';
 import {initialClientAI} from './default-client-ai.mjs';
 const json=(body,status=200)=>Response.json(body,{status,headers:{'Cache-Control':'no-store','Referrer-Policy':'no-referrer'}});
 const fail=(error,status=400)=>json({error},status);
@@ -29,6 +29,7 @@ export async function handleClientAccountRequest(req,env,user){
   if(new URL(req.url).pathname!=='/v1/human/client-accounts')return null;
   if(user?.globalRole!=='super_admin')return fail('forbidden',403);
   if(req.method!=='POST')return fail('method not allowed',405);
+  if(new URL(req.url).search||!mutationOriginAllowed(req))return fail('same-origin request required',403);
   try{
     const d=await readBody(req);
     if(Object.keys(d).some(k=>!['displayName','email','mobile','tenantId','initialCreditInr','initialMinutes'].includes(k)))return fail('unexpected account field');
@@ -37,17 +38,9 @@ export async function handleClientAccountRequest(req,env,user){
     if(!Number.isSafeInteger(initialMinutes)||initialMinutes<0||initialMinutes>16666666||(initialMinutes>0&&initialCreditInr>0))return fail('invalid starting calling minutes');
     if(![0,100,200,300,400,500].includes(initialCreditInr))
       return fail('choose 0, 100, 200, 300, 400 or 500 planned credits');
-    // An initial budget is a provisional internal plan, never Plivo funds.
-    // Do not allow a stale or non-MFA session to create credits.
-    if(initialCreditInr>0||initialMinutes>0){
-      if(!/^[a-f0-9]{64}$/i.test(user.token_hash||''))return fail('current MFA required to set credits',403);
-      const session=await env.CONTROL_DB.prepare(
-       'SELECT 1 AS valid FROM human_mfa_settings m JOIN human_sessions s ON s.user_id=m.user_id '+
-       'WHERE m.user_id=? AND s.token_hash=? AND m.enabled_at IS NOT NULL '+
-       'AND s.created_at>=m.enabled_at AND s.revoked_at IS NULL AND s.expires_at>? LIMIT 1')
-       .bind(user.id,user.token_hash,Date.now()).first();
-      if(!session)return fail('current MFA required to set credits',403);
-    }
+    // Even a zero-credit invitation grants future company access. Require
+    // the same current MFA session as a funded invitation.
+    if(!await currentSuperAdminMfa(env.CONTROL_DB,user))return fail('current_super_admin_mfa_required',403);
     if(!/^\+91[6-9][0-9]{9}$/.test(mobile))return fail('Indian mobile number required');
     if(d.tenantId!==undefined&&(!/^[a-f0-9-]{36}$/i.test(d.tenantId)||typeof d.tenantId!=='string'))
       return fail('invalid existing client');

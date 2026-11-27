@@ -43,7 +43,7 @@ import {handleConversationRequest} from './conversation-routes.mjs';
 import {simulatorHtml,simulatorCss,simulatorJs} from './simulator-ui.mjs';
 import {checkSlug,checkName,checkStorageMode,normalizeIndianPhone,resolveCrmDb,sha256hex,parseJsonBody,SOURCES} from './core.mjs';
 import {html,css,js} from './app-assets.mjs';
-import {COOKIE,validEmail,validPassword,makePassword,checkPassword,randomSecret,cookieFor,readCookie,mutationOriginAllowed,getSession,newSession,requireMembership,userSummary} from './human-auth.mjs';
+import {COOKIE,validEmail,validPassword,makePassword,checkPassword,randomSecret,cookieFor,readCookie,mutationOriginAllowed,getSession,newSession,requireMembership,userSummary,currentSuperAdminMfa} from './human-auth.mjs';
 
 const now=()=>new Date().toISOString();
 const headers={'Cache-Control':'no-store','X-Content-Type-Options':'nosniff','Referrer-Policy':'no-referrer','X-Frame-Options':'DENY','Permissions-Policy':'camera=(),microphone=(self)'};
@@ -203,6 +203,7 @@ async function listTenants(env,req){
   }
 }
 async function createTenant(req,db,user){
+  if(!await currentSuperAdminMfa(db,user))return fail('current_super_admin_mfa_required',403);
   const d=await payload(req),slug=checkSlug(d.slug),name=checkName(d.displayName);
   const plan=d.plan||'starter',mode=d.storageMode||'shared';checkStorageMode(plan,mode);
   const id=crypto.randomUUID(),date=now();
@@ -218,6 +219,7 @@ async function createTenant(req,db,user){
      aiDraftReady:true,aiPublished:false},201);
 }
 async function invite(req,db,user){
+  if(user.globalRole==='super_admin'&&!await currentSuperAdminMfa(db,user))return fail('current_super_admin_mfa_required',403);
   const d=await payload(req),tenantId=d.tenantId,email=validEmail(d.email),role=d.role||'client_admin';
   if(!validTenantId(tenantId)||!['client_admin','viewer'].includes(role))return fail('invalid tenant or role',400);
   const owner=await db.prepare('SELECT id FROM tenants WHERE id=? AND status IN (\'trial\',\'active\')').bind(tenantId).first();

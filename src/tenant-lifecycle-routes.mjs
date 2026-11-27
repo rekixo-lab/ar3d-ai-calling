@@ -1,5 +1,6 @@
 // Human Super Admin-only tenant access suspension; not payment or billing.
 import {parseJsonBody,resolveCrmDb} from './core.mjs';
+import {currentSuperAdminMfa,mutationOriginAllowed} from './human-auth.mjs';
 const path=/^\/v1\/human\/tenants\/([a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})\/(suspend|resume)$/i;
 const json=(body,status=200)=>Response.json(body,{status,headers:{'Cache-Control':'no-store'}});
 const fail=(message,status=400)=>json({error:message},status);
@@ -21,7 +22,9 @@ export async function handleTenantLifecycleRequest(req,env,user){
   if(!match)return null;
   if(user?.globalRole!=='super_admin')return fail('forbidden',403);
   if(req.method!=='POST')return fail('method not allowed',405);
+  if(new URL(req.url).search||!mutationOriginAllowed(req))return fail('same-origin request required',403);
   try{
+    if(!await currentSuperAdminMfa(env.CONTROL_DB,user))return fail('current_super_admin_mfa_required',403);
     const body=await payload(req);
     if(Object.keys(body).some(k=>k!=='reason')||
        typeof body.reason!=='string'||body.reason.trim().length<10||

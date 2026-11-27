@@ -8,6 +8,7 @@ const req=(payload)=>new Request('https://calling.example.test/v1/human/client-a
   body:JSON.stringify(payload)
 });
 const post=(f,p,user=admin)=>handleClientAccountRequest(req(p),f.env,user);
+function refreshAdmin(f){const t=Date.now();f.c.db.prepare("UPDATE human_sessions SET created_at=?,expires_at=? WHERE user_id='admin'").run(new Date(t).toISOString(),t+3600000)}
 
 test('client accounts deny tenant members, leaving isolated D1 unchanged',async()=>{
  const f=fixture();
@@ -21,6 +22,7 @@ test('client accounts deny tenant members, leaving isolated D1 unchanged',async(
 test('new client account atomically creates shared tenant, contact and one private invitation without login',async()=>{
  const f=fixture();
  try{
+  refreshAdmin(f);
   const email='owner@example.test';
   const r=await post(f,{displayName:'North Builder',email,mobile:'9000000002'});
   if(r.status!==201)assert.fail('onboarding failed: '+await r.text());
@@ -62,6 +64,7 @@ test('new client account atomically creates shared tenant, contact and one priva
 test('existing company is reused, never duplicated, when creating first login invitation',async()=>{
  const f=fixture();
  try{
+  refreshAdmin(f);
   const before=f.c.db.prepare('SELECT COUNT(*) AS n FROM tenants').get().n;
   const r=await post(f,{displayName:'Demo',email:'firstowner@example.test',mobile:'9888888888',tenantId:tid});
   if(r.status!==201)assert.fail('onboarding failed: '+await r.text());
@@ -79,6 +82,7 @@ test('existing company is reused, never duplicated, when creating first login in
 test('onboarding refuses mismatched tenant, unsupported phone, unexpected fields and pre-existing access',async()=>{
  const f=fixture();
  try{
+  refreshAdmin(f);
   const common={displayName:'Demo',email:'abc@example.test',mobile:'9000000001'};
   assert.equal((await post(f,{...common,tenantId:'22222222-2222-4222-8222-222222222222'})).status,404);
   assert.equal((await post(f,{...common,displayName:'Different',tenantId:tid})).status,409);
@@ -143,3 +147,22 @@ test('initial manual minutes are atomically allocated with new client invitation
  assert.equal((await post(f,payload)).status,409);assert.equal(f.c.db.prepare('SELECT COUNT(*) AS n FROM tenant_minute_ledger WHERE tenant_id=?').get(data.id).n,1);
  assert.equal(f.c.db.prepare('SELECT COUNT(*) AS n FROM human_invitations WHERE tenant_id=?').get(data.id).n,1);
 }finally{f.close()}});
+
+test('zero-credit onboarding needs an active current MFA session and same origin',async()=>{
+ const f=fixture();try{
+  const data={displayName:'Synthetic Tenant',email:'new@example.invalid',mobile:'9000000002'};
+  assert.equal((await post(f,data)).status,403,'expired session');
+  refreshAdmin(f);
+  f.c.db.prepare("UPDATE human_mfa_settings SET enabled_at=NULL WHERE user_id='admin'").run();
+  assert.equal((await post(f,data)).status,403,'password only');
+  f.c.db.prepare("UPDATE human_mfa_settings SET enabled_at=? WHERE user_id='admin'").run(new Date(Date.now()-1000).toISOString());refreshAdmin(f);
+  f.c.db.prepare("UPDATE human_users SET global_role='user' WHERE id='admin'").run();
+  assert.equal((await post(f,data)).status,403,'role revoked after lookup');
+  f.c.db.prepare("UPDATE human_users SET global_role='super_admin' WHERE id='admin'").run();
+  const cross=new Request('https://calling.example.test/v1/human/client-accounts',{method:'POST',headers:{origin:'https://other.invalid','content-type':'application/json'},body:JSON.stringify(data)});
+  assert.equal((await handleClientAccountRequest(cross,f.env,admin)).status,403);
+  assert.equal(f.c.db.prepare('SELECT COUNT(*) AS n FROM client_account_contacts').get().n,0);
+  assert.equal(f.c.db.prepare('SELECT COUNT(*) AS n FROM human_invitations').get().n,0);
+  assert.equal((await post(f,data)).status,201);
+ }finally{f.close()}
+});
