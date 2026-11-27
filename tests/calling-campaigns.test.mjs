@@ -281,3 +281,44 @@ test('final eligibility fence cancels before Plivo POST after reservation, relea
   }finally{f.close()}
  }
 });
+
+test('operator pause blocks all new campaign calls but preserves existing hangup reconciliation and holds',async()=>{
+ const f=fixture();try{
+  await setup(f);
+  const pause=await route(f,'emergency-pause',{paused:true,expectedRevision:0,reason:'Synthetic operational pause'},admin);
+  assert.equal(pause.status,200,await pause.clone().text());assert.equal((await pause.json()).paused,true);
+  const status=await (await route(f,'emergency-pause',{},admin,'GET')).json();assert.equal(status.revision,1);
+  assert.equal((await route(f,'emergency-pause',{paused:false,expectedRevision:0,reason:'Stale synthetic resume'},admin)).status,409);
+  assert.equal((await route(f,'emergency-pause',{paused:false,expectedRevision:1,reason:'Client cannot resume'},client)).status,403);
+  const out=await runScriptedCampaignCron(f.env,{now,apiFetch:()=>assert.fail('paused must not dial'),settings:{maxConcurrent:8,maxPerCompany:1,queryBudget:950}});
+  assert.equal(out.dialed,0);assert.equal(f.r.db.prepare('SELECT state FROM calling_jobs').get().state,'queued');
+  assert.equal(f.c.db.prepare('SELECT COUNT(*) AS n FROM tenant_minute_holds').get().n,0);
+  assert.equal((await scriptedCampaignConfiguration(f.env)).dispatchPaused,true);
+  const resume=await route(f,'emergency-pause',{paused:false,expectedRevision:1,reason:'Synthetic incident resolved'},admin);
+  assert.equal(resume.status,200);
+  const sent=await tickTenant(f.env,f.r.wrap,tid,{now:now+60000,apiFetch:async()=>accepted()});assert.equal(sent.state,'submitted');
+  assert.equal((await route(f,'emergency-pause',{paused:true,expectedRevision:2,reason:'Synthetic second pause'},admin)).status,200);
+  f.c.db.prepare("UPDATE scripted_phone_pilots SET phase='completed',hangup_at=?,duration_seconds=37 WHERE job_id IS NOT NULL").run(now+90000);
+  const ended=await runScriptedCampaignCron(f.env,{now:now+120000,apiFetch:()=>assert.fail('paused must not dial'),settings:{maxConcurrent:8,maxPerCompany:1,queryBudget:950}});
+  assert.equal(ended.reconciled,1);assert.equal(ended.dialed,0);
+  assert.equal(f.r.db.prepare('SELECT state FROM calling_jobs').get().state,'completed');
+  assert.equal(f.c.db.prepare('SELECT state FROM tenant_minute_holds').get().state,'held');
+  assert.throws(()=>f.c.db.prepare("UPDATE calling_dispatch_pause_events SET paused=0 WHERE revision=3").run(),/immutable/);
+  assert.throws(()=>f.c.db.prepare("DELETE FROM calling_dispatch_pause_events WHERE revision=3").run(),/immutable/);
+ }finally{f.close()}
+});
+test('operator pause arriving after session reservation stops the provider POST and releases untouched credit',async()=>{
+ const f=fixture();try{
+  await setup(f);const db=f.c.wrap;
+  f.env.CONTROL_DB={...db,prepare(sql){const stmt=db.prepare(sql);if(!sql.includes('INSERT INTO scripted_phone_pilots'))return stmt;
+   return {...stmt,bind(...args){const b=stmt.bind(...args);return {...b,async run(){
+    const result=await b.run();
+    if(result.meta.changes===1)f.c.db.prepare("INSERT INTO calling_dispatch_pause_events(revision,paused,reason,actor,created_at) VALUES(1,1,'Synthetic pause before POST','admin',?)").run(at);
+    return result;
+   }}}};
+  }};
+  const result=await tickTenant(f.env,f.r.wrap,tid,{now,apiFetch:()=>assert.fail('pause before carrier submission')});
+  assert.equal(result.state,'failed');assert.equal(f.c.db.prepare('SELECT state FROM tenant_minute_holds').get().state,'released');
+  assert.match(f.c.db.prepare('SELECT evidence_ref FROM tenant_minute_holds').get().evidence_ref,/^pre-submit-blocked:/);
+ }finally{f.close()}
+});

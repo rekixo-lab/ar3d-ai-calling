@@ -28,7 +28,7 @@ const messagingMissingTables=state=>state==='control_whatsapp_upgrade'?CONTROL_W
   state==='crm_property_whatsapp_upgrade'?[...PROPERTY_TABLES,...WHATSAPP_TABLES]:[];
 export const REQUIRED_TABLES = Object.freeze({
   CONTROL_DB: Object.freeze([
-    ...CONTROL_WHATSAPP_TABLES,...INDUSTRY_DRAFT_TABLES,...INDUSTRY_SNAPSHOT_TABLES,'industry_launch_requests',
+    ...CONTROL_WHATSAPP_TABLES,...INDUSTRY_DRAFT_TABLES,...INDUSTRY_SNAPSHOT_TABLES,'industry_launch_requests','calling_dispatch_pause_events',
     'tenants','tenant_keys','project_links','tenant_numbers','tenant_audit_events',
     'human_users','tenant_memberships','human_sessions','human_invitations',
     'human_login_limits','human_bootstrap_claim','human_ip_login_limits','human_mfa_settings','human_mfa_challenges','human_mfa_recovery_codes','provider_event_inbox','calling_script_bindings','calling_script_versions','company_profile_versions','calling_agent_publications','shared_voice_gateway','voice_call_routes','client_account_contacts','company_change_requests','scripted_phone_pilots','tenant_credit_budgets','tenant_credit_audit','tenant_minute_ledger','tenant_minute_holds','provider_financial_journal','tenant_credit_purchases','provider_safety_events','provider_cost_reservations','provider_cost_reconciliations','calling_dispatch_settings','calling_company_settings','calling_capacity_signals','calling_funding_settings','provider_balance_snapshots','provider_balance_covered_calls','provider_manual_funding_control'
@@ -74,6 +74,7 @@ export const REQUIRED_COLUMNS = Object.freeze({
     calling_script_bindings: Object.freeze(['tenant_id','bot_id','assistant_id','source_version']),
     calling_script_versions: Object.freeze(['tenant_id','id','revision','config_json','prompt','provider_state','provider_version']),
     human_ip_login_limits: Object.freeze(['ip_hash','attempt_count','blocked_until']),
+    calling_dispatch_pause_events: Object.freeze(['revision','paused','reason','actor','created_at']),
     calling_dispatch_settings: Object.freeze(['id','max_concurrent_calls','max_calls_per_company','updated_by','updated_at']),
     calling_company_settings: Object.freeze(['tenant_id','consent_mode','updated_by','updated_at']),
     calling_capacity_signals: Object.freeze(['provider','throttled_until','updated_at']),
@@ -305,6 +306,18 @@ export function checkIndustrySnapshotTriggers(records){
    throw Error('Control simulation snapshot immutability trigger missing or invalid: '+name+'. Deployment refused.');
  }
 }
+export const REQUIRED_DISPATCH_PAUSE_TRIGGERS=Object.freeze({
+ trg_dispatch_pause_sequence:Object.freeze(['before insert','on calling_dispatch_pause_events','max(revision)','new.paused=coalesce','raise(abort']),
+ trg_dispatch_pause_no_update:Object.freeze(['before update','on calling_dispatch_pause_events','raise(abort']),
+ trg_dispatch_pause_no_delete:Object.freeze(['before delete','on calling_dispatch_pause_events','raise(abort'])
+});
+export function checkDispatchPauseTriggers(records){
+ if(!Array.isArray(records))throw Error('Invalid dispatch pause trigger inspection.');
+ const rows=new Map(records.map(r=>[r?.name,String(r?.sql||'').toLowerCase().replace(/\s+/g,' ').trim()]));
+ for(const [name,parts] of Object.entries(REQUIRED_DISPATCH_PAUSE_TRIGGERS)){
+  if(parts.some(part=>!rows.get(name)?.includes(part)))throw Error('Dispatch pause safety trigger missing or invalid: '+name);
+ }
+}
 export const REQUIRED_INDUSTRY_LAUNCH_TRIGGERS=Object.freeze({
  trg_industry_launch_request_guard:Object.freeze(['before update','on industry_launch_requests',"old.state<>'requested'",'raise(abort']),
  trg_industry_launch_request_no_delete:Object.freeze(['before delete','on industry_launch_requests','raise(abort'])
@@ -356,6 +369,7 @@ export function checkTables(tables, binding, mode) {
   const missing = expected.filter(name => !present.has(name));
   if(mode==='preflight'){
     const exact=names=>missing.length===names.length&&names.every(name=>missing.includes(name));
+    if(binding==='CONTROL_DB'&&exact(['calling_dispatch_pause_events']))return 'control_dispatch_pause_upgrade';
     if(binding==='CONTROL_DB'&&exact(['industry_launch_requests']))return 'control_industry_launch_upgrade';
     if(binding==='CONTROL_DB'&&exact(INDUSTRY_SNAPSHOT_TABLES))return 'control_industry_snapshots_upgrade';
     if(binding==='CONTROL_DB'&&exact(INDUSTRY_DRAFT_TABLES))return 'control_industry_drafts_upgrade';
@@ -447,7 +461,7 @@ export async function inspectCloudflare({ credentials, mode, apiFetch = fetch, t
     const names = rows.map(x => x.name);
     const state = checkTables(names, binding, mode);
     modes[binding] = state;
-    if ([...messagingUpgradeStates,'control_industry_drafts_upgrade','control_industry_snapshots_upgrade','control_industry_launch_upgrade','control_client_accounts_upgrade','control_publication_upgrade','control_profile_upgrade',
+    if ([...messagingUpgradeStates,'control_industry_drafts_upgrade','control_industry_snapshots_upgrade','control_industry_launch_upgrade','control_dispatch_pause_upgrade','control_client_accounts_upgrade','control_publication_upgrade','control_profile_upgrade',
          'control_script_upgrade','crm_dispatch_upgrade','ready','crm_call_intent_upgrade',
          'crm_scripted_results_upgrade','crm_industry_campaign_upgrade','control_company_change_upgrade',
          'control_scripted_pilot_upgrade','control_dispatch_settings_upgrade','control_funding_settings_upgrade','control_manual_balances_upgrade','control_credit_upgrade','control_minute_ledger_upgrade','control_minute_holds_upgrade','control_provider_journal_upgrade','control_credit_purchase_upgrade','control_provider_safety_upgrade','control_provider_reserve_upgrade','control_provider_reconcile_upgrade','crm_staff_upgrade','crm_cdr_upgrade','crm_staff_cdr_upgrade'].includes(state)) {
@@ -459,6 +473,10 @@ export async function inspectCloudflare({ credentials, mode, apiFetch = fetch, t
       if(binding==='CONTROL_DB'&&presentMinuteLedger(names)){
         const triggers=await query(id,"SELECT name,sql FROM sqlite_master WHERE type='trigger' AND name LIKE 'trg_minute_ledger_%'");
         checkMinuteLedgerTriggers(triggers);
+      }
+      if(binding==='CONTROL_DB'&&names.includes('calling_dispatch_pause_events')){
+        const triggers=await query(id,"SELECT name,sql FROM sqlite_master WHERE type='trigger' AND name LIKE 'trg_dispatch_pause_%'");
+        checkDispatchPauseTriggers(triggers);
       }
       if(binding==='CONTROL_DB'&&names.includes('industry_launch_requests')){
         const triggers=await query(id,"SELECT name,sql FROM sqlite_master WHERE type='trigger' AND name LIKE 'trg_industry_launch_%'");
@@ -505,6 +523,7 @@ export async function inspectCloudflare({ credentials, mode, apiFetch = fetch, t
         if(state==='crm_industry_campaign_upgrade'&&INDUSTRY_CAMPAIGN_TABLES.includes(table))continue;
          if(state==='control_industry_drafts_upgrade'&&INDUSTRY_DRAFT_TABLES.includes(table))continue;
          if(state==='control_industry_snapshots_upgrade'&&INDUSTRY_SNAPSHOT_TABLES.includes(table))continue;
+         if(state==='control_dispatch_pause_upgrade'&&table==='calling_dispatch_pause_events')continue;
          if(state==='control_industry_launch_upgrade'&&table==='industry_launch_requests')continue;
         if(state==='control_manual_balances_upgrade'&&['provider_balance_snapshots','provider_balance_covered_calls','provider_manual_funding_control'].includes(table))continue;
         if(state==='control_funding_settings_upgrade'&&table==='calling_funding_settings')continue;
@@ -550,6 +569,7 @@ export function verifiedSchemaState(modes) {
   // These are whole, explicitly reviewed additive groups on the complete
   // prior Calling schema. A completed group can be resumed after a failed
   // deployment; arbitrary partial tables or unrelated upgrades still fail.
+  if(modes?.CONTROL_DB==='control_dispatch_pause_upgrade'&&modes?.CRM_DB==='ready')return 'control_dispatch_pause_upgrade';
   if(modes?.CONTROL_DB==='control_industry_launch_upgrade'&&modes?.CRM_DB==='crm_industry_campaign_upgrade')return 'industry_launch_campaign_upgrade';
   if(modes?.CONTROL_DB==='ready'&&modes?.CRM_DB==='crm_industry_campaign_upgrade')return 'crm_industry_campaign_upgrade';
   if(modes?.CONTROL_DB==='control_industry_launch_upgrade'&&modes?.CRM_DB==='ready')return 'control_industry_launch_upgrade';

@@ -1,4 +1,5 @@
-import {requireMembership,mutationOriginAllowed} from './human-auth.mjs';
+import {requireMembership,mutationOriginAllowed,currentSuperAdminMfa} from './human-auth.mjs';
+import {readDispatchPause,changeDispatchPause} from './calling-dispatch-pause.mjs';
 import {resolveCrmDb,parseJsonBody} from './core.mjs';
 import {scriptedCampaignConfiguration,dispatchSettings,providerThrottledUntil} from './scripted-campaign-dispatch.mjs';
 import {minutePosition,fundingCap,fundingPosition,affordableCallSeconds,BILLING_PULSE_SECONDS} from './minute-holds.mjs';
@@ -51,6 +52,7 @@ async function creditPreflight(env,tid,policy,configuration){
  if(!policy?.enabled||requiredSeconds===null)return {...unavailable,reason:'approval_required'};
  const manual=configuration.funding?.source==='manual_balance';
  if(!configuration.ready){
+  if(configuration.dispatchPaused)return {...unavailable,reason:'calling_paused_by_super_admin'};
   let reason='approval_required';
   // Missing funds do not revoke an owner's existing company authorization.
   // Keep carrier/policy problems distinct from copying or replenishing money.
@@ -75,9 +77,20 @@ export async function handleScriptedCallingRequest(req,env,user,{now=Date.now()}
  if(!['GET','POST'].includes(req.method))return fail('method_not_allowed',405);
  if(req.method==='POST'&&!mutationOriginAllowed(req))return fail('same_origin_required',403);
  const admin=['policy','clearances','reconcile','release-unused-reservation'].includes(action);
- if(!['policy','clearances','runs','state','results','reconcile','review-partial','capacity','enable-clients','release-unused-reservation'].includes(action))return fail('not_found',404);
+ if(!['policy','clearances','runs','state','results','reconcile','review-partial','capacity','enable-clients','release-unused-reservation','emergency-pause'].includes(action))return fail('not_found',404);
  try{
   const d=req.method==='POST'?await body(req):Object.fromEntries(url.searchParams);
+  if(action==='emergency-pause'){
+   if(url.search)return fail('invalid_query',400);
+   if(!await currentSuperAdminMfa(env.CONTROL_DB,user,now))return fail('current_super_admin_mfa_required',403);
+   if(req.method==='GET')return json(await readDispatchPause(env.CONTROL_DB));
+   let result;
+   try{result=await changeDispatchPause(env.CONTROL_DB,d,user,now)}catch(e){
+    if(e?.message==='invalid dispatch pause request')return fail('invalid_dispatch_pause',400);
+    throw e;
+   }
+   return result.ok?json(result.state):fail('dispatch_pause_changed_refresh',409);
+  }
   if(action==='enable-clients'){
    if(req.method!=='POST')return fail('method_not_allowed',405);
    if(!await freshAdmin(env,user,now))return fail('current_super_admin_mfa_required',403);
@@ -299,6 +312,7 @@ export async function handleScriptedCallingRequest(req,env,user,{now=Date.now()}
   }
   if(member.status!=='active')return fail('super_admin_must_activate_tenant',409);
   const configuration=await scriptedCampaignConfiguration(env);
+  if(configuration.dispatchPaused)return fail('calling_paused_by_super_admin',409);
   if(!configuration.ready)return fail('scripted_customer_campaigns_unconfigured',503);
   const policy=await db.prepare('SELECT tenant_id,flow_id,enabled,max_seconds AS maxSeconds,expires_at AS expiresAt FROM calling_policies WHERE tenant_id=? AND enabled=1 AND expires_at>? AND flow_id=?').bind(tid,at,SCRIPTED_CALLING_POLICY).first();
   if(!policy)return fail('super_admin_calling_approval_required',409);

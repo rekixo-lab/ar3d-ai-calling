@@ -70,6 +70,9 @@ const server=http.createServer(async(req,res)=>{
       });
     if(req.method==='GET'&&path==='/v1/human/credits/admin-dashboard')
       return respond(res,200,{clients:{total:0,active:0},position:{},internal:{ended:0},campaign:{ended:0},transactions:[]});
+    // This fixture intentionally has no enrolled MFA; emergency controls must be unavailable.
+    if(req.method==='GET'&&path==='/v1/human/calling/emergency-pause')
+      return respond(res,403,{error:'current_mfa_required'});
     if(req.method==='GET'&&path==='/v1/human/mfa')
       return respond(res,200,{enabled:false,configured:true});
     if(req.method==='GET'&&path==='/v1/human/launch-readiness')
@@ -150,6 +153,8 @@ try{
     await page.getByText('Super Admin',{exact:true}).waitFor();
     await page.getByRole('heading',{name:'Dashboard',exact:true}).waitFor();
     await page.getByRole('link',{name:'Calling Setup',exact:true}).click();
+    await page.getByText('Dispatch pause status unavailable. Current Super Admin MFA required.',{exact:true}).waitFor();
+    assert.equal(await page.getByRole('button',{name:'Pause new campaign calls',exact:true}).isDisabled(),true);
     await page.getByText('Internal test and platform settings',{exact:true}).click();
     await page.getByRole('heading',{name:'Internal phone test'}).waitFor();
     await page.getByText('Advanced diagnostics · Plivo go-live readiness',{exact:true}).click();

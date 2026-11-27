@@ -463,6 +463,18 @@ try{
 
  // Platform capacity card: matches Plivo/Sarvam limits, shared fairly by all companies.
  await adminPage.getByRole('heading',{name:'Calling capacity',exact:true}).waitFor();
+ await adminPage.getByRole('heading',{name:'Emergency calling pause',exact:true}).waitFor();
+ await adminPage.getByText('No operator pause. All funding, provider and consent checks still apply.',{exact:true}).waitFor();
+ await adminPage.getByLabel('Reason for dispatch pause or resume',{exact:true}).fill('Fictional browser incident check');
+ adminPage.once('dialog',dialog=>dialog.accept());
+ await adminPage.getByRole('button',{name:'Pause new campaign calls',exact:true}).click();
+ await adminPage.getByText('New campaign calls paused globally · Fictional browser incident check',{exact:true}).waitFor();
+ assert.deepEqual({...f.c.db.prepare('SELECT revision,paused FROM calling_dispatch_pause_events ORDER BY revision DESC LIMIT 1').get()},{revision:1,paused:1});
+ await adminPage.getByLabel('Reason for dispatch pause or resume',{exact:true}).fill('Fictional browser review complete');
+ adminPage.once('dialog',dialog=>dialog.accept());
+ await adminPage.getByRole('button',{name:'Resume new campaign calls',exact:true}).click();
+ await adminPage.getByText('No operator pause. All funding, provider and consent checks still apply.',{exact:true}).waitFor();
+ assert.deepEqual({...f.c.db.prepare('SELECT revision,paused FROM calling_dispatch_pause_events ORDER BY revision DESC LIMIT 1').get()},{revision:2,paused:0});
  await adminPage.getByText(/Occupied calling slots: 0 \/ 8 · Reserved\/submitted: 0 · Uncertain: 0/).waitFor();
  await adminPage.getByLabel('Calls at once, all companies (1–2000)',{exact:true}).fill('40');
  await adminPage.getByLabel('Calls at once, one company (1–500)',{exact:true}).fill('5');

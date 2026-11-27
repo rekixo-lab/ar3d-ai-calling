@@ -1,5 +1,5 @@
 import {resolveCrmDb} from './core.mjs';
-import {providerFaultBlocked} from './provider-safety.mjs';
+import {campaignDispatchInterlock,dispatchPausePredicate} from './calling-dispatch-pause.mjs';
 import {moneyBudgetConfig,providerBudgetPosition,reserveBudgetedMinutes} from './provider-cost-reservations.mjs';
 import {minutePosition,closeMinuteHold,fundingCap,fundingPosition,affordableCallSeconds,BILLING_PULSE_SECONDS} from './minute-holds.mjs';
 import {SCRIPTED_CALLING_POLICY,approvedCampaignPhone,reserveCampaignQuestionnaire,campaignPromptMode,submitScriptedPhone} from './scripted-phone-pilot.mjs';
@@ -17,12 +17,14 @@ export const creditOnlyCallingApproved=env=>fundedDispatchApproved(env)&&env.AR3
 export async function scriptedCampaignConfiguration(env){
  env=await resolveFundingEnv(env);
  const carrier=Boolean(await approvedCampaignPhone(env)),funded=fundedDispatchApproved(env);
- const blocked=carrier&&funded?await providerFaultBlocked(env.CONTROL_DB):false;
+ const gate=carrier&&funded?await campaignDispatchInterlock(env.CONTROL_DB):{paused:false,providerBlocked:false};
+ const blocked=gate.paused||gate.providerBlocked;
  const missing=[...(!carrier?['Plivo setup, a completed internal pilot and campaign authorization']:[]),...(!funded?[
   resolvedFunding(env)?.source==='manual_balance'?'Sync both current provider balances on Super Admin Dashboard. Available funds must cover one billing pulse.':
   'Reviewed provider funding setup and dispatch approval are required. Check Super Admin → Credit transactions → Provider funding setup.']:[])];
- if(blocked)missing.push('Provider billing or authentication fault requires Super Admin review');
- return {ready:carrier&&funded&&!blocked,carrierReady:carrier,missing,creditOnly:carrier&&!blocked&&creditOnlyCallingApproved(env),
+ if(gate.paused)missing.push('New campaign calls paused by Super Admin');
+ if(gate.providerBlocked)missing.push('Provider billing or authentication fault requires Super Admin review');
+ return {ready:carrier&&funded&&!blocked,carrierReady:carrier,dispatchPaused:gate.paused,missing,creditOnly:carrier&&!blocked&&creditOnlyCallingApproved(env),
   funding:{source:resolvedFunding(env).source,status:resolvedFunding(env).status}};
 }
 // A definitive provider rejection is the only automatic no-submission release.
@@ -149,8 +151,11 @@ function budgetedEnv(env,limit){
 async function dispatchPreconditions(env,tid,db,now,cache){
  const at=new Date(now).toISOString();
  if(!cache.global){
-  cache.global=!fundedDispatchApproved(env)?{state:'funding_approval_required'}:
-   await providerFaultBlocked(env.CONTROL_DB)?{state:'provider_review_required'}:{ok:true};
+  if(!fundedDispatchApproved(env))cache.global={state:'funding_approval_required'};
+  else{
+   const gate=await campaignDispatchInterlock(env.CONTROL_DB);
+   cache.global=gate.paused?{state:'operator_dispatch_paused'}:gate.providerBlocked?{state:'provider_review_required'}:{ok:true};
+  }
  }
  if(!cache.global.ok)return cache.global;
  if(cache.tenants.has(tid))return cache.tenants.get(tid);
@@ -176,7 +181,7 @@ async function dispatchPreconditions(env,tid,db,now,cache){
 // Separate D1 databases and the external carrier cannot share a transaction.
 async function stillEligibleForSubmission(env,db,job,policy,needed,reservedAt,now){
  if(env.AR3D_SCRIPTED_CAMPAIGNS_ENABLED!=='enabled'||!inCallingWindow(now))return false;
- const funded=await env.CONTROL_DB.prepare("SELECT 1 AS ok FROM tenants t JOIN tenant_minute_holds h ON h.tenant_id=t.id JOIN provider_cost_reservations p ON p.tenant_id=h.tenant_id AND p.job_id=h.job_id WHERE t.id=? AND t.status='active' AND t.storage_mode='shared' AND h.job_id=? AND h.state='held' AND h.reserved_seconds=? AND p.reserved_seconds=h.reserved_seconds").bind(job.tenant_id,job.id,needed).first();
+ const funded=await env.CONTROL_DB.prepare("SELECT 1 AS ok FROM tenants t JOIN tenant_minute_holds h ON h.tenant_id=t.id JOIN provider_cost_reservations p ON p.tenant_id=h.tenant_id AND p.job_id=h.job_id WHERE t.id=? AND t.status='active' AND t.storage_mode='shared' AND h.job_id=? AND h.state='held' AND h.reserved_seconds=? AND p.reserved_seconds=h.reserved_seconds AND "+dispatchPausePredicate).bind(job.tenant_id,job.id,needed).first();
  if(!funded)return false;
  const at=new Date(now).toISOString();
  return !!await db.prepare(`SELECT 1 AS ok FROM calling_jobs j
@@ -353,7 +358,7 @@ export async function runScriptedCampaignCron(baseEnv,{now=Date.now(),apiFetch=f
     catch{console.error('AR3D scripted campaign processing unavailable');continue}
     if(r.state==='submitted'){dialed++;free--;live.set(tid,(live.get(tid)||0)+1);next.push(tid)}
     else if(r.state==='unknown'||r.state==='locked'){free--;unknownSlots++;}
-    else if(r.state==='funding_approval_required'||r.state==='provider_review_required'){queue=[];next.length=0;break}
+    else if(r.state==='funding_approval_required'||r.state==='provider_review_required'||r.state==='operator_dispatch_paused'){queue=[];next.length=0;break}
    }
    queue=next;
   }
