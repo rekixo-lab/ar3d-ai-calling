@@ -23,6 +23,7 @@ import {handleLeadStaffRequest} from './lead-staff-routes.mjs';
 import {handleLaunchReadiness} from './launch-readiness-routes.mjs';
 import {handleAgentSettingsRequest} from './agent-settings-routes.mjs';
 import {handleIndustryAgentRequest} from './industry-agent-routes.mjs';
+import {handleIndustryFlowSimulation} from './industry-flow-simulation-routes.mjs';
 import {handleAuditRequest} from './audit-routes.mjs';
 import {handleVisitStatusRequest} from './visit-status-routes.mjs';
 import {handleCampaignRequest} from './campaign-routes.mjs';
@@ -346,6 +347,8 @@ export async function handleHumanRequest(req,env){
     if(campaignResponse)return campaignResponse;
     const visitResponse=await handleVisitStatusRequest(req,env,user);
     if(visitResponse)return visitResponse;
+    const dryRun=await handleIndustryFlowSimulation(req,env,user);
+    if(dryRun)return dryRun;
     const industryDraft=await handleIndustryAgentRequest(req,env,user);
     if(industryDraft)return industryDraft;
     const agentResponse=await handleAgentSettingsRequest(req,env,user);

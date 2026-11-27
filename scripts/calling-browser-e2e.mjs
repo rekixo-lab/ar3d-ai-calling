@@ -70,6 +70,11 @@ try{
   const record=f.c.db.prepare('SELECT name,status,revision FROM ai_flow_definitions WHERE tenant_id=?').get(tid);
   assert.equal(record?.name,'Fictional admissions assistant');
   assert.equal(record?.status,'draft');assert.equal(record?.revision,2);
+  await page.getByLabel('Fictional conversation answers').fill(['Yes','Class 5','Please call me'].join('\n'));
+  await page.getByRole('button',{name:'Run fictional conversation (no calls)'}).click();
+  await page.getByRole('heading',{name:'Fictional conversation result'}).waitFor();
+  await page.getByText('Status: simulated_complete · answers used: 3').waitFor();
+  assert.equal(f.c.db.prepare('SELECT COUNT(*) AS n FROM ai_flow_definitions').get().n,1);
   assert.equal(f.r.db.prepare('SELECT COUNT(*) AS n FROM calling_jobs').get().n,beforeJobs);
   assert.equal(f.r.db.prepare('SELECT COUNT(*) AS n FROM calls').get().n,beforeCalls);
   assert.equal(f.c.db.prepare('SELECT COUNT(*) AS n FROM voice_call_routes').get().n,0);
