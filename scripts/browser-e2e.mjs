@@ -153,6 +153,8 @@ try{
     await page.getByText('Super Admin',{exact:true}).waitFor();
     await page.getByRole('heading',{name:'Dashboard',exact:true}).waitFor();
     await page.getByRole('link',{name:'Calling Setup',exact:true}).click();
+    await page.getByText('Dispatch pause status unavailable. Current Super Admin MFA required.',{exact:true}).waitFor();
+    assert.equal(await page.getByRole('button',{name:'Pause new campaign calls',exact:true}).isDisabled(),true);
     await page.getByText('Internal test and platform settings',{exact:true}).click();
     await page.getByRole('heading',{name:'Internal phone test'}).waitFor();
     await page.getByText('Advanced diagnostics · Plivo go-live readiness',{exact:true}).click();
