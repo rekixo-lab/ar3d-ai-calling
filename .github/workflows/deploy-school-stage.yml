@@ -1,0 +1,59 @@
+name: AR3D School Stage - locked manual deployment
+on:
+  workflow_dispatch:
+    inputs:
+      operation:
+        description: 'Read-only preflight or migrate/deploy isolated locked stage'
+        type: choice
+        options: [preflight, deploy_locked]
+        default: preflight
+        required: true
+      confirm:
+        description: 'Type SCHOOL_STAGE_ONLY'
+        type: string
+        required: true
+permissions:
+  contents: read
+concurrency:
+  group: ar3d-school-stage-deployment
+  cancel-in-progress: false
+jobs:
+  stage:
+    if: github.ref == 'refs/heads/main' && inputs.confirm == 'SCHOOL_STAGE_ONLY'
+    runs-on: ubuntu-latest
+    environment: school-stage
+    timeout-minutes: 20
+    env:
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.SCHOOL_STAGE_CLOUDFLARE_ACCOUNT_ID }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.SCHOOL_STAGE_CLOUDFLARE_API_TOKEN }}
+      SCHOOL_STAGE_D1_ID: ${{ secrets.SCHOOL_STAGE_D1_ID }}
+      PRODUCTION_CONTROL_DB_ID: ${{ secrets.AR3D_MAIN_CONTROL_DB_ID }}
+      PRODUCTION_CRM_DB_ID: ${{ secrets.AR3D_MAIN_CRM_DB_ID }}
+      SCHOOL_STAGE_TENANT_ID: ${{ vars.SCHOOL_STAGE_TENANT_ID }}
+      SCHOOL_STAGE_ORIGIN: ${{ vars.SCHOOL_STAGE_ORIGIN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: npm ci --ignore-scripts
+      - run: npm test
+      - name: Verify isolated resource names, IDs, privacy and stage marker
+        run: node scripts/school-stage-cloudflare.mjs prepare
+      - name: Build separate stage Worker (dry run)
+        run: npx --yes wrangler@4 deploy --config wrangler.school-stage.generated.json --dry-run --outdir "$RUNNER_TEMP/school-stage-build"
+      - name: Apply only allowlisted stage migrations
+        if: inputs.operation == 'deploy_locked'
+        run: npx --yes wrangler@4 d1 migrations apply ar3d-calling-school-stage-control --remote --config wrangler.school-stage.generated.json
+      - name: Verify migrated stage and private R2 again
+        if: inputs.operation == 'deploy_locked'
+        run: node scripts/school-stage-cloudflare.mjs verify-ready
+      - name: Deploy locked stage Worker (all paid action flags disabled)
+        if: inputs.operation == 'deploy_locked'
+        run: npx --yes wrangler@4 deploy --config wrangler.school-stage.generated.json
+      - name: Verify stage health and reject unauthorized dialing
+        if: inputs.operation == 'deploy_locked'
+        run: node scripts/smoke-school-stage.mjs
