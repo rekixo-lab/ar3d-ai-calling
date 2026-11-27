@@ -7,6 +7,7 @@ function industryAgentPanel(tenantId,content,role){
   node('p',{class:'note',text:'Choose an industry, build your AI instructions and save a draft. None of these agents is connected to live calling, Plivo, CRM outcomes or WhatsApp. Real Estate calling remains unchanged.'}));
  const profileBox=div('card'),listBox=div('card'),editBox=div('card');
  content.append(card,profileBox,listBox,editBox);
+ industryCampaignPanel(tenantId,content,{editable});
  let templates=[],drafts=[],activeId='',activeDraft=null,profileRevision=0,sequence=0;
  let snapshots=[],snapshotSequence=0;
  let launchSequence=0;
