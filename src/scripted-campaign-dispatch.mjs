@@ -118,7 +118,7 @@ async function reconcile(env,db,job,now,at){
 // ---------- capacity settings ----------
 export const DEFAULT_MAX_CONCURRENT_CALLS=8;     // ~Sarvam pay-as-you-go 60 STT req/min
 export const DEFAULT_QUERY_BUDGET=45;            // Cloudflare Free: 50 D1 queries per invocation
-const DIAL_QUERY_COST=21,RECONCILE_QUERY_COST=4; // includes named-client lookup for built-in campaign speech
+const DIAL_QUERY_COST=19,RECONCILE_QUERY_COST=4; // normal claim path + two final eligibility reads; outer cron retains platform headroom
 const intEnv=(v,lo,hi,def)=>{const n=Number(v);return Number.isSafeInteger(n)&&n>=lo&&n<=hi?n:def};
 export async function dispatchSettings(env){
  const fallbackMax=intEnv(env.AR3D_MAX_CONCURRENT_CALLS,1,2000,DEFAULT_MAX_CONCURRENT_CALLS);
