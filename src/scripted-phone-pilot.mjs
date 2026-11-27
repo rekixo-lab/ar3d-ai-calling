@@ -913,7 +913,7 @@ export async function handleScriptedPhoneCallback(req,env,{now=Date.now(),fetche
   // Preserve signed hangup and settlement for historical calls, but do not process their audio through a different provider.
   // Previously bound STOP must remain actionable even if the operator disables
   // speech or the call ended concurrently. It never authorizes a new turn.
-  if(row.job_id&&row.provider_call_id===call&&row.phase==='suppressing')return await finishCampaignOptOut(env,row,now);
+  if(step!=='hangup'&&row.job_id&&row.provider_call_id===call&&row.phase==='suppressing')return await finishCampaignOptOut(env,row,now);
   if(row.job_id&&row.provider_call_id===call&&step==='consent'&&!arg&&params.get('Digits')==='2'&&row.turn===0&&['consent','question','ended'].includes(row.phase)){
    const stopped=await control.prepare("UPDATE scripted_phone_pilots SET phase='suppressing' WHERE id=? AND provider_call_id=? AND turn=0 AND phase IN('consent','question','ended')").bind(id,call).run();
    if(stopped.meta.changes===1)return await finishCampaignOptOut(env,row,now);
@@ -950,6 +950,7 @@ export async function handleScriptedPhoneCallback(req,env,{now=Date.now(),fetche
     phase=CASE WHEN phase IN('requested','unknown','consent','question') THEN 'ended' ELSE phase END
     WHERE id=? AND (provider_call_id IS NULL OR provider_call_id=?)
       AND (provider_call_id IS NOT NULL OR provider_request_id IS NULL OR provider_request_id=?)`).bind(now,durationSeconds,call,id,call,requestId).run();
+   if(row.job_id&&row.provider_call_id===call&&row.phase==='suppressing')await finishCampaignOptOut(env,row,now);
    return new Response(null,{status:204,headers});
   }
   if(row.provider_call_id!==call)return end();
