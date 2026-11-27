@@ -1,5 +1,6 @@
 import {propertyWhatsAppJs} from './property-whatsapp-ui.mjs';
 import {industryAgentJs} from './industry-agent-ui.mjs';
+import {industryCampaignJs} from './industry-campaign-ui.mjs';
 export const html=`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#171717"><title>AR3D AI Calling</title><link rel="stylesheet" href="/app/assets/style.css"></head><body><div id="app" role="main"><p>Loading AR3D AI Calling…</p></div><script src="/app/assets/app.js" defer></script></body></html>`;
 export {css} from './dashboard-styles.mjs';
 export const js=String.raw`'use strict';
@@ -2630,6 +2631,7 @@ async function companyAdminPanel(main,client=null){
   const requests=div('stack'),profile=div('stack'),industryLaunch=div('stack');
   area.replaceChildren(requests,profile,industryLaunch);
   adminIndustryLaunchPanel(industryLaunch,company.value).catch(asError);
+  industryCampaignPanel(company.value,industryLaunch,{admin:true});
   adminCompanyChangesPanel(requests,company.value).catch(asError);
   companyProfileEditor(company.value,profile,true,company.selectedOptions[0]?.textContent||'').catch(asError);
  }
@@ -3311,5 +3313,6 @@ window.addEventListener('hashchange',event=>{
  else if(state.me)dashboard();
 });
 ${propertyWhatsAppJs}
+${industryCampaignJs}
 ${industryAgentJs}
 load();`;
