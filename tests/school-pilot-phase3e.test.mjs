@@ -192,8 +192,13 @@ test('stage entrypoint denies missing isolated binding, production routes, and u
   const origin=f.env.AR3D_SCHOOL_STAGE_ORIGIN;
   const req=new Request(origin+'/health');
   assert.equal((await handleSchoolStageWorker(req,f.env)).status,503);
-  const isolated={...f.env,CONTROL_DB:undefined,SCHOOL_STAGE_CONTROL_DB:f.env.CONTROL_DB,AR3D_SCHOOL_STAGE_ISOLATED_DB_CONFIRMED:'yes'};
+  const stageDbId='56565656-5656-4565-8565-565656565656';
+  const isolated={...f.env,CONTROL_DB:undefined,SCHOOL_STAGE_CONTROL_DB:f.env.CONTROL_DB,AR3D_SCHOOL_STAGE_ISOLATED_DB_CONFIRMED:'yes',AR3D_SCHOOL_STAGE_DB_ID:stageDbId};
+  assert.equal((await handleSchoolStageWorker(req,isolated)).status,503);
+  const {markerSql}=await import('../scripts/school-stage-cloudflare.mjs');
+  f.c.db.exec(markerSql({database:stageDbId}));
   assert.equal((await handleSchoolStageWorker(req,isolated)).status,200);
+  assert.equal((await handleSchoolStageWorker(req,{...isolated,AR3D_SCHOOL_STAGE_DB_ID:'78787878-7878-4787-8787-787878787878'})).status,503);
   assert.equal((await handleSchoolStageWorker(new Request(origin+'/v1/human/scripted-phone-pilot'),isolated)).status,404);
   assert.equal((await handleSchoolStageWorker(new Request(origin+'/v1/human/school-stage/dispatch',{method:'POST',headers:{Origin:origin,'Content-Type':'application/json'},body:'{}'}),isolated)).status,403);
   assert.equal(f.c.db.prepare('SELECT COUNT(*) AS n FROM school_stage_dispatches').get().n,0);
