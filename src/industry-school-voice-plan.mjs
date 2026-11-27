@@ -51,6 +51,16 @@ export async function validateSchoolAudioPack(scope,manifest,manifestSha256){
  if(JSON.stringify(expected.manifest)!==JSON.stringify(manifest)||expected.manifestSha256!==manifestSha256)fail('school_audio_pack_integrity');
  return expected.manifest;
 }
+function validMP3Header(bytes){
+ let offset=0;
+ if(bytes[0]===73&&bytes[1]===68&&bytes[2]===51){
+  if(bytes.length<14||Array.from(bytes.slice(6,10)).some(n=>n>127))return false;
+  offset=10+bytes[6]*2097152+bytes[7]*16384+bytes[8]*128+bytes[9]+((bytes[5]&16)?10:0);
+ }
+ if(offset+4>bytes.length)return false;
+ const a=bytes[offset],b=bytes[offset+1],c=bytes[offset+2];
+ return a===255&&(b&224)===224&&(b&24)!==8&&(b&6)===2&&(c&240)!==0&&(c&240)!==240&&(c&12)!==12;
+}
 export async function readSchoolAudioAsset(bucket,scope,pack,nodeId){
  const manifest=await validateSchoolAudioPack(scope,pack.manifest,pack.manifestSha256);
  const entry=manifest.entries.find(e=>e.nodeId===nodeId);
@@ -58,7 +68,7 @@ export async function readSchoolAudioAsset(bucket,scope,pack,nodeId){
  const obj=await bucket.get(entry.key);
  if(!obj?.body||obj.size!==entry.bytes||obj.httpMetadata?.contentType!=='audio/mpeg')fail('school_audio_asset_missing');
  const bytes=await readBoundedBytes({headers:new Headers({'content-length':String(obj.size)}),body:obj.body},SCHOOL_AUDIO_MAX);
- if(bytes.length!==entry.bytes||await audioSha(bytes)!==entry.sha256)fail('school_audio_asset_integrity');
+ if(bytes.length!==entry.bytes||!validMP3Header(bytes)||await audioSha(bytes)!==entry.sha256)fail('school_audio_asset_integrity');
  return bytes;
 }
 export async function beginSchoolVoiceSession(scope,pack){
@@ -78,12 +88,12 @@ const repeat=/^(?:repeat|again|say again|pardon|hello|hi|दोबारा ब�
 const sensitive=/(?:\d[\s-]*?){6}|(?:[०-९][\s-]*?){6}|[\w.+-]+@[\w.-]+\.[a-z]{2,}|\b(?:otp|aadhaar|aadhar|pan card|pin number|password|cvv)\b|आधार|पासवर्ड|ओटीपी/iu;
 export function validateSchoolVoiceProgress(state,plan){
  if(state?.version!==1||state.language!==plan.language||!Number.isSafeInteger(state.index)||state.index<0||state.index>plan.questions.length||
-  !Number.isSafeInteger(state.attempt)||state.attempt<0||state.attempt>1||!Number.isSafeInteger(state.turn)||state.turn<0||state.turn>2*plan.questions.length||
+  !Number.isSafeInteger(state.attempt)||state.attempt<0||state.attempt>1||!Number.isSafeInteger(state.turn)||state.turn<0||state.turn>2*plan.questions.length||state.turn<state.index+state.attempt||
   !Array.isArray(state.answers)||state.answers.length!==state.index||state.answers.some((x,i)=>!exact(x,['field','value'])||
     x.field!==plan.questions[i].field||typeof x.value!=='string'||!x.value.trim()||x.value.length>plan.questions[i].maxLength||bad.test(x.value)||sensitive.test(x.value))||
   !Array.isArray(state.recordings)||state.recordings.length!==state.turn||new Set(state.recordings).size!==state.recordings.length||state.recordings.some(x=>!digest(x))||
   !['active','completed','needs_review','declined','opted_out'].includes(state.status)||
-  (state.status==='active'&&state.index>=plan.questions.length)||(state.status==='completed'&&state.index!==plan.questions.length))fail('school_voice_progress_invalid');
+  (state.status==='active'&&(state.index>=plan.questions.length||state.turn>=2*plan.questions.length||state.turn>2*state.index+state.attempt))||(state.status==='completed'&&(state.index!==plan.questions.length||state.attempt!==0)))fail('school_voice_progress_invalid');
  return state;
 }
 /** Called once after a durable recording claim. Never guesses or invokes an LLM.
