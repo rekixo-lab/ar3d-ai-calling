@@ -464,7 +464,7 @@ try{
  await adminPage.getByText('Please update our fictional Raipur plot price from 12 lakh to 14 lakh.').waitFor();
  const schoolReview=adminPage.getByRole('heading',{name:'Industry production configuration review',exact:true});
  await schoolReview.waitFor();
- await adminPage.getByLabel('Review reference / reason',{exact:true}).fill('Fictional reviewed School script');
+ await adminPage.getByRole('textbox',{name:'Production review reference',exact:true}).fill('Fictional reviewed School script');
  await adminPage.getByText('I reviewed the script and understand this does not enable live calls.',{exact:true}).click();
  await adminPage.getByRole('button',{name:'Mark configuration reviewed',exact:true}).click();
  await adminPage.getByRole('button',{name:'Load School audio preparation',exact:true}).click();
