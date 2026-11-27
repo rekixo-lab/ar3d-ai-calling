@@ -19,6 +19,7 @@ export const WHATSAPP_TABLES=Object.freeze([
 ]);
 export const CONTROL_WHATSAPP_TABLES=Object.freeze(['whatsapp_connections','whatsapp_webhook_batches','whatsapp_dispatch_ticks']);
 export const INDUSTRY_DRAFT_TABLES=Object.freeze(['tenant_industry_profiles','ai_flow_definitions']);
+export const INDUSTRY_SNAPSHOT_TABLES=Object.freeze(['ai_flow_snapshots','ai_flow_preview_reviews']);
 const messagingUpgradeStates=['control_whatsapp_upgrade','control_whatsapp_queue_upgrade','crm_property_upgrade','crm_whatsapp_upgrade','crm_property_whatsapp_upgrade'];
 const messagingMissingTables=state=>state==='control_whatsapp_upgrade'?CONTROL_WHATSAPP_TABLES:
   state==='control_whatsapp_queue_upgrade'?['whatsapp_dispatch_ticks']:
@@ -26,7 +27,7 @@ const messagingMissingTables=state=>state==='control_whatsapp_upgrade'?CONTROL_W
   state==='crm_property_whatsapp_upgrade'?[...PROPERTY_TABLES,...WHATSAPP_TABLES]:[];
 export const REQUIRED_TABLES = Object.freeze({
   CONTROL_DB: Object.freeze([
-    ...CONTROL_WHATSAPP_TABLES,...INDUSTRY_DRAFT_TABLES,
+    ...CONTROL_WHATSAPP_TABLES,...INDUSTRY_DRAFT_TABLES,...INDUSTRY_SNAPSHOT_TABLES,
     'tenants','tenant_keys','project_links','tenant_numbers','tenant_audit_events',
     'human_users','tenant_memberships','human_sessions','human_invitations',
     'human_login_limits','human_bootstrap_claim','human_ip_login_limits','human_mfa_settings','human_mfa_challenges','human_mfa_recovery_codes','provider_event_inbox','calling_script_bindings','calling_script_versions','company_profile_versions','calling_agent_publications','shared_voice_gateway','voice_call_routes','client_account_contacts','company_change_requests','scripted_phone_pilots','tenant_credit_budgets','tenant_credit_audit','tenant_minute_ledger','tenant_minute_holds','provider_financial_journal','tenant_credit_purchases','provider_safety_events','provider_cost_reservations','provider_cost_reconciliations','calling_dispatch_settings','calling_company_settings','calling_capacity_signals','calling_funding_settings','provider_balance_snapshots','provider_balance_covered_calls','provider_manual_funding_control'
@@ -44,6 +45,8 @@ export const REQUIRED_COLUMNS = Object.freeze({
     whatsapp_dispatch_ticks: Object.freeze(['slot_start_ms','claimed_at','finished_at','outcome']),
     tenant_industry_profiles: Object.freeze(['tenant_id','industry_code','revision','updated_by','updated_at']),
     ai_flow_definitions: Object.freeze(['tenant_id','id','template_id','industry_code','name','config_json','status','revision','created_by','created_at','updated_by','updated_at']),
+    ai_flow_snapshots: Object.freeze(['tenant_id','id','flow_id','source_revision','template_id','config_json','graph_json','graph_sha256','compiler_version','status','created_by','created_at']),
+    ai_flow_preview_reviews: Object.freeze(['tenant_id','snapshot_id','decision','review_note','reviewed_by','reviewed_at']),
     tenants: Object.freeze(['id','plan_code','storage_mode','suspended_from_status']),
     human_users: Object.freeze(['id','global_role','password_hash']),
     human_sessions: Object.freeze(['token_hash','expires_at']),
@@ -282,6 +285,21 @@ export function checkMinuteLedgerTriggers(records){
   if(parts.some(p=>!rows.get(name)?.includes(p)))throw Error('Minute ledger safety trigger missing or invalid: '+name);
  }
 }
+export const REQUIRED_INDUSTRY_SNAPSHOT_TRIGGERS=Object.freeze({
+  trg_ai_flow_snapshot_immutable:Object.freeze(['before update','on ai_flow_snapshots','raise(abort']),
+  trg_ai_flow_snapshot_no_delete:Object.freeze(['before delete','on ai_flow_snapshots','raise(abort']),
+  trg_ai_flow_review_immutable:Object.freeze(['before update','on ai_flow_preview_reviews','raise(abort']),
+  trg_ai_flow_review_no_delete:Object.freeze(['before delete','on ai_flow_preview_reviews','raise(abort'])
+});
+export function checkIndustrySnapshotTriggers(records){
+ if(!Array.isArray(records))throw Error('Invalid simulation snapshot trigger inspection.');
+ const triggers=new Map(records.map(r=>[r?.name,String(r?.sql||'').toLowerCase().replace(/\s+/g,' ').trim()]));
+ for(const [name,parts] of Object.entries(REQUIRED_INDUSTRY_SNAPSHOT_TRIGGERS)){
+  const sql=triggers.get(name);
+  if(!sql||parts.some(x=>!sql.includes(x)))
+   throw Error('Control simulation snapshot immutability trigger missing or invalid: '+name+'. Deployment refused.');
+ }
+}
 export function checkSafetyTriggers(records,{allowCallIntentUpgrade=false}={}) {
   if (!Array.isArray(records)) throw Error('Invalid CRM trigger inspection result.');
   const triggers = new Map(records.map(row => [row?.name, String(row?.sql || '')
@@ -306,6 +324,7 @@ export function checkTables(tables, binding, mode) {
   const missing = expected.filter(name => !present.has(name));
   if(mode==='preflight'){
     const exact=names=>missing.length===names.length&&names.every(name=>missing.includes(name));
+    if(binding==='CONTROL_DB'&&exact(INDUSTRY_SNAPSHOT_TABLES))return 'control_industry_snapshots_upgrade';
     if(binding==='CONTROL_DB'&&exact(INDUSTRY_DRAFT_TABLES))return 'control_industry_drafts_upgrade';
     if(binding==='CONTROL_DB'&&exact(CONTROL_WHATSAPP_TABLES))return 'control_whatsapp_upgrade';
     if(binding==='CONTROL_DB'&&exact(['whatsapp_dispatch_ticks']))return 'control_whatsapp_queue_upgrade';
@@ -394,7 +413,7 @@ export async function inspectCloudflare({ credentials, mode, apiFetch = fetch, t
     const names = rows.map(x => x.name);
     const state = checkTables(names, binding, mode);
     modes[binding] = state;
-    if ([...messagingUpgradeStates,'control_industry_drafts_upgrade','control_client_accounts_upgrade','control_publication_upgrade','control_profile_upgrade',
+    if ([...messagingUpgradeStates,'control_industry_drafts_upgrade','control_industry_snapshots_upgrade','control_client_accounts_upgrade','control_publication_upgrade','control_profile_upgrade',
          'control_script_upgrade','crm_dispatch_upgrade','ready','crm_call_intent_upgrade',
          'crm_scripted_results_upgrade','control_company_change_upgrade',
          'control_scripted_pilot_upgrade','control_dispatch_settings_upgrade','control_funding_settings_upgrade','control_manual_balances_upgrade','control_credit_upgrade','control_minute_ledger_upgrade','control_minute_holds_upgrade','control_provider_journal_upgrade','control_credit_purchase_upgrade','control_provider_safety_upgrade','control_provider_reserve_upgrade','control_provider_reconcile_upgrade','crm_staff_upgrade','crm_cdr_upgrade','crm_staff_cdr_upgrade'].includes(state)) {
@@ -405,6 +424,10 @@ export async function inspectCloudflare({ credentials, mode, apiFetch = fetch, t
       if(binding==='CONTROL_DB'&&presentMinuteLedger(names)){
         const triggers=await query(id,"SELECT name,sql FROM sqlite_master WHERE type='trigger' AND name LIKE 'trg_minute_ledger_%'");
         checkMinuteLedgerTriggers(triggers);
+      }
+      if(binding==='CONTROL_DB'&&names.includes('ai_flow_snapshots')){
+        const immutable=await query(id,"SELECT name,sql FROM sqlite_master WHERE type='trigger' AND name LIKE 'trg_ai_flow_%'");
+        checkIndustrySnapshotTriggers(immutable);
       }
       if(binding==='CONTROL_DB'&&names.includes('tenant_minute_holds')){
         const triggers=await query(id,"SELECT name,sql FROM sqlite_master WHERE type='trigger' AND name LIKE 'trg_minute_%'");
@@ -441,6 +464,7 @@ export async function inspectCloudflare({ credentials, mode, apiFetch = fetch, t
       for (const table of Object.keys(REQUIRED_COLUMNS[binding])) {
         if(messagingMissingTables(state).includes(table))continue;
          if(state==='control_industry_drafts_upgrade'&&INDUSTRY_DRAFT_TABLES.includes(table))continue;
+         if(state==='control_industry_snapshots_upgrade'&&INDUSTRY_SNAPSHOT_TABLES.includes(table))continue;
         if(state==='control_manual_balances_upgrade'&&['provider_balance_snapshots','provider_balance_covered_calls','provider_manual_funding_control'].includes(table))continue;
         if(state==='control_funding_settings_upgrade'&&table==='calling_funding_settings')continue;
         if(state==='control_dispatch_settings_upgrade'&&['calling_dispatch_settings','calling_company_settings','calling_capacity_signals'].includes(table))continue;
@@ -485,6 +509,7 @@ export function verifiedSchemaState(modes) {
   // These are whole, explicitly reviewed additive groups on the complete
   // prior Calling schema. A completed group can be resumed after a failed
   // deployment; arbitrary partial tables or unrelated upgrades still fail.
+  if(modes?.CONTROL_DB==='control_industry_snapshots_upgrade'&&modes?.CRM_DB==='ready')return 'control_industry_snapshots_upgrade';
   if(modes?.CONTROL_DB==='control_industry_drafts_upgrade'&&modes?.CRM_DB==='ready')return 'control_industry_drafts_upgrade';
    if(modes?.CONTROL_DB==='control_whatsapp_queue_upgrade'&&modes?.CRM_DB==='ready')return 'whatsapp_queue_upgrade';
   if(['ready','control_whatsapp_upgrade','control_whatsapp_queue_upgrade'].includes(modes?.CONTROL_DB)&&
