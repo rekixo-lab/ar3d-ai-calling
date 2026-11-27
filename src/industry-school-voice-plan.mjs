@@ -85,7 +85,7 @@ export async function beginSchoolVoiceSession(scope,pack){
 const stop=/(?:stop calling|don['’]?t call|do not call|remove my number|unsubscribe|opt.?out|कॉल मत|फोन मत|नंबर हटा|नम्बर हटा|(?:कॉल|फोन)\s+(?:बंद|न\s+कर)|(?:call|phone)\s+(?:mat|nahi|nahin)\s+kar)/iu;
 const endCall=/^(?:stop|hang up|end call|not interested|बात नहीं करनी|कॉल बंद करो|फोन बंद करो|अभी बात नहीं करनी|रुचि नहीं है)[।.!?\s]*$/iu;
 const repeat=/^(?:repeat|again|say again|pardon|hello|hi|दोबारा बोलिए|फिर से पूछिए|सुनाई नहीं दिया|हेलो|नमस्ते|हम्म)[।.!?\s]*$/iu;
-const sensitive=/(?:\d[\s-]*?){6}|(?:[०-९][\s-]*?){6}|[\w.+-]+@[\w.-]+\.[a-z]{2,}|\b(?:otp|aadhaar|aadhar|pan card|pin number|password|cvv)\b|आधार|पासवर्ड|ओटीपी/iu;
+const sensitive=/(?:[\d०-९][\s-]*?){6}|[\w.+-]+@[\w.-]+\.[a-z]{2,}|\b(?:otp|aadhaar|aadhar|pan card|pin number|password|cvv)\b|आधार|पासवर्ड|ओटीपी/iu;
 export function validateSchoolVoiceProgress(state,plan){
  if(state?.version!==1||state.language!==plan.language||!Number.isSafeInteger(state.index)||state.index<0||state.index>plan.questions.length||
   !Number.isSafeInteger(state.attempt)||state.attempt<0||state.attempt>1||!Number.isSafeInteger(state.turn)||state.turn<0||state.turn>2*plan.questions.length||state.turn<state.index+state.attempt||
