@@ -23,12 +23,15 @@ test('every deployed Cloudflare Worker module avoids unsupported error redirects
 test('Plivo network call sites use manual redirects, and client credit lookup is local only',()=>{
  const files={
   'credit-wallet-routes.mjs':4,
-  'plivo-cost-reconcile-routes.mjs':1,
+  'plivo-verified-cdr.mjs':1,
   'cost-intelligence.mjs':1,
   'scripted-phone-pilot.mjs':5
  };
  const client=readFileSync(join(src,'plivo-cdr-routes.mjs'),'utf8');
  assert.doesNotMatch(client,/\bfetch\s*\(|\bfetcher\b|api\.plivo\.com|Authorization\s*:/,'client credit lookup must not contact the carrier');
+ const reconcile=readFileSync(join(src,'plivo-cost-reconcile-routes.mjs'),'utf8');
+ assert.match(reconcile,/await readVerifiedPlivoCdr\(/,'CDR route must delegate network verification to the shared reader');
+ assert.doesNotMatch(reconcile,/\bfetch\s*\(|\bfetcher\s*\(|api\.plivo\.com|Authorization\s*:/,'CDR route must not bypass the shared reader');
  for(const [name,total] of Object.entries(files)){
   const s=readFileSync(join(src,name),'utf8');
   const manual=[...s.matchAll(/redirect\s*:\s*['"]manual['"]/g)].length;

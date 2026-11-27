@@ -214,3 +214,22 @@ test('bounded settlement batch continues past provider failure without releasing
  assert.deepEqual(await runAutomaticMinuteSettlement(f.env,{now:now+120000,fetcher}),{attempted:0});
  }finally{f.close()}
 });
+
+test('CDR manual reconciliation rechecks active Super Admin MFA before and after the provider read',async()=>{
+ for(const mode of ['inactive','revoked-during-get']){
+  const f=fixture();try{
+   seed(f);
+   let reads=0;
+   if(mode==='inactive')f.c.db.prepare("UPDATE human_users SET status='disabled' WHERE id='admin'").run();
+   const fetcher=async(...args)=>{
+    reads++;
+    f.c.db.prepare("UPDATE human_sessions SET revoked_at=? WHERE user_id='admin'").run(new Date().toISOString());
+    return gateway(good)(...args);
+   };
+   const r=await handlePlivoCostReconcile(request(),f.env,admin,{fetcher});
+   assert.equal(r.status,403,await r.clone().text());
+   assert.equal(reads,mode==='inactive'?0:1);
+   assert.equal(f.r.db.prepare('SELECT COUNT(*) AS n FROM verified_provider_call_costs').get().n,0);
+  }finally{f.close()}
+ }
+});

@@ -1,7 +1,8 @@
 // Current-MFA Super Admin may record a verified Plivo CDR for one completed
 // Calling job, exactly once. A matched held call may settle billed seconds;
 // this never authorizes new calls or asserts currency/funding.
-import {mutationOriginAllowed} from './human-auth.mjs';
+import {mutationOriginAllowed,currentSuperAdminMfa} from './human-auth.mjs';
+import {readVerifiedPlivoCdr} from './plivo-verified-cdr.mjs';
 import {resolveCrmDb} from './core.mjs';
 import {closeMinuteHold} from './minute-holds.mjs';
 import {resolveFundingEnv,resolvedFunding} from './provider-funding.mjs';
@@ -12,9 +13,7 @@ const validJobId=value=>UUID.test(value||'')||JOB_ID.test(value||'');
 const HEADERS={'Cache-Control':'no-store','X-Content-Type-Options':'nosniff','Referrer-Policy':'no-referrer'};
 const json=(data,status=200)=>Response.json(data,{status,headers:HEADERS});
 const fail=(error,status=400)=>json({error},status);
-const phone=x=>typeof x==='string'?x.replace(/^\+/,''):null;
-const seconds=x=>Number.isSafeInteger(x)&&x>=0&&x<=86400;
-const money=x=>typeof x==='string'&&/^(?:0|[1-9]\d{0,8})(?:\.\d{1,8})?$/.test(x);
+
 
 async function input(req){
  if(!req.headers.get('content-type')?.startsWith('application/json')||
@@ -33,16 +32,6 @@ async function input(req){
  }finally{reader.releaseLock()}
  return JSON.parse(raw);
 }
-async function currentMfa(db,user){
- if(user?.globalRole!=='super_admin'||!/^[a-f0-9]{64}$/i.test(user.token_hash||''))
-  return false;
- return !!await db.prepare(
-  'SELECT 1 FROM human_mfa_settings m JOIN human_sessions s ON s.user_id=m.user_id '+
-  'WHERE m.user_id=? AND s.token_hash=? AND m.enabled_at IS NOT NULL '+
-  'AND s.created_at>=m.enabled_at AND s.revoked_at IS NULL AND s.expires_at>? LIMIT 1'
- ).bind(user.id,user.token_hash,Date.now()).first();
-}
-
 // Only a persisted, matched CDR plus a signed-ended session may settle a
 // hold. Older jobs without holds remain observations. Retry after a crash
 // between databases is safe because the CDR and terminal hold are idempotent.
@@ -63,7 +52,7 @@ export async function handlePlivoCostReconcile(req,env,user,{fetcher=fetch}={}){
  if(url.search)return fail('unsupported query',400);
  if(!mutationOriginAllowed(req))return fail('same origin required',403);
  try{
-  if(!env.CONTROL_DB||!await currentMfa(env.CONTROL_DB,user))
+  if(!env.CONTROL_DB||!await currentSuperAdminMfa(env.CONTROL_DB,user))
    return fail('current Super Admin MFA required',403);
   const data=await input(req);
   if(!data||Array.isArray(data)||typeof data!=='object'||
@@ -71,7 +60,7 @@ export async function handlePlivoCostReconcile(req,env,user,{fetcher=fetch}={}){
      !Object.hasOwn(data,'jobId')||
      !UUID.test(data.tenantId||'')||!validJobId(data.jobId))
    return fail('invalid call selection');
-  return await observeCampaignCdr(env,data.tenantId,data.jobId,user.id,'human:'+user.id,fetcher);
+  return await observeCampaignCdr(env,data.tenantId,data.jobId,user.id,'human:'+user.id,fetcher,()=>currentSuperAdminMfa(env.CONTROL_DB,user));
  }catch(e){
   if(/JSON|invalid/i.test(String(e?.message||'')))return fail('invalid request');
   console.error('AR3D Plivo CDR observation unavailable');
@@ -80,7 +69,7 @@ export async function handlePlivoCostReconcile(req,env,user,{fetcher=fetch}={}){
 }
 
 // Shared internal path. No route accepts actor identity or provider URL from clients.
-async function observeCampaignCdr(env,tid,jid,actor,auditActor,fetcher){
+async function observeCampaignCdr(env,tid,jid,actor,auditActor,fetcher,authorize=null){
   const tenant=await env.CONTROL_DB.prepare(
    "SELECT id AS tenant_id,storage_mode,dedicated_binding FROM tenants WHERE id=? AND status IN('trial','active','suspended')"
   ).bind(tid).first();
@@ -93,32 +82,12 @@ async function observeCampaignCdr(env,tid,jid,actor,auditActor,fetcher){
   if(!job)return fail('job not found',404);
   if(!['completed','failed'].includes(job.state)||!UUID.test(job.callUuid||''))
    return fail('final call record not available',409);
-  const auth=env.PLIVO_AUTH_ID,token=env.PLIVO_AUTH_TOKEN;
-  if(typeof auth!=='string'||!/^[A-Za-z0-9]{8,64}$/.test(auth)||
-     typeof token!=='string'||!/^[A-Za-z0-9]{16,128}$/.test(token)||
-     job.accountSid!==auth)
-   return fail('Plivo billing credentials unavailable',503);
-  let cdr;
-  try{
-   const response=await fetcher(
-    'https://api.plivo.com/v1/Account/'+encodeURIComponent(auth)+
-    '/Call/'+encodeURIComponent(job.callUuid)+'/',{
-     method:'GET',redirect:'manual',signal:AbortSignal.timeout(5000),
-     headers:{Authorization:'Basic '+btoa(auth+':'+token),Accept:'application/json'}
-    });
-   if(!response.ok||!response.headers.get('content-type')?.toLowerCase().includes('json')||
-      Number(response.headers.get('content-length'))>8192)
-    return fail('provider CDR unavailable',503);
-   const raw=await response.text();
-   if(raw.length>8192)return fail('provider CDR unavailable',503);
-   cdr=JSON.parse(raw);
-  }catch{return fail('provider CDR unavailable',503)}
-  if(cdr?.call_uuid!==job.callUuid||cdr?.call_direction!=='outbound'||
-     phone(cdr.from_number)!==phone(job.caller)||
-     phone(cdr.to_number)!==phone(job.destination)||
-     !seconds(cdr.billed_duration)||!seconds(cdr.call_duration)||cdr.billed_duration<cdr.call_duration||
-     !money(cdr.total_amount))
-   return fail('provider call identity or amount did not match',503);
+  const verified=await readVerifiedPlivoCdr(env,job,{fetcher});
+  if(!verified.ok)return fail(verified.error,503);
+  const {cdr}=verified;
+  // The provider GET can outlive the privileged session. A manual request
+  // must still have current MFA and an active Super Admin before any write.
+  if(authorize&&!await authorize())return fail('current Super Admin MFA required',403);
   const at=new Date().toISOString();
   const recorded=await db.batch([
    db.prepare(
