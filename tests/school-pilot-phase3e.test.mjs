@@ -184,3 +184,18 @@ test('declined consent does not record, revoked pilot only hangs up its verified
   assert.match(await late.text(),/Hangup/);assert.equal(c.stt,0);
  }finally{f.close()}
 });
+
+test('stage entrypoint denies missing isolated binding, production routes, and unauthenticated dispatch',async()=>{
+ const {handleSchoolStageWorker}=await import('../src/school-stage-worker.mjs');
+ const f=stage(setup());
+ try{
+  const origin=f.env.AR3D_SCHOOL_STAGE_ORIGIN;
+  const req=new Request(origin+'/health');
+  assert.equal((await handleSchoolStageWorker(req,f.env)).status,503);
+  const isolated={...f.env,CONTROL_DB:undefined,SCHOOL_STAGE_CONTROL_DB:f.env.CONTROL_DB,AR3D_SCHOOL_STAGE_ISOLATED_DB_CONFIRMED:'yes'};
+  assert.equal((await handleSchoolStageWorker(req,isolated)).status,200);
+  assert.equal((await handleSchoolStageWorker(new Request(origin+'/v1/human/scripted-phone-pilot'),isolated)).status,404);
+  assert.equal((await handleSchoolStageWorker(new Request(origin+'/v1/human/school-stage/dispatch',{method:'POST',headers:{Origin:origin,'Content-Type':'application/json'},body:'{}'}),isolated)).status,403);
+  assert.equal(f.c.db.prepare('SELECT COUNT(*) AS n FROM school_stage_dispatches').get().n,0);
+ }finally{f.close()}
+});
