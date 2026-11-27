@@ -97,6 +97,10 @@ try{
 
   assert.equal(f.c.db.prepare('SELECT COUNT(*) AS n FROM ai_flow_snapshots').get().n,1);
   assert.equal(f.c.db.prepare('SELECT COUNT(*) AS n FROM ai_flow_preview_reviews').get().n,0);
+  await page.getByRole('button',{name:'Request production configuration review',exact:true}).click();
+  await page.getByText('Production configuration review: requested. Customer calling is not enabled.',{exact:true}).waitFor();
+  assert.equal(f.c.db.prepare('SELECT COUNT(*) AS n FROM school_audio_preparations').get().n,0);
+
 
   assert.equal(f.c.db.prepare('SELECT COUNT(*) AS n FROM ai_flow_definitions').get().n,1);
   assert.equal(f.r.db.prepare('SELECT COUNT(*) AS n FROM calling_jobs').get().n,beforeJobs);
@@ -458,6 +462,16 @@ try{
  assert.equal(f.c.db.prepare('SELECT COUNT(*) AS n FROM calling_agent_publications').get().n,0);
  await adminPage.getByRole('heading',{name:'Client Change Requests',exact:true}).waitFor();
  await adminPage.getByText('Please update our fictional Raipur plot price from 12 lakh to 14 lakh.').waitFor();
+ const schoolReview=adminPage.getByRole('heading',{name:'Industry production configuration review',exact:true});
+ await schoolReview.waitFor();
+ await adminPage.getByRole('textbox',{name:'Production review reference',exact:true}).fill('Fictional reviewed School script');
+ await adminPage.getByText('I reviewed the script and understand this does not enable live calls.',{exact:true}).click();
+ await adminPage.getByRole('button',{name:'Mark configuration reviewed',exact:true}).click();
+ await adminPage.getByRole('button',{name:'Load School audio preparation',exact:true}).click();
+ await adminPage.getByText('Paid generation disabled until separately funded TTS configuration is reviewed.',{exact:true}).waitFor();
+ assert.equal(await adminPage.getByRole('button',{name:'Generate one reviewed School audio pack',exact:true}).count(),0);
+ assert.equal(f.c.db.prepare('SELECT COUNT(*) AS n FROM school_audio_preparations').get().n,0);
+
  await adminPage.getByRole('link',{name:'Calling Setup'}).click();
  assert.equal(await adminPage.getByRole('combobox',{name:'Recorded prompt language'}).inputValue(),'en');
 

@@ -26,6 +26,7 @@ import {handleIndustryAgentRequest} from './industry-agent-routes.mjs';
 import {handleIndustryFlowSimulation} from './industry-flow-simulation-routes.mjs';
 import {handleIndustryFlowSnapshots} from './industry-flow-snapshots.mjs';
 import {handleIndustryLaunchRequests} from './industry-launch-requests.mjs';
+import {handleSchoolAudioPreparation} from './industry-school-audio-preparation.mjs';
 import {handleIndustryCampaigns} from './industry-campaigns.mjs';
 import {handleAuditRequest} from './audit-routes.mjs';
 import {handleVisitStatusRequest} from './visit-status-routes.mjs';
@@ -354,6 +355,8 @@ export async function handleHumanRequest(req,env){
     if(visitResponse)return visitResponse;
     const industryCampaign=await handleIndustryCampaigns(req,env,user);
     if(industryCampaign)return industryCampaign;
+    const schoolAudio=await handleSchoolAudioPreparation(req,env,user);
+    if(schoolAudio)return schoolAudio;
     const launchRequest=await handleIndustryLaunchRequests(req,env,user);
     if(launchRequest)return launchRequest;
     const frozenResult=await handleIndustryFlowSnapshots(req,env,user);

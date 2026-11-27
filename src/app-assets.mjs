@@ -2661,6 +2661,45 @@ async function companyAdminPanel(main,client=null){
  company.addEventListener('change',load);
  await findCompany();
 }
+function schoolAudioPreparationPanel(tenantId,r,item){
+ const box=div('card',title('School audio preparation','h3')),status=node('p',{class:'muted',role:'status',text:'Audio status not loaded.'}),controls=div('stack');
+ const base='/v1/human/school-audio/'+encodeURIComponent(r.id),query='?tenantId='+encodeURIComponent(tenantId);
+ let busy=false;
+ async function load(){
+  if(busy||!box.isConnected)return;
+  busy=true;controls.replaceChildren();
+  try{
+   const d=await api(base+query);if(!box.isConnected)return;
+   status.textContent='Audio: '+d.state.replaceAll('_',' ')+(d.expired?' (interrupted; no automatic retry)':'')+' · '+d.characters+' characters · '+d.nodeCount+' prompts · No calling approval';
+   if(d.reservedMicros!==null)status.textContent+=' · Reserved ₹'+(d.reservedMicros/1000000).toFixed(2)+' (conservative; not invoice)';
+   if(d.state==='not_prepared'){
+    if(!d.configured){controls.append(node('p',{class:'muted',text:'Paid generation disabled until separately funded TTS configuration is reviewed.'}));return}
+    const run=btn('Generate one reviewed School audio pack',async()=>{
+     if(busy||!confirm('Authorize one static-script audio preparation, reserving up to ₹'+(d.quoteMicros/1000000).toFixed(2)+' from the dedicated TTS budget? Confirm no customer or private data, and independently funded TTS. This is NOT a call. No automatic retries.'))return;
+     busy=true;run.disabled=true;
+     try{await api(base+'/prepare','POST',{tenantId,expectedGraphSha256:r.digest,expectedCostMicros:d.quoteMicros,confirm:'SEPARATELY_FUNDED_STATIC_SCRIPT_ONLY_NO_CALLS'})}
+     catch(e){asError(e)}finally{busy=false;await load()}
+    },true);
+    controls.append(node('p',{class:'muted',text:'Maximum reserved amount ₹'+(d.quoteMicros/1000000).toFixed(2)}),run);
+   }
+   for(const n of d.nodes||[]){
+    const audio=node('audio',{controls:'controls',preload:'none',controlslist:'nodownload',src:base+'/audio/'+encodeURIComponent(n.id)+query,'aria-label':'Reviewed script prompt '+n.id});
+    controls.append(node('p',{text:n.text}),audio);
+   }
+   if(d.state==='ready'){
+    const reference=input('schoolAudioReview-'+r.id,'text','Independent audio review reference');reference.maxLength=160;
+    const ack=node('input',{type:'checkbox'});
+    const decide=async decision=>{
+     if(busy||!ack.checked||reference.value.trim().length<10)return asError(Error('Listen to every prompt and enter a review reference.'));
+     busy=true;try{await api(base+'/review','POST',{tenantId,manifestSha256:d.manifestSha256,decision,reference:reference.value.trim(),acknowledgeListened:true})}
+     catch(e){asError(e)}finally{busy=false;await load()}
+    };
+    controls.append(node('p',{class:'note',text:'A different current-MFA Super Admin must approve the generated audio. Approval is not permission to dial.'}),lab('Audio review reference',reference),node('label',{class:'row'},[ack,'I listened to every prompt and compared it with the exact frozen script.']),div('formrow',btn('Approve School audio',()=>decide('approved'),true),btn('Reject School audio',()=>decide('rejected'),true)));
+   }
+  }catch{status.textContent='School audio preparation unavailable.'}finally{busy=false}
+ }
+ box.append(status,btn('Load School audio preparation',()=>load(),true),controls);item.append(box);
+}
 async function adminIndustryLaunchPanel(content,tenantId){
  const card=div('card',title('Industry production configuration review','h3'),
   node('p',{class:'note',text:'Review the exact frozen School script for production preparation. This does not authorize calls, provider requests or credit spending.'}));
@@ -2676,6 +2715,7 @@ async function adminIndustryLaunchPanel(content,tenantId){
    const item=div('card',title(c.name||'School Admission','h3'),node('p',{class:'muted',text:r.state.replaceAll('_',' ')+' · '+r.digest.slice(0,12)}),
     node('p',{text:c.greeting||''}),...(c.questions||[]).map(q=>node('p',{text:q})),node('p',{text:c.closing||''}));
    if(r.reviewReference)item.append(node('p',{class:'muted',text:r.reviewReference}));
+   if(r.state==='configuration_reviewed')schoolAudioPreparationPanel(tenantId,r,item);
    if(r.state==='requested'){
     const decide=async decision=>{
      if(!ack.checked||reference.value.trim().length<3){asError(Error('Enter a review reference and acknowledge that calling remains disabled.'));return}
