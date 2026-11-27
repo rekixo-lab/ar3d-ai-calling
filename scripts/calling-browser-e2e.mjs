@@ -463,11 +463,11 @@ try{
 
  // Platform capacity card: matches Plivo/Sarvam limits, shared fairly by all companies.
  await adminPage.getByRole('heading',{name:'Calling capacity',exact:true}).waitFor();
- await adminPage.getByText(/Live calls now: 0 \/ 8/).waitFor();
+ await adminPage.getByText(/Occupied calling slots: 0 \/ 8 · Reserved\/submitted: 0 · Uncertain: 0/).waitFor();
  await adminPage.getByLabel('Calls at once, all companies (1–2000)',{exact:true}).fill('40');
  await adminPage.getByLabel('Calls at once, one company (1–500)',{exact:true}).fill('5');
  await adminPage.getByRole('button',{name:'Save capacity',exact:true}).click();
- await adminPage.getByText(/Live calls now: 0 \/ 40/).waitFor();
+ await adminPage.getByText(/Occupied calling slots: 0 \/ 40/).waitFor();
  assert.deepEqual({...f.c.db.prepare('SELECT max_concurrent_calls AS a,max_calls_per_company AS b FROM calling_dispatch_settings').get()},{a:40,b:5});
  await adminPage.getByLabel('Calling activation reference',{exact:true}).fill('browser-owner-activation-reference');
  await adminPage.getByLabel('Customer consent mode',{exact:true}).selectOption('client_declared');

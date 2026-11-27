@@ -244,3 +244,40 @@ test('provider fault interlock stops new dispatch, preserves credits, and needs 
  assert.throws(()=>f.c.db.exec('DELETE FROM provider_safety_events'),/immutable/);
  }finally{f.close()}
 });
+
+test('final eligibility fence cancels before Plivo POST after reservation, releasing only unused hold',async()=>{
+ for(const change of ['optout','pause','suspend','clearance','policy']){
+  const f=fixture();try{
+   await setup(f);
+   const db=f.c.wrap;
+   let inserted=false,posts=0;
+   f.env.CONTROL_DB={...db,prepare(sql){
+    const st=db.prepare(sql);
+    if(!sql.includes('INSERT INTO scripted_phone_pilots'))return st;
+    return {...st,bind(...args){
+     const bound=st.bind(...args);
+     return {...bound,async run(){
+      const result=await bound.run();
+      if(result.meta.changes===1&&!inserted){
+       inserted=true;
+       if(change==='optout')f.r.db.prepare("UPDATE leads SET consent_status='denied',dnd_status='blocked' WHERE tenant_id=? AND id=?").run(tid,lead);
+       if(change==='pause')f.r.db.prepare("UPDATE calling_runs SET state='paused' WHERE tenant_id=?").run(tid);
+       if(change==='suspend')f.c.db.prepare("UPDATE tenants SET status='suspended',suspended_from_status='active' WHERE id=?").run(tid);
+       if(change==='clearance')f.r.db.prepare("DELETE FROM calling_clearances WHERE tenant_id=? AND lead_id=?").run(tid,lead);
+       if(change==='policy')f.r.db.prepare("UPDATE calling_policies SET enabled=0 WHERE tenant_id=?").run(tid);
+      }
+      return result;
+     }};
+    }};
+   }};
+   const outcome=await tickTenant(f.env,f.r.wrap,tid,{now,apiFetch:async()=>{posts++;return accepted()}});
+   assert.equal(inserted,true,change);assert.equal(posts,0,change);assert.equal(outcome.state,'failed',change);
+   const job=f.r.db.prepare('SELECT state,error_code FROM calling_jobs').get();
+   assert.equal(job.state,'failed');assert.equal(job.error_code,'eligibility_changed_before_submission');
+   const hold=f.c.db.prepare('SELECT state,charged_seconds,evidence_ref FROM tenant_minute_holds').get();
+   assert.equal(hold.state,'released');assert.equal(hold.charged_seconds,0);assert.match(hold.evidence_ref,/^pre-submit-blocked:/);
+   const row=f.c.db.prepare('SELECT phase,provider_request_id,provider_call_id FROM scripted_phone_pilots WHERE job_id IS NOT NULL').get();
+   assert.equal(row.phase,'rejected');assert.equal(row.provider_request_id,null);assert.equal(row.provider_call_id,null);
+  }finally{f.close()}
+ }
+});

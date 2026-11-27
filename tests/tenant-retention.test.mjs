@@ -75,3 +75,21 @@ test('Super Admin dashboard includes suspend and resume but no payment charging'
   assert.match(js,/Tenant Access: Suspend \/ Resume/);
   assert.match(js,/tenantRows/);
 });
+
+test('stale tenant transition does not create a second misleading audit event',async()=>{
+ const {fixture:realFixture,tid,admin}=await import('./helpers/calling-fixture.mjs');
+ const {handleTenantLifecycleRequest}=await import('../src/tenant-lifecycle-routes.mjs');
+ const f=realFixture();
+ try{
+  const base=f.c.wrap;
+  f.env.CONTROL_DB={...base,async batch(queries){
+   // Another request committed the same state before this optimistic batch.
+   f.c.db.prepare("UPDATE tenants SET status='suspended',suspended_from_status='active' WHERE id=?").run(tid);
+   return base.batch(queries);
+  }};
+  const request=new Request('https://app.example.invalid/v1/human/tenants/'+tid+'/suspend',{method:'POST',headers:{'Content-Type':'application/json',Origin:'https://app.example.invalid'},body:JSON.stringify({reason:'Synthetic concurrent transition'})});
+  const res=await handleTenantLifecycleRequest(request,f.env,admin);
+  assert.equal(res.status,409);
+  assert.equal(f.c.db.prepare("SELECT COUNT(*) AS n FROM tenant_audit_events WHERE tenant_id=? AND action='tenant.suspended'").get(tid).n,0);
+ }finally{f.close()}
+});
