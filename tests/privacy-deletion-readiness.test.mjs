@@ -89,3 +89,20 @@ test('Opt-out suppression remains visible and untouched in deletion readiness',a
   assert.equal(f.r.db.prepare('SELECT COUNT(*) AS n FROM lead_opt_out_events').get().n,1);
  }finally{f.close()}
 });
+
+test('deletion inventory includes new industry candidate and every review revision without exposing destination',async()=>{
+ const f=fixture();try{
+  currentMfa(f);
+  const cid='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+  const at='2026-11-20T06:30:00.000Z',expires='2026-11-21T06:30:00.000Z';
+  f.r.db.prepare("INSERT INTO industry_campaigns(tenant_id,id,launch_request_id,snapshot_id,graph_sha256,purpose,name,created_by,created_at) VALUES(?,?,?,?,?,'school_admission','School','client',?)").run(tid,cid,cid,cid,'a'.repeat(64),at);
+  f.r.db.prepare("INSERT INTO industry_campaign_candidates(tenant_id,campaign_id,lead_id,added_by,added_at) VALUES(?,?,?,'client',?)").run(tid,cid,lead,at);
+  f.r.db.prepare("INSERT INTO industry_recipient_reviews(tenant_id,campaign_id,lead_id,revision,decision,destination,lead_updated_at,consent_ref,dnd_ref,expires_at,reviewed_by,reviewed_at) VALUES(?,?,?,1,'cleared','+919000000001',?,'guardian-ref','dnd-ref',?,'admin',?)").run(tid,cid,lead,at,expires,at);
+  f.r.db.prepare("INSERT INTO industry_recipient_reviews(tenant_id,campaign_id,lead_id,revision,decision,reason,reviewed_by,reviewed_at) VALUES(?,?,?,2,'revoked','withdrawn','admin',?)").run(tid,cid,lead,at);
+  const res=await handleDeletionReadiness(req(),f.env,admin);assert.equal(res.status,200);
+  const body=await res.json();
+  assert.equal(body.dependentRecords.industryCampaignCandidates,1);
+  assert.equal(body.dependentRecords.industryRecipientReviews,2);
+  assert.equal(body.executionAllowed,false);assert.ok(!JSON.stringify(body).includes('+919000000001'));
+ }finally{f.close()}
+});
