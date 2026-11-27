@@ -71,6 +71,14 @@ export async function handleDeletionReadiness(req,env,user){
    control.prepare('SELECT COUNT(*) AS n FROM scripted_phone_pilots WHERE tenant_id=? AND lead_id=?').bind(tid,leadId).first()
   ]);
   for(const [i,name] of ['scriptedCallResults','verifiedProviderCosts','directLeadAuditEvents','phoneSessions'].entries())dependentRecords[name]=Number(related[i]?.n||0);
+  if(tenant.storage_mode==='shared'){
+   const [admissions,receipts]=await Promise.all([
+    db.prepare('SELECT COUNT(*) AS n FROM industry_funded_admissions WHERE tenant_id=? AND lead_id=?').bind(tid,leadId).first(),
+    db.prepare('SELECT COUNT(*) AS n FROM verified_industry_call_costs r JOIN industry_call_jobs j ON j.tenant_id=r.tenant_id AND j.id=r.job_id WHERE j.tenant_id=? AND j.lead_id=?').bind(tid,leadId).first()
+   ]);
+   dependentRecords.industryFundedAdmissions=Number(admissions?.n||0);
+   dependentRecords.verifiedIndustryCosts=Number(receipts?.n||0);
+  }
   return json({
    tenantId:tid,leadId,
    mode:'read_only_deletion_dry_run',executionAllowed:false,

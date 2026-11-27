@@ -13,6 +13,7 @@ import {handleSchoolAudioPreparation,readApprovedSchoolAudioPack} from '../src/i
 import {handleIndustryCallQueue,readPreparedIndustryJob} from '../src/industry-call-queue.mjs';
 import {handleIndustryAdmission,claimFundedIndustryAdmission} from '../src/industry-funded-admission.mjs';
 import {commercialCapacityRows} from '../src/commercial-capacity.mjs';
+import {settleIndustryCallCdr} from '../src/industry-cdr-settlement.mjs';
 import {runScriptedCampaignCron} from '../src/scripted-campaign-dispatch.mjs';
 import {setup as setupProperty,route as callingRoute} from './helpers/calling-fixture.mjs';
 const version='abababab-abab-4bab-8bab-abababababab',flow='cdcdcdcd-cdcd-4dcd-8dcd-cdcdcdcdcdcd';
@@ -507,4 +508,78 @@ test('revocation immediately after the exact funded reservation releases unused 
   assert.equal((await f.claim()).state,'release_unavailable');
   assert.equal(f.r.db.prepare('SELECT COUNT(*) AS n FROM ('+commercialCapacityRows+')').get().n,0);
  }finally{f.close()}
+});
+
+async function industryCdrFixture(){
+ const f=await admissionFixture();try{
+  assert.equal((await f.authorize()).status,201);
+  assert.equal((await f.claim()).state,'funded');
+  const id=f.prepared.id;
+  const a=f.r.db.prepare("SELECT * FROM industry_funded_admissions WHERE job_id=?").get(id);
+  const created=Date.parse(a.finished_at)+1000;
+  const {scope,pack}=await readPreparedIndustryJob(f.env,{tenantId:tid,jobId:id,now:created});
+  const doc=await beginSchoolVoiceSession(scope,pack);
+  const hangup=created+40000;
+  f.c.db.prepare("INSERT INTO scripted_phone_pilots(id,tenant_id,lead_id,lead_updated_at,actor_id,language,destination,caller,expires_at,phase,provider_request_id,provider_call_id,survey_json,created_at,provider_account_id,job_id,hangup_at,duration_seconds) VALUES(?,?,?,?,'admin',?,?,?,?,'ended',?,?,?,?,?,?,?,?)")
+   .run(session,tid,lead,scope.leadUpdatedAt,doc.industryVoice.language,scope.destination,f.env.AR3D_PLIVO_CALLER_NUMBER,created+600000,request,call,JSON.stringify(doc),iso(created),f.env.PLIVO_AUTH_ID,id,hangup,40);
+  const good={call_uuid:call,call_direction:'outbound',from_number:'918000000000',to_number:'919000000001',billed_duration:60,call_duration:40,total_amount:'0.01234'};
+  let reads=0;
+  const settle=(data=good,overrides={})=>settleIndustryCallCdr(f.env,{tenantId:tid,jobId:id,now:hangup+120000,fetcher:async(url,opts)=>{
+   reads++;assert.equal(opts.method,'GET');assert.equal(opts.redirect,'manual');
+   assert.equal(url,'https://api.plivo.com/v1/Account/'+f.env.PLIVO_AUTH_ID+'/Call/'+call+'/');
+   return Response.json(data);
+  },...overrides});
+  const hold=()=>f.c.db.prepare('SELECT * FROM tenant_minute_holds WHERE tenant_id=? AND job_id=?').get(tid,id);
+  return {...f,id,settle,hold,good,reads:()=>reads,hangup};
+ }catch(e){f.close();throw e}
+}
+test('School CDR settles shared hold once after signed terminal evidence despite revocation or suspension',async()=>{
+ const f=await industryCdrFixture();try{
+  f.r.db.prepare("UPDATE leads SET consent_status='denied',dnd_status='blocked' WHERE tenant_id=? AND id=?").run(tid,lead);
+  f.r.db.prepare("UPDATE industry_campaigns SET archived_at=?,archived_by='client' WHERE tenant_id=? AND id=?").run(at,tid,f.scope.campaignId);
+  f.env.AR3D_INDUSTRY_SCHOOL_VOICE_ENABLED='disabled';
+  f.env.RECORDINGS=null;
+  // Settlement relies on immutable historical identity, not continued access.
+  const first=await f.settle();assert.equal(first.state,'settled',JSON.stringify(first));
+  assert.equal(first.clientCreditsDebited,true);assert.equal(first.chargedSeconds,60);
+  const next=await f.settle();assert.equal(next.state,'settled');assert.equal(next.replayed,true);assert.equal(next.clientCreditsDebited,false);
+  assert.equal(f.hold().charged_seconds,60);
+  assert.equal(f.hold().evidence_ref,'plivo-cdr:'+call);
+  assert.equal(f.r.db.prepare('SELECT COUNT(*) AS n FROM verified_industry_call_costs').get().n,1);
+  assert.equal(f.r.db.prepare("SELECT COUNT(*) AS n FROM crm_audit_events WHERE action='industry.cdr_observed'").get().n,1);
+  assert.throws(()=>f.r.db.prepare('UPDATE verified_industry_call_costs SET billed_seconds=90').run(),/immutable/);
+  assert.throws(()=>f.r.db.prepare('DELETE FROM verified_industry_call_costs').run(),/immutable/);
+  assert.equal(first.capacityReleased,false);assert.equal(next.capacityReleased,false);
+  assert.equal(f.r.db.prepare('SELECT COUNT(*) AS n FROM ('+commercialCapacityRows+')').get().n,1);
+  const conflict=await f.settle({...f.good,total_amount:'0.05'});assert.equal(conflict.state,'conflicting_cdr_review');
+  assert.equal(f.hold().charged_seconds,60);
+ }finally{f.close()}
+});
+test('School CDR fails closed on missing terminal evidence, wrong historical identity or foreign tenant',async()=>{
+ for(const mode of ['unsigned','missing-request','destination','manifest','foreign','too-early','unknown']){
+  const f=await industryCdrFixture();try{
+   let overrides={};
+   if(mode==='unsigned')f.c.db.prepare('UPDATE scripted_phone_pilots SET hangup_at=NULL WHERE id=?').run(session);
+   else if(mode==='missing-request')f.c.db.prepare('UPDATE scripted_phone_pilots SET provider_request_id=NULL WHERE id=?').run(session);
+   else if(mode==='destination')f.c.db.prepare("UPDATE scripted_phone_pilots SET destination='+919000000099' WHERE id=?").run(session);
+   else if(mode==='manifest')f.c.db.prepare("UPDATE scripted_phone_pilots SET survey_json=json_set(survey_json,'$.industryVoice.manifestSha256',?) WHERE id=?").run('0'.repeat(64),session);
+   else if(mode==='foreign')overrides={tenantId:'99999999-9999-4999-8999-999999999999'};
+   else if(mode==='too-early')overrides={now:f.hangup+1000};
+   else if(mode==='unknown')f.c.db.prepare("UPDATE scripted_phone_pilots SET phase='unknown' WHERE id=?").run(session);
+   const r=await f.settle(f.good,overrides);
+   assert.equal(r.state,'terminal_evidence_unavailable',mode+': '+JSON.stringify(r));assert.equal(f.reads(),0);
+   assert.equal(f.hold().state,'held');assert.equal(f.r.db.prepare('SELECT COUNT(*) AS n FROM verified_industry_call_costs').get().n,0);
+  }finally{f.close()}
+ }
+});
+test('School CDR rejects provider identity mismatch and preserves holds for unsupported pulses and over-reserve evidence',async()=>{
+ for(const mode of ['mismatch','pulse','overreserve']){
+  const f=await industryCdrFixture();try{
+   const cdr=mode==='mismatch'?{...f.good,to_number:'919000000099'}:mode==='pulse'?{...f.good,billed_duration:61}:{...f.good,billed_duration:210};
+   const r=await f.settle(cdr);
+   assert.equal(r.state,mode==='mismatch'?'provider_cdr_unverified':mode==='pulse'?'billing_pulse_review':'over_reserve_review',JSON.stringify(r));
+   assert.equal(f.hold().state,'held');
+   assert.equal(f.r.db.prepare('SELECT COUNT(*) AS n FROM verified_industry_call_costs').get().n,mode==='mismatch'?0:1);
+  }finally{f.close()}
+ }
 });
