@@ -57,7 +57,7 @@ export function validateWhatsAppQueue(queue,{expectedId}={}){
  for(const consumer of consumers){
   if(!record(consumer)||consumer.type!=='worker'||consumer.script_name!==CALLING_WORKER_NAME||
    consumer.queue_name!==undefined&&consumer.queue_name!==WHATSAPP_QUEUE_NAME||
-   consumer.dead_letter_queue!==undefined&&consumer.dead_letter_queue!=='')
+   consumer.dead_letter_queue!==undefined&&consumer.dead_letter_queue!==null&&consumer.dead_letter_queue!=='')
    stop('WhatsApp queue has an unexpected consumer or dead-letter destination; deployment was stopped.');
  }
  for(const producer of producers){

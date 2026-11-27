@@ -146,3 +146,13 @@ test('failed envelopes identify request stage, HTTP status, safe field types and
   for(const privateValue of [credentials.token,credentials.account,'private-provider-message'])assert.ok(!output[0].includes(privateValue));
  }
 });
+
+// Cloudflare may return null for an unset optional dead-letter destination.
+test('existing worker with null dead-letter metadata is safe; actual DLQ remains forbidden',async()=>{
+ const withNull=queue({consumers:[{type:'worker',script_name:CALLING_WORKER_NAME,queue_name:WHATSAPP_QUEUE_NAME,dead_letter_queue:null}],consumers_total_count:1});
+ const s=scripted([list([withNull]),ok(withNull)]);
+ const result=await ensureWhatsAppQueue(credentials,s);
+ assert.equal(result.created,false);assert.equal(result.consumerCount,1);
+ assert.deepEqual(s.calls.map(x=>x.method),['GET','GET']);
+ assert.throws(()=>validateWhatsAppQueue(queue({consumers:[{type:'worker',script_name:CALLING_WORKER_NAME,dead_letter_queue:'foreign-dlq'}],consumers_total_count:1})),/unexpected consumer/);
+});
