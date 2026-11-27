@@ -48,7 +48,7 @@ function industryCampaignPanel(tenantId,content,{admin=false,editable=false}={})
       try{
        await api(base+'/'+encodeURIComponent(id)+'/review','POST',{tenantId,leadId:x.leadId,baseRevision:x.revision,decision:'cleared',
         consentReference:consent.value.trim(),dndReference:dnd.value.trim(),expiresAt:new Date(expiryMs).toISOString(),
-        expectedLeadUpdatedAt:x.leadUpdatedAt,expectedDestinationLast4:x.destinationLast4,acknowledgeGuardianAndPurpose:true});
+        reviewTarget:x.reviewTarget,acknowledgeGuardianAndPurpose:true});
        if(active(id,stamp))await loadRecipients();
       }catch(e){asError(e)}finally{review.disabled=false}
      });
