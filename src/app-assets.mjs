@@ -1,4 +1,5 @@
 import {propertyWhatsAppJs} from './property-whatsapp-ui.mjs';
+import {industryAgentJs} from './industry-agent-ui.mjs';
 export const html=`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#171717"><title>AR3D AI Calling</title><link rel="stylesheet" href="/app/assets/style.css"></head><body><div id="app" role="main"><p>Loading AR3D AI Calling…</p></div><script src="/app/assets/app.js" defer></script></body></html>`;
 export {css} from './dashboard-styles.mjs';
 export const js=String.raw`'use strict';
@@ -312,6 +313,7 @@ function dashboard(){
  ]:[
   ['home','Home','grid','Your minutes, customers and what needs attention today.'],
   ['customers','Customers / Excel','users','Import customers and prepare a calling campaign.'],
+  ['agents','My AI Agents','spark','Configure industry-specific, non-calling AI drafts.'],
   ['calling','Calling','phone','Review your campaign and start or pause approved calls.'],
   ['results','Results / CRM','chart','See call outcomes and answers saved to your CRM.'],
   ['properties','My Properties','building','Add prices, availability, brochures and locations for your customers.'],
@@ -1767,7 +1769,7 @@ async function renderClient(id,content){
   refreshCredit=refreshBalance;
   refreshBalance();
  }
- const sections=Object.fromEntries(['home','customers','calling','results','properties','whatsapp','wallet','company'].map(key=>[
+ const sections=Object.fromEntries(['home','customers','agents','calling','results','properties','whatsapp','wallet','company'].map(key=>[
   key,node('section',{class:'workspace-section',id:key,hidden:true})
  ]));
  const loaded=new Set();
@@ -1801,6 +1803,7 @@ async function renderClient(id,content){
    if(d.role==='client_admin')section.append(manualCustomerPanel(id,content));
    await crmWorkflow(id,section,d.role,content);
   },
+  agents:section=>industryAgentPanel(id,section,d.role),
   calling:section=>{
    const controls=customerCallingPanel(id,section,d.role,content.openView,openResults,()=>creditSnapshot);
    const practice=node('details',{class:'card'},node('summary',{text:'Practice with AI'}));
@@ -3278,4 +3281,5 @@ window.addEventListener('hashchange',event=>{
  else if(state.me)dashboard();
 });
 ${propertyWhatsAppJs}
+${industryAgentJs}
 load();`;
