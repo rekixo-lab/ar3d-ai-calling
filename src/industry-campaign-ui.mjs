@@ -7,7 +7,7 @@ function industryCampaignPanel(tenantId,content,{admin=false,editable=false}={})
  const area=div('stack'),status=node('p',{class:'muted',role:'status'}),campaign=node('select',{class:'field','aria-label':'Industry campaign'});
  const launch=node('select',{class:'field','aria-label':'Reviewed frozen School agent'}),name=input('industryCampaignName','text','Campaign name');name.maxLength=80;
  const body=div('stack'),chooseBox=div('stack'),list=div('stack'),search=input('industryLeadSearch','search','Search name or mobile');search.maxLength=80;
- let campaigns=[],offset=0,recipientOffset=0,leadOffset=0,seq=0,loading=false;
+ let campaigns=[],offset=0,recipientOffset=0,leadOffset=0,seq=0,leadSeq=0,loading=false;
  const base='/v1/human/industry-campaigns',query='?tenantId='+encodeURIComponent(tenantId);
  const callPath=()=>base+'/'+encodeURIComponent(campaign.value);
  function active(id,stamp){return card.isConnected&&campaign.value===id&&stamp===seq}
@@ -67,10 +67,10 @@ function industryCampaignPanel(tenantId,content,{admin=false,editable=false}={})
   }
  }
  async function loadAvailable(){
-  const id=campaign.value,stamp=seq,container=chooseBox.lastElementChild;
+  const id=campaign.value,stamp=seq,request=++leadSeq,container=chooseBox.lastElementChild;
   if(!id||!container)return;
   const r=await api(callPath()+'/available-leads'+query+'&offset='+leadOffset+'&q='+encodeURIComponent(search.value.trim()));
-  if(!active(id,stamp)||chooseBox.lastElementChild!==container)return;
+  if(!active(id,stamp)||request!==leadSeq||chooseBox.lastElementChild!==container)return;
   const selected=new Set();
   const rows=r.leads.map(x=>{
    const check=node('input',{type:'checkbox'});check.addEventListener('change',()=>check.checked?selected.add(x.id):selected.delete(x.id));
