@@ -70,6 +70,7 @@ const none=async()=>{throw Error('unexpected external request')};
 const route=(f,r,fetcher=none,time=now)=>handleScriptedPhoneCallback(r,f.env,{now:time,fetcher});
 const row=f=>f.c.db.prepare('SELECT * FROM scripted_phone_pilots WHERE id=?').get(session);
 const state=f=>JSON.parse(row(f).survey_json);
+const mediaTime=url=>Math.max(now,Number(new URL(url).searchParams.get('expires'))-59000);
 const urls=body=>[...body.matchAll(/<Play>([^<]+)<\/Play>/g)].map(x=>x[1].replaceAll('&amp;','&'));
 async function consent(f){
  let r=await route(f,signed(f,'answer'));assert.match(await r.text(),/GetDigits/);
@@ -133,15 +134,15 @@ test('existing signed callback handles consent, scoped MP3 and three one-shot an
   const wrong=await route(f,signed(f,'answer',{RequestUUID:'different-request'}));assert.equal(wrong.status,403);
   const before=await route(f,answerReq(f,0));assert.match(await before.text(),/<Hangup\/>/);
   const opening=await consent(f);assert.equal(opening.length,2);
-  assert.equal((await route(f,new Request(opening[0]))).status,200);
-  assert.equal((await route(f,new Request(opening[0].replace('start.mp3','closing.mp3')))).status,404);
+  assert.equal((await route(f,new Request(opening[0]),none,mediaTime(opening[0]))).status,200);
+  assert.equal((await route(f,new Request(opening[0].replace('start.mp3','closing.mp3')),none,mediaTime(opening[0]))).status,404);
   assert.equal((await route(f,new Request(origin+hook+'/'+session+'/audio/opening.mp3'))).status,404);
   const c=counts();
   for(let i=0;i<3;i++){
    const r=await route(f,answerReq(f,i),speechProvider(f,c,{answer:['हाँ','कक्षा पाँच','जी हाँ'][i]}));
    const body=await r.text(),next=urls(body);
-   assert.equal(next.length,1,body);assert.equal((await route(f,new Request(next[0]))).status,200);
-   if(i===0)assert.equal((await route(f,new Request(opening[0]))).status,404);
+   assert.equal(next.length,1,body);assert.equal((await route(f,new Request(next[0]),none,mediaTime(next[0]))).status,200);
+   if(i===0)assert.equal((await route(f,new Request(opening[0]),none,mediaTime(opening[0]))).status,404);
    await route(f,answerReq(f,i),speechProvider(f,c));assert.equal(c.stt,i+1);
   }
   assert.equal(row(f).phase,'completed');assert.equal(row(f).turn,3);
@@ -177,7 +178,7 @@ test('wrong-call recording metadata never reaches Sarvam; consent withdrawal inv
  try{
   const opening=await consent(g),c=counts();
   g.r.db.prepare('UPDATE industry_campaigns SET archived_at=?,archived_by=? WHERE tenant_id=? AND id=?').run(at,'client',tid,g.scope.campaignId);
-  assert.equal((await route(g,new Request(opening[0]))).status,404);
+  assert.equal((await route(g,new Request(opening[0]),none,mediaTime(opening[0]))).status,404);
   assert.match(await (await route(g,answerReq(g,0),speechProvider(g,c))).text(),/<Hangup\/>/);
   assert.equal(c.stt,0);
   assert.equal((await route(g,signed(g,'hangup',{Duration:'10'}),none,now+700000)).status,204);
