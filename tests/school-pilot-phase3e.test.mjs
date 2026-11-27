@@ -145,7 +145,7 @@ test('full mocked staff voice flow: consent, signed private MP3, three bounded S
   assert.equal((await dispatch(f,input,fetcher)).state,'submitted');
   assert.equal((await route(f,new Request(callback(f,id,'answer').url))).status,403);
   const early=await route(f,callback(f,id,'turn',{turn:0,RecordingID:'synthetic-recording-0'}),fetcher);
-  assert.match(await early.text(),/Hangup/);assert.equal(c.stt,0);
+  assert.equal(early.status,403);assert.equal(c.stt,0);
   const first=await route(f,callback(f,id,'answer'),fetcher);
   assert.match(await first.text(),/GetDigits/);
   const consent=await route(f,callback(f,id,'consent',{Digits:'1'}),fetcher),opening=await consent.text(),urls=mediaURLs(opening);
