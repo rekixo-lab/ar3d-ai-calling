@@ -3,6 +3,7 @@
 import {requireMembership} from './human-auth.mjs';
 import {sha256hex} from './core.mjs';
 import {compileDraftToFlow,validateFlowGraph,simulateFlowGraph} from './call-flow-dsl.mjs';
+import {runVirtualVoiceTurns} from './virtual-voice-turns.mjs';
 import {validateIndustryAgentDraft} from './industry-template-catalog.mjs';
 
 const BASE='/v1/human/ai-flow-snapshots';
@@ -30,7 +31,7 @@ async function jsonBody(req){
 }
 function pathInfo(path){
  if(path===BASE)return {kind:'collection'};
- const match=path.match(/^\/v1\/human\/ai-flow-snapshots\/([^/]+)(?:\/(review|simulate))?$/);
+ const match=path.match(/^\/v1\/human\/ai-flow-snapshots\/([^/]+)(?:\/(review|simulate|voice-turn-preview))?$/);
  if(!match)return null;
  if(!idRE.test(match[1]))return {kind:'invalid'};
  return {kind:match[2]||'detail',id:match[1]};
@@ -133,6 +134,16 @@ export async function handleIndustryFlowSnapshots(req,env,user,{now=Date.now()}=
    if(!exact(body,['tenantId','answers'])||!Array.isArray(body.answers)||body.answers.length>12||
       body.answers.some(x=>typeof x!=='string'||x.length>160))return fail('invalid_fictional_answers');
    return reply({...simulateFlowGraph(frozen.graph,{answers:body.answers}),snapshot:view(row)});
+  }
+  if(p.kind==='voice-turn-preview'){
+   if(admin)return fail('client_admin_required',403);
+   // The server verifies the immutable snapshot digest and graph above.
+   // Never accept caller-supplied cursor, verification flags, voice URIs or provider IDs.
+   if(!exact(body,['tenantId','answers'])||!Array.isArray(body.answers)||body.answers.length>12||
+      body.answers.some(x=>typeof x!=='string'||x.length>160))
+    return fail('invalid_fictional_voice_answers');
+   const output=runVirtualVoiceTurns(frozen.graph,{answers:body.answers});
+   return reply({...output,snapshot:view(row)});
   }
   if(p.kind==='review'){
    if(!admin)return fail('super_admin_required',403);
