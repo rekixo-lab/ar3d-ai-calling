@@ -9,6 +9,7 @@ function industryAgentPanel(tenantId,content,role){
  content.append(card,profileBox,listBox,editBox);
  let templates=[],drafts=[],activeId='',activeDraft=null,profileRevision=0,sequence=0;
  let snapshots=[],snapshotSequence=0;
+ let launchSequence=0;
  const enabled=()=>card.isConnected&&content.isConnected;
  const choose=node('select',{class:'field','aria-label':'New AI template'});
  const business=node('select',{class:'field','aria-label':'Business industry'});
@@ -54,6 +55,34 @@ function industryAgentPanel(tenantId,content,role){
  const frozenChoice=node('select',{class:'field','aria-label':'Frozen AI versions'});
  const frozenNotice=node('p',{class:'muted',role:'status',text:'Choose a saved draft to view frozen versions.'});
  const frozenResult=div('card');
+ const launchBox=div('card'),launchStatus=node('p',{class:'muted',role:'status'});
+ const launchRequestButton=btn('Request production configuration review',async()=>{
+  const version=frozenChoice.value,draftId=activeDraft?.id;
+  if(!editable||!version||activeDraft?.config.templateId!=='school_admission_v1')return;
+  launchRequestButton.disabled=true;
+  try{
+   await api('/v1/human/industry-launch-requests','POST',{tenantId,snapshotId:version,acknowledgeProductionReview:true});
+   if(enabled()&&activeDraft?.id===draftId&&frozenChoice.value===version)await refreshLaunchReview();
+  }catch(e){if(enabled())asError(e);await refreshLaunchReview()}
+ },true);
+ async function refreshLaunchReview(){
+  const seq=++launchSequence,version=frozenChoice.value,draft=activeDraft;
+  launchBox.hidden=draft?.config.templateId!=='school_admission_v1';
+  launchRequestButton.disabled=true;
+  if(launchBox.hidden)return;
+  launchStatus.textContent='Choose the latest frozen School version.';
+  if(!version)return;
+  try{
+   const out=await api('/v1/human/industry-launch-requests?tenantId='+encodeURIComponent(tenantId));
+   if(seq!==launchSequence||!enabled()||frozenChoice.value!==version)return;
+   const r=out.requests.find(x=>x.snapshotId===version),snap=snapshots.find(x=>x.id===version);
+   const latest=snap?.draftRevision===draft.revision;
+   launchStatus.textContent=r?'Production configuration review: '+r.state.replaceAll('_',' ')+'. Customer calling is not enabled.':latest?'Request review of this exact School script. Calling remains unavailable until consent, dispatch and runtime are connected.':'Freeze your latest saved draft before requesting review.';
+   launchRequestButton.disabled=!editable||!latest||!!r||draft.config.mode!=='interactive'||draft.config.questions.length>3;
+  }catch(e){if(seq===launchSequence&&enabled())launchStatus.textContent='Production review status unavailable.'}
+ }
+ launchBox.hidden=true;
+ launchBox.append(title('Production calling preparation','h3'),node('p',{class:'note',text:'School Admission first. Review is for production configuration only; it never starts a call or spends credits.'}),launchStatus,editable?launchRequestButton:null);
  const virtualTurnBox=div('card');
  const virtualTurnResult=div('card');
  const virtualTurnStatus=node('p',{class:'muted',role:'status',text:'Choose a frozen version and enter fictional answers to preview each virtual voice turn.'});
@@ -174,6 +203,7 @@ function industryAgentPanel(tenantId,content,role){
   frozenChoice.value=snapshots.some(x=>x.id===keep)?keep:'';
   frozenRehearsal.disabled=!editable||!frozenChoice.value;
   virtualTurnButton.disabled=!editable||!frozenChoice.value;
+  refreshLaunchReview();
  }
  async function loadSnapshots(draftId,selectId){
   const version=++snapshotSequence;
@@ -187,13 +217,13 @@ function industryAgentPanel(tenantId,content,role){
  frozenChoice.addEventListener('change',()=>{
   frozenRehearsal.disabled=!editable||!frozenChoice.value;
   virtualTurnButton.disabled=!editable||!frozenChoice.value;
-  frozenResult.replaceChildren();virtualTurnResult.replaceChildren();
+  frozenResult.replaceChildren();virtualTurnResult.replaceChildren();refreshLaunchReview();
  });
  snapshotsBox.append(title('Immutable simulation versions','h3'),
   node('p',{class:'muted',text:'Freeze a draft revision for review. Even a reviewed version cannot dial customers.'}),
   editable?freezeButton:null,lab('Frozen versions',frozenChoice),
   div('formrow',editable?frozenRehearsal:null,refreshSnapshots),
-  frozenNotice,frozenResult,virtualTurnBox);
+  frozenNotice,frozenResult,launchBox,virtualTurnBox);
  const refreshButton=btn('Refresh AI drafts',()=>load().catch(asError),true);
  const previewButton=btn('Preview AI script (no call)',()=>{updatePreview();preview.scrollIntoView({block:'nearest'})},true);
  const controls=div('formrow',previewButton,editable?saveButton:null,refreshButton);
@@ -228,7 +258,7 @@ function industryAgentPanel(tenantId,content,role){
  function showEditor(){
   activeDraft=drafts.find(x=>x.id===activeId)||null;
   fictionalAnswers.value='';simulation.replaceChildren();frozenResult.replaceChildren();virtualTurnResult.replaceChildren();
-  snapshots=[];snapshotSequence++;frozenChoice.replaceChildren();
+  snapshots=[];snapshotSequence++;launchSequence++;frozenChoice.replaceChildren();launchBox.hidden=true;
   editBox.hidden=!activeDraft;
   if(!activeDraft)return;
   const c=activeDraft.config,t=templates.find(x=>x.id===c.templateId);
