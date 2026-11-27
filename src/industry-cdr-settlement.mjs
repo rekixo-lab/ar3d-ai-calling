@@ -1,5 +1,6 @@
 // Internal-only industry minute settlement. Not a route or scheduled job.
-// No call creation, retry, provider-money reconciliation, or capacity release.
+// No call creation, retry or provider-money reconciliation. Capacity release
+// is a separate internal operation and is not called by the CDR adapter.
 import {sha256hex} from './core.mjs';
 import {SCHOOL_VOICE_MODE} from './industry-school-voice-plan.mjs';
 import {readVerifiedPlivoCdr} from './plivo-verified-cdr.mjs';
@@ -83,4 +84,45 @@ export async function settleIndustryCallCdr(env,{tenantId:tid,jobId:id,now=Date.
    clientCreditsDebited:result.ok&&cdr.billed_duration>0&&!result.replayed,
    chargedSeconds:result.ok?cdr.billed_duration:null,replayed:result.replayed===true,capacityReleased:false};
  }catch{return denied('settlement_unavailable')}
+}
+
+// Crash recovery for an already settled, exact industry call. No provider
+// read or write, no wallet operation, no new call or reuse of the prepared
+// job. An immutable settled hold and CDR are necessary even for zero billing.
+const canonicalTime=value=>typeof value==='string'&&Number.isFinite(Date.parse(value))&&iso(Date.parse(value))===value;
+export async function closeSettledIndustryCapacity(env,{tenantId:tid,jobId:id,now=Date.now()}={}){
+ if(!uuid(tid)||!uuid(id)||!Number.isSafeInteger(now)||now<0)return denied('invalid_scope');
+ try{
+  const first=await readTerminal(env,tid,id,now);
+  if(!first)return denied('terminal_evidence_unavailable');
+  const db=env.CRM_DB;
+  const receipt=await db.prepare('SELECT * FROM verified_industry_call_costs WHERE tenant_id=? AND job_id=?').bind(tid,id).first();
+  if(!receipt||receipt.session_id!==first.sessionId||receipt.provider_request_id!==first.requestId||
+     receipt.provider_call_uuid!==first.callUuid||receipt.hangup_at!==first.hangupAt||
+     receipt.currency_status!=='unverified'||!Number.isSafeInteger(receipt.billed_seconds)||
+     receipt.billed_seconds<0||receipt.billed_seconds>first.maxSeconds||receipt.billed_seconds%30!==0||
+     !canonicalTime(receipt.verified_at)||Date.parse(receipt.verified_at)<first.hangupAt+60000)
+   return denied('terminal_receipt_unavailable');
+  const hold=await env.CONTROL_DB.prepare('SELECT state,reserved_seconds,charged_seconds,evidence_ref,closed_at FROM tenant_minute_holds WHERE tenant_id=? AND job_id=?').bind(tid,id).first();
+  if(!hold||hold.state!=='settled'||hold.reserved_seconds!==first.maxSeconds||
+     hold.charged_seconds!==receipt.billed_seconds||hold.evidence_ref!=='plivo-cdr:'+first.callUuid||
+     !canonicalTime(hold.closed_at)||hold.closed_at<receipt.verified_at||Date.parse(hold.closed_at)>now)
+   return denied('settlement_evidence_unavailable');
+  const latest=await readTerminal(env,tid,id,now);
+  if(!same(first,latest))return denied('terminal_evidence_changed');
+  // Both source records are immutable now. The CRM insert is atomic with
+  // its audit and the capacity queries exclude exactly the closed identity.
+  const at=iso(now);
+  const out=await db.batch([
+   db.prepare('INSERT OR IGNORE INTO industry_terminal_closures(tenant_id,job_id,session_id,provider_call_uuid,hangup_at,billed_seconds,settled_at,closed_at) VALUES(?,?,?,?,?,?,?,?)')
+    .bind(tid,id,first.sessionId,first.callUuid,first.hangupAt,receipt.billed_seconds,hold.closed_at,at),
+   db.prepare("INSERT INTO crm_audit_events(tenant_id,id,actor,action,target_id,created_at) SELECT ?,?,'system:industry-terminal','industry.capacity_closed',?,? WHERE changes()=1")
+    .bind(tid,crypto.randomUUID(),id,at)
+  ]);
+  const saved=await db.prepare('SELECT * FROM industry_terminal_closures WHERE tenant_id=? AND job_id=?').bind(tid,id).first();
+  if(!saved||saved.session_id!==first.sessionId||saved.provider_call_uuid!==first.callUuid||
+     saved.hangup_at!==first.hangupAt||saved.billed_seconds!==receipt.billed_seconds||saved.settled_at!==hold.closed_at)
+   return denied('terminal_closure_conflict');
+  return {state:'closed',capacityReleased:true,replayed:out[0]?.meta?.changes!==1,clientCreditsDebited:false,chargedSeconds:receipt.billed_seconds};
+ }catch{return denied('terminal_closure_unavailable')}
 }

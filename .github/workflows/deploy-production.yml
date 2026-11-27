@@ -77,6 +77,9 @@ jobs:
       - name: Add production industry launch review records (no call activation)
         if: github.event_name == 'push' && (steps.schema.outputs.schema_state == 'control_industry_launch_upgrade' || steps.schema.outputs.schema_state == 'industry_launch_campaign_upgrade')
         run: npx --yes wrangler@4 d1 execute ar3d-calling-control --remote --yes --config wrangler.jsonc --file migrations/control/0036_industry_launch_requests.sql
+      - name: Install immutable industry terminal closure ledger (no calling activation)
+        if: github.event_name == 'push' && steps.schema.outputs.schema_state == 'crm_industry_terminal_upgrade'
+        run: npx --yes wrangler@4 d1 execute ar3d-calling-shared-crm --remote --yes --config wrangler.jsonc --file migrations/crm/0029_industry_terminal_closures.sql
       - name: Install verified industry CDR ledger (no calling activation)
         if: github.event_name == 'push' && steps.schema.outputs.schema_state == 'crm_industry_cdr_upgrade'
         run: npx --yes wrangler@4 d1 execute ar3d-calling-shared-crm --remote --yes --config wrangler.jsonc --file migrations/crm/0028_verified_industry_call_costs.sql
@@ -249,6 +252,7 @@ jobs:
           npx --yes wrangler@4 d1 execute ar3d-calling-shared-crm --remote --yes --config wrangler.jsonc --file migrations/crm/0026_industry_call_jobs.sql
           npx --yes wrangler@4 d1 execute ar3d-calling-shared-crm --remote --yes --config wrangler.jsonc --file migrations/crm/0027_industry_funded_admissions.sql
           npx --yes wrangler@4 d1 execute ar3d-calling-shared-crm --remote --yes --config wrangler.jsonc --file migrations/crm/0028_verified_industry_call_costs.sql
+          npx --yes wrangler@4 d1 execute ar3d-calling-shared-crm --remote --yes --config wrangler.jsonc --file migrations/crm/0029_industry_terminal_closures.sql
       - name: Install Super Admin team tables in verified Calling Control
         if: github.event_name == 'push' || inputs.operation == 'initialize' || inputs.operation == 'deploy'
         run: npx --yes wrangler@4 d1 execute ar3d-calling-control --remote --yes --config wrangler.jsonc --file migrations/control/0029_super_admin_team.sql

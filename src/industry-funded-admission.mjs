@@ -10,7 +10,7 @@ import {fundedDispatchApproved,dispatchSettings,inCallingWindow,providerThrottle
 import {resolveFundingEnv} from './provider-funding.mjs';
 import {fundingCap,closeMinuteHold} from './minute-holds.mjs';
 import {moneyBudgetConfig,reserveBudgetedMinutes} from './provider-cost-reservations.mjs';
-import {sharedCapacityCount,sharedTenantCapacityCount,sharedTenantUnknown} from './commercial-capacity.mjs';
+import {sharedCapacityCount,sharedTenantCapacityCount,sharedTenantUnknown,industryOccupiedFor} from './commercial-capacity.mjs';
 const uuid=x=>typeof x==='string'&&/^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i.test(x);
 const digest=x=>typeof x==='string'&&/^[a-f0-9]{64}$/.test(x);
 const exact=(o,k)=>o&&typeof o==='object'&&!Array.isArray(o)&&Object.keys(o).length===k.length&&k.every(x=>Object.hasOwn(o,x));
@@ -89,7 +89,7 @@ export async function claimFundedIndustryAdmission(baseEnv,{tenantId:tid,jobId:i
  // Same serialized shared CRM statement as legacy capacity admission:
  // both job types consume the global and per-company limits; unknown
  // attempts and same-lead overlaps block. No separate capacity pool.
- const changed=await db.prepare("UPDATE industry_funded_admissions SET state='claiming',claimed_at=? WHERE tenant_id=? AND job_id=? AND state='released' AND expires_at>? AND manifest_sha256=? AND EXISTS(SELECT 1"+joins+" WHERE j.tenant_id=industry_funded_admissions.tenant_id AND j.id=industry_funded_admissions.job_id AND j.manifest_sha256=industry_funded_admissions.manifest_sha256 AND "+currentRecipient+") AND "+sharedTenantUnknown+" AND "+sharedTenantCapacityCount+"<? AND "+sharedCapacityCount+"<? AND NOT EXISTS(SELECT 1 FROM calling_jobs p WHERE p.tenant_id=? AND p.lead_id=industry_funded_admissions.lead_id AND p.state IN('reserved','submitted','unknown')) AND NOT EXISTS(SELECT 1 FROM industry_funded_admissions a WHERE a.tenant_id=? AND a.lead_id=industry_funded_admissions.lead_id AND a.state IN('claiming','funded','unknown'))")
+ const changed=await db.prepare("UPDATE industry_funded_admissions SET state='claiming',claimed_at=? WHERE tenant_id=? AND job_id=? AND state='released' AND expires_at>? AND manifest_sha256=? AND EXISTS(SELECT 1"+joins+" WHERE j.tenant_id=industry_funded_admissions.tenant_id AND j.id=industry_funded_admissions.job_id AND j.manifest_sha256=industry_funded_admissions.manifest_sha256 AND "+currentRecipient+") AND "+sharedTenantUnknown+" AND "+sharedTenantCapacityCount+"<? AND "+sharedCapacityCount+"<? AND NOT EXISTS(SELECT 1 FROM calling_jobs p WHERE p.tenant_id=? AND p.lead_id=industry_funded_admissions.lead_id AND p.state IN('reserved','submitted','unknown')) AND NOT EXISTS(SELECT 1 FROM industry_funded_admissions a WHERE a.tenant_id=? AND a.lead_id=industry_funded_admissions.lead_id AND "+industryOccupiedFor('a')+")")
   .bind(at,tid,id,requiredUntil,r.manifest_sha256,requiredUntil,tid,tid,cfg.maxPerCompany,cfg.maxConcurrent,tid,tid).run();
  if(changed.meta.changes!==1)return stopped('capacity_or_scope_changed');
  const claim={...r,claimed_at:at};
