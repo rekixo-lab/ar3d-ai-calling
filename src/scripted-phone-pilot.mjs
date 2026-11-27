@@ -1,5 +1,6 @@
 // Shared phone questionnaire with a separately approved internal pilot and customer campaigns.
 import {signalProviderThrottle} from './capacity-signals.mjs';
+import {isSchoolVoiceSession,serveSchoolVoiceAudio,handleSchoolVoiceCallback} from './industry-school-voice-callback.mjs';
 import {resolveCrmDb,parseJsonBody} from './core.mjs';
 import {mutationOriginAllowed} from './human-auth.mjs';
 import {beginFixedVoicePreview,advanceFixedVoicePreview,advanceContextualVoice,advanceInternalVoice} from './fixed-voice-turns.mjs';
@@ -875,20 +876,26 @@ export async function handleScriptedPhoneCallback(req,env,{now=Date.now(),fetche
  if(!UUID.test(id)||rest.length)return error('not_found',404);
  const control=env.CONTROL_DB;
  try{
+  if(step==='industry-audio')return serveSchoolVoiceAudio(req,env,config,id,arg,now);
   if(step==='audio'){
    if(!arg?.endsWith('.mp3')||!AUDIO_PROMPTS.has(arg.slice(0,-4))||url.search)return error('not_found',404);
    // Scoped to the random pilot ID; serves prerecorded questions only.
-   const row=await control.prepare('SELECT language,tenant_id,job_id FROM scripted_phone_pilots WHERE id=? AND expires_at>? AND provider_account_id=?')
+   const row=await control.prepare('SELECT language,tenant_id,job_id,survey_json FROM scripted_phone_pilots WHERE id=? AND expires_at>? AND provider_account_id=?')
     .bind(id,now,config.authId).first();
-   const audio=row?await env.RECORDINGS.get(promptKey(row.language,arg.slice(0,-4),row.job_id?row.tenant_id:null)):null;
+   const audio=row&&!isSchoolVoiceSession(row)?await env.RECORDINGS.get(promptKey(row.language,arg.slice(0,-4),row.job_id?row.tenant_id:null)):null;
    if(!audio||audio.size<1||audio.size>ANSWER_MAX_BYTES)return error('not_found',404);
    return new Response(audio.body,{headers:{...headers,'Content-Type':'audio/mpeg','Content-Length':String(audio.size)}});
   }
   if(!await verifiedPlivoGet(req,config,url))return error('invalid_provider_signature',403);
   const params=url.searchParams,call=params.get('CallUUID'),requestId=params.get('ALegRequestUUID')||params.get('RequestUUID');
   if(!ID.test(call||''))return error('invalid_call_reference',400);
-  const row=await control.prepare('SELECT * FROM scripted_phone_pilots WHERE id=? AND expires_at>?').bind(id,now).first();
+  const row=await control.prepare('SELECT * FROM scripted_phone_pilots WHERE id=?').bind(id).first();
   if(!row||row.provider_account_id!==config.authId||row.caller!==config.caller)return end();
+  if(isSchoolVoiceSession(row)){
+   if(row.expires_at<=now&&(step!=='hangup'||now-row.expires_at>86400000))return end();
+   return await handleSchoolVoiceCallback(env,config,row,step,arg,params,{now,fetcher,finishOptOut:finishCampaignOptOut});
+  }
+  if(row.expires_at<=now)return end();
   // A previously reserved call must still be able to report its signed hangup
   // after enrollment/lead eligibility changes. The immutable call identity is
   // checked below. Other internal steps recheck the enrolled destination.
