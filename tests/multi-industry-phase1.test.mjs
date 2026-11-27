@@ -121,6 +121,9 @@ test('finance draft is non-callable and users cannot invent activation endpoints
 test('control schema rejects publish-state mutation or cross-tenant implicit call activation',()=>{
  const f=fixture();
  try{
+  const draft=defaultIndustryAgentDraft('school_admission_v1');
+  f.c.db.prepare("INSERT INTO ai_flow_definitions(tenant_id,id,template_id,industry_code,name,config_json,created_by,created_at,updated_by,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)").run(
+   tid,'99999999-9999-4999-8999-999999999999',draft.templateId,'school',draft.name,JSON.stringify(draft),'client',at,'client',at);
   assert.throws(()=>f.c.db.prepare("UPDATE ai_flow_definitions SET status='active'").run(),/CHECK/);
   assert.throws(()=>f.c.db.prepare("INSERT INTO ai_flow_definitions(tenant_id,id,template_id,industry_code,name,config_json,created_by,created_at,updated_by,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)").run(
    other,'88888888-8888-4888-8888-888888888888','school_admission_v1','school','Forbidden','{}','client',at,'client',at),/FOREIGN KEY/);
