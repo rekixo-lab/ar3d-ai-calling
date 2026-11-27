@@ -6,14 +6,14 @@ function industryCampaignPanel(tenantId,content,{admin=false,editable=false}={})
  content.append(card);
  const area=div('stack'),status=node('p',{class:'muted',role:'status'}),campaign=node('select',{class:'field','aria-label':'Industry campaign'});
  const launch=node('select',{class:'field','aria-label':'Reviewed frozen School agent'}),name=input('industryCampaignName','text','Campaign name');name.maxLength=80;
- const body=div('stack'),chooseBox=div('stack'),list=div('stack'),search=input('industryLeadSearch','search','Search name or mobile');search.maxLength=80;
+ const body=div('stack'),chooseBox=div('stack'),list=div('stack'),queueBox=div('stack'),search=input('industryLeadSearch','search','Search name or mobile');search.maxLength=80;
  let campaigns=[],offset=0,recipientOffset=0,leadOffset=0,seq=0,leadSeq=0,loading=false;
  const base='/v1/human/industry-campaigns',query='?tenantId='+encodeURIComponent(tenantId);
  const callPath=()=>base+'/'+encodeURIComponent(campaign.value);
  function active(id,stamp){return card.isConnected&&campaign.value===id&&stamp===seq}
  async function loadRecipients(){
   const id=campaign.value,stamp=++seq;
-  list.replaceChildren();chooseBox.replaceChildren();
+  list.replaceChildren();chooseBox.replaceChildren();queueBox.replaceChildren();
   if(!id)return;
   const r=await api(callPath()+'/recipients'+query+'&offset='+recipientOffset);
   if(!active(id,stamp))return;
@@ -58,6 +58,46 @@ function industryCampaignPanel(tenantId,content,{admin=false,editable=false}={})
    }
    list.append(item);
   }
+  const showQueue=btn('Load prepared calling jobs',async()=>{
+   if(!active(id,stamp))return;
+   showQueue.disabled=true;
+   try{
+    const baseQueue='/v1/human/industry-queue/'+encodeURIComponent(id),out=await api(baseQueue+query);
+    if(!active(id,stamp))return;
+    const controls=div('stack'),eligible=r.recipients.filter(x=>x.status==='review_current'&&!out.jobs.some(j=>j.leadId===x.leadId&&j.state==='prepared'));
+    queueBox.replaceChildren(title('Prepared calling jobs','h3'),node('p',{class:'note',text:'Preparation only. No carrier submission, credit reservation or automatic future dialing.'}),
+     node('p',{class:'muted',text:out.manifestSha256?'Approved audio manifest recorded · '+out.manifestSha256.slice(0,12):'Approved audio pack is required before preparing jobs.'}),controls);
+    for(const j of out.jobs){
+     const x=r.recipients.find(x=>x.leadId===j.leadId);
+     const line=div('card',node('p',{text:(x?.name||'CRM contact '+j.leadId.slice(0,8))+' · '+j.state+(j.state==='prepared'&&!j.current?' · stale / not eligible':'')+' · review v'+j.reviewRevision}));
+     if((admin||editable)&&j.state==='prepared'){
+      const why=input('industryCancel-'+j.id,'text','Reason for cancelling prepared job');why.maxLength=160;
+      const cancel=btn('Cancel prepared job',async()=>{
+       if(!active(id,stamp)||why.value.trim().length<4)return asError(Error('Enter a cancellation reason.'));
+       cancel.disabled=true;try{await api(baseQueue+'/cancel','POST',{tenantId,jobId:j.id,reason:why.value.trim()});if(active(id,stamp))await loadRecipients()}catch(e){asError(e)}finally{cancel.disabled=false}
+      },true);
+      line.append(lab('Cancellation reason',why),cancel);
+     }
+     controls.append(line);
+    }
+    if(out.hasMore)controls.append(node('p',{class:'muted',text:'First 50 jobs shown. The API supports paginated job history.'}));
+    if(editable&&!admin&&!archived&&out.tenantActive&&out.manifestSha256&&eligible.length){
+     const selected=new Map();
+     for(const x of eligible){
+      const check=node('input',{type:'checkbox'});check.addEventListener('change',()=>check.checked?selected.set(x.leadId,{leadId:x.leadId,reviewRevision:x.revision}):selected.delete(x.leadId));
+      controls.append(node('label',{class:'row'},[check,'Prepare '+(x.name||'CRM contact')+' · ••••'+x.destinationLast4]));
+     }
+     const prepare=btn('Prepare selected calling jobs (no calls)',async()=>{
+      if(!active(id,stamp)||!selected.size)return asError(Error('Select at least one currently reviewed recipient.'));
+      if(!confirm('Prepare these exact reviewed recipients and audio version? No calls or credit reservation will occur.'))return;
+      prepare.disabled=true;
+      try{const response=await api(baseQueue+'/prepare','POST',{tenantId,manifestSha256:out.manifestSha256,recipients:[...selected.values()],acknowledgePreparationOnly:true});notice(response.prepared+' jobs prepared. No calls started.');if(active(id,stamp))await loadRecipients()}catch(e){asError(e)}finally{prepare.disabled=false}
+     },true);
+     controls.append(prepare);
+    }
+   }catch(e){asError(e)}finally{showQueue.disabled=false}
+  },true);
+  list.append(showQueue);
   if(!r.recipients.length)list.append(node('p',{class:'muted',text:'No recipients added.'}));
   const prev=btn('Previous recipients',()=>{recipientOffset=Math.max(0,recipientOffset-50);loadRecipients().catch(asError)},true),next=btn('Next recipients',()=>{recipientOffset+=50;loadRecipients().catch(asError)},true);
   prev.disabled=recipientOffset===0;next.disabled=!r.hasMore;list.append(div('formrow',prev,next));
@@ -125,7 +165,7 @@ function industryCampaignPanel(tenantId,content,{admin=false,editable=false}={})
  },true);
  body.hidden=true;
  if(editable&&!admin)body.append(div('formrow',lab('Reviewed School agent',launch),lab('Campaign name',name),create));
- body.append(lab('Campaign',campaign),div('formrow',previous,following,editable&&!admin?archive:null),status,list,chooseBox);
+ body.append(lab('Campaign',campaign),div('formrow',previous,following,editable&&!admin?archive:null),status,list,queueBox,chooseBox);
  card.append(open,body);
 }
 `;

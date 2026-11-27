@@ -15,6 +15,7 @@ const sources=[
  ['callingClearances','calling_clearances'],
  ['industryCampaignCandidates','industry_campaign_candidates'],
  ['industryRecipientReviews','industry_recipient_reviews'],
+ ['industryCallJobs','industry_call_jobs'],
  ['siteVisits','site_visits'],
  ['consentReferences','lead_consent_evidence'],
  ['optOutEvents','lead_opt_out_events'],
