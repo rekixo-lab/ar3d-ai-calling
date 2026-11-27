@@ -48,7 +48,7 @@ export async function handleTenantLifecycleRequest(req,env,user){
           .bind(at,tid,from):
         db.prepare("UPDATE tenants SET status=suspended_from_status,suspended_from_status=NULL,updated_at=? WHERE id=? AND status='suspended' AND suspended_from_status=?")
           .bind(at,tid,to),
-      db.prepare("INSERT INTO tenant_audit_events(id,tenant_id,actor,action,target_id,detail_json,created_at) SELECT ?,?,'human:'||?,?,?, ?,? FROM tenants WHERE id=? AND status=?")
+      db.prepare("INSERT INTO tenant_audit_events(id,tenant_id,actor,action,target_id,detail_json,created_at) SELECT ?,?,'human:'||?,?,?, ?,? FROM tenants WHERE id=? AND status=? AND changes()=1")
         .bind(crypto.randomUUID(),tid,user.id,verb==='suspend'?'tenant.suspended':'tenant.resumed',tid,detail,at,tid,to)
     ]);
     if(Number(changes[0]?.meta?.changes||0)!==1||Number(changes[1]?.meta?.changes||0)!==1)

@@ -155,3 +155,39 @@ test('overlapping schedulers cannot exceed the shared live call ceiling',async()
   assert.equal(f.r.db.prepare("SELECT COUNT(*) AS n FROM calling_jobs WHERE state IN('reserved','submitted')").get().n,1);
  }finally{f.close()}
 });
+
+test('unknown call consumes global capacity across companies until signed end evidence',async()=>{
+ const f=fixture();
+ try{
+  seed(f,3,1);
+  const settings={maxConcurrent:1,maxPerCompany:1,queryBudget:950};
+  let submissions=0;
+  const send=async()=>{submissions++;throw Error('synthetic timeout')};
+  const first=await runScriptedCampaignCron(f.env,{now:anchor,apiFetch:send,settings});
+  assert.equal(first.occupiedSlots,1);
+  const row=f.r.db.prepare("SELECT tenant_id FROM calling_jobs WHERE state='unknown'").get();
+  assert.ok(row);
+  for(let i=1;i<=2;i++){
+   const r=await runScriptedCampaignCron(f.env,{now:anchor+i*STEP,apiFetch:send,settings});
+   assert.equal(r.dialed,0);assert.equal(r.occupiedSlots,1);
+  }
+  assert.equal(submissions,1);
+  f.c.db.prepare("UPDATE scripted_phone_pilots SET phase='ended',hangup_at=? WHERE job_id IS NOT NULL").run(anchor+2*STEP);
+  const end=await runScriptedCampaignCron(f.env,{now:anchor+3*STEP,apiFetch:plivo([]),settings});
+  assert.equal(end.reconciled,1);assert.equal(end.dialed,1);
+ }finally{f.close()}
+});
+test('suspending all companies blocks new dispatch but reconciles an existing call',async()=>{
+ const f=fixture();
+ try{
+  seed(f,1,2);
+  const settings={maxConcurrent:1,maxPerCompany:1,queryBudget:950};
+  assert.equal((await runScriptedCampaignCron(f.env,{now:anchor,apiFetch:plivo([]),settings})).dialed,1);
+  f.c.db.prepare("UPDATE tenants SET status='suspended',suspended_from_status='active' WHERE status='active'").run();
+  hangUpAll(f,anchor+STEP);
+  const r=await runScriptedCampaignCron(f.env,{now:anchor+STEP,apiFetch:()=>assert.fail('suspended tenant must not dial'),settings});
+  assert.equal(r.activeTenants,0);assert.equal(r.reconciled,1);
+  assert.equal(f.r.db.prepare("SELECT COUNT(*) AS n FROM calling_jobs WHERE state='completed'").get().n,1);
+  assert.equal(f.r.db.prepare("SELECT COUNT(*) AS n FROM calling_jobs WHERE state='queued'").get().n,1);
+ }finally{f.close()}
+});

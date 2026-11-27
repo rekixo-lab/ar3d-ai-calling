@@ -251,3 +251,19 @@ test('ordinary speech received after hangup stores metering but no answer or fur
   assert.equal(state(f).phoneMeta.sttRoundedSeconds,2);
  }finally{f.close()}
 });
+
+test('already claimed STOP survives tenant suspension and hangup without granting ordinary access',async()=>{
+ const f=await setup();try{
+  await consent(f);const c=counts();
+  const fetcher=speechProvider(f,c,{answer:'do not call me again',beforeStt:async()=>{
+   f.c.db.prepare("UPDATE tenants SET status='suspended',suspended_from_status='active' WHERE id=?").run(tid);
+   const h=await route(f,signed(f,'hangup',{Duration:'12'}));assert.equal(h.status,204);
+  }});
+  await route(f,answerReq(f,0),fetcher);
+  assert.equal(row(f).phase,'declined');assert.equal(state(f).industryVoice.status,'opted_out');
+  const l=f.r.db.prepare('SELECT consent_status,dnd_status FROM leads WHERE tenant_id=? AND id=?').get(tid,lead);
+  assert.deepEqual([l.consent_status,l.dnd_status],['denied','blocked']);
+  assert.equal(f.c.db.prepare('SELECT status FROM tenants WHERE id=?').get(tid).status,'suspended');
+  assert.equal(c.stt,1);assert.equal(f.r.db.prepare('SELECT COUNT(*) AS n FROM lead_opt_out_events').get().n,1);
+ }finally{f.close()}
+});

@@ -81,3 +81,5 @@ necessary; no separate staging setup is planned.
 ## Audit follow-up
 
 A signed keypad opt-out remains actionable after consent-stage hangup or revocation. For a recording already claimed before hangup, explicit spoken opt-out is committed using the exact call, turn and pending document even if hangup set needs_review. Ordinary late speech cannot advance or save an answer; its confirmed metering is retained. The default admission-interest question closes on a clear negative answer without making that an all-future-calls opt-out. Arbitrary edited questions still require explicit typed branching; a bare no is not assumed to mean refusal for unrelated questions. No dispatcher, TTS job or activation is added.
+
+Combined reliability verification also covers a claimed opt-out finishing after company suspension, without restoring tenant access or permitting new calls.
