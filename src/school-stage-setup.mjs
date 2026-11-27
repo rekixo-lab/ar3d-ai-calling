@@ -19,7 +19,7 @@ export async function stageSetupStatus(env,user,{now=Date.now()}={}){
  const row=await db.prepare("SELECT s.id,s.graph_sha256,r.decision,s.config_json FROM ai_flow_snapshots s LEFT JOIN ai_flow_preview_reviews r ON r.tenant_id=s.tenant_id AND r.snapshot_id=s.id WHERE s.tenant_id=? AND s.template_id='school_admission_v1' ORDER BY s.created_at DESC LIMIT 1").bind(tenantId).first();
  return {tenantId,snapshot:row?{id:row.id,digest:row.graph_sha256,review:row.decision||'awaiting_review',config:JSON.parse(row.config_json)}:null,
   switches:{stage:env.AR3D_SCHOOL_STAGE_ENABLED==='approved',approval:env.AR3D_SCHOOL_PILOT_APPROVAL_ENABLED==='approved',audio:env.AR3D_SCHOOL_PILOT_AUDIO_ENABLED==='approved'},
-  noCallsMade:true};
+  callsStartedByThisRequest:0};
 }
 /** One-time setup of a fixed fictional tenant + disabled author + immutable snapshot.
  * The MFA reviewer is not the author. Explicit later review is still required.
