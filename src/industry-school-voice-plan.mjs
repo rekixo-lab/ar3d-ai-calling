@@ -52,7 +52,7 @@ export async function validateSchoolAudioPack(scope,manifest,manifestSha256){
  if(JSON.stringify(expected.manifest)!==JSON.stringify(manifest)||expected.manifestSha256!==manifestSha256)fail('school_audio_pack_integrity');
  return expected.manifest;
 }
-function validMP3Header(bytes){
+export function validMP3Header(bytes){
  let offset=0;
  if(bytes[0]===73&&bytes[1]===68&&bytes[2]===51){
   if(bytes.length<14||Array.from(bytes.slice(6,10)).some(n=>n>127))return false;

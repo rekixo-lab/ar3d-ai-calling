@@ -9,6 +9,7 @@ import {handleIndustryLaunchRequests} from '../src/industry-launch-requests.mjs'
 import {handleIndustryCampaigns,readIndustryRecipientScope} from '../src/industry-campaigns.mjs';
 import {audioSha,schoolVoicePlan,buildSchoolAudioPack,validateSchoolAudioPack,readSchoolAudioAsset,beginSchoolVoiceSession,advanceSchoolVoice,schoolVoiceNodes} from '../src/industry-school-voice-plan.mjs';
 import {handleScriptedPhoneCallback} from '../src/scripted-phone-pilot.mjs';
+import {handleSchoolAudioPreparation,readApprovedSchoolAudioPack} from '../src/industry-school-audio-preparation.mjs';
 const version='abababab-abab-4bab-8bab-abababababab',flow='cdcdcdcd-cdcd-4dcd-8dcd-cdcdcdcdcdcd';
 const session='56565656-5656-4565-8565-565656565656',job='78787878-7878-4787-8787-787878787878';
 const call='12121212-1212-4212-8212-121212121212',request='34343434-3434-4343-8343-343434343434';
@@ -265,5 +266,80 @@ test('already claimed STOP survives tenant suspension and hangup without grantin
   assert.deepEqual([l.consent_status,l.dnd_status],['denied','blocked']);
   assert.equal(f.c.db.prepare('SELECT status FROM tenants WHERE id=?').get(tid).status,'suspended');
   assert.equal(c.stt,1);assert.equal(f.r.db.prepare('SELECT COUNT(*) AS n FROM lead_opt_out_events').get().n,1);
+ }finally{f.close()}
+});
+
+function audioEnv(f){
+ const objects=new Map();
+ Object.assign(f.env,{AR3D_SCHOOL_TTS_ENABLED:'approved',AR3D_SCHOOL_TTS_API_KEY:'fictional-separately-funded-key',AR3D_SCHOOL_TTS_BUDGET_MICROS:'10000000',AR3D_SCHOOL_TTS_RATE_MICROS_PER_CHAR:'3000',AR3D_SCHOOL_TTS_FUNDING_REFERENCE:'Synthetic separate budget',RECORDINGS:{
+  async put(key,bytes,opts){assert.equal(opts.onlyIf.get('If-None-Match'),'*');assert.equal(await audioSha(bytes),opts.sha256);if(objects.has(key))return null;objects.set(key,bytes.slice());return {key}},
+  async get(key){const bytes=objects.get(key);return bytes?{size:bytes.length,httpMetadata:{contentType:'audio/mpeg'},body:new Blob([bytes]).stream()}:null}
+ }});
+ return objects;
+}
+async function prepFixture(){
+ const f=fixture();try{
+  const scope=await launch(f),id=f.c.db.prepare('SELECT id FROM industry_launch_requests WHERE tenant_id=?').get(tid).id,objects=audioEnv(f);
+  let calls=0;
+  const fetcher=async(url,o)=>{
+   calls++;assert.equal(url,'https://api.sarvam.ai/text-to-speech/stream');assert.equal(o.method,'POST');assert.equal(o.redirect,'error');
+   assert.equal(o.headers['api-subscription-key'],'fictional-separately-funded-key');
+   const d=JSON.parse(o.body);assert.equal(d.model,'bulbul:v3');assert.equal(d.speaker,'shubh');assert.equal(d.language_code,'hi-IN');assert.equal(d.output_audio_codec,'mp3');
+   assert.ok(scope.graph.nodes.some(n=>n.text===d.text));return new Response(mp3,{headers:{'Content-Type':'audio/mpeg'}});
+  };
+  const api=(op='',data={tenantId:tid},user=admin,method='GET',mock=fetcher)=>handleSchoolAudioPreparation(req('/v1/human/school-audio/'+id+op,data,method),f.env,user,{now,fetcher:mock});
+  const get=async()=>await (await api()).json(),d=await get();
+  const input={tenantId:tid,expectedGraphSha256:scope.digest,expectedCostMicros:d.quoteMicros,confirm:'SEPARATELY_FUNDED_STATIC_SCRIPT_ONLY_NO_CALLS'};
+  const reviewer={id:'reviewer',globalRole:'super_admin',token_hash:'b'.repeat(64)};
+  f.c.db.prepare("INSERT INTO human_users(id,email,password_salt,password_hash,password_iterations,global_role,created_at,updated_at) VALUES('reviewer','reviewer@example.invalid','salt','hash',200000,'super_admin',?,?)").run(at,at);
+  f.c.db.prepare("INSERT INTO human_sessions(token_hash,user_id,created_at,expires_at) VALUES(?,'reviewer',?,?)").run(reviewer.token_hash,at,now+3600000);
+  f.c.db.prepare("INSERT INTO human_mfa_settings(user_id,secret_ciphertext,secret_iv,enabled_at,created_at,updated_at) VALUES('reviewer',?,?,?,?,?)").run('c'.repeat(72),'i'.repeat(24),at,at,at);
+  return {...f,scope,id,api,get,input,reviewer,objects,calls:()=>calls};
+ }catch(e){f.close();throw e}
+}
+test('School audio is default disabled, tenant scoped and current-MFA only; shared credential is refused',async()=>{
+ const f=await prepFixture();try{
+  const {api,input}=f;
+  assert.equal((await api('',{tenantId:tid},client)).status,403);
+  f.env.AR3D_SCHOOL_TTS_ENABLED=undefined;
+  assert.equal((await api('/prepare',input,admin,'POST')).status,409);
+  f.env.AR3D_SCHOOL_TTS_ENABLED='approved';f.env.SARVAM_API_KEY=f.env.AR3D_SCHOOL_TTS_API_KEY;
+  assert.equal((await api('/prepare',input,admin,'POST')).status,409);
+  assert.equal(f.calls(),0);assert.equal(f.c.db.prepare('SELECT COUNT(*) AS n FROM school_audio_preparations').get().n,0);
+  assert.equal((await api('',{tenantId:'22222222-2222-4222-8222-222222222222'})).status,409);
+ }finally{f.close()}
+});
+test('one atomic School TTS claim reserves cost, stores exact MP3s, and independent review is required',async()=>{
+ const f=await prepFixture();try{
+  const outcomes=await Promise.all([f.api('/prepare',f.input,admin,'POST'),f.api('/prepare',f.input,admin,'POST')]);
+  assert.deepEqual(outcomes.map(x=>x.status).sort(),[201,409]);
+  const d=await f.get();assert.equal(d.state,'ready');assert.equal(f.calls(),5);assert.equal(d.attemptedNodes,5);
+  assert.equal(d.reservedMicros,f.input.expectedCostMicros);assert.equal(f.objects.size,5);assert.equal(d.callable,false);
+  const r=await f.api('/audio/'+d.nodes[0].id);assert.equal(r.status,200);assert.deepEqual(new Uint8Array(await r.arrayBuffer()),mp3);
+  const review={tenantId:tid,manifestSha256:d.manifestSha256,decision:'approved',reference:'Synthetic independent review',acknowledgeListened:true};
+  assert.equal((await f.api('/review',review,admin,'POST')).status,403);
+  await assert.rejects(readApprovedSchoolAudioPack(f.env,{tenantId:tid,launchId:f.id}),/not_approved/);
+  assert.equal((await f.api('/review',review,f.reviewer,'POST')).status,200);
+  const pack=await readApprovedSchoolAudioPack(f.env,{tenantId:tid,launchId:f.id});assert.equal(pack.manifestSha256,d.manifestSha256);
+  assert.equal((await f.api('/review',review,f.reviewer,'POST')).status,409);
+  assert.throws(()=>f.c.db.prepare("UPDATE school_audio_preparations SET reserved_micros=1").run(),/immutable|CHECK/);
+  assert.throws(()=>f.c.db.prepare("DELETE FROM school_audio_preparations").run(),/immutable/);
+  assert.equal(f.c.db.prepare('SELECT COUNT(*) AS n FROM tenant_minute_holds').get().n,0);
+  assert.equal(f.c.db.prepare('SELECT COUNT(*) AS n FROM scripted_phone_pilots').get().n,0);
+  f.objects.set(pack.manifest.entries[0].key,new Uint8Array([255,251,144,100,7,7,7,7,7]));
+  await assert.rejects(readApprovedSchoolAudioPack(f.env,{tenantId:tid,launchId:f.id}),/integrity/);
+ }finally{f.close()}
+});
+test('School TTS insufficient budget and uncertain paid failure never retry or refund',async()=>{
+ const f=await prepFixture();try{
+  f.env.AR3D_SCHOOL_TTS_BUDGET_MICROS='1';
+  assert.equal((await f.api('/prepare',f.input,admin,'POST')).status,409);
+  assert.equal(f.calls(),0);
+  f.env.AR3D_SCHOOL_TTS_BUDGET_MICROS='10000000';
+  let attempts=0;const broken=async()=>{attempts++;throw Error('synthetic network ambiguity')};
+  assert.equal((await f.api('/prepare',f.input,admin,'POST',broken)).status,503);
+  const d=await f.get();assert.equal(d.state,'failed');assert.equal(d.attemptedNodes,1);assert.equal(d.reservedMicros,f.input.expectedCostMicros);
+  assert.equal((await f.api('/prepare',f.input,admin,'POST',broken)).status,409);assert.equal(attempts,1);
+  assert.equal(f.objects.size,0);
  }finally{f.close()}
 });
