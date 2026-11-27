@@ -55,3 +55,20 @@ test('reschedule refuses unauthorized, cross-tenant, terminal visits and unsafe 
   assert.equal(f.r.db.prepare("SELECT COUNT(*) AS n FROM crm_audit_events WHERE action='visit.rescheduled'").get().n,0);
  }finally{f.close()}
 });
+
+// A second writer may make the visit confirmed before this request's conditional UPDATE.
+// That rejected write must not create an audit event for the other writer's change.
+test('racing status update does not append an audit event for a rejected write',async()=>{
+ const f=fixture();
+ try{
+  create(f,new Date(Date.now()+2*86400000).toISOString());
+  const batch=f.env.CRM_DB.batch.bind(f.env.CRM_DB);
+  f.env.CRM_DB.batch=async statements=>{
+   f.r.db.prepare("UPDATE site_visits SET status='confirmed' WHERE tenant_id=? AND id=?").run(tid,id);
+   return batch(statements);
+  };
+  const result=await handleVisitStatusRequest(request({tenantId:tid,status:'confirmed'}),f.env,client);
+  assert.equal(result.status,409);
+  assert.equal(f.r.db.prepare("SELECT COUNT(*) AS n FROM crm_audit_events WHERE tenant_id=? AND action='visit.status_changed'").get(tid).n,0);
+ }finally{f.close()}
+});

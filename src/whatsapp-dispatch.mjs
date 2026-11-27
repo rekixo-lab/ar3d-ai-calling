@@ -200,7 +200,7 @@ export async function runWhatsAppCron(env,{now=Date.now(),fetcher=fetch,maxTenan
    await applyPendingStatusEvents(db,tid,{now,limit:1});
    queued+=await reconcileAcceptedCalls(env,member,db,rules,{now,limit:1});
    if(rules.visitReminderEnabled)queued+=await reconcileVisits(env,member,db,rules,{now,limit:1});
-   const due=await db.prepare("SELECT * FROM whatsapp_messages WHERE tenant_id=? AND status IN('scheduled','pending_setup') AND kind!='reply' AND due_at<=? ORDER BY due_at,id LIMIT ?").bind(tid,iso(now),maxSends).all();
+   const due=await db.prepare("SELECT * FROM whatsapp_messages WHERE tenant_id=? AND status IN('scheduled','pending_setup') AND kind!='reply' AND due_at<=? ORDER BY CASE WHEN status='scheduled' THEN 0 ELSE 1 END,due_at,id LIMIT ?").bind(tid,iso(now),maxSends).all();
    for(const message of due.results||[]){const result=await dispatchMessage(env,member,db,connection,rules,message,{now,fetcher,origin});if(result.sent)sent++;}
    checked++;
   }catch{console.error('AR3D WhatsApp scheduled operation unavailable');}

@@ -169,7 +169,7 @@ async function dispatchPreconditions(env,tid,db,now,cache){
 
 // Dials the next eligible queued customer of ONE company, if that company has
 // fewer than maxPerCompany live calls and no uncertain call awaiting review.
-export async function dialNextForTenant(env,db,tid,config,{apiFetch=fetch,now=Date.now(),maxPerCompany=1,cache={tenants:new Map()}}={}){
+export async function dialNextForTenant(env,db,tid,config,{apiFetch=fetch,now=Date.now(),maxPerCompany=1,maxGlobalConcurrent=2147483647,cache={tenants:new Map()}}={}){
  const at=new Date(now).toISOString();
  if(!config||!inCallingWindow(now))return {state:'disabled_or_outside_hours'};
  const pre=await dispatchPreconditions(env,tid,db,now,cache);
@@ -211,8 +211,8 @@ export async function dialNextForTenant(env,db,tid,config,{apiFetch=fetch,now=Da
  // Prepaid minutes and provider ceilings (below) are the only volume limits.
  let reserved;
  try{
-  reserved=await db.prepare("UPDATE calling_jobs SET state='reserved',reserved_at=?,updated_at=?,account_sid=?,caller_id=?,flow_id=?,destination=? WHERE tenant_id=? AND id=? AND state='queued' AND EXISTS(SELECT 1 FROM calling_runs r WHERE r.tenant_id=calling_jobs.tenant_id AND r.id=calling_jobs.run_id AND r.state='running') AND EXISTS(SELECT 1 FROM calling_policies p WHERE p.tenant_id=? AND p.enabled=1 AND p.expires_at>? AND p.updated_at=? AND p.flow_id=?) AND EXISTS(SELECT 1 FROM calling_clearances v JOIN leads l ON l.tenant_id=v.tenant_id AND l.id=v.lead_id WHERE v.tenant_id=? AND v.lead_id=? AND v.purpose=? AND v.expires_at>? AND v.reviewed_at>=? AND v.reviewed_at>COALESCE((SELECT MAX(h.reserved_at) FROM calling_jobs h WHERE h.tenant_id=v.tenant_id AND h.lead_id=v.lead_id),'') AND l.consent_status!='denied' AND l.dnd_status!='blocked' AND l.mobile_e164=? AND l.updated_at=? AND NOT EXISTS(SELECT 1 FROM lead_opt_out_events o WHERE o.tenant_id=l.tenant_id AND o.lead_id=l.id)) AND NOT EXISTS(SELECT 1 FROM calling_jobs x WHERE x.tenant_id=? AND x.state='unknown') AND (SELECT COUNT(*) FROM calling_jobs x WHERE x.tenant_id=? AND x.state IN('reserved','submitted'))<?")
-  .bind(at,at,config.authId,config.caller,policy.flow_id,job.destination,tid,job.id,tid,at,policy.updated_at,SCRIPTED_CALLING_POLICY,tid,job.lead_id,job.purpose,at,policy.updated_at,job.destination,job.lead_updated_at,tid,tid,maxPerCompany).run();
+  reserved=await db.prepare("UPDATE calling_jobs SET state='reserved',reserved_at=?,updated_at=?,account_sid=?,caller_id=?,flow_id=?,destination=? WHERE tenant_id=? AND id=? AND state='queued' AND EXISTS(SELECT 1 FROM calling_runs r WHERE r.tenant_id=calling_jobs.tenant_id AND r.id=calling_jobs.run_id AND r.state='running') AND EXISTS(SELECT 1 FROM calling_policies p WHERE p.tenant_id=? AND p.enabled=1 AND p.expires_at>? AND p.updated_at=? AND p.flow_id=?) AND EXISTS(SELECT 1 FROM calling_clearances v JOIN leads l ON l.tenant_id=v.tenant_id AND l.id=v.lead_id WHERE v.tenant_id=? AND v.lead_id=? AND v.purpose=? AND v.expires_at>? AND v.reviewed_at>=? AND v.reviewed_at>COALESCE((SELECT MAX(h.reserved_at) FROM calling_jobs h WHERE h.tenant_id=v.tenant_id AND h.lead_id=v.lead_id),'') AND l.consent_status!='denied' AND l.dnd_status!='blocked' AND l.mobile_e164=? AND l.updated_at=? AND NOT EXISTS(SELECT 1 FROM lead_opt_out_events o WHERE o.tenant_id=l.tenant_id AND o.lead_id=l.id)) AND NOT EXISTS(SELECT 1 FROM calling_jobs x WHERE x.tenant_id=? AND x.state='unknown') AND (SELECT COUNT(*) FROM calling_jobs x WHERE x.tenant_id=? AND x.state IN('reserved','submitted'))<? AND (SELECT COUNT(*) FROM calling_jobs g WHERE g.state IN('reserved','submitted'))<?")
+  .bind(at,at,config.authId,config.caller,policy.flow_id,job.destination,tid,job.id,tid,at,policy.updated_at,SCRIPTED_CALLING_POLICY,tid,job.lead_id,job.purpose,at,policy.updated_at,job.destination,job.lead_updated_at,tid,tid,maxPerCompany,maxGlobalConcurrent).run();
  }catch{return {state:'quota_or_concurrent_change'}} // e.g. a legacy one-call-per-company index
  if(Number(reserved.meta?.changes)!==1)return {state:'quota_or_concurrent_change'};
  try{
@@ -324,7 +324,7 @@ export async function runScriptedCampaignCron(baseEnv,{now=Date.now(),apiFetch=f
     if((live.get(tid)||0)>=cfg.maxPerCompany)continue;
     processed++;
     let r;
-    try{r=await dialNextForTenant(env,db,tid,config,{apiFetch,now,maxPerCompany:cfg.maxPerCompany,cache})}
+    try{r=await dialNextForTenant(env,db,tid,config,{apiFetch,now,maxPerCompany:cfg.maxPerCompany,maxGlobalConcurrent:cfg.maxConcurrent,cache})}
     catch{console.error('AR3D scripted campaign processing unavailable');continue}
     if(r.state==='submitted'){dialed++;free--;live.set(tid,(live.get(tid)||0)+1);next.push(tid)}
     else if(r.state==='unknown'||r.state==='locked'){free--;}
