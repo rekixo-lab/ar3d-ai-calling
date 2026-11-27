@@ -56,7 +56,7 @@ try{
   const beforeJobs=f.r.db.prepare('SELECT COUNT(*) AS n FROM calling_jobs').get().n;
   const beforeCalls=f.r.db.prepare('SELECT COUNT(*) AS n FROM calls').get().n;
   await page.getByRole('link',{name:'My AI Agents',exact:true}).click();
-  await page.getByRole('heading',{name:'My AI Agents',exact:true}).waitFor();
+  await page.locator('#agents').getByRole('heading',{name:'My AI Agents',exact:true}).waitFor();
   await page.getByLabel('New AI template').selectOption('school_admission_v1');
   await page.getByRole('button',{name:'Create AI draft',exact:true}).click();
   await page.getByLabel('Agent name',{exact:true}).waitFor();
@@ -68,7 +68,8 @@ try{
   await page.getByRole('button',{name:'Save AI draft',exact:true}).click();
   await page.getByText('Draft saved (revision 2). It is still not published or callable.',{exact:true}).waitFor();
   const record=f.c.db.prepare('SELECT name,status,revision FROM ai_flow_definitions WHERE tenant_id=?').get(tid);
-  assert.deepEqual(record,{name:'Fictional admissions assistant',status:'draft',revision:2});
+  assert.equal(record?.name,'Fictional admissions assistant');
+  assert.equal(record?.status,'draft');assert.equal(record?.revision,2);
   assert.equal(f.r.db.prepare('SELECT COUNT(*) AS n FROM calling_jobs').get().n,beforeJobs);
   assert.equal(f.r.db.prepare('SELECT COUNT(*) AS n FROM calls').get().n,beforeCalls);
   assert.equal(f.c.db.prepare('SELECT COUNT(*) AS n FROM voice_call_routes').get().n,0);
