@@ -11,6 +11,10 @@ import {audioSha,schoolVoicePlan,buildSchoolAudioPack,validateSchoolAudioPack,re
 import {handleScriptedPhoneCallback} from '../src/scripted-phone-pilot.mjs';
 import {handleSchoolAudioPreparation,readApprovedSchoolAudioPack} from '../src/industry-school-audio-preparation.mjs';
 import {handleIndustryCallQueue,readPreparedIndustryJob} from '../src/industry-call-queue.mjs';
+import {handleIndustryAdmission,claimFundedIndustryAdmission} from '../src/industry-funded-admission.mjs';
+import {commercialCapacityRows} from '../src/commercial-capacity.mjs';
+import {runScriptedCampaignCron} from '../src/scripted-campaign-dispatch.mjs';
+import {setup as setupProperty,route as callingRoute} from './helpers/calling-fixture.mjs';
 const version='abababab-abab-4bab-8bab-abababababab',flow='cdcdcdcd-cdcd-4dcd-8dcd-cdcdcdcdcdcd';
 const session='56565656-5656-4565-8565-565656565656',job='78787878-7878-4787-8787-787878787878';
 const call='12121212-1212-4212-8212-121212121212',request='34343434-3434-4343-8343-343434343434';
@@ -421,6 +425,64 @@ test('prepared industry job loses freshness on review revocation, opt-out, chang
    // GET reports recorded manifest approval, not actual R2 integrity. The
    // server-only reader always checks the bytes before returning a pack.
    if(change!=='audio')assert.equal(out.jobs[0].current,false,change);
+  }finally{f.close()}
+ }
+});
+
+async function admissionFixture(){
+ const f=await approvedQueueFixture();try{
+  assert.equal((await f.queue('/prepare',f.data,client,'POST')).status,201);
+  const prepared=(await (await f.queue()).json()).jobs[0],id=prepared.id;
+  const savedBucket=f.env.RECORDINGS;await setupProperty(f);f.env.RECORDINGS=savedBucket;
+  Object.assign(f.env,{AR3D_INDUSTRY_SCHOOL_FUNDED_ADMISSION:'approved',AR3D_INDUSTRY_SCHOOL_VOICE_ENABLED:'enabled',AR3D_MAX_CONCURRENT_CALLS:'1'});
+  const input={tenantId:tid,jobId:id,manifestSha256:f.data.manifestSha256,maxSeconds:180,expiresAt:iso(now+1800000),approvalReference:'Fictional reviewed funding admission',acknowledgeFundingOnly:true};
+  const authorize=(d=input,user=admin)=>handleIndustryAdmission(req('/v1/human/industry-admission/'+id,d),f.env,user,{now});
+  const claim=()=>claimFundedIndustryAdmission(f.env,{tenantId:tid,jobId:id,now});
+  return {...f,prepared,input,authorize,claim};
+ }catch(e){f.close();throw e}
+}
+test('explicit current-MFA admission is immutable and no scheduler automatically consumes it',async()=>{
+ const f=await admissionFixture();try{
+  assert.equal((await f.authorize(f.input,client)).status,403);
+  assert.equal((await f.authorize({...f.input,manifestSha256:'a'.repeat(64)})).status,409);
+  assert.equal((await f.authorize({...f.input,expiresAt:iso(now+60000)})).status,400);
+  assert.equal((await f.authorize()).status,201);
+  assert.equal((await f.authorize()).status,409);
+  const row=f.r.db.prepare('SELECT * FROM industry_funded_admissions').get();assert.equal(row.state,'released');
+  assert.equal(f.c.db.prepare('SELECT COUNT(*) AS n FROM tenant_minute_holds').get().n,0);
+  assert.throws(()=>f.r.db.prepare("UPDATE industry_funded_admissions SET max_seconds=90").run(),/immutable/);
+  assert.throws(()=>f.r.db.prepare("DELETE FROM industry_funded_admissions").run(),/immutable/);
+  await callingRoute(f,'runs',{tenantId:tid,campaignId:'22222222-2222-4222-8222-222222222222',action:'pause'});
+  const r=await runScriptedCampaignCron(f.env,{now,apiFetch:()=>assert.fail('no provider request for released School job'),settings:{maxConcurrent:1,maxPerCompany:1,queryBudget:950}});
+  assert.equal(r.dialed,0);assert.equal(f.r.db.prepare('SELECT state FROM industry_funded_admissions').get().state,'released');
+ }finally{f.close()}
+});
+test('funded industry admission shares wallet and carrier capacity with property jobs; one claim only',async()=>{
+ const f=await admissionFixture();try{
+  assert.equal((await f.authorize()).status,201);
+  const results=await Promise.all([f.claim(),f.claim()]);
+  assert.equal(results.filter(x=>x.state==='funded').length,1);
+  const r=f.r.db.prepare('SELECT * FROM industry_funded_admissions').get();assert.equal(r.state,'funded');
+  const held=f.c.db.prepare('SELECT * FROM tenant_minute_holds WHERE job_id=?').get(f.prepared.id);assert.equal(held.reserved_seconds,180);assert.equal(held.state,'held');
+  const cost=f.c.db.prepare('SELECT * FROM provider_cost_reservations WHERE job_id=?').get(f.prepared.id);assert.equal(cost.reserved_seconds,180);
+  assert.equal(f.c.db.prepare('SELECT COUNT(*) AS n FROM scripted_phone_pilots WHERE job_id IS NOT NULL').get().n,0);
+  assert.equal(f.r.db.prepare('SELECT COUNT(*) AS n FROM ('+commercialCapacityRows+')').get().n,1);
+  const result=await runScriptedCampaignCron(f.env,{now,apiFetch:()=>assert.fail('shared capacity exhausted'),settings:{maxConcurrent:1,maxPerCompany:1,queryBudget:950}});
+  assert.equal(result.dialed,0);assert.equal(result.occupiedSlots,1);
+  assert.equal((await f.queue('/cancel',{tenantId:tid,jobId:f.prepared.id,reason:'Synthetic late cancellation'},client,'POST')).status,409);
+  assert.throws(()=>f.r.db.prepare("UPDATE industry_call_jobs SET state='cancelled',cancelled_by='client',cancelled_at=?,cancel_reason='late cancellation'").run(at),/already claimed/);
+ }finally{f.close()}
+});
+test('property in-flight and uncertain calls block School admission, and pause blocks shared reservations',async()=>{
+ for(const state of ['reserved','unknown','paused','disabled']){
+  const f=await admissionFixture();try{
+   assert.equal((await f.authorize()).status,201);
+   if(state==='paused')f.c.db.prepare("INSERT INTO calling_dispatch_pause_events(revision,paused,reason,actor,created_at) VALUES(1,1,'Synthetic operator pause','admin',?)").run(at);
+   else if(state==='disabled')f.env.AR3D_INDUSTRY_SCHOOL_FUNDED_ADMISSION='disabled';
+   else f.r.db.prepare("UPDATE calling_jobs SET state=?,reserved_at=?").run(state,at);
+   const r=await f.claim();assert.notEqual(r.state,'funded',state);
+   assert.equal(f.r.db.prepare('SELECT state FROM industry_funded_admissions').get().state,'released');
+   assert.equal(f.c.db.prepare('SELECT COUNT(*) AS n FROM tenant_minute_holds').get().n,0);
   }finally{f.close()}
  }
 });
