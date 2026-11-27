@@ -73,13 +73,14 @@ async function generate(env,tid,id,user,s,b,clock,fetcher){
    const response=await fetcher('https://api.sarvam.ai/text-to-speech/stream',{
     method:'POST',headers:{'api-subscription-key':b.key,'Content-Type':'application/json','Accept':'audio/mpeg'},
     body:JSON.stringify({text:node.text,language_code:s.plan.language==='en'?'en-IN':'hi-IN',model:'bulbul:v3',speaker:'shubh',output_audio_codec:'mp3',output_audio_bitrate:'64k',speech_sample_rate:22050}),
-    redirect:'error',signal:AbortSignal.timeout(15000)
+    redirect:'manual',signal:AbortSignal.timeout(15000)
    });
    if(!response.ok||answerContentType(response.headers)!=='audio/mpeg'){try{await response.body?.cancel()}catch{}fail('school_audio_provider_failed')}
    const bytes=await readBoundedBytes(response,SCHOOL_AUDIO_MAX);
    if(!validMP3Header(bytes))fail('school_audio_invalid_mp3');
    assets.push({nodeId:node.id,sha256:await audioSha(bytes),bytes:bytes.length});blobs.push(bytes);
   }
+  if(!await currentSuperAdminMfa(db,user,clock()))fail('school_audio_claim_unavailable');
   const pack=await buildSchoolAudioPack(scope,assets);
   for(let i=0;i<pack.manifest.entries.length;i++){
    const entry=pack.manifest.entries[i];
@@ -110,6 +111,7 @@ export async function handleSchoolAudioPreparation(req,env,user,{now=Date.now(),
  if(!url.pathname.startsWith(BASE+'/'))return null;
  if(!m||!uuid(m[1]))return error('school_audio_invalid_scope');
  const op=m[2],get=!op||op.startsWith('audio/');
+ const started=Date.now(),clock=()=>now+Math.max(0,Date.now()-started);
  if(req.method!==(get?'GET':'POST'))return error('method_not_allowed',405);
  if(!get&&!mutationOriginAllowed(req))return error('same_origin_required',403);
  try{
@@ -122,13 +124,13 @@ export async function handleSchoolAudioPreparation(req,env,user,{now=Date.now(),
   if(op.startsWith('audio/')){
    if(!['ready','approved','rejected'].includes(r?.state)||r.snapshot_id!==s.scope.snapshotId||r.graph_sha256!==s.scope.digest)return error('school_audio_unavailable',404);
    const bytes=await readSchoolAudioAsset(env.RECORDINGS,s.scope,packFrom(r),op.slice(6));
+   if(!await currentSuperAdminMfa(db,user,clock())||!await db.prepare("SELECT id FROM tenants WHERE id=? AND status IN('active','trial')").bind(tid).first())return error('school_audio_unavailable',403);
    return new Response(bytes,{headers:{...headers,'Content-Type':'audio/mpeg','Content-Length':String(bytes.length)}});
   }
   if(op==='prepare'){
    if(!exact(data,['tenantId','expectedGraphSha256','expectedCostMicros','confirm'])||data.expectedGraphSha256!==s.scope.digest||data.confirm!=='SEPARATELY_FUNDED_STATIC_SCRIPT_ONLY_NO_CALLS')return error('school_audio_invalid_request');
    if(!b)return error('school_audio_not_configured',409);
    if(r||data.expectedCostMicros!==s.chars*b.rate)return error('school_audio_claim_unavailable',409);
-   const start=Date.now(),clock=()=>now+Math.max(0,Date.now()-start);
    await generate(env,tid,id,user,s,b,clock,fetcher);
    return reply(view(await job(db,tid,id),b,s,clock()),201);
   }
@@ -137,8 +139,9 @@ export async function handleSchoolAudioPreparation(req,env,user,{now=Date.now(),
   if(r?.state!=='ready'||r.manifest_sha256!==data.manifestSha256||r.snapshot_id!==s.scope.snapshotId||r.graph_sha256!==s.scope.digest)return error('school_audio_review_conflict',409);
   if(data.decision==='approved'&&r.claimed_by===user.id)return error('school_audio_independent_reviewer_required',403);
   if(data.decision==='approved')for(const node of s.plan.spoken)await readSchoolAudioAsset(env.RECORDINGS,s.scope,packFrom(r),node.id);
+  const stamp=clock();
   const update=await db.prepare("UPDATE school_audio_preparations SET state=?,reviewed_by=?,reviewed_at=?,review_reference=? WHERE tenant_id=? AND launch_id=? AND state='ready' AND manifest_sha256=? AND "+sessionPredicate+" AND "+tenantPredicate)
-   .bind(data.decision,user.id,now,data.reference.trim(),tid,id,data.manifestSha256,user.id,user.token_hash,now,tid).run();
+   .bind(data.decision,user.id,stamp,data.reference.trim(),tid,id,data.manifestSha256,user.id,user.token_hash,stamp,tid).run();
   if(update.meta.changes!==1)return error('school_audio_review_conflict',409);
   return reply(view(await job(db,tid,id),b,s,now));
  }catch(e){

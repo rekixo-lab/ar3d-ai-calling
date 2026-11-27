@@ -282,7 +282,7 @@ async function prepFixture(){
   const scope=await launch(f),id=f.c.db.prepare('SELECT id FROM industry_launch_requests WHERE tenant_id=?').get(tid).id,objects=audioEnv(f);
   let calls=0;
   const fetcher=async(url,o)=>{
-   calls++;assert.equal(url,'https://api.sarvam.ai/text-to-speech/stream');assert.equal(o.method,'POST');assert.equal(o.redirect,'error');
+   calls++;assert.equal(url,'https://api.sarvam.ai/text-to-speech/stream');assert.equal(o.method,'POST');assert.equal(o.redirect,'manual');
    assert.equal(o.headers['api-subscription-key'],'fictional-separately-funded-key');
    const d=JSON.parse(o.body);assert.equal(d.model,'bulbul:v3');assert.equal(d.speaker,'shubh');assert.equal(d.language_code,'hi-IN');assert.equal(d.output_audio_codec,'mp3');
    assert.ok(scope.graph.nodes.some(n=>n.text===d.text));return new Response(mp3,{headers:{'Content-Type':'audio/mpeg'}});
@@ -342,4 +342,23 @@ test('School TTS insufficient budget and uncertain paid failure never retry or r
   assert.equal((await f.api('/prepare',f.input,admin,'POST',broken)).status,409);assert.equal(attempts,1);
   assert.equal(f.objects.size,0);
  }finally{f.close()}
+});
+
+test('School TTS never follows a redirect or persists invalid audio; a revoked generator cannot send the next prompt',async()=>{
+ for(const mode of ['redirect','invalid-mp3','revoked']){
+  const f=await prepFixture();try{
+   let count=0;
+   const fetcher=async(url,o)=>{
+    count++;assert.equal(o.redirect,'manual');assert.equal(url,'https://api.sarvam.ai/text-to-speech/stream');
+    if(mode==='redirect')return new Response(null,{status:302,headers:{Location:'https://foreign.invalid/'}});
+    if(mode==='invalid-mp3')return new Response(new Uint8Array([0,1,2,3]),{headers:{'Content-Type':'audio/mpeg'}});
+    f.c.db.prepare("UPDATE human_sessions SET revoked_at=? WHERE user_id='admin'").run(at);
+    return new Response(mp3,{headers:{'Content-Type':'audio/mpeg'}});
+   };
+   assert.equal((await f.api('/prepare',f.input,admin,'POST',fetcher)).status,503);
+   assert.equal(count,1);assert.equal(f.objects.size,0);
+   const row=f.c.db.prepare('SELECT * FROM school_audio_preparations').get();
+   assert.equal(row.state,'failed');assert.equal(row.attempted_nodes,1);assert.equal(row.reserved_micros,f.input.expectedCostMicros);
+  }finally{f.close()}
+ }
 });

@@ -12,7 +12,7 @@ CREATE TABLE IF NOT EXISTS school_audio_preparations (
  funding_reference TEXT NOT NULL CHECK(length(funding_reference) BETWEEN 10 AND 160),
  attempted_nodes INTEGER NOT NULL DEFAULT 0 CHECK(attempted_nodes BETWEEN 0 AND node_count),
  claimed_by TEXT NOT NULL REFERENCES human_users(id),
- claimed_at INTEGER NOT NULL, deadline INTEGER NOT NULL CHECK(deadline=claimed_at+120000),
+ claimed_at INTEGER NOT NULL CHECK(claimed_at>=0), deadline INTEGER NOT NULL CHECK(deadline=claimed_at+120000),
  manifest_json TEXT, manifest_sha256 TEXT,
  reviewed_by TEXT REFERENCES human_users(id), reviewed_at INTEGER, review_reference TEXT,
  PRIMARY KEY(tenant_id,launch_id), UNIQUE(tenant_id,snapshot_id),
@@ -21,7 +21,7 @@ CREATE TABLE IF NOT EXISTS school_audio_preparations (
  CHECK(reserved_micros=char_count*rate_micros),
  CHECK((state IN('claimed','failed') AND manifest_json IS NULL AND manifest_sha256 IS NULL) OR
  (state IN('ready','approved','rejected') AND manifest_json IS NOT NULL AND length(manifest_json)<=16384
- AND json_valid(manifest_json) AND length(manifest_sha256)=64 AND manifest_sha256 NOT GLOB '*[^0-9a-f]*' AND attempted_nodes=node_count)),
+ AND json_valid(manifest_json) AND manifest_sha256 IS NOT NULL AND length(manifest_sha256)=64 AND manifest_sha256 NOT GLOB '*[^0-9a-f]*' AND attempted_nodes=node_count)),
  CHECK((state IN('approved','rejected') AND reviewed_by IS NOT NULL AND reviewed_at IS NOT NULL AND review_reference IS NOT NULL AND length(review_reference) BETWEEN 10 AND 160)
  OR (state NOT IN('approved','rejected') AND reviewed_by IS NULL AND reviewed_at IS NULL AND review_reference IS NULL)),
  CHECK(state<>'approved' OR reviewed_by<>claimed_by)
