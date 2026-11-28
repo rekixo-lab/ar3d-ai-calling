@@ -4,6 +4,7 @@ import {createCipheriv,createDecipheriv,createHash,randomBytes} from 'node:crypt
 import {readFileSync,writeFileSync,statSync,mkdirSync,realpathSync,rmSync} from 'node:fs';
 import {resolve,dirname,join,sep} from 'node:path';
 import {fileURLToPath} from 'node:url';
+import {spawnSync} from 'node:child_process';
 const MAGIC=Buffer.from('AR3DBAK1');
 const MAX=64*1024*1024,MAX_ARCHIVE=2*MAX+4096;
 const sha=b=>createHash('sha256').update(b).digest('hex');
@@ -55,7 +56,16 @@ function privateDestination(path){
  if(!s.isDirectory()||(s.mode&0o077)!==0)throw Error('Use a private destination directory (0700)');
  return p;
 }
-function usage(){throw Error('Usage: seal <control.sql> <crm.sql> <key> <archive> | verify <archive> <key> | extract <archive> <key> <new-private-dir>')}
+// Run each authenticated dump in a disposable, in-memory database. Only the
+// child process receives plaintext. Its diagnostics never include SQL or rows.
+export function verifyRestore(parts){
+ const script=fileURLToPath(new URL('./verify-restore.py',import.meta.url));
+ for(const [index,kind] of ['control','crm'].entries()){
+  const run=spawnSync('python3',['-I',script,kind],{input:parts[index],timeout:120000,stdio:['pipe','ignore','ignore']});
+  if(run.error||run.status!==0)throw Error('Isolated '+kind+' restore failed');
+ }
+}
+function usage(){throw Error('Usage: seal <control.sql> <crm.sql> <key> <archive> | verify <archive> <key> | verify-restore <archive> <key> | extract <archive> <key> <new-private-dir>')}
 function main(args){
  const [command,...a]=args;
  if(command==='seal'&&a.length===4){
@@ -65,8 +75,12 @@ function main(args){
   const result=openBackup(archive,privateFile(a[2],32));
   writeFileSync(privateDestination(a[3]),archive,{flag:'wx',mode:0o600});
   console.log('Encrypted backup saved and authenticated: '+result.manifest.createdAt);
- }else if((command==='verify'&&a.length===2)||(command==='extract'&&a.length===3)){
+ }else if((['verify','verify-restore'].includes(command)&&a.length===2)||(command==='extract'&&a.length===3)){
   const result=openBackup(privateFile(a[0],MAX_ARCHIVE),privateFile(a[1],32));
+  if(command==='verify-restore'){
+   verifyRestore(result.parts);
+   console.log('Control and CRM restored in memory; required tables, integrity and foreign keys verified.');
+  }
   if(command==='extract'){
    const dest=privateDestination(a[2]);mkdirSync(dest,{mode:0o700});
    try{result.parts.forEach((b,i)=>writeFileSync(join(dest,names[i]),b,{flag:'wx',mode:0o600}));}

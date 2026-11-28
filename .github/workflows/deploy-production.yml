@@ -27,7 +27,11 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  acceptance:
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || inputs.confirm == 'AR3D_MAIN_ONLY')
+    uses: ./.github/workflows/ci.yml
   main:
+    needs: acceptance
     if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || inputs.confirm == 'AR3D_MAIN_ONLY')
     runs-on: ubuntu-latest
     environment: production

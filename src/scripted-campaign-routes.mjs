@@ -295,7 +295,15 @@ export async function handleScriptedCallingRequest(req,env,user,{now=Date.now()}
   if(action==='state'){
    if(req.method!=='GET')return fail('method_not_allowed',405);
    const [runs,jobs,policy]=await Promise.all([
-    db.prepare('SELECT r.id,r.campaign_id AS campaignId,c.name,r.state,r.created_at AS createdAt FROM calling_runs r JOIN call_campaign_drafts c ON c.tenant_id=r.tenant_id AND c.id=r.campaign_id WHERE r.tenant_id=? ORDER BY r.created_at DESC LIMIT 50').bind(tid).all(),
+    db.prepare(`WITH recent AS (
+      SELECT r.tenant_id,r.id,r.campaign_id AS campaignId,c.name,r.state,r.created_at AS createdAt
+      FROM calling_runs r JOIN call_campaign_drafts c ON c.tenant_id=r.tenant_id AND c.id=r.campaign_id
+      WHERE r.tenant_id=? ORDER BY r.created_at DESC,r.id DESC LIMIT 50
+     ) SELECT r.id,r.campaignId,r.name,r.state,r.createdAt,COUNT(j.id) AS totalAttempts,
+      COUNT(CASE WHEN j.state='completed' THEN 1 END) AS completedAttempts,
+      COUNT(CASE WHEN j.state='blocked' OR (j.state='failed' AND j.error_code IN ('credit_reservation_unavailable','eligibility_changed_before_submission')) THEN 1 END) AS stoppedBeforeDial
+     FROM recent r LEFT JOIN calling_jobs j ON j.tenant_id=r.tenant_id AND j.run_id=r.id
+     GROUP BY r.id ORDER BY r.createdAt DESC,r.id DESC`).bind(tid).all(),
     db.prepare(`SELECT j.id,j.run_id AS runId,j.lead_id AS leadId,l.name,j.state,j.provider_status AS providerStatus,j.duration_seconds AS durationSeconds,j.error_code AS errorCode,j.updated_at AS updatedAt,j.created_at AS createdAt,j.reserved_at AS reservedAt,${targetColumns} FROM calling_jobs j JOIN leads l ON l.tenant_id=j.tenant_id AND l.id=j.lead_id WHERE j.tenant_id=? ORDER BY j.created_at DESC,j.id DESC LIMIT 200`).bind(tid).all(),
     db.prepare('SELECT enabled,expires_at AS expiresAt,daily_limit AS dailyLimit,max_seconds AS maxSeconds FROM calling_policies WHERE tenant_id=? AND flow_id=?').bind(tid,SCRIPTED_CALLING_POLICY).first()
    ]);

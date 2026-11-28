@@ -1,8 +1,7 @@
 name: AR3D AI Calling CI
 
 on:
-  push:
-    branches: [main]
+  workflow_call:
   pull_request:
 
 permissions:

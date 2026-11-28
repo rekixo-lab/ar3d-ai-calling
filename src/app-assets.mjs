@@ -242,6 +242,7 @@ function scriptedPhonePilotPanel(){
     const available=config?.availability;
     const seconds=Math.max(0,Math.ceil((deadline-Date.now())/1000));
     call.disabled=busy||refreshing||!config?.configured||available?.ready!==true||!device.value||!config?.sarvamConfigured;
+    whatsappCall.disabled=call.disabled||!config?.whatsappPilotConfigured||!config.devices?.find(d=>d.leadId===device.value)?.primary;
     enroll.disabled=busy||refreshing||!config?.enrollmentEnabled||(config?.devices?.length||0)>=5;
     cooldown.textContent=!config?.configured?'':available?.reason==='awaiting_signed_hangup'?
       'Waiting for signed hangup from Plivo. Do not redial an unconfirmed call.':
@@ -270,6 +271,16 @@ function scriptedPhonePilotPanel(){
     }catch(err){asError(err)}
     finally{try{await refresh()}catch(err){asError(err)}busy=false;updateAvailability()}
   });
+  const whatsappCall=btn('Test WhatsApp voice call',async()=>{
+    if(whatsappCall.disabled||!window.confirm('Call your verified primary internal device on WhatsApp? Confirm the recipient has granted current WhatsApp calling permission for this business number and agreed to this recorded AI survey. Provider charges may apply.'))return;
+    busy=true;updateAvailability();
+    try{
+      await api('/v1/human/scripted-phone-pilot','POST',{language:language.value,leadId:device.value,confirm:'CALL_ONE_INTERNAL_WHATSAPP_WITH_CURRENT_PERMISSION'});
+      notice('WhatsApp voice test submitted. Waiting for signed hangup.');
+    }catch(err){asError(err)}
+    finally{try{await refresh()}catch(err){asError(err)}busy=false;updateAvailability()}
+  },true);
+  whatsappCall.disabled=true;
   call.disabled=true;
   async function refresh(){
     if(refreshing)return;
@@ -290,7 +301,7 @@ function scriptedPhonePilotPanel(){
     finally{refreshing=false;updateAvailability();scheduleCheck()}
   }
   enrollment.hidden=true;device.addEventListener('change',updateAvailability);
-  card.append(status,prepare,prepared,enrollment,div('formrow',lab('Internal test number',device),lab('Recorded prompt language',language),lab('Speech recognition engine',engine),lab('Internal answer timing',timing),call,
+  card.append(status,prepare,prepared,enrollment,div('formrow',lab('Internal test number',device),lab('Recorded prompt language',language),lab('Speech recognition engine',engine),lab('Internal answer timing',timing),call,whatsappCall,
     btn('Refresh fixed-question pilot status',()=>refresh().catch(asError),true)),cooldown,results,
     node('details',{class:'card tools'},[node('summary',{text:'Test tools · verify last call, Sarvam check, listen to answer'}),
      div('row',verifyResult,sarvamProbe,listen),verifiedReport,sarvamReport,listenReport]));
@@ -1787,7 +1798,7 @@ async function renderClient(id,content){
    if(!current()||!campaign)return;
    const run=summary.runs.find(r=>r.campaignId===campaign.id);
    if(run?.state==='completed'){
-    action.replaceChildren(btn('View answers',()=>openResults(campaign.id)));
+    action.replaceChildren(btn('View call results',()=>openResults(campaign.id)));
    }else action.replaceChildren(btn('Open campaign',()=>{
     state.importCampaign={tenantId:id,id:campaign.id};sections.calling.requestedCampaign=campaign.id;go('calling')();
    }));
@@ -2355,6 +2366,9 @@ async function customerCallingPanel(tenantId,content,role,openView,openResults,r
    !policyReady?'AI calling for this company is waiting for AR3D activation.':
    !snapshot.data.credits?.ready?'Company calling setup is incomplete. Ask the Super Admin to check Calling Setup.':
    !campaign?'Import customers and prepare a campaign.':!languageOK?'Prepare a Hindi or English campaign.':run?.state==='completed'?'Campaign finished. View customer answers.':run?.state==='running'?campaignRunProgress(run,snapshot.data.jobs):needsDeclaration&&!consentBox.checked?'Confirm customer consent below to start calling.':'Calls run while you have calling minutes · 09:00–20:00 India time');
+  if(run?.state==='completed'&&Number.isInteger(run.totalAttempts)){
+   status.textContent='Campaign finished · '+run.totalAttempts+' attempts · '+run.completedAttempts+' completed · '+run.stoppedBeforeDial+' stopped before dialing. View call results for each customer.';
+  }
   status.className='note '+(ready?'ready-note':'');
   summary.replaceChildren(campaign?div('between row',
    node('strong',{text:campaign.name}),

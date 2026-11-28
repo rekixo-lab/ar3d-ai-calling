@@ -256,6 +256,7 @@ async function whatsappFollowupPanel(tenantId,content,role){
   if(webhook)card.append(lab('Meta webhook URL',node('input',{class:'field',value:webhook,readonly:'readonly'})));
   card.append(div('formrow',pwLink('https://business.facebook.com/wa/manage/','Open WhatsApp Manager'),pwLink('https://developers.facebook.com/documentation/business-messaging/whatsapp/get-started','Meta setup guide')));
   if(!snapshot.setup?.canConnect){card.append(node('p',{class:'muted',text:'Your Super Admin connects the company’s Meta account. You can manage properties, message permissions and follow-up settings here.'}));setup.append(card);return}
+  card.append(node('details',{},[node('summary',{text:'WhatsApp voice pilot setup'}),node('p',{text:'Link the business number to the Plivo account used for Calling, enable WhatsApp Calling and set AR3D_PLIVO_WHATSAPP_CALLER_NUMBER to its +91 number in the Calling Worker. After the primary internal recipient grants calling permission, open Calling Setup to run the WhatsApp voice test.'}),pwLink('https://www.plivo.com/docs/messaging/concepts/whatsapp/whatsapp-calling','Plivo WhatsApp calling setup')]));
   const details=node('details',{class:'whatsapp-technical'},node('summary',{text:c.status==='not_connected'?'Connect this client’s Meta account':'Connection settings and credentials'}));
   const account=pwField('whatsappAccountId','text','Meta messaging / WhatsApp Business account ID',true);
   const phone=pwField('whatsappPhoneNumberId','text','Meta Phone Number ID',true);
