@@ -45,7 +45,7 @@ async function freshMfaAdmin(db,user,now){
   .bind(user.id,user.token_hash,now).first();
  return !!row;
 }
-async function verifyFrozen(row){
+export async function verifyFrozen(row){
  if(!row||row.compiler_version!==1||row.status!=='simulation_only')throw Error('invalid_snapshot_integrity');
  if(await sha256hex('ar3d:offline-flow:v1:'+row.graph_json)!==row.graph_sha256)throw Error('invalid_snapshot_integrity');
  const graph=validateFlowGraph(JSON.parse(row.graph_json));
