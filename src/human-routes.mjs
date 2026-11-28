@@ -291,7 +291,7 @@ async function addAgent(req,env,user){
 export async function handleHumanRequest(req,env){
   const u=new URL(req.url),path=u.pathname,method=req.method;
   if(path==='/app'&&method==='GET')return new Response(html,{headers:{...headers,'Permissions-Policy':'camera=(),microphone=(self)','Content-Type':'text/html;charset=utf-8','Content-Security-Policy':"default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' blob:; media-src 'self' blob:; form-action 'self'; base-uri 'none'; frame-ancestors 'none'"}});
-  if(path==='/app/simulator'&&method==='GET')return new Response(simulatorHtml,{headers:{...headers,'Permissions-Policy':'camera=(),microphone=(self)','Content-Type':'text/html;charset=utf-8','Content-Security-Policy':"default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'"}});
+  if(path==='/app/simulator'&&method==='GET')return new Response(simulatorHtml,{headers:{...headers,'Permissions-Policy':'camera=(),microphone=(self)','Content-Type':'text/html;charset=utf-8','Content-Security-Policy':"default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'"}});
   if(path==='/app/assets/simulator.js'&&method==='GET')return new Response(simulatorJs,{headers:{...headers,'Content-Type':'text/javascript;charset=utf-8'}});
   if(path==='/app/assets/simulator.css'&&method==='GET')return new Response(simulatorCss,{headers:{...headers,'Content-Type':'text/css;charset=utf-8'}});
   if(path==='/app/assets/app.js'&&method==='GET')return new Response(js,{headers:{...headers,'Content-Type':'text/javascript;charset=utf-8'}});

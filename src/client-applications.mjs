@@ -9,7 +9,12 @@ import {readBoundedBytes} from './scripted-speech.mjs';
 const prefix='private/client-applications/v1/';
 const headers={'Cache-Control':'no-store','X-Content-Type-Options':'nosniff','Referrer-Policy':'no-referrer'};
 const json=(value,status=200)=>Response.json(value,{status,headers});
-const assets=new Map([['/',['text/html',landingHtml]],['/policies',['text/html',policyHtml]],['/policies.css',['text/css',policyCss]],['/policy-request.js',['text/javascript',policyJs]],['/motion.js',['text/javascript',motionJs]],['/landing.css',['text/css',landingCss]],['/landing.js',['text/javascript',landingJs]]]);
+const favicon=`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+ <defs><linearGradient id="brand" x2="1" y2="1" gradientUnits="objectBoundingBox"><stop stop-color="#bb90ff"/><stop offset="1" stop-color="#7040d4"/></linearGradient></defs>
+ <rect width="32" height="32" rx="9" fill="url(#brand)"/>
+ <path d="M10 13v6m6-12v18m6-15v12" fill="none" stroke="white" stroke-width="3.5" stroke-linecap="round"/>
+</svg>`;
+const assets=new Map([['/favicon.svg',['image/svg+xml',favicon]],['/',['text/html',landingHtml]],['/policies',['text/html',policyHtml]],['/policies.css',['text/css',policyCss]],['/policy-request.js',['text/javascript',policyJs]],['/motion.js',['text/javascript',motionJs]],['/landing.css',['text/css',landingCss]],['/landing.js',['text/javascript',landingJs]]]);
 const purposes=new Set(applicationPurposes);
 const requestPattern=/^(\d{13})-([a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12})$/;
 function field(value,max){
