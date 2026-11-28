@@ -34,7 +34,7 @@ export const REQUIRED_TABLES = Object.freeze({
     'human_login_limits','human_bootstrap_claim','human_ip_login_limits','human_mfa_settings','human_mfa_challenges','human_mfa_recovery_codes','provider_event_inbox','calling_script_bindings','calling_script_versions','company_profile_versions','calling_agent_publications','shared_voice_gateway','voice_call_routes','client_account_contacts','company_change_requests','scripted_phone_pilots','tenant_credit_budgets','tenant_credit_audit','tenant_minute_ledger','tenant_minute_holds','provider_financial_journal','tenant_credit_purchases','provider_safety_events','provider_cost_reservations','provider_cost_reconciliations','calling_dispatch_settings','calling_company_settings','calling_capacity_signals','calling_funding_settings','provider_balance_snapshots','provider_balance_covered_calls','provider_manual_funding_control'
   ]),
   CRM_DB: Object.freeze([
-    ...PROPERTY_TABLES,...WHATSAPP_TABLES,...INDUSTRY_CAMPAIGN_TABLES,'industry_call_jobs','industry_funded_admissions','verified_industry_call_costs','industry_terminal_closures','industry_dispatch_releases',
+    ...PROPERTY_TABLES,...WHATSAPP_TABLES,...INDUSTRY_CAMPAIGN_TABLES,'industry_call_jobs','industry_funded_admissions','verified_industry_call_costs','industry_terminal_closures','industry_dispatch_releases','industry_notice_jobs',
     'leads','agents','calls','site_visits','crm_audit_events',
     'lead_notes','conversation_simulations','lead_opt_out_events','lead_consent_evidence','call_campaign_drafts','call_campaign_candidates','call_intent_proposals','calling_policies','calling_clearances','calling_runs','calling_jobs','scripted_call_results','lead_staff_assignments','verified_provider_call_costs',
   ]),
@@ -85,6 +85,7 @@ export const REQUIRED_COLUMNS = Object.freeze({
     provider_manual_funding_control: Object.freeze(['id','enabled','revision','updated_by','updated_at']),
   }),
   CRM_DB: Object.freeze({
+    industry_notice_jobs:Object.freeze(['tenant_id','id','lead_id','snapshot_id','graph_sha256','template_id','language','delivery_mode','destination','lead_updated_at','review_sha256','consent_ref','dnd_ref','provider_ref','private_speech_ref','reviewed_by','reviewed_at','review_expires_at','state','actor_id','authorized_at','release_expires_at','claimed_at','session_id','revoked_at','revoked_by','updated_at','request_id','call_uuid','hangup_at','billed_seconds','connected_seconds','reported_amount','result','verified_at']),
     industry_dispatch_releases:Object.freeze(['tenant_id','job_id','approved_by','approval_reference','approved_at','expires_at','state','session_id','claimed_at','updated_at']),
     industry_terminal_closures:Object.freeze(['tenant_id','job_id','session_id','provider_call_uuid','hangup_at','billed_seconds','settled_at','closed_at']),
     verified_industry_call_costs:Object.freeze(['tenant_id','job_id','session_id','provider_request_id','provider_call_uuid','reported_amount','billed_seconds','call_seconds','currency_status','hangup_at','verified_at']),
@@ -348,6 +349,18 @@ export function checkIndustryLaunchTriggers(records){
   if(parts.some(part=>!rows.get(name)?.includes(part)))throw Error('Industry launch request safety trigger missing or invalid: '+name);
  }
 }
+export const REQUIRED_NOTICE_JOB_TRIGGERS=Object.freeze({
+ trg_notice_job_insert:Object.freeze(['before insert','on industry_notice_jobs',"new.state<>'reviewed'",'from leads','raise(abort']),
+ trg_notice_job_update:Object.freeze(['before update','on industry_notice_jobs',"old.state='claiming'","old.state='posting'","old.state='receipt'","new.review_sha256<>old.review_sha256",'raise(abort']),
+ trg_notice_job_delete:Object.freeze(['before delete','on industry_notice_jobs','raise(abort'])
+});
+export function checkNoticeJobTriggers(records){
+ if(!Array.isArray(records))throw Error('Invalid notice trigger inspection.');
+ const rows=new Map(records.map(r=>[r?.name,String(r?.sql||'').toLowerCase().replace(/\s+/g,' ').trim()]));
+ for(const [name,parts] of Object.entries(REQUIRED_NOTICE_JOB_TRIGGERS)){
+  if(parts.some(part=>!rows.get(name)?.includes(part)))throw Error('Notice job safety trigger missing or invalid: '+name);
+ }
+}
 export const REQUIRED_INDUSTRY_DISPATCH_TRIGGERS=Object.freeze({
  trg_industry_dispatch_insert:Object.freeze(['before insert','on industry_dispatch_releases',"new.state<>'authorized'",'from industry_funded_admissions','raise(abort']),
  trg_industry_dispatch_update:Object.freeze(['before update','on industry_dispatch_releases',"old.state='claimed'","old.state='posting'",'new.session_id is old.session_id','raise(abort']),
@@ -457,6 +470,7 @@ export function checkTables(tables, binding, mode) {
     if(binding==='CONTROL_DB'&&exact(CONTROL_WHATSAPP_TABLES))return 'control_whatsapp_upgrade';
     if(binding==='CONTROL_DB'&&exact(['whatsapp_dispatch_ticks']))return 'control_whatsapp_queue_upgrade';
     if(binding==='CRM_DB'){
+      if(exact(['industry_notice_jobs']))return 'crm_notice_jobs_upgrade';
       if(exact(['industry_dispatch_releases']))return 'crm_industry_dispatch_upgrade';
       if(exact(['industry_terminal_closures']))return 'crm_industry_terminal_upgrade';
       if(exact(['verified_industry_call_costs']))return 'crm_industry_cdr_upgrade';
@@ -549,7 +563,7 @@ export async function inspectCloudflare({ credentials, mode, apiFetch = fetch, t
     modes[binding] = state;
     if ([...messagingUpgradeStates,'control_industry_drafts_upgrade','control_industry_snapshots_upgrade','control_industry_launch_upgrade','control_dispatch_pause_upgrade','control_school_audio_upgrade','control_client_accounts_upgrade','control_publication_upgrade','control_profile_upgrade',
          'control_script_upgrade','crm_dispatch_upgrade','ready','crm_call_intent_upgrade',
-         'crm_scripted_results_upgrade','crm_industry_campaign_upgrade','crm_industry_jobs_upgrade','crm_industry_admission_upgrade','crm_industry_cdr_upgrade','crm_industry_terminal_upgrade','crm_industry_dispatch_upgrade','control_company_change_upgrade',
+         'crm_scripted_results_upgrade','crm_industry_campaign_upgrade','crm_industry_jobs_upgrade','crm_industry_admission_upgrade','crm_industry_cdr_upgrade','crm_industry_terminal_upgrade','crm_industry_dispatch_upgrade','crm_notice_jobs_upgrade','control_company_change_upgrade',
          'control_scripted_pilot_upgrade','control_dispatch_settings_upgrade','control_funding_settings_upgrade','control_manual_balances_upgrade','control_credit_upgrade','control_minute_ledger_upgrade','control_minute_holds_upgrade','control_provider_journal_upgrade','control_credit_purchase_upgrade','control_provider_safety_upgrade','control_provider_reserve_upgrade','control_provider_reconcile_upgrade','crm_staff_upgrade','crm_cdr_upgrade','crm_staff_cdr_upgrade'].includes(state)) {
       if (binding === 'CRM_DB') {
         const triggers = await query(id, "SELECT name,sql FROM sqlite_master WHERE type='trigger' AND name LIKE 'trg_%'");
@@ -560,6 +574,7 @@ export async function inspectCloudflare({ credentials, mode, apiFetch = fetch, t
         if(names.includes('verified_industry_call_costs'))checkIndustryCdrTriggers(triggers);
         if(names.includes('industry_terminal_closures'))checkIndustryTerminalTriggers(triggers);
         if(names.includes('industry_dispatch_releases'))checkIndustryDispatchTriggers(triggers);
+        if(names.includes('industry_notice_jobs'))checkNoticeJobTriggers(triggers);
       }
       if(binding==='CONTROL_DB'&&presentMinuteLedger(names)){
         const triggers=await query(id,"SELECT name,sql FROM sqlite_master WHERE type='trigger' AND name LIKE 'trg_minute_ledger_%'");
@@ -615,6 +630,7 @@ export async function inspectCloudflare({ credentials, mode, apiFetch = fetch, t
       }
       for (const table of Object.keys(REQUIRED_COLUMNS[binding])) {
         if(messagingMissingTables(state).includes(table))continue;
+        if(state==='crm_notice_jobs_upgrade'&&table==='industry_notice_jobs')continue;
         if(state==='crm_industry_dispatch_upgrade'&&table==='industry_dispatch_releases')continue;
         if(state==='crm_industry_terminal_upgrade'&&table==='industry_terminal_closures')continue;
         if(state==='crm_industry_cdr_upgrade'&&table==='verified_industry_call_costs')continue;
@@ -670,6 +686,7 @@ export function verifiedSchemaState(modes) {
   // These are whole, explicitly reviewed additive groups on the complete
   // prior Calling schema. A completed group can be resumed after a failed
   // deployment; arbitrary partial tables or unrelated upgrades still fail.
+  if(modes?.CONTROL_DB==='ready'&&modes?.CRM_DB==='crm_notice_jobs_upgrade')return 'crm_notice_jobs_upgrade';
   if(modes?.CONTROL_DB==='ready'&&modes?.CRM_DB==='crm_industry_dispatch_upgrade')return 'crm_industry_dispatch_upgrade';
   if(modes?.CONTROL_DB==='ready'&&modes?.CRM_DB==='crm_industry_terminal_upgrade')return 'crm_industry_terminal_upgrade';
   if(modes?.CONTROL_DB==='ready'&&modes?.CRM_DB==='crm_industry_cdr_upgrade')return 'crm_industry_cdr_upgrade';
