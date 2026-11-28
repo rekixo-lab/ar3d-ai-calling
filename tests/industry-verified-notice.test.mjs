@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createHmac,createHash} from 'node:crypto';
 import {INDUSTRY_NOTICE_CONTRACTS,buildVerifiedIndustryNotice} from '../src/industry-verified-notice.mjs';
+import {industryNoticeConnectorStatus,retrieveVerifiedIndustryNotice} from '../src/industry-notice-connectors.mjs';
 const now=Date.parse('2026-11-28T04:00:00.000Z');
 const tenantId='11111111-1111-4111-8111-111111111111';
 const keys={tenantId,identityKeyHex:'a1'.repeat(32),recordKeyHex:'b2'.repeat(32)};
@@ -64,4 +65,88 @@ test('typed notices reject arbitrary data and account identifiers even with vali
  ]){
   const r=await buildVerifiedIndustryNotice(fixture(t,'en',{fields}));assert.equal(r.ok,false);assert.equal(r.speech,null);
  }
+});
+
+function connectorFixture(templateId='finance_due_notice_v1',options={}){
+ const f=fixture(templateId,options.language||'en',options.recordChanges||{},options.identityChanges||{});
+ const requests=[],times=[];
+ let elapsed=0,checks=0;
+ const env={
+  AR3D_NOTICE_ISSUER_KEYS_JSON:JSON.stringify([keys]),
+  INDUSTRY_NOTICE_RECORD_SERVICE:{fetch:async req=>{
+   requests.push({issuer:'record',url:req.url,method:req.method,redirect:req.redirect,body:await req.json()});
+   elapsed+=options.recordDelay||0;
+   return options.recordResponse?.()??Response.json(f.record);
+  }},
+  INDUSTRY_NOTICE_IDENTITY_SERVICE:{fetch:async req=>{
+   requests.push({issuer:'identity',url:req.url,method:req.method,redirect:req.redirect,body:await req.json()});
+   elapsed+=options.identityDelay||0;
+   return options.identityResponse?.()??Response.json(f.identity);
+  }}
+ };
+ const run=(overrides={})=>retrieveVerifiedIndustryNotice(env,{scope:f.scope,now,clock:()=>now+elapsed,assertCurrent:async(scope,ts)=>{
+  checks++;times.push(ts);assert.equal(scope.tenantId,tenantId);return checks!==options.revokeAt;
+ },...overrides});
+ return {env,f,requests,times,run};
+}
+test('all four notice integrations retrieve independently signed records and proof using fixed service bindings',async()=>{
+ for(const t of INDUSTRY_NOTICE_CONTRACTS)for(const language of ['hi','en']){
+  const c=connectorFixture(t.templateId,{language});
+  const ready=industryNoticeConnectorStatus(c.env,tenantId);
+  assert.equal(ready.state,'configured_unverified');assert.equal(ready.dispatchReady,false);
+  assert.ok(!JSON.stringify(ready).includes(keys.identityKeyHex));
+  const out=await c.run();assert.equal(out.ok,true,JSON.stringify(out));
+  assert.equal(out.dispatchReady,false);assert.ok(out.speech.includes('Synthetic Customer'));
+  assert.equal(c.requests.length,2);assert.deepEqual(c.requests.map(x=>x.issuer),['record','identity']);
+  assert.equal(c.requests[0].url,'https://industry-record.internal/v1/approved-notice');
+  assert.equal(c.requests[1].url,'https://industry-identity.internal/v1/recipient-proof');
+  assert.ok(c.requests.every(x=>x.method==='POST'&&x.redirect==='manual'));
+  assert.equal(c.requests[0].body.purpose,t.purpose);
+  assert.equal(c.requests[1].body.recordSha256,createHash('sha256').update(c.f.record.payload).digest('hex'));
+  assert.ok(!JSON.stringify(c.requests).includes('Synthetic Customer'));
+  assert.ok(!JSON.stringify(c.requests).includes(keys.recordKeyHex));
+  assert.ok(c.times.length>=4);
+ }
+});
+test('connector setup is tenant scoped and rejects shared keys and invalid scope',async()=>{
+ for(const mode of ['missing','wrong_tenant','same_binding','same_key','reused_key','wrong_scope','extra_scope','no_guard']){
+  const c=connectorFixture();let override={};
+  if(mode==='missing')delete c.env.INDUSTRY_NOTICE_IDENTITY_SERVICE;
+  if(mode==='same_binding')c.env.INDUSTRY_NOTICE_IDENTITY_SERVICE=c.env.INDUSTRY_NOTICE_RECORD_SERVICE;
+  if(mode==='wrong_tenant')c.env.AR3D_NOTICE_ISSUER_KEYS_JSON=JSON.stringify([{...keys,tenantId:'99999999-9999-4999-8999-999999999999'}]);
+  if(mode==='same_key')c.env.AR3D_NOTICE_ISSUER_KEYS_JSON=JSON.stringify([{...keys,recordKeyHex:keys.identityKeyHex}]);
+  if(mode==='reused_key')c.env.AR3D_NOTICE_ISSUER_KEYS_JSON=JSON.stringify([keys,{tenantId:'99999999-9999-4999-8999-999999999999',recordKeyHex:'e3'.repeat(32),identityKeyHex:keys.recordKeyHex}]);
+  if(mode==='wrong_scope')override={scope:{...c.f.scope,templateId:'property_enquiry_v1'}};
+  if(mode==='extra_scope')override={scope:{...c.f.scope,amountPaise:10}};
+  if(mode==='no_guard')override={assertCurrent:null};
+  const out=await c.run(override);assert.equal(out.ok,false,mode);assert.equal(out.speech,null);assert.equal(c.requests.length,0);
+ }
+});
+test('invalid records and unsafe responses disclose nothing and avoid identity lookups',async()=>{
+ const invalid=[
+  {recordChanges:{source:'crm_excel_import'}},{recordChanges:{asOf:now-16*60000}},
+  {recordChanges:{tenantId:'99999999-9999-4999-8999-999999999999'}},
+  {recordResponse:()=>new Response(null,{status:302,headers:{Location:'https://untrusted.invalid'}})},
+  {recordResponse:()=>new Response('x'.repeat(13000),{headers:{'Content-Type':'application/json'}})},
+  {recordResponse:()=>new Response(Uint8Array.of(0x7b,0xff,0x7d),{headers:{'Content-Type':'application/json'}})},
+  {recordResponse:()=>Response.json({payload:'{}',signature:'00'.repeat(32)})},
+  {recordResponse:()=>new Response('{"payload":"{}"}',{headers:{'Content-Type':'text/html'}})}
+ ];
+ for(const options of invalid){
+  const c=connectorFixture('finance_due_notice_v1',options),out=await c.run();
+  assert.equal(out.ok,false);assert.equal(out.speech,null);assert.equal(c.requests.length,1);
+ }
+ for(const options of [{identityChanges:{method:'spoken_yes'}},{identityChanges:{recordSha256:'00'.repeat(32)}},{identityDelay:16000}]){
+  const c=connectorFixture('finance_due_notice_v1',options),out=await c.run();
+  assert.equal(out.ok,false);assert.equal(out.speech,null);assert.equal(c.requests.length,2);
+ }
+});
+test('live eligibility is checked before each issuer and after verification',async()=>{
+ for(const revokeAt of [1,2,3,4]){
+  const c=connectorFixture('finance_due_notice_v1',{revokeAt}),out=await c.run();
+  assert.equal(out.ok,false);assert.equal(out.speech,null);
+  assert.equal(c.requests.length,revokeAt===1?0:revokeAt===2?1:2);
+ }
+ const c=connectorFixture('finance_due_notice_v1',{identityDelay:2000,recordDelay:1000});
+ const out=await c.run();assert.equal(out.ok,true);assert.ok(c.times.includes(now+3000));
 });

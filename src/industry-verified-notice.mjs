@@ -30,7 +30,7 @@ function liveInterval(x,now,maxAge){
  return validTime(x.issuedAt)&&validTime(x.expiresAt)&&x.issuedAt<=now&&now<x.expiresAt&&
  now-x.issuedAt<=maxAge&&x.expiresAt-x.issuedAt<=maxAge;
 }
-function validScope(s){
+export function validIndustryNoticeScope(s){
  return exact(s,[...bindKeys,'language'])&&['tenantId','leadId','sessionId','callUuid'].every(k=>uuid(s[k]))&&
  hash(s.graphSha256)&&hash(s.recipientReviewSha256)&&['hi','en'].includes(s.language)&&contracts.has(s.templateId);
 }
@@ -77,26 +77,35 @@ function render(t,f,lang){
  return hello+body+end;
 }
 const blocked=()=>({ok:false,state:'verified_notice_unavailable',speech:null,dispatchReady:false});
-// Trusted configuration and active-call scope must come from a privileged
-// server adapter, never an HTTP body. Future speech integration must claim
-// a one-use utterance, recheck live consent, and avoid sensitive audio/logs.
-export async function buildVerifiedIndustryNotice({scope,identity,record,trusted,now=Date.now()}={}){
- try{
-  if(!validScope(scope)||!validTime(now)||!exact(trusted,['tenantId','identityKeyHex','recordKeyHex'])||
+async function checkedRecord(scope,record,trusted,now){
+  if(!validIndustryNoticeScope(scope)||!validTime(now)||!exact(trusted,['tenantId','identityKeyHex','recordKeyHex'])||
    trusted.tenantId!==scope.tenantId||!hash(trusted.identityKeyHex)||!hash(trusted.recordKeyHex)||
-   trusted.identityKeyHex===trusted.recordKeyHex)return blocked();
+   trusted.identityKeyHex===trusted.recordKeyHex)return null;
   const t=contracts.get(scope.templateId);
   const r=await verifiedEnvelope(record,trusted.recordKeyHex,'ar3d:approved-industry-record:v1');
   if(!exact(r,['version','audience','purpose','source',...bindKeys,'issuedAt','expiresAt','asOf','recordRevision','fields'])||
    r.version!==1||r.audience!=='ar3d_notice_record'||r.purpose!==t.purpose||r.source!==t.source||
    !equalScope(r,scope)||!liveInterval(r,now,MAX_RECORD_AGE)||!validTime(r.asOf)||r.asOf>r.issuedAt||
    now-r.asOf>=MAX_RECORD_AGE||!Number.isSafeInteger(r.recordRevision)||r.recordRevision<1||
-   !validateFields(t,r.fields,now))return blocked();
+   !validateFields(t,r.fields,now))return null;
+  return {t,r,recordSha256:await sha(record.payload)};
+}
+export async function verifyIndustryNoticeRecord({scope,record,trusted,now=Date.now()}={}){
+ try{const c=await checkedRecord(scope,record,trusted,now);return c?{recordSha256:c.recordSha256,validUntil:Math.min(c.r.expiresAt,c.r.asOf+MAX_RECORD_AGE)}:null}catch{return null}
+}
+// Trusted configuration and active-call scope must come from a privileged
+// server adapter, never an HTTP body. Future speech integration must claim
+// a one-use utterance, recheck live consent, and avoid sensitive audio/logs.
+export async function buildVerifiedIndustryNotice({scope,identity,record,trusted,now=Date.now()}={}){
+ try{
+  const checked=await checkedRecord(scope,record,trusted,now);
+  if(!checked)return blocked();
+  const {t,r,recordSha256}=checked;
   const proof=await verifiedEnvelope(identity,trusted.identityKeyHex,'ar3d:recipient-proof:v1');
   if(!exact(proof,['version','audience','purpose','method',...bindKeys,'issuedAt','expiresAt','recordSha256'])||
    proof.version!==1||proof.audience!=='ar3d_notice_identity'||proof.purpose!==t.purpose||
    proof.method!=='authenticated_customer_portal'||!equalScope(proof,scope)||!liveInterval(proof,now,MAX_PROOF_AGE)||
-   proof.issuedAt<r.issuedAt||proof.recordSha256!==await sha(record.payload))return blocked();
+   proof.issuedAt<r.issuedAt||proof.recordSha256!==recordSha256)return blocked();
   return {ok:true,state:'verified_text_ready',speech:render(t,r.fields,scope.language),
    validUntil:Math.min(proof.expiresAt,r.expiresAt,r.asOf+MAX_RECORD_AGE),dispatchReady:false};
  }catch{return blocked()}

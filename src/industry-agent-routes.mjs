@@ -2,6 +2,7 @@
 // Do not wire to calling_scripts, caller policy, campaigns, Plivo or WhatsApp.
 import {requireMembership} from './human-auth.mjs';
 import {INDUSTRY_NOTICE_CONTRACTS} from './industry-verified-notice.mjs';
+import {industryNoticeConnectorStatus} from './industry-notice-connectors.mjs';
 import {INDUSTRY_CODES,INDUSTRY_DRAFT_VERSION,INDUSTRY_TEMPLATES,getIndustryTemplate,
  defaultIndustryAgentDraft,validateIndustryAgentDraft,draftOnlyPreview} from './industry-template-catalog.mjs';
 
@@ -55,6 +56,7 @@ export async function handleIndustryAgentRequest(req,env,user,{now=Date.now()}={
    version:INDUSTRY_DRAFT_VERSION,
    templates:INDUSTRY_TEMPLATES,
    noticeContracts:INDUSTRY_NOTICE_CONTRACTS,
+   noticeConnectorStatus:industryNoticeConnectorStatus(env,tenantId),
    modes:['announcement','interactive','hybrid'],
    notice:'Draft setup only. These templates cannot place calls, publish agents or change existing Real Estate calling.'
   });
