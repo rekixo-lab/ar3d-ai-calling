@@ -2,6 +2,7 @@
 // only invokes this with an independent explicit dispatch release.
 // A release authorizes only this bounded reservation, NOT a carrier POST.
 import {currentSuperAdminMfa,mutationOriginAllowed} from './human-auth.mjs';
+import {industryActorPredicate} from './industry-dispatch-authority.mjs';
 import {readPreparedIndustryJob,readPreparedIndustryEligibility} from './industry-call-queue.mjs';
 import {readSchoolAudioAsset} from './industry-school-voice-plan.mjs';
 import {readBoundedBytes} from './scripted-speech.mjs';
@@ -110,7 +111,7 @@ export async function claimFundedIndustryAdmission(baseEnv,{tenantId:tid,jobId:i
   try{
    for(const entry of before.pack.manifest.entries)await readSchoolAudioAsset(env.RECORDINGS,before.scope,before.pack,entry.nodeId);
    const after=await readPreparedIndustryEligibility(env,{tenantId:tid,jobId:id,now:clock()}),g=await campaignDispatchInterlock(env.CONTROL_DB);
-   const funded=await env.CONTROL_DB.prepare("SELECT 1 AS ok FROM tenants t JOIN tenant_minute_holds h ON h.tenant_id=t.id JOIN provider_cost_reservations p ON p.tenant_id=h.tenant_id AND p.job_id=h.job_id WHERE t.id=? AND t.status='active' AND t.storage_mode='shared' AND h.job_id=? AND h.state='held' AND h.reserved_seconds=? AND p.reserved_seconds=h.reserved_seconds AND "+dispatchPausePredicate).bind(tid,id,r.max_seconds).first();
+   const funded=await env.CONTROL_DB.prepare("SELECT 1 AS ok FROM tenants t JOIN tenant_minute_holds h ON h.tenant_id=t.id JOIN provider_cost_reservations p ON p.tenant_id=h.tenant_id AND p.job_id=h.job_id JOIN human_users u ON u.id=? WHERE t.id=? AND t.status='active' AND t.storage_mode='shared' AND "+industryActorPredicate+" AND h.job_id=? AND h.state='held' AND h.reserved_seconds=? AND p.reserved_seconds=h.reserved_seconds AND "+dispatchPausePredicate).bind(r.approved_by,tid,id,r.max_seconds).first();
    eligible=!!funded&&!g.paused&&!g.providerBlocked&&inCallingWindow(clock())&&deadline(r.expires_at,clock(),r.max_seconds)&&after.manifestSha256===r.manifest_sha256&&after.scope.destination===before.scope.destination&&after.scope.leadUpdatedAt===before.scope.leadUpdatedAt;
   }catch{ /* Preserve the unused hold unless its identity is explicitly proven. */ }
   if(!eligible){

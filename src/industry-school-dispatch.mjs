@@ -1,6 +1,7 @@
 // Funding-only approval never authorizes a carrier POST. One explicit release,
 // one claim, one session. A lost POST response is never automatically retried.
-import {currentSuperAdminMfa,mutationOriginAllowed} from './human-auth.mjs';
+import {mutationOriginAllowed} from './human-auth.mjs';
+import {currentIndustryDispatchAuthorizer,activeIndustryDispatchActor,industryActorPredicate} from './industry-dispatch-authority.mjs';
 import {readBoundedBytes} from './scripted-speech.mjs';
 import {readPreparedIndustryJob} from './industry-call-queue.mjs';
 import {claimFundedIndustryAdmission} from './industry-funded-admission.mjs';
@@ -36,8 +37,7 @@ export async function handleIndustryDispatchRelease(req,env,user,{now=Date.now()
  if(req.method!=='POST')return err('method_not_allowed',405);
  if(url.search||!mutationOriginAllowed(req))return err('same_origin_required',403);
  try{
-  if(!await currentSuperAdminMfa(env.CONTROL_DB,user,now))return err('current_super_admin_mfa_required',403);
-  if(!industryDispatchEnabled(env))return err('industry_dispatch_not_enabled',409);
+  if(!user?.id||!['super_admin','user'].includes(user.globalRole)||!digest(user.token_hash))return err('current_dispatch_authorization_required',403);
   let d;try{
    if(req.headers.get('content-type')?.split(';')[0].trim()!=='application/json')throw Error();
    d=JSON.parse(new TextDecoder('utf-8',{fatal:true}).decode(await readBoundedBytes(req,8192)));
@@ -49,6 +49,8 @@ export async function handleIndustryDispatchRelease(req,env,user,{now=Date.now()
    !reference(d.approvalReference)||!(time(d.expiresAt)>now+(d.maxSeconds+25)*1000)||time(d.expiresAt)>now+3600000)
    return err('invalid_dispatch_release');
   const clock=clockFrom(now),tid=d.tenantId,db=env.CRM_DB;
+  if(!await currentIndustryDispatchAuthorizer(env.CONTROL_DB,user,tid,now))return err('current_dispatch_authorization_required',403);
+  if(!industryDispatchEnabled(env))return err('industry_dispatch_not_enabled',409);
   const readiness=await inspectSchoolDispatchReadiness(env,{now});
   if(!readiness.ready)return reply({error:'industry_dispatch_prerequisites_required',blockers:readiness.blockers},409);
   const campaign=await db.prepare("SELECT * FROM industry_campaigns WHERE tenant_id=? AND id=? AND archived_at IS NULL AND purpose='school_admission'").bind(tid,d.campaignId).first();
@@ -56,7 +58,7 @@ export async function handleIndustryDispatchRelease(req,env,user,{now=Date.now()
   const ready=await env.CONTROL_DB.prepare("SELECT 1 AS ok FROM school_audio_preparations p JOIN industry_launch_requests r ON r.tenant_id=p.tenant_id AND r.id=p.launch_id JOIN tenants t ON t.id=p.tenant_id WHERE t.id=? AND t.status='active' AND t.storage_mode='shared' AND p.launch_id=? AND p.snapshot_id=? AND p.graph_sha256=? AND p.manifest_sha256=? AND p.state='approved' AND r.state='configuration_reviewed' AND r.purpose='school_admission' AND r.snapshot_id=p.snapshot_id AND r.graph_sha256=p.graph_sha256")
    .bind(tid,campaign.launch_request_id,campaign.snapshot_id,campaign.graph_sha256,d.manifestSha256).first();
   const stamp=clock(),at=iso(stamp);
-  if(!ready||time(d.expiresAt)<=stamp+(d.maxSeconds+25)*1000||!await currentSuperAdminMfa(env.CONTROL_DB,user,stamp))return err('dispatch_scope_unavailable',409);
+  if(!ready||time(d.expiresAt)<=stamp+(d.maxSeconds+25)*1000||!await currentIndustryDispatchAuthorizer(env.CONTROL_DB,user,tid,stamp))return err('dispatch_scope_unavailable',409);
   // Atomically authorize funding AND dialing for the explicitly selected set.
   // Full asset byte verification is still mandatory at funding and dispatch.
   const cte="WITH eligible AS (SELECT j.tenant_id,j.id,j.lead_id,j.manifest_sha256,a.job_id AS existing FROM json_each(?) x JOIN industry_call_jobs j ON j.id=x.value JOIN industry_campaigns c ON c.tenant_id=j.tenant_id AND c.id=j.campaign_id JOIN industry_recipient_reviews v ON v.tenant_id=j.tenant_id AND v.campaign_id=j.campaign_id AND v.lead_id=j.lead_id AND v.revision=j.review_revision JOIN leads l ON l.tenant_id=j.tenant_id AND l.id=j.lead_id LEFT JOIN industry_funded_admissions a ON a.tenant_id=j.tenant_id AND a.job_id=j.id WHERE j.tenant_id=? AND j.campaign_id=? AND j.manifest_sha256=? AND j.review_expires_at>=? AND "+localEligibility+" AND (a.job_id IS NULL OR (a.state IN('released','funded') AND a.max_seconds=? AND a.expires_at>=? AND a.manifest_sha256=j.manifest_sha256)) AND NOT EXISTS(SELECT 1 FROM industry_dispatch_releases z WHERE z.tenant_id=j.tenant_id AND z.job_id=j.id) AND NOT EXISTS(SELECT 1 FROM industry_terminal_closures z WHERE z.tenant_id=j.tenant_id AND z.job_id=j.id) AND NOT EXISTS(SELECT 1 FROM calling_jobs p WHERE p.id=j.id)) ";
@@ -85,7 +87,7 @@ async function transition(db,r,from,to,now){
 }
 const scopeCheck="EXISTS(SELECT 1"+joins+" JOIN industry_funded_admissions a ON a.tenant_id=j.tenant_id AND a.job_id=j.id WHERE j.tenant_id=industry_dispatch_releases.tenant_id AND j.id=industry_dispatch_releases.job_id AND a.state='funded' AND a.manifest_sha256=j.manifest_sha256 AND a.expires_at>? AND j.review_expires_at>? AND "+localEligibility+")";
 async function heldScope(env,r,p,config,stamp,{session=false}={}){
- const row=await env.CONTROL_DB.prepare("SELECT 1 AS ok FROM tenants t JOIN tenant_minute_holds h ON h.tenant_id=t.id JOIN provider_cost_reservations c ON c.tenant_id=h.tenant_id AND c.job_id=h.job_id JOIN human_users u ON u.id=? JOIN human_mfa_settings m ON m.user_id=u.id JOIN industry_launch_requests launch ON launch.tenant_id=t.id JOIN school_audio_preparations a ON a.tenant_id=t.id AND a.launch_id=launch.id WHERE t.id=? AND t.status='active' AND t.storage_mode='shared' AND u.status='active' AND u.global_role='super_admin' AND m.enabled_at IS NOT NULL AND h.job_id=? AND h.state='held' AND h.reserved_seconds=? AND c.reserved_seconds=h.reserved_seconds AND launch.id=? AND launch.state='configuration_reviewed' AND launch.purpose='school_admission' AND launch.snapshot_id=a.snapshot_id AND launch.graph_sha256=a.graph_sha256 AND a.state='approved' AND a.snapshot_id=? AND a.graph_sha256=? AND a.manifest_sha256=? AND "+dispatchPausePredicate+" AND NOT EXISTS(SELECT 1 FROM provider_safety_events e WHERE e.kind='blocked' AND e.sequence=(SELECT MAX(sequence) FROM provider_safety_events WHERE provider=e.provider))"+
+ const row=await env.CONTROL_DB.prepare("SELECT 1 AS ok FROM tenants t JOIN tenant_minute_holds h ON h.tenant_id=t.id JOIN provider_cost_reservations c ON c.tenant_id=h.tenant_id AND c.job_id=h.job_id JOIN human_users u ON u.id=? JOIN industry_launch_requests launch ON launch.tenant_id=t.id JOIN school_audio_preparations a ON a.tenant_id=t.id AND a.launch_id=launch.id WHERE t.id=? AND t.status='active' AND t.storage_mode='shared' AND "+industryActorPredicate+" AND h.job_id=? AND h.state='held' AND h.reserved_seconds=? AND c.reserved_seconds=h.reserved_seconds AND launch.id=? AND launch.state='configuration_reviewed' AND launch.purpose='school_admission' AND launch.snapshot_id=a.snapshot_id AND launch.graph_sha256=a.graph_sha256 AND a.state='approved' AND a.snapshot_id=? AND a.graph_sha256=? AND a.manifest_sha256=? AND "+dispatchPausePredicate+" AND NOT EXISTS(SELECT 1 FROM provider_safety_events e WHERE e.kind='blocked' AND e.sequence=(SELECT MAX(sequence) FROM provider_safety_events WHERE provider=e.provider))"+
   (session?" AND EXISTS(SELECT 1 FROM scripted_phone_pilots x WHERE x.tenant_id=t.id AND x.job_id=h.job_id AND x.id=? AND x.phase='requested' AND x.provider_request_id IS NULL AND x.provider_call_id IS NULL AND x.hangup_at IS NULL AND x.destination=? AND x.caller=? AND x.provider_account_id=? AND x.lead_updated_at=? AND x.expires_at>?)":""))
   .bind(r.approved_by,r.tenant_id,r.job_id,r.max_seconds,p.scope.launchRequestId,p.scope.snapshotId,p.scope.digest,r.manifest_sha256,...(session?[r.session_id,p.scope.destination,config.caller,config.authId,p.scope.leadUpdatedAt,stamp]:[])).first();
  return !!row;
@@ -124,7 +126,12 @@ export async function dispatchFundedIndustryJob(baseEnv,{tenantId:tid,jobId:id,n
   if(p.pack.manifestSha256!==r.manifest_sha256||p.scope.leadId!==r.lead_id)return state('scope_changed');
   const doc=await beginSchoolVoiceSession(p.scope,p.pack);doc.phoneMeta.dispatchVersion=1;
   const stamp=clock(),at=iso(stamp),until=iso(stamp+(r.max_seconds+25)*1000),sessionId=crypto.randomUUID(),cfg=await dispatchSettings(env);
-  if(!inCallingWindow(stamp)||time(r.expires_at)<=Date.parse(until)||!await heldScope(env,r,p,config,stamp))return state('scope_changed');
+  if(!inCallingWindow(stamp)||time(r.expires_at)<=Date.parse(until))return state('scope_changed');
+  if(!await heldScope(env,r,p,config,stamp)){
+   // Only an untouched authorized release can be closed without a POST.
+   if(!await activeIndustryDispatchActor(env.CONTROL_DB,tid,r.approved_by)&&await transition(db,r,'authorized','no_post',clock()))return await noSubmission(env,r,clock());
+   return state('scope_changed');
+  }
   const claimed=await db.batch([
    db.prepare("UPDATE industry_dispatch_releases SET state='claimed',session_id=?,claimed_at=?,updated_at=? WHERE tenant_id=? AND job_id=? AND state='authorized' AND expires_at>? AND "+scopeCheck+" AND "+sharedTenantUnknown+" AND "+sharedTenantCapacityCount+"<=? AND "+sharedCapacityCount+"<=?")
     .bind(sessionId,at,at,tid,id,until,until,until,tid,tid,cfg.maxPerCompany,cfg.maxConcurrent),
@@ -238,7 +245,7 @@ export async function runIndustrySchoolTick(baseEnv,{now=Date.now(),apiFetch=fet
    const resolved=await resolveFundingEnv(env);
    if(!automaticMinuteSettlementApproved(resolved))return {lane:mode,state:'settlement_not_approved',queriesUsed:meter.used()};
    const release=await load(db,row.tenant_id,row.job_id);
-   if(!release||release.state!=='authorized'||!await env.CONTROL_DB.prepare("SELECT 1 AS ok FROM human_users u JOIN human_mfa_settings m ON m.user_id=u.id WHERE u.id=? AND u.status='active' AND u.global_role='super_admin' AND m.enabled_at IS NOT NULL").bind(release.approved_by).first())return {lane:mode,state:'authorization_unavailable',queriesUsed:meter.used()};
+   if(!release||release.state!=='authorized'||!await activeIndustryDispatchActor(env.CONTROL_DB,release.tenant_id,release.approved_by))return {lane:mode,state:'authorization_unavailable',queriesUsed:meter.used()};
    result=await claimFundedIndustryAdmission(resolved,scope);
   }else if(mode==='dial')result=await dispatchFundedIndustryJob(env,{...scope,fetcher:apiFetch});
   else result=await reconcileIndustryDispatch(env,{...scope,fetcher:cdrFetch});

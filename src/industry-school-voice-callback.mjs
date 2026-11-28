@@ -74,7 +74,7 @@ async function speechXML(config,row,c,now){
  if(!nodes.length)return end();
  let body=row.phase==='question'&&c.v.attempt?say(row.language,row.language==='en'?'Please say that again.':'कृपया दोबारा बताइए।'):'';
  for(const n of nodes)body+='<Play>'+escape(await mediaURL(config,row,n,now,c.deadline))+'</Play>';
- if(row.phase==='question')body+='<Record action="'+escape(href(config,row,'turn/'+row.turn))+'" method="GET" fileFormat="mp3" maxLength="8" timeout="3" finishOnKey="#" playBeep="true"/>';
+ if(row.phase==='question')body+='<Record action="'+escape(href(config,row,'turn/'+row.turn))+'" method="GET" fileFormat="mp3" maxLength="8" timeout="3" finishOnKey="#" playBeep="false"/>';
  return xml(body+'<Hangup/>');
 }
 async function latestRow(env,id){return env.CONTROL_DB.prepare('SELECT * FROM scripted_phone_pilots WHERE id=?').bind(id).first()}

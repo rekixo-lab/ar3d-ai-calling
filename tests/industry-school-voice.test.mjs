@@ -796,3 +796,74 @@ test('School feature defaults available without bypassing independent approvals,
   assert.equal(f.hold(),undefined);
  }finally{f.close()}
 });
+
+function clientSession(f,id='client',hash='b'.repeat(64),createdAt=at,expires=now+86400000){
+ f.c.db.prepare('INSERT INTO human_sessions(token_hash,user_id,created_at,expires_at) VALUES(?,?,?,?)').run(hash,id,createdAt,expires);
+ return {id,globalRole:'user',token_hash:hash};
+}
+test('active client admin can queue exact reviewed School jobs and complete funded dispatch without a second admin release',async()=>{
+ const f=await releasedDispatchFixture();try{
+  const actor=clientSession(f),viewer=clientSession(f,'viewer','e'.repeat(64));
+  assert.equal((await f.release(f.body,viewer)).status,403);
+  assert.equal((await f.release({...f.body,tenantId:'99999999-9999-4999-8999-999999999999'},actor)).status,403);
+  assert.equal((await f.release({...f.body,jobIds:[f.id,'99999999-9999-4999-8999-999999999999']},actor)).status,409);
+  assert.equal(f.r.db.prepare('SELECT COUNT(*) AS n FROM industry_funded_admissions').get().n,0);
+  const response=await f.release(f.body,actor);assert.equal(response.status,201,await response.clone().text());
+  assert.equal(f.read().approved_by,'client');assert.equal(f.hold(),undefined);
+  assert.equal(f.r.db.prepare('SELECT approved_by FROM industry_funded_admissions').get().approved_by,'client');
+  assert.equal((await f.release(f.body,actor)).status,409);
+  const fund=await runIndustrySchoolTick(f.env,{now:now+1000,lane:'fund',apiFetch:none,maxQueries:40});
+  assert.equal(fund?.state,'funded',JSON.stringify(fund));assert.equal(f.hold().state,'held');
+  let posts=0;
+  const dial=await f.dispatch(async(url,opts)=>{posts++;assert.equal(opts.method,'POST');assert.equal(f.read().state,'posting');return Response.json({request_uuid:request},{status:202})});
+  assert.equal(dial.state,'submitted',JSON.stringify(dial));assert.equal(posts,1);
+  const id=f.read().session_id,sessionRow=f.c.db.prepare('SELECT * FROM scripted_phone_pilots WHERE id=?').get(id),created=Date.parse(sessionRow.created_at);
+  assert.equal(sessionRow.actor_id,'client');
+  const answer=await route(f,signed(f,'answer',{},id),none,created+1000);assert.match(await answer.text(),/GetDigits/);
+  const consent=await route(f,signed(f,'consent',{Digits:'1'},id),none,created+2000);
+  const xml=await consent.text();assert.match(xml,/playBeep="false"/);assert.doesNotMatch(xml,/playBeep="true"/);
+  // Removal of an actor must not prevent settlement of an already placed call.
+  f.c.db.prepare("UPDATE tenant_memberships SET status='disabled' WHERE tenant_id=? AND user_id='client'").run(tid);
+  const ended=await route(f,signed(f,'hangup',{Duration:'40'},id),none,created+40000);assert.equal(ended.status,204);
+  const closed=await f.recover(created+120000,schoolCdr);assert.equal(closed.state,'closed',JSON.stringify(closed));
+  assert.equal(f.hold().charged_seconds,60);assert.equal(posts,1);
+ }finally{f.close()}
+});
+test('client session expiry, revocation, disabled membership, viewer or newly enrolled MFA deny batch authorization',async()=>{
+ for(const mode of ['expired','revoked','disabled','viewer','account_disabled','mfa','trial']){
+  const f=await releasedDispatchFixture();try{
+   const actor=clientSession(f,'client','b'.repeat(64),at,mode==='expired'?now-1:now+86400000);
+   if(mode==='revoked')f.c.db.prepare('UPDATE human_sessions SET revoked_at=? WHERE token_hash=?').run(at,actor.token_hash);
+   if(mode==='disabled')f.c.db.prepare("UPDATE tenant_memberships SET status='disabled' WHERE tenant_id=? AND user_id='client'").run(tid);
+   if(mode==='viewer')f.c.db.prepare("UPDATE tenant_memberships SET role='viewer' WHERE tenant_id=? AND user_id='client'").run(tid);
+   if(mode==='account_disabled')f.c.db.prepare("UPDATE human_users SET status='disabled' WHERE id='client'").run();
+   if(mode==='mfa')f.c.db.prepare('INSERT INTO human_mfa_settings(user_id,secret_ciphertext,secret_iv,enabled_at,created_at,updated_at) VALUES(?,?,?,?,?,?)').run('client','c'.repeat(72),'i'.repeat(24),iso(now+1),at,at);
+   if(mode==='trial')f.c.db.prepare("UPDATE tenants SET status='trial' WHERE id=?").run(tid);
+   const response=await f.release(f.body,actor);assert.equal(response.status,403,mode+': '+await response.clone().text());
+   assert.equal(f.r.db.prepare('SELECT COUNT(*) AS n FROM industry_dispatch_releases').get().n,0);
+   assert.equal(f.hold(),undefined);
+  }finally{f.close()}
+ }
+});
+test('loss of client calling authority before funding prevents reservation; after funding closes only a proven unused hold',async()=>{
+ for(const stage of ['before_fund','after_fund']){
+  const f=await releasedDispatchFixture();try{
+   const actor=clientSession(f);assert.equal((await f.release(f.body,actor)).status,201);
+   if(stage==='after_fund')assert.equal((await f.claim()).state,'funded');
+   f.c.db.prepare("UPDATE tenant_memberships SET status='disabled' WHERE tenant_id=? AND user_id='client'").run(tid);
+   let posts=0;const carrier=async()=>{posts++;throw Error('must not submit')};
+   if(stage==='before_fund'){
+    const result=await runIndustrySchoolTick(f.env,{now:now+1000,lane:'fund',apiFetch:carrier,maxQueries:40});
+    assert.equal(result?.state,'authorization_unavailable',JSON.stringify(result));
+    assert.equal(f.hold(),undefined);
+   }else{
+    const result=await f.dispatch(carrier);
+    assert.equal(result.state,'not_submitted',JSON.stringify(result));
+    assert.equal(f.read().state,'not_submitted');assert.equal(f.hold().state,'released');
+    assert.equal(f.hold().charged_seconds,0);
+    assert.equal(f.r.db.prepare('SELECT COUNT(*) AS n FROM ('+commercialCapacityRows+')').get().n,0);
+   }
+   assert.equal(posts,0);
+  }finally{f.close()}
+ }
+});
