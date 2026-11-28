@@ -61,12 +61,7 @@ export async function graphRequest(path,token,{fetcher=fetch,method='GET',body}=
  if(!match||(match[1]==='messages'?(method!=='POST'||!!match[2]||!body):(method!=='GET'||body!==undefined)))throw Error('invalid Meta endpoint');
  const response=await fetcher('https://graph.facebook.com/'+GRAPH_VERSION+path,{method,redirect:'manual',headers:{Authorization:'Bearer '+token,...(body?{'Content-Type':'application/json'}:{})},body:body?JSON.stringify(body):undefined,signal:AbortSignal.timeout(15000)});
  const type=(response.headers.get('content-type')||'').split(';')[0].trim();
- if(response.status>=300&&response.status<400||!/^application\/(?:json|[a-z0-9!# if(!/^\/[\d]+\/(?:phone_numbers|message_templates|messages)(?:\?|$)/.test(path))throw Error('invalid Meta endpoint');
- const response=await fetcher('https://graph.facebook.com/'+GRAPH_VERSION+path,{method,headers:{Authorization:'Bearer '+token,...(body?{'Content-Type':'application/json'}:{})},body:body?JSON.stringify(body):undefined,signal:AbortSignal.timeout(15000)});
- const raw=await response.text();if(raw.length>1048576)throw Error('Meta response too large');
- let data;try{data=JSON.parse(raw);}catch{throw Error('Meta returned an invalid response');}
- if(!response.ok){const e=Error('Meta request rejected');e.providerCode=Number(data?.error?.code)||response.status;e.definitive=response.status>=400&&response.status<500;throw e;}
- return data;^_.+-]+\+json)$/i.test(type)){
+ if((response.status>=300&&response.status<400)||!/^application\/(?:json|[a-z0-9_.+-]+\+json)$/i.test(type)){
   try{await response.body?.cancel()}catch{}
   throw Error('Meta returned an invalid response');
  }
