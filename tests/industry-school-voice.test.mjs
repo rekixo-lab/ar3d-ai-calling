@@ -14,6 +14,8 @@ import {handleIndustryCallQueue,readPreparedIndustryJob} from '../src/industry-c
 import {handleIndustryAdmission,claimFundedIndustryAdmission} from '../src/industry-funded-admission.mjs';
 import {commercialCapacityRows} from '../src/commercial-capacity.mjs';
 import {settleIndustryCallCdr,closeSettledIndustryCapacity} from '../src/industry-cdr-settlement.mjs';
+import {handleIndustryDispatchRelease,dispatchFundedIndustryJob,reconcileIndustryDispatch,runIndustrySchoolTick} from '../src/industry-school-dispatch.mjs';
+import {handleIndustryResult} from '../src/industry-result-routes.mjs';
 import {runScriptedCampaignCron} from '../src/scripted-campaign-dispatch.mjs';
 import {setup as setupProperty,route as callingRoute} from './helpers/calling-fixture.mjs';
 const version='abababab-abab-4bab-8bab-abababababab',flow='cdcdcdcd-cdcd-4dcd-8dcd-cdcdcdcdcdcd';
@@ -64,8 +66,8 @@ async function setup({held=true,enabled=true}={}){
   return {...f,scope,plan,pack,doc,objects};
  }catch(e){f.close();throw e}
 }
-function signed(f,step,changes={}){
- const url=new URL(origin+hook+'/'+session+'/'+step);
+function signed(f,step,changes={},sessionId=session){
+ const url=new URL(origin+hook+'/'+sessionId+'/'+step);
  const values={CallUUID:call,RequestUUID:request,Direction:'outbound',From:'918000000000',To:'919000000001',...changes};
  for(const [k,v] of Object.entries(values))url.searchParams.set(k,String(v));
  const nonce='school-fictional-nonce',pairs=[...url.searchParams].sort(([a],[b])=>a<b?-1:a>b?1:0);
@@ -652,5 +654,120 @@ test('terminal closure SQL independently rejects missing or mismatched immutable
   assert.equal((await f.settle()).state,'settled');
   assert.throws(()=>insert(90),/invalid industry terminal evidence/);
   assert.equal(f.r.db.prepare('SELECT COUNT(*) AS n FROM industry_terminal_closures').get().n,0);
+ }finally{f.close()}
+});
+
+async function releasedDispatchFixture(){
+ const f=await admissionFixture();try{
+  Object.assign(f.env,{AR3D_INDUSTRY_SCHOOL_DISPATCH_ENABLED:'enabled',AR3D_AUTO_CDR_SETTLEMENT:'approved'});
+  const id=f.prepared.id,body={tenantId:tid,campaignId:f.scope.campaignId,jobIds:[id],manifestSha256:f.data.manifestSha256,maxSeconds:180,expiresAt:iso(now+1800000),approvalReference:'Fictional explicit School carrier approval',acknowledgeDialing:true};
+  const release=(d=body,user=admin)=>handleIndustryDispatchRelease(req('/v1/human/industry-dispatch-release',d),f.env,user,{now});
+  const read=()=>f.r.db.prepare('SELECT * FROM industry_dispatch_releases WHERE tenant_id=? AND job_id=?').get(tid,id);
+  const hold=()=>f.c.db.prepare('SELECT * FROM tenant_minute_holds WHERE tenant_id=? AND job_id=?').get(tid,id);
+  const dispatch=(fetcher=none,ts=now+10000)=>dispatchFundedIndustryJob(f.env,{tenantId:tid,jobId:id,now:ts,fetcher});
+  const recover=(ts=now+400000,fetcher=none)=>reconcileIndustryDispatch(f.env,{tenantId:tid,jobId:id,now:ts,fetcher});
+  return {...f,id,body,release,read,hold,dispatch,recover};
+ }catch(e){f.close();throw e}
+}
+const schoolCdr=async(url,opts)=>{
+ assert.equal(opts.method,'GET');assert.equal(opts.redirect,'manual');
+ return Response.json({call_uuid:call,call_direction:'outbound',from_number:'918000000000',to_number:'919000000001',billed_duration:60,call_duration:40,total_amount:'0.01234'});
+};
+test('explicit batch release creates funding and one-use dialing permission atomically; request itself never calls',async()=>{
+ const f=await releasedDispatchFixture();try{
+  assert.equal((await f.release(f.body,client)).status,403);
+  assert.equal((await f.release({...f.body,acknowledgeDialing:false})).status,400);
+  assert.equal((await f.release({...f.body,jobIds:[f.id,'99999999-9999-4999-8999-999999999999']})).status,409);
+  assert.equal(f.r.db.prepare('SELECT COUNT(*) AS n FROM industry_funded_admissions').get().n,0);
+  const r=await f.release();assert.equal(r.status,201,await r.clone().text());
+  assert.equal(f.read().state,'authorized');assert.equal(f.hold(),undefined);
+  assert.equal((await f.release()).status,409);
+  assert.throws(()=>f.r.db.prepare("UPDATE industry_dispatch_releases SET state='posting'").run(),/immutable/);
+  assert.throws(()=>f.r.db.prepare('DELETE FROM industry_dispatch_releases').run(),/immutable/);
+  assert.equal((await f.dispatch()).state,'release_unavailable');
+  f.env.AR3D_INDUSTRY_SCHOOL_DISPATCH_ENABLED='disabled';
+  assert.equal((await f.dispatch()).state,'dispatch_disabled_or_outside_hours');
+ }finally{f.close()}
+});
+test('integrated School workflow claims funds, submits once, accepts signed hangup, settles and exposes tenant result',async()=>{
+ const f=await releasedDispatchFixture();try{
+  assert.equal((await f.release()).status,201);
+  const fund=await runIndustrySchoolTick(f.env,{now:now+1000,lane:'fund',apiFetch:none,maxQueries:40});
+  assert.equal(fund?.state,'funded',JSON.stringify(fund));assert.ok(fund.queriesUsed<=40);
+  assert.equal(f.hold().state,'held');
+  let posts=0;
+  const provider=async(url,opts)=>{
+   posts++;assert.equal(opts.method,'POST');assert.equal(opts.redirect,'manual');
+   const body=JSON.parse(opts.body);assert.equal(body.to,f.scope.destination);assert.equal(body.time_limit,180);
+   assert.equal(f.read().state,'posting');assert.ok(body.answer_url.includes(f.read().session_id));
+   return Response.json({request_uuid:request},{status:202});
+  };
+  const outcomes=await Promise.all([f.dispatch(provider),f.dispatch(provider)]);
+  assert.equal(outcomes.filter(x=>x.state==='submitted').length,1,JSON.stringify(outcomes));assert.equal(posts,1);
+  const id=f.read().session_id,created=Date.parse(f.c.db.prepare('SELECT created_at FROM scripted_phone_pilots WHERE id=?').get(id).created_at);
+  const answer=await route(f,signed(f,'answer',{},id),none,created+1000);assert.match(await answer.text(),/GetDigits/);
+  const ended=await route(f,signed(f,'hangup',{Duration:'40'},id),none,created+40000);assert.equal(ended.status,204);
+  const closed=await f.recover(created+120000,schoolCdr);assert.equal(closed.state,'closed',JSON.stringify(closed));
+  assert.equal(f.hold().charged_seconds,60);assert.equal(f.r.db.prepare('SELECT COUNT(*) AS n FROM ('+commercialCapacityRows+')').get().n,0);
+  const path='/v1/human/industry-results/'+f.id;
+  const response=await handleIndustryResult(req(path,{tenantId:tid},'GET'),f.env,client,{now:created+120000});
+  assert.equal(response.status,200,await response.clone().text());const result=await response.json();assert.equal(result.chargedSeconds,60);
+  assert.equal(result.crmMutated,false);assert.ok(!JSON.stringify(result).includes(f.scope.destination));
+  const foreign=await handleIndustryResult(req(path,{tenantId:'99999999-9999-4999-8999-999999999999'},'GET'),f.env,client,{now:created+120000});
+  assert.equal(foreign.status,403);
+  assert.equal((await f.dispatch(provider)).state,'release_unavailable');assert.equal(posts,1);
+ }finally{f.close()}
+});
+test('funding-only permission remains non-dialable; lost carrier response never retries; signed callback recovers the request',async()=>{
+ const f=await releasedDispatchFixture();try{
+  assert.equal((await f.authorize()).status,201);assert.equal((await f.claim()).state,'funded');
+  assert.equal((await f.dispatch()).state,'release_unavailable');
+  const release=await f.release();assert.equal(release.status,201,await release.clone().text());
+  let posts=0;
+  const outcome=await f.dispatch(async()=>{posts++;throw Error('fictional lost carrier response')});
+  assert.equal(outcome.state,'locked');assert.equal(posts,1);assert.equal(f.read().state,'unknown');assert.equal(f.hold().state,'held');
+  assert.equal((await f.dispatch(async()=>{posts++;throw Error()})).state,'release_unavailable');assert.equal(posts,1);
+  const id=f.read().session_id,created=Date.parse(f.c.db.prepare('SELECT created_at FROM scripted_phone_pilots WHERE id=?').get(id).created_at);
+  await route(f,signed(f,'hangup',{To:'919000000099'},id),none,created+40000);
+  assert.equal(f.c.db.prepare('SELECT provider_request_id FROM scripted_phone_pilots WHERE id=?').get(id).provider_request_id,null);
+  const hang=await route(f,signed(f,'hangup',{Duration:'40'},id),none,created+40000);assert.equal(hang.status,204);
+  assert.equal(f.c.db.prepare('SELECT provider_request_id FROM scripted_phone_pilots WHERE id=?').get(id).provider_request_id,request);
+  assert.equal((await f.recover(created+120000,schoolCdr)).state,'closed');
+ }finally{f.close()}
+});
+test('expired or rejected authorization releases only proven unused reserve; consent and emergency pause prevent POST',async()=>{
+ for(const mode of ['expired','rejected','optout','pause']){
+  const f=await releasedDispatchFixture();try{
+   assert.equal((await f.release()).status,201);assert.equal((await f.claim()).state,'funded');
+   let posts=0;
+   if(mode==='expired'){
+    assert.equal((await f.recover(now+1800001)).state,'not_submitted');
+   }else{
+    if(mode==='optout')f.r.db.prepare("UPDATE leads SET consent_status='denied',dnd_status='blocked' WHERE tenant_id=? AND id=?").run(tid,lead);
+    if(mode==='pause')f.c.db.prepare("INSERT INTO calling_dispatch_pause_events(revision,paused,reason,actor,created_at) VALUES(1,1,'Synthetic pause','admin',?)").run(at);
+    const r=await f.dispatch(async()=>{posts++;return Response.json({error:'synthetic rejection'},{status:400})});
+    if(mode==='rejected')assert.equal(r.state,'not_submitted',JSON.stringify(r));
+    else{assert.equal(posts,0);assert.equal(f.hold().state,'held');assert.equal((await f.recover(now+1800001)).state,'not_submitted')}
+   }
+   assert.equal(f.hold().state,'released');assert.equal(f.hold().charged_seconds,0);
+   assert.equal(f.read().state,'not_submitted');assert.equal(f.r.db.prepare('SELECT COUNT(*) AS n FROM ('+commercialCapacityRows+')').get().n,0);
+   assert.equal(posts,mode==='rejected'?1:0);
+  }finally{f.close()}
+ }
+});
+test('a signed early answer before the carrier HTTP response binds only the exact managed posting session',async()=>{
+ const f=await releasedDispatchFixture();try{
+  assert.equal((await f.release()).status,201);assert.equal((await f.claim()).state,'funded');
+  let n=0;
+  const outcome=await f.dispatch(async()=>{
+   n++;const d=f.read();assert.equal(d.state,'posting');
+   const ts=Date.parse(f.c.db.prepare('SELECT created_at FROM scripted_phone_pilots WHERE id=?').get(d.session_id).created_at)+1000;
+   const r=await route(f,signed(f,'answer',{},d.session_id),none,ts);
+   assert.match(await r.text(),/GetDigits/);
+   return Response.json({request_uuid:request},{status:202});
+  });
+  assert.equal(outcome.state,'submitted',JSON.stringify(outcome));assert.equal(n,1);
+  const s=f.c.db.prepare('SELECT * FROM scripted_phone_pilots WHERE id=?').get(f.read().session_id);
+  assert.equal(s.provider_request_id,request);assert.equal(s.provider_call_id,call);assert.equal(s.phase,'consent');
  }finally{f.close()}
 });

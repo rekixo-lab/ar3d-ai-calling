@@ -1,5 +1,5 @@
 import {resolveCrmDb} from './core.mjs';
-import {sharedCapacityCount,sharedTenantCapacityCount,sharedTenantUnknown,industryOccupied,industryOccupiedFor} from './commercial-capacity.mjs';
+import {sharedCapacityCount,sharedTenantCapacityCount,sharedTenantUnknown,industryOccupied,industryOccupiedFor,industryCapacityState} from './commercial-capacity.mjs';
 import {campaignDispatchInterlock,dispatchPausePredicate} from './calling-dispatch-pause.mjs';
 import {moneyBudgetConfig,providerBudgetPosition,reserveBudgetedMinutes} from './provider-cost-reservations.mjs';
 import {minutePosition,closeMinuteHold,fundingCap,fundingPosition,affordableCallSeconds,BILLING_PULSE_SECONDS} from './minute-holds.mjs';
@@ -321,7 +321,7 @@ export async function runScriptedCampaignCron(baseEnv,{now=Date.now(),apiFetch=f
  const active=new Set(((await env.CONTROL_DB.prepare("SELECT id FROM tenants WHERE status='active' AND storage_mode='shared'").all()).results||[]).map(r=>r.id));
  // Reconcile already-submitted shared CRM jobs even when their tenant is suspended.
  const inflight=((await db.prepare(`SELECT tenant_id,id,state,reserved_at,flow_id,lead_id,destination,run_id,'legacy' AS source FROM calling_jobs
-  WHERE state IN('reserved','submitted','unknown') UNION ALL SELECT tenant_id,job_id AS id,CASE state WHEN 'unknown' THEN 'unknown' ELSE 'reserved' END,claimed_at AS reserved_at,NULL,lead_id,NULL,NULL,'industry' AS source FROM industry_funded_admissions WHERE ${industryOccupied} ORDER BY reserved_at LIMIT 5000`).all()).results||[]);
+  WHERE state IN('reserved','submitted','unknown') UNION ALL SELECT tenant_id,job_id AS id,${industryCapacityState},claimed_at AS reserved_at,NULL,lead_id,NULL,NULL,'industry' AS source FROM industry_funded_admissions WHERE ${industryOccupied} ORDER BY reserved_at LIMIT 5000`).all()).results||[]);
  const byTenant=new Map();
  for(const j of inflight){if(j.source==='industry')continue;if(!byTenant.has(j.tenant_id))byTenant.set(j.tenant_id,[]);byTenant.get(j.tenant_id).push(j)}
  // 1. Close finished calls first so their lines are free for new customers.

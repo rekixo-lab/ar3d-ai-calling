@@ -120,3 +120,12 @@ test('XLSX customer imports require Name column and non-empty printable names',a
   '<c r="A2" t="inlineStr"><is><t></t></is></c>');
  await assert.rejects(parseLeadXlsx(workbookZip(emptyName)),/customer name is required/);
 });
+
+test('XLSX column inspection and explicit mapping share the bounded parser',async()=>{
+ const columns=await parseLeadXlsxBase64(payload.xlsxBase64,{headersOnly:true});assert.equal(columns.columns[0].label,'Name');
+ const rows=await parseLeadXlsxBase64(payload.xlsxBase64,{columnMap:{name:0,mobile:1,location:2}});
+ assert.equal(rows[0].name,'Rita Shah');assert.equal(rows[0].budgetMaxInr,null);
+ const e=env(),r=await worker.fetch(request(payload,'columns'),e.env);
+ assert.equal(r.status,200,await r.clone().text());assert.equal((await r.json()).columns.length,4);
+ assert.ok(!e.log.some(x=>x.sql.includes('INSERT INTO leads')));
+});

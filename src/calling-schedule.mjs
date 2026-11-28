@@ -2,6 +2,7 @@ import {AUTH_MAINTENANCE_CRON,pruneExpiredAuth} from './auth-maintenance.mjs';
 import {CAMPAIGN_CRON,runScriptedCampaignCron,dispatchSettings} from './scripted-campaign-dispatch.mjs';
 import {runAutomaticMinuteSettlement,automaticMinuteSettlementApproved} from './plivo-cost-reconcile-routes.mjs';
 import {resolveFundingEnv} from './provider-funding.mjs';
+import {runIndustrySchoolTick} from './industry-school-dispatch.mjs';
 
 export async function handleCallingCron(controller,env,{apiFetch=fetch,cdrFetch=fetch}={}){
  const cron=controller?.cron,now=controller?.scheduledTime??Date.now();
@@ -19,12 +20,27 @@ export async function handleCallingCron(controller,env,{apiFetch=fetch,cdrFetch=
  env=await resolveFundingEnv(env);
  const settings=await dispatchSettings(env);
  const automatic=automaticMinuteSettlementApproved(env);
+ // Alternate bounded industry work and legacy property work. Consider
+ // recovery even with new School dispatch disabled.
+ const industryMinute=Math.floor(now/60000)%2===1;
+ if(industryMinute&&settings.queryBudget>=40){
+  const industry=await runIndustrySchoolTick(env,{now,apiFetch,cdrFetch,maxQueries:Math.min(950,settings.queryBudget-5)});
+  if(industry)return {processed:0,dialed:industry.state==='submitted'?1:0,industry};
+ }
  // A matched CDR can use ten statements including an idempotent/racing
  // settlement, plus up to three queue reads. Free-tier ticks settle one call
  // so their remaining budget can still dispatch one new customer call.
  const maxCalls=settings.queryBudget>=80?3:1;
- const reserve=(automatic?3+10*maxCalls:0)+(maintenance?4:0)+4+4;
+
+ // After industry inspection, reserve budget for actual CDR attempts rather
+ // than hypothetical work. Empty recovery queues must not starve property calls.
+ const inspected=industryMinute&&settings.queryBudget>=40;
+ let settlement;
+ if(automatic&&inspected)settlement=await runAutomaticMinuteSettlement(env,{now,maxCalls,fetcher:cdrFetch});
+ const attempted=settlement?.attempted;
+ const count=Number.isSafeInteger(attempted)&&attempted>=0&&attempted<=maxCalls?attempted:maxCalls;
+ const reserve=(automatic?3+10*count:0)+(maintenance?4:0)+4+4+(inspected?2:0);
  const campaign=await runScriptedCampaignCron(env,{now,apiFetch,settings:{...settings,queryBudget:Math.max(10,settings.queryBudget-reserve)}});
- const settlement=automatic?await runAutomaticMinuteSettlement(env,{now,maxCalls,fetcher:cdrFetch}):undefined;
+ if(automatic&&!inspected)settlement=await runAutomaticMinuteSettlement(env,{now,maxCalls,fetcher:cdrFetch});
  return {...campaign,maintenance,...(settlement?{settlement}:{})};
 }

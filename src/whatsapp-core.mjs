@@ -1,4 +1,4 @@
-import {requireMembership} from './human-auth.mjs';
+import {requireMembership,currentSuperAdminMfa} from './human-auth.mjs';
 import {resolveCrmDb,normalizeIndianPhone,sha256hex} from './core.mjs';
 
 export const WHATSAPP_CRON='*/2 * * * *';
@@ -28,9 +28,7 @@ export async function boundedText(req,max=65536){
 export async function memberFor(env,user,tid,write=false,{now=Date.now()}={}){
  if(!UUID.test(tid||''))return null;
  if(user?.globalRole!=='super_admin')return requireMembership(env.CONTROL_DB,user,tid,write);
- if(!/^[a-f0-9]{64}$/.test(user.token_hash||''))return null;
- const session=await env.CONTROL_DB.prepare('SELECT 1 AS verified FROM human_mfa_settings m JOIN human_sessions s ON s.user_id=m.user_id WHERE m.user_id=? AND s.token_hash=? AND m.enabled_at IS NOT NULL AND s.created_at>=m.enabled_at AND s.revoked_at IS NULL AND s.expires_at>? LIMIT 1').bind(user.id,user.token_hash,now).first();
- if(!session)return null;
+ if(!await currentSuperAdminMfa(env.CONTROL_DB,user,now))return null;
  return env.CONTROL_DB.prepare("SELECT id AS tenant_id,display_name,storage_mode,dedicated_binding,status,'client_admin' AS role FROM tenants WHERE id=? AND status IN('trial','active') LIMIT 1").bind(tid).first();
 }
 async function credentialKey(env,tid){
@@ -56,11 +54,26 @@ export async function verifySignature(raw,signature,secret){
  return constantEqual(signature,'sha256='+hex(await crypto.subtle.sign('HMAC',key,encoder.encode(raw))));
 }
 export async function graphRequest(path,token,{fetcher=fetch,method='GET',body}={}){
- if(!/^\/[\d]+\/(?:phone_numbers|message_templates|messages)(?:\?|$)/.test(path))throw Error('invalid Meta endpoint');
- const response=await fetcher('https://graph.facebook.com/'+GRAPH_VERSION+path,{method,headers:{Authorization:'Bearer '+token,...(body?{'Content-Type':'application/json'}:{})},body:body?JSON.stringify(body):undefined,signal:AbortSignal.timeout(15000)});
- const raw=await response.text();if(raw.length>1048576)throw Error('Meta response too large');
- let data;try{data=JSON.parse(raw);}catch{throw Error('Meta returned an invalid response');}
- if(!response.ok){const e=Error('Meta request rejected');e.providerCode=Number(data?.error?.code)||response.status;e.definitive=response.status>=400&&response.status<500;throw e;}
+ // Only the three internal endpoints and their intended HTTP method.
+ // Never forward bearer credentials through a redirect or consume an
+ // unbounded body. A malformed acknowledgement is not proof of rejection.
+ const match=typeof path==='string'&&path.match(/^\/\d{5,30}\/(phone_numbers|message_templates|messages)(\?[A-Za-z0-9_,=&%.-]{1,500})?$/);
+ if(!match||(match[1]==='messages'?(method!=='POST'||!!match[2]||!body):(method!=='GET'||body!==undefined)))throw Error('invalid Meta endpoint');
+ const response=await fetcher('https://graph.facebook.com/'+GRAPH_VERSION+path,{method,redirect:'manual',headers:{Authorization:'Bearer '+token,...(body?{'Content-Type':'application/json'}:{})},body:body?JSON.stringify(body):undefined,signal:AbortSignal.timeout(15000)});
+ const type=(response.headers.get('content-type')||'').split(';')[0].trim();
+ if((response.status>=300&&response.status<400)||!/^application\/(?:json|[a-z0-9_.+-]+\+json)$/i.test(type)){
+  try{await response.body?.cancel()}catch{}
+  throw Error('Meta returned an invalid response');
+ }
+ let data;try{data=JSON.parse(await boundedText(response,1048576));}catch{throw Error('Meta returned an invalid response');}
+ if(!data||typeof data!=='object'||Array.isArray(data))throw Error('Meta returned an invalid response');
+ if(!response.ok){
+  const code=data.error?.code;
+  const e=Error('Meta request rejected');e.providerCode=Number.isSafeInteger(code)&&code>0?code:response.status;
+  // A timeout or generic/malformed 4xx may conceal an accepted POST.
+  e.definitive=response.status>=400&&response.status<500&&response.status!==408&&Number.isSafeInteger(code)&&code>0;
+  throw e;
+ }
  return data;
 }
 export function normalizeTemplate(t){

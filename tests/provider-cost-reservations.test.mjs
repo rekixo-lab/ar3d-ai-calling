@@ -70,6 +70,7 @@ test('manual-balance cron reaches one provider submission with D1 trigger-inclus
   });
   assert.equal(posts,1);
   assert.equal(result.dialed,1);
+  assert.equal(result.settlement?.attempted,0,'empty CDR queue must not consume a hypothetical CDR budget');
   assert.equal(reservations.length,1);
   assert.equal(reservations[0].changes,2);
   assert.equal(f.r.db.prepare('SELECT state FROM calling_jobs').get().state,'submitted');

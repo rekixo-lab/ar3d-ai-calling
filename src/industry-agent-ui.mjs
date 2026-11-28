@@ -8,7 +8,7 @@ function industryAgentPanel(tenantId,content,role){
  const profileBox=div('card'),listBox=div('card'),editBox=div('card');
  content.append(card,profileBox,listBox,editBox);
  industryCampaignPanel(tenantId,content,{editable});
- let templates=[],drafts=[],activeId='',activeDraft=null,profileRevision=0,sequence=0;
+ let templates=[],noticeContracts=[],drafts=[],activeId='',activeDraft=null,profileRevision=0,sequence=0;
  let snapshots=[],snapshotSequence=0;
  let launchSequence=0;
  const enabled=()=>card.isConnected&&content.isConnected;
@@ -49,7 +49,7 @@ function industryAgentPanel(tenantId,content,role){
  const questions=node('textarea',{class:'field',rows:'6','aria-label':'AI questions, one per line',maxlength:'3400'});
  const closing=node('textarea',{class:'field',rows:'2','aria-label':'AI Closing',maxlength:'450'});
  const questionLabel=lab('Questions (one per line, up to 12)',questions);
- const preview=div('card');
+ const preview=div('card'),noticeReadiness=div('card');
  const fictionalAnswers=node('textarea',{class:'field',rows:'3','aria-label':'Fictional conversation answers',maxlength:'2000'});
  const simulation=div('card');
  const snapshotsBox=div('card');
@@ -230,7 +230,7 @@ function industryAgentPanel(tenantId,content,role){
  const controls=div('formrow',previewButton,editable?saveButton:null,refreshButton);
  const advisory=node('p',{class:'muted',text:'This text preview uses no AI provider, customer data, microphone, phone call or CRM write. Finance/banking agents are demonstration drafts requiring separate compliance and recipient-verification work.'});
  editBox.append(title('Draft editor','h3'),lab('Agent name',name),div('formrow',lab('Mode',mode),lab('Language',language)),
-  lab('Greeting',greeting),questionLabel,lab('Closing',closing),controls,advisory,preview,
+  lab('Greeting',greeting),questionLabel,lab('Closing',closing),controls,advisory,noticeReadiness,preview,
   lab('Fictional answers (one per line; no customer information)',fictionalAnswers),
   simulateButton,simulation,snapshotsBox);
  function editorValue(){
@@ -263,6 +263,15 @@ function industryAgentPanel(tenantId,content,role){
   editBox.hidden=!activeDraft;
   if(!activeDraft)return;
   const c=activeDraft.config,t=templates.find(x=>x.id===c.templateId);
+  const contract=noticeContracts.find(x=>x.templateId===c.templateId);
+  noticeReadiness.hidden=!contract;noticeReadiness.replaceChildren();
+  if(contract)noticeReadiness.append(title('Verified customer-specific notice','h3'),
+   node('p',{class:'note',text:'Typed notice renderer available in code. Live calling and private data access are NOT enabled.'}),
+   node('p',{text:'Approved business data source: '+contract.source.replaceAll('_',' ')}),
+   node('p',{text:'Supported fields: '+contract.fields.join(', ')}),
+   node('p',{text:'Recipient proof: '+contract.recipientProof.replaceAll('_',' ')}),
+   node('p',{text:'Remaining integration gates: '+contract.blockers.map(x=>x.replaceAll('_',' ')).join('; ')}),
+   node('p',{class:'muted',text:'Do not paste account numbers, PINs, OTPs or personal account records in drafts or ordinary CRM imports.'}));
   name.value=c.name;greeting.value=c.greeting;questions.value=c.questions.join('\n');closing.value=c.closing;
   language.value=c.language;
   mode.replaceChildren(...(t?.allowedModes||[c.mode]).map(v=>node('option',{value:v,text:v==='announcement'?'Announcement — information only':v==='interactive'?'Interactive — questions':'Hybrid — information and questions'})));
@@ -289,7 +298,7 @@ function industryAgentPanel(tenantId,content,role){
    api('/v1/human/ai-flows'+query)
   ]);
   if(version!==sequence||!enabled())return;
-  templates=catalog.templates||[];drafts=list.drafts||[];
+  templates=catalog.templates||[];noticeContracts=catalog.noticeContracts||[];drafts=list.drafts||[];
   profileRevision=profile.profile?.revision||0;
   business.replaceChildren(...(profile.availableIndustries||[]).map(v=>node('option',{value:v,text:v.replaceAll('_',' ')})));
   if(profile.profile)business.value=profile.profile.industryCode;

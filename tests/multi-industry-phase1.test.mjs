@@ -51,6 +51,8 @@ test('school and finance industry templates and drafts are GET-only for viewers'
   assert.equal(r.status,200);
   const d=await r.json();
   assert.equal(d.templates.length,6);assert.equal(d.templates.find(x=>x.id==='school_admission_v1').callable,false);
+  assert.equal(d.noticeContracts.length,4);assert.ok(d.noticeContracts.every(x=>!x.dispatchReady&&x.blockers.length===4));
+  assert.ok(!JSON.stringify(d.noticeContracts).includes('identityKeyHex'));
   assert.equal((await call(f,viewer,'/v1/human/industry-profiles?tenantId='+tid)).status,200);
   assert.equal((await call(f,viewer,path+'?tenantId='+tid)).status,200);
   assert.equal((await create(f,viewer)).status,403);
