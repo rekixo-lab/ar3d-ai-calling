@@ -314,9 +314,9 @@ function dashboard(){
  ]:[
   ['home','Home','grid','Your minutes, customers and what needs attention today.'],
   ['customers','Customers / Excel','users','Import customers and prepare a calling campaign.'],
-  ['agents','My AI Agents','spark','Configure industry-specific, non-calling AI drafts.'],
   ['calling','Calling','phone','Review your campaign and start or pause approved calls.'],
   ['results','Results / CRM','chart','See call outcomes and answers saved to your CRM.'],
+  ['agents','My AI Agents','spark','Configure industry-specific, non-calling AI drafts.'],
   ['properties','My Properties','building','Add prices, availability, brochures and locations for your customers.'],
   ['whatsapp','WhatsApp','mail','Schedule relevant follow-ups and see customer replies.'],
   ['wallet','Minutes & Wallet','wallet','View verified call usage and credit history.'],
@@ -391,6 +391,7 @@ function dashboard(){
  for(const [key,label,symbol] of items){
   const link=node('a',{href:'#'+key,class:'navitem',onclick:e=>{e.preventDefault();openView(key,{focus:true,resetScroll:true})}},
    [icon(symbol),node('span',{text:label})]);
+  if(key===(admin?'team':'agents'))nav.append(node('p',{class:'nav-group-label',text:admin?'Administration':'Tools & settings'}));
   links.set(key,link);nav.append(link);
   if(admin){
    const area=node('section',{class:'workspace-section',id:key,hidden:true});
@@ -619,21 +620,24 @@ async function adminDashboard(main,openView){
    if(attention.length)alerts.append(node('section',{class:'chart-panel','aria-label':'Needs attention'},[
     title('Needs attention','h3'),...attention.map(t=>node('p',{class:'banner err',role:'status',text:t})),
     btn('Review calling and funding status',()=>{advanced.open=true;advanced.scrollIntoView({block:'start'});advanced.querySelector('summary').focus()},true)]));
+   const activity=node('details',{class:'card'},[
+    node('summary',{text:'Company and call activity'}),
+    div('overview-grid',overviewMetric('Active companies',safeCount(d.clients.active),'users'),
+     overviewMetric('On hold (live calls)',formatSeconds(p.heldSeconds),'clock'),
+     overviewMetric('Ended internal tests',safeCount(d.internal.ended),'phone'),
+     overviewMetric('Ended campaign calls',safeCount(d.campaign.ended),'phone'))
+   ]);
    body.replaceChildren(
     div('overview-grid',
     overviewMetric('Client companies',safeCount(d.clients.total),'users'),
-    overviewMetric('Active companies',safeCount(d.clients.active),'users'),
     overviewMetric('Minutes given to clients',formatSeconds(p.allocatedSeconds),'wallet'),
     overviewMetric('Minutes used',formatSeconds(p.usedSeconds),'receipt'),
-    overviewMetric('On hold (live calls)',formatSeconds(p.heldSeconds),'clock'),
-    overviewMetric('Minutes left with clients',formatSeconds(p.uncommittedSeconds),'wallet'),
-    overviewMetric('Ended internal tests',safeCount(d.internal.ended),'phone'),
-    overviewMetric('Ended campaign calls',safeCount(d.campaign.ended),'phone')),
-    div('overview-actions',btn('Manage clients',()=>openView('clients',{focus:true,resetScroll:true})),btn('Credit transactions',()=>openView('wallet',{focus:true,resetScroll:true}),true),btn('Calling setup',()=>openView('calling',{focus:true,resetScroll:true}),true)),
+    overviewMetric('Minutes left with clients',formatSeconds(p.uncommittedSeconds),'wallet')),
     title('Client payments','h3'),
     div('overview-grid',overviewMetric('Payments recorded',Number.isSafeInteger(d.purchases?.collectedPaise)?'₹'+(d.purchases.collectedPaise/100).toFixed(2):'Unavailable','wallet'),overviewMetric('Minutes sold',formatSeconds(d.purchases?.purchasedSeconds),'receipt'),overviewMetric('Minutes still owed to clients',formatSeconds(p.outstandingSeconds),'wallet')),
-    title('Recent credit adjustments','h3'),
-    table(['Date (IST)','Company','Adjustment','Minutes','Balance'],d.transactions.map(t=>[formatIst(t.createdAt),t.company,t.kind,String(t.deltaSeconds/60),formatSeconds(t.balanceSeconds)])),
+    activity,
+    node('details',{class:'card'},[node('summary',{text:'Recent credit adjustments'}),
+    table(['Date (IST)','Company','Adjustment','Minutes','Balance'],d.transactions.map(t=>[formatIst(t.createdAt),t.company,t.kind,String(t.deltaSeconds/60),formatSeconds(t.balanceSeconds)]))]),
     advanced);
    advanced.append(
     title('Provider safety review','h3'),
@@ -1403,7 +1407,7 @@ async function superAdmin(main,chooseCompany){
    const d=await api('/v1/human/tenants?'+query);tenantRowsAll=d.tenants;
    const total=Number.isSafeInteger(d.total)?d.total:d.tenants.length;
    const matched=Number.isSafeInteger(d.matched)?d.matched:d.tenants.length;
-   prev.disabled=pageOffset===0;next.disabled=pageOffset+d.tenants.length>=matched;
+   prev.disabled=pageOffset===0;next.disabled=pageOffset+d.tenants.length>=matched;pagination.hidden=prev.disabled&&next.disabled;
    list.replaceChildren(
     div('cards',...[
       ['Total clients',total,'users'],
@@ -1764,10 +1768,6 @@ async function renderClient(id,content){
  const snapshotStatus=node('p',{class:'muted',role:'status',text:'Updates automatically'});
  overview.append(snapshotStatus);
  if(d.role==='client_admin'){
-  const creditRows=[['Available minutes','uncommittedSeconds','wallet']];
-  const creditMetrics=creditRows.map(([label,key,symbol])=>({key,metric:overviewMetric(label,'Loading…',symbol)}));
-  grid.append(...creditMetrics.map(x=>x.metric));
-  overview.append(node('p',{class:'muted',text:'Minutes are added by AR3D after your payment.'}));
   const remaining=node('strong',{class:'sidebar-credit-value',text:'Loading…'});
   const refresh=btn('Refresh balance',()=>refreshCredit(),true);
   let balanceVersion=0;
@@ -1777,7 +1777,6 @@ async function renderClient(id,content){
    balanceVersion++;creditSnapshot=w;
    content.querySelector('#calling')?.dispatchEvent(new Event('credit-updated'));
    const fmt=v=>Number.isSafeInteger(v)&&v>=0?formatSeconds(v):'Unavailable';
-   for(const {key,metric} of creditMetrics)metric.querySelector('strong').textContent=fmt(w?.[key]);
    remaining.textContent=fmt(w?.uncommittedSeconds);
    checked.textContent=w?'Updated '+formatIst(new Date().toISOString()):'Update unavailable';
   };
@@ -1844,7 +1843,12 @@ async function renderClient(id,content){
   },
   results:async section=>{
    campaignResultsPanel(id,section,d.role);
-   operationsReportPanel(id,section);
+   const diagnostics=node('details',{class:'card'},node('summary',{text:'Call activity and diagnostics'}));
+   section.append(diagnostics);
+   diagnostics.addEventListener('toggle',()=>{
+    if(!diagnostics.open||diagnostics.dataset.loaded)return;
+    diagnostics.dataset.loaded='true';operationsReportPanel(id,diagnostics);
+   });
    if(d.role==='client_admin'){
     const reports=node('details',{class:'card'},node('summary',{text:'Export and audit history'}));
     section.append(reports);

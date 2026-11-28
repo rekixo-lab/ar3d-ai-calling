@@ -37,6 +37,7 @@ h2 > .icon, h3 > .icon { color: #93b9ff; }
   border-radius: 12px; background: #2563eb; color: white;
 }
 .brand-mark .icon { width: 21px; height: 21px; }
+.nav-group-label { grid-column:1/-1; margin:8px 0 0; padding:8px 10px 0; border-top:1px solid #444; font-size:12px; color:#bbb; }
 .workspace-nav { display: grid; gap: 5px; }
 .navitem {
   display: flex; align-items: center; gap: 11px; padding: 10px 12px; min-height: 44px;

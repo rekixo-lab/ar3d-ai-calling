@@ -40,7 +40,7 @@ test('AI Testing UI defaults to preview only; explicit auto-save is scoped to se
 
 test('Operations & Security Report is tenant scoped, aggregate-only and cannot retry a call',()=>{
   assert.match(js,/function operationsReportPanel\(tenantId,content\)/);
-  assert.match(js,/operationsReportPanel\(id,section\)/);
+  assert.match(js,/operationsReportPanel\(id,diagnostics\)/);
   const panel=js.slice(js.indexOf('function operationsReportPanel('),js.indexOf('function campaignResultsPanel('));
   assert.match(panel,/\/v1\/human\/operations\/report\?tenantId=/);
   assert.match(panel,/Unknown provider outcomes/);

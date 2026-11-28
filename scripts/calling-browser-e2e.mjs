@@ -43,7 +43,7 @@ try{
   const add=f.c.db.prepare("INSERT INTO tenant_minute_ledger(id,tenant_id,kind,delta_seconds,previous_seconds,balance_seconds,actor,reason,created_at) VALUES(?,?,?,?,?,?,'admin','Synthetic browser refresh check',?)");
   add.run('browser-live-allocation',tid,'allocation',60,6000,6060,new Date().toISOString());
   await sidebar.locator('.sidebar-credit-value').getByText('101m 00s',{exact:true}).waitFor({timeout:25000});
-  await page.locator('.client-summary').getByText('101m 00s',{exact:true}).first().waitFor();
+  assert.equal(await page.locator('.client-summary').getByText('Available minutes',{exact:true}).count(),0);
   await sidebar.getByRole('button',{name:'Wallet',exact:true}).click();
   await page.getByRole('heading',{name:'Calling credit ledger',exact:true}).waitFor();
   add.run('browser-live-recovery',tid,'recovery',-60,6060,6000,new Date().toISOString());
@@ -233,6 +233,8 @@ try{
  f.r.db.prepare("INSERT INTO scripted_call_results VALUES(?,?,?,?,1,?)").run(tid,job,crypto.randomUUID(),
   JSON.stringify({propertyType:'flat',location:'Raipur',area:'Shankar Nagar',size:'3BHK',budgetInr:3500000,interest:'interested',visitDate:'2027-01-12'}),at);
  await page.getByRole('button',{name:'View customer answers',exact:true}).click();
+ assert.equal(await page.getByRole('heading',{name:'Operations & Security Report'}).count(),0);
+ await page.getByText('Call activity and diagnostics',{exact:true}).click();
  await page.getByRole('heading',{name:'Operations & Security Report'}).waitFor();
  const outcomes=page.getByRole('region',{name:'Call job outcomes · recorded counts'});
  await outcomes.waitFor();
