@@ -1467,6 +1467,31 @@ async function superAdmin(main,chooseCompany){
   finally{submit.disabled=false}
  });
  panel.insertBefore(node('details',{class:'card'},[node('summary',{text:'Add client'}),f,inviteResult]),panel.children[1]);
+ const inboxRows=div('stack');
+ const inbox=node('details',{class:'card'},[node('summary',{text:'नए आवेदन · Client applications'}),inboxRows]);
+ panel.append(inbox);
+ let cursor=null,loading=false;
+ async function loadApplications(append=false){
+  if(loading)return;loading=true;
+  if(!append)inboxRows.replaceChildren();
+  const feedback=node('p',{role:'status',text:'Loading applications…'});inboxRows.append(feedback);
+  try{
+   const page=await api('/v1/human/client-applications'+(append&&cursor?'?cursor='+encodeURIComponent(cursor):''));
+   for(const a of page.applications){
+    const invite=btn('Prepare invitation',()=>{
+     existing.value='';name.value=a.company;email.value=a.email;mobile.value=a.mobile;
+     f.closest('details').open=true;name.focus();
+    },true);
+    inboxRows.append(div('card',node('strong',{text:a.company}),node('p',{text:[a.name,a.city,a.mobile,a.email].join(' · ')}),
+     node('p',{text:a.purpose+' · '+formatIst(a.submittedAt)}),node('small',{text:a.reference}),invite));
+   }
+   cursor=page.cursor;
+   feedback.textContent=!append&&!page.applications.length?'No applications yet.':'';
+   if(cursor){const more=btn('More applications',()=>{more.remove();loadApplications(true)},true);inboxRows.append(more)}
+  }catch{feedback.textContent='Could not load applications.';inboxRows.append(btn('Retry',()=>loadApplications(),true))}
+  finally{loading=false}
+ }
+ inbox.addEventListener('toggle',()=>{if(inbox.open)loadApplications()});
 const accessCard=div('card access-card',title('Tenant Access: Suspend / Resume','h3'),
   node('p',{class:'note',text:'Suspending access blocks the company CRM and API keys.'}));
 const management=node('details',{class:'card client-directory',id:'client-access'},node('summary',{text:'Manage existing access'}));main.append(management);management.append(accessCard);
