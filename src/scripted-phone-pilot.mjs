@@ -108,7 +108,7 @@ export async function approvedCampaignPhone(env){
  const verified=await env.CONTROL_DB.prepare(`SELECT id FROM scripted_phone_pilots
    WHERE job_id IS NULL AND phase='completed' AND hangup_at IS NOT NULL AND provider_account_id=?
    AND caller=? AND destination=? AND tenant_id=? AND lead_id=?
-   AND CASE WHEN json_valid(survey_json) THEN json_extract(survey_json,'$.phoneMeta.engine')=? ELSE 0 END LIMIT 1`)
+   AND CASE WHEN json_valid(survey_json) THEN json_extract(survey_json,'$.phoneMeta.engine')=? AND json_extract(survey_json,'$.phoneMeta.channel') IS NULL ELSE 0 END LIMIT 1`)
   .bind(config.authId,config.caller,config.destination,config.tenant,config.lead,engine).first();
  return verified?{...phoneConfiguration(env),engine}:null;
 }
@@ -152,6 +152,11 @@ const play=url=>'<Play>'+escapeXml(url)+'</Play>';
 const keypadConfirm='CALL_ONE_CONSENTED_INTERNAL_SARVAM_KEYPAD';
 const sarvamEngine='sarvam';
 const sarvamConfirm='CALL_ONE_PRECONSENTED_INTERNAL_SARVAM_NUMBER';
+const whatsAppConfirm='CALL_ONE_INTERNAL_WHATSAPP_WITH_CURRENT_PERMISSION';
+function whatsAppSender(env){
+ const sender=env.AR3D_PLIVO_WHATSAPP_CALLER_NUMBER;
+ return /^\+91[1-9]\d{9}$/.test(sender||'')?sender:null;
+}
 const friendlyConfirm='CALL_ONE_INTERNAL_SARVAM_WITH_PRIOR_RECORDING_NOTICE';
 const sarvamConfigured=env=>typeof env.SARVAM_API_KEY==='string'&&!!env.SARVAM_API_KEY.trim()&&env.SARVAM_API_KEY.length<=512;
 function isSarvam(row){return JSON.parse(row.survey_json).phoneMeta?.engine===sarvamEngine}
@@ -323,12 +328,18 @@ async function startPilot(req,env,user,config,now,fetcher){
  catch{return error('invalid_pilot_request',400)}
  if(!['confirm,language','confirm,language,leadId','confirm,engine,language','confirm,engine,language,leadId'].includes(Object.keys(data).filter(k=>k!=='fastTiming').sort().join(','))||
     (Object.hasOwn(data,'fastTiming')&&(typeof data.fastTiming!=='boolean'||data.fastTiming&&data.confirm!==friendlyConfirm))||
-    ![keypadConfirm,sarvamConfirm,friendlyConfirm].includes(data.confirm)||!['hi','en'].includes(data.language)||
+    ![keypadConfirm,sarvamConfirm,friendlyConfirm,whatsAppConfirm].includes(data.confirm)||!['hi','en'].includes(data.language)||
     (Object.hasOwn(data,'engine')&&data.engine!==sarvamEngine)||
     (Object.hasOwn(data,'leadId')&&(typeof data.leadId!=='string'||!UUID.test(data.leadId))))return error('explicit_pilot_confirmation_required',400);
  if(!sarvamConfigured(env))return error('sarvam_not_configured',409);
  config=await selectDevice(env,config,data.leadId);
  if(!config)return error('internal_test_device_not_enrolled_or_blocked',403);
+ const whatsapp=data.confirm===whatsAppConfirm;
+ if(whatsapp){
+  const caller=whatsAppSender(env);
+  if(!caller||config.destination!==env.AR3D_SCRIPTED_PILOT_VERIFIED_NUMBER)return error('whatsapp_primary_pilot_unavailable',409);
+  config={...config,caller};
+ }
  const control=env.CONTROL_DB,crm=await pilotCrm(env,config.tenant);
  if(!crm)return error('pilot_client_unavailable',409);
  const lead=await eligiblePilotLead(crm,config);
@@ -337,21 +348,24 @@ async function startPilot(req,env,user,config,now,fetcher){
   return error('pilot_prompt_recordings_incomplete',409);
  const id=crypto.randomUUID(),slot=Math.floor(now/pilotCooldownMs),survey=beginFixedVoicePreview({language:data.language,now}).state;
  // Separate keypad and explicitly preconsented internal paths.
- survey.phoneMeta={mode:data.confirm===keypadConfirm?'internal_keypad':'direct_preconsented',engine:sarvamEngine,...(data.confirm===friendlyConfirm?{priorRecordingNotice:true}:{}),...(data.fastTiming===true?{fastTiming:true}:{}),costMeterVersion:1,sttRoundedSeconds:0,sttFailedRequests:0};
+ survey.phoneMeta={mode:(whatsapp||data.confirm===keypadConfirm)?'internal_keypad':'direct_preconsented',engine:sarvamEngine,...(whatsapp?{channel:'whatsapp_voice'}:{}),...(data.confirm===friendlyConfirm?{priorRecordingNotice:true}:{}),...(data.fastTiming===true?{fastTiming:true}:{}),costMeterVersion:1,sttRoundedSeconds:0,sttFailedRequests:0};
  const reservation=await control.prepare(`INSERT INTO scripted_phone_pilots
   (id,tenant_id,lead_id,lead_updated_at,actor_id,language,destination,caller,rate_slot,expires_at,phase,survey_json,created_at,provider_account_id)
   SELECT ?,?,?,?,?,?,?,?,?,?,'requested',?,?,? WHERE NOT EXISTS(
    SELECT 1 FROM scripted_phone_pilots WHERE job_id IS NULL
     AND ((${pilotUnconfirmed}) OR ${pilotLastEnd}>?))
+  AND (?=0 OR (SELECT COUNT(*) FROM scripted_phone_pilots WHERE job_id IS NULL AND caller=? AND destination=?
+   AND created_at>=? AND json_extract(survey_json,'$.phoneMeta.channel')='whatsapp_voice')<5)
   ON CONFLICT(rate_slot) DO NOTHING`).bind(id,config.tenant,config.lead,lead.updated_at,user.id,
-  data.language,config.destination,config.caller,slot,now+ttl,JSON.stringify(survey),iso(now),config.authId,now-pilotCooldownMs).run();
+  data.language,config.destination,config.caller,slot,now+ttl,JSON.stringify(survey),iso(now),config.authId,now-pilotCooldownMs,+whatsapp,config.caller,config.destination,iso(now-86400000)).run();
  if(reservation.meta.changes!==1){
   const availability=await pilotAvailability(control,now);
+  if(whatsapp&&availability.ready)return error('whatsapp_daily_pilot_limit',409);
   return json({error:availability.reason==='awaiting_signed_hangup'?
    'Previous internal call has not received a signed hangup. Check Plivo before retrying.':
    'Internal test cooldown is active. Refresh status before retrying.',availability},409);
  }
- const outcome=await submitScriptedPhone(control,config,id,config.destination,duration,fetcher);
+ const outcome=await submitScriptedPhone(control,config,id,config.destination,duration,fetcher,{whatsapp});
  if(outcome==='rejected')return error('plivo_rejected_pilot',502);
  if(outcome==='unknown')return error('pilot_outcome_unconfirmed_check_status',502);
  return json({id,state:'submitted'},202);
@@ -381,7 +395,7 @@ export async function reserveCampaignQuestionnaire(control,config,job,now){
  return id;
 }
 
-export async function submitScriptedPhone(control,config,id,destination,maxSeconds,fetcher,{commercial=false,beforeSubmit=null}={}){
+export async function submitScriptedPhone(control,config,id,destination,maxSeconds,fetcher,{commercial=false,beforeSubmit=null,whatsapp=false}={}){
  // ring_timeout stops unanswered ringing; hangup_on_ring schedules a hangup
  // from the start of ringing even if the recipient has answered (6000).
  try{
@@ -398,7 +412,7 @@ export async function submitScriptedPhone(control,config,id,destination,maxSecon
   const response=await fetcher('https://api.plivo.com/v1/Account/'+config.authId+'/Call/',{
    method:'POST',redirect:'manual',signal:AbortSignal.timeout(8000),
    headers:{Authorization:config.authorization,'Content-Type':'application/json'},body:JSON.stringify({
-    from:config.caller,to:destination,answer_url:callback(config,id,'answer'),answer_method:'GET',
+    ...(whatsapp?{call_type:'whatsapp_voice'}:{}),from:config.caller,to:destination,answer_url:callback(config,id,'answer'),answer_method:'GET',
     hangup_url:callback(config,id,'hangup'),hangup_method:'GET',time_limit:maxSeconds,ring_timeout:25
    })
   });
@@ -514,7 +528,7 @@ export async function handleScriptedPhoneAdmin(req,env,user,{now=Date.now(),fetc
     provider_call_id IS NOT NULL AS provider_call_reference FROM scripted_phone_pilots
     WHERE tenant_id=? AND job_id IS NULL ORDER BY created_at DESC LIMIT 5`).bind(config.tenant).all();
   const devices=[config,...await enrolledDevices(env,config)];
-  return json({configured:true,destinationLast4:config.destination.slice(-4),recent:recent.results,
+  return json({configured:true,whatsappPilotConfigured:!!whatsAppSender(env),destinationLast4:config.destination.slice(-4),recent:recent.results,
    devices:devices.map((x,i)=>({leadId:x.lead,destinationLast4:x.destination.slice(-4),primary:i===0})),
    enrollmentEnabled:env.AR3D_SCRIPTED_CAMPAIGNS_ENABLED!=='enabled'&&!!await deviceCrm(env,config),
    engines:sarvamConfigured(env)?[sarvamEngine]:[],sarvamConfigured:sarvamConfigured(env),availability:await pilotAvailability(env.CONTROL_DB,now)});
@@ -897,7 +911,11 @@ export async function handleScriptedPhoneCallback(req,env,{now=Date.now(),fetche
   if(params.has('ALegRequestUUID')&&params.has('RequestUUID')&&params.get('ALegRequestUUID')!==params.get('RequestUUID'))return error('call_identity_mismatch',403);
   if(!ID.test(call||''))return error('invalid_call_reference',400);
   const row=await control.prepare('SELECT * FROM scripted_phone_pilots WHERE id=?').bind(id).first();
-  if(!row||row.provider_account_id!==config.authId||row.caller!==config.caller)return end();
+  if(!row||row.provider_account_id!==config.authId)return end();
+  const whatsapp=!row.job_id&&JSON.parse(row.survey_json||'{}').phoneMeta?.channel==='whatsapp_voice';
+  if(whatsapp){
+   if(step!=='hangup'&&row.caller!==whatsAppSender(env))return end();
+  }else if(row.caller!==config.caller)return end();
   if(isNoticeSession(row)){
    if(row.expires_at<=now&&(step!=='hangup'||now-row.expires_at>86400000))return end();
    return await handleNoticeVoiceCallback(env,config,row,step,arg,params,{now,end,xml,speak:campaignSpeak,actionUrl:(id,s)=>escapeXml(callback(config,id,s)),finishOptOut:(r,t)=>finishCampaignOptOut(env,r,t)});

@@ -37,13 +37,15 @@ function signed(url,params={},secret=token){
  }});
 }
 
-test('verified internal pilot only: consent, fixed prompts, AI answers, and one tenant-scoped CRM save',async()=>{
+for(const channel of ['phone','whatsapp_voice']) test(channel+' internal pilot: consent, fixed prompts, AI answers and one CRM save',async()=>{
+ const whatsapp=channel==='whatsapp_voice';
  const f=fixture();
  try{
   const answers=['प्लॉट','रायपुर','अमलीडीह','बारह सौ वर्ग फीट','45 लाख','बाद में'];
   const env={...f.env,SARVAM_API_KEY:'synthetic-key',PLIVO_AUTH_ID:'syntheticAuth',PLIVO_AUTH_TOKEN:token,
    AR3D_SCRIPTED_PILOT_ENABLED:'enabled',AR3D_PLIVO_RECORDING_AUTH:'confirmed',
    AR3D_SCRIPTED_PILOT_ORIGIN:origin,AR3D_PLIVO_CALLER_NUMBER:'+918000000000',
+   AR3D_PLIVO_WHATSAPP_CALLER_NUMBER:'+919000000008',
    AR3D_SCRIPTED_PILOT_VERIFIED_NUMBER:internalNumber,AR3D_SCRIPTED_PILOT_TENANT_ID:tid,
    AR3D_SCRIPTED_PILOT_LEAD_ID:lead,
    RECORDINGS:{head:async()=>({size:4}),get:async()=>({size:4,body:new Uint8Array(4)})},
@@ -59,6 +61,8 @@ test('verified internal pilot only: consent, fixed prompts, AI answers, and one 
    if(url.startsWith('https://api.plivo.com/')){
     dialCount++;
     const payload=JSON.parse(options.body);
+    assert.equal(payload.call_type,whatsapp?'whatsapp_voice':undefined);
+    assert.equal(payload.from,whatsapp?env.AR3D_PLIVO_WHATSAPP_CALLER_NUMBER:env.AR3D_PLIVO_CALLER_NUMBER);
     assert.equal(payload.to,internalNumber);
     assert.equal(payload.time_limit,180);
     assert.equal(payload.ring_timeout,25);
@@ -71,9 +75,10 @@ test('verified internal pilot only: consent, fixed prompts, AI answers, and one 
    return new Response('RIFF',{headers:{'Content-Type':'audio/wav'}});
   };
   const start=(configuration=env)=>handleScriptedPhoneAdmin(new Request(origin+'/v1/human/scripted-phone-pilot',{
-   method:'POST',headers:{Origin:origin},body:JSON.stringify({language:'hi',confirm:'CALL_ONE_CONSENTED_INTERNAL_SARVAM_KEYPAD'})
+   method:'POST',headers:{Origin:origin},body:JSON.stringify({language:'hi',confirm:whatsapp?'CALL_ONE_INTERNAL_WHATSAPP_WITH_CURRENT_PERMISSION':'CALL_ONE_CONSENTED_INTERNAL_SARVAM_KEYPAD'})
   }),configuration,admin,{now,fetcher});
   assert.equal((await start({...env,AR3D_SCRIPTED_PILOT_ENABLED:undefined})).status,503);
+  if(whatsapp)assert.equal((await start({...env,AR3D_PLIVO_WHATSAPP_CALLER_NUMBER:undefined})).status,409);
   assert.equal(dialCount,0);
   const started=await start();
   assert.equal(started.status,202,await started.clone().text());
@@ -81,7 +86,7 @@ test('verified internal pilot only: consent, fixed prompts, AI answers, and one 
   assert.equal(dialCount,1);
   const callback=(step,params={})=>handleScriptedPhoneCallback(signed(hook+'/'+step,{CallUUID:callId,...params}),env,{now,fetcher});
   assert.equal((await handleScriptedPhoneCallback(new Request(hook+'/answer'),env,{now,fetcher})).status,403);
-  const details={ALegRequestUUID:requestId,From:'918000000000',To:'919000000001',Direction:'outbound'};
+  const details={ALegRequestUUID:requestId,From:whatsapp?'919000000008':'918000000000',To:'919000000001',Direction:'outbound'};
   assert.equal((await callback('answer',{...details,To:'919000000009'})).status,403);
   const opening=await (await callback('answer',details)).text();
   assert.match(opening,/GetDigits.*opening\.mp3/);

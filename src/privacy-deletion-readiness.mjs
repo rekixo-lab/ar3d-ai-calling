@@ -72,12 +72,14 @@ export async function handleDeletionReadiness(req,env,user){
   ]);
   for(const [i,name] of ['scriptedCallResults','verifiedProviderCosts','directLeadAuditEvents','phoneSessions'].entries())dependentRecords[name]=Number(related[i]?.n||0);
   if(tenant.storage_mode==='shared'){
-   const [admissions,receipts,closures,dispatches]=await Promise.all([
+   const [admissions,receipts,closures,dispatches,notices]=await Promise.all([
     db.prepare('SELECT COUNT(*) AS n FROM industry_funded_admissions WHERE tenant_id=? AND lead_id=?').bind(tid,leadId).first(),
     db.prepare('SELECT COUNT(*) AS n FROM verified_industry_call_costs r JOIN industry_call_jobs j ON j.tenant_id=r.tenant_id AND j.id=r.job_id WHERE j.tenant_id=? AND j.lead_id=?').bind(tid,leadId).first(),
     db.prepare('SELECT COUNT(*) AS n FROM industry_terminal_closures r JOIN industry_call_jobs j ON j.tenant_id=r.tenant_id AND j.id=r.job_id WHERE j.tenant_id=? AND j.lead_id=?').bind(tid,leadId).first(),
-    db.prepare('SELECT COUNT(*) AS n FROM industry_dispatch_releases r JOIN industry_call_jobs j ON j.tenant_id=r.tenant_id AND j.id=r.job_id WHERE j.tenant_id=? AND j.lead_id=?').bind(tid,leadId).first()
+    db.prepare('SELECT COUNT(*) AS n FROM industry_dispatch_releases r JOIN industry_call_jobs j ON j.tenant_id=r.tenant_id AND j.id=r.job_id WHERE j.tenant_id=? AND j.lead_id=?').bind(tid,leadId).first(),
+    db.prepare('SELECT COUNT(*) AS n FROM industry_notice_jobs WHERE tenant_id=? AND lead_id=?').bind(tid,leadId).first()
    ]);
+   dependentRecords.industryNoticeJobs=Number(notices?.n||0);
    dependentRecords.industryFundedAdmissions=Number(admissions?.n||0);
    dependentRecords.verifiedIndustryCosts=Number(receipts?.n||0);
    dependentRecords.industryTerminalClosures=Number(closures?.n||0);
