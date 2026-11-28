@@ -133,8 +133,8 @@ export async function recoverNoticeJob(env,{tenantId:tid,jobId:id,now=Date.now()
  if(!j)return state('not_found');
  if(j.state==='receipt')return closeReceipt(env,j,now);
  if(j.state==='no_post')return releaseUnused(env,j,now);
- if(j.state==='authorized'&&(j.release_expires_at<=now+115000||j.revoked_at!==null)){
-  const r=await db.prepare("UPDATE industry_notice_jobs SET state='revoked',updated_at=? WHERE tenant_id=? AND id=? AND state='authorized' AND updated_at=?").bind(now,tid,id,j.updated_at).run();return state(r.meta.changes===1?'revoked':'locked');
+ if((j.state==='reviewed'&&j.review_expires_at<=now)||(j.state==='authorized'&&(j.release_expires_at<=now+115000||j.revoked_at!==null))){
+  const r=await db.prepare("UPDATE industry_notice_jobs SET state='revoked',updated_at=? WHERE tenant_id=? AND id=? AND state=? AND updated_at=?").bind(Math.max(now,j.updated_at),tid,id,j.state,j.updated_at).run();return state(r.meta.changes===1?'revoked':'locked');
  }
  if(j.state==='funded'&&(j.release_expires_at<=now+115000||j.revoked_at!==null))return noPost(env,j,now);
  if(j.state==='claimed'&&j.updated_at<=now-120000)return noPost(env,j,now);
@@ -161,12 +161,12 @@ export async function runIndustryNoticeTick(baseEnv,{now=Date.now(),apiFetch=fet
  let used=0;const take=n=>{if(used+n>maxQueries)throw Error('notice_query_budget');used+=n};
  const wrap=db=>({prepare(sql){const bound=s=>({bind(...args){return bound(s.bind(...args))},async first(...args){take(1);return s.first(...args)},async all(...args){take(1);return s.all(...args)},async run(...args){take(1);return s.run(...args)},inner:s});return bound(db.prepare(sql))},async batch(rows){take(rows.length);return db.batch(rows.map(x=>x.inner))}});
  const env={...baseEnv,CRM_DB:wrap(baseEnv.CRM_DB),CONTROL_DB:wrap(baseEnv.CONTROL_DB)},db=env.CRM_DB;
- const mode=enabled(env)?lane??['fund','dial','recover'][Math.floor(now/240000)%3]:'recover';
+ const mode=enabled(env)&&reference(env.AR3D_NOTICE_CARRIER_APPROVAL_REFERENCE,10)?lane??['fund','dial','recover'][Math.floor(now/240000)%3]:'recover';
  if(!['fund','dial','recover'].includes(mode))return null;
- const predicate=mode==='fund'?"state='authorized' AND revoked_at IS NULL AND release_expires_at>?":mode==='dial'?"state='funded' AND revoked_at IS NULL AND release_expires_at>?":"state IN('receipt','no_post','posting','submitted','unknown') OR (state IN('authorized','funded') AND (release_expires_at<=? OR revoked_at IS NOT NULL)) OR (state IN('claiming','claimed') AND updated_at<=?)";
+ const predicate=mode==='fund'?"state='authorized' AND revoked_at IS NULL AND release_expires_at>?":mode==='dial'?"state='funded' AND revoked_at IS NULL AND release_expires_at>?":"state IN('receipt','no_post','posting','submitted','unknown') OR (state IN('authorized','funded') AND (release_expires_at<=? OR revoked_at IS NOT NULL)) OR (state IN('claiming','claimed') AND updated_at<=?) OR (state='reviewed' AND review_expires_at<=?)";
  let selected=false;
  try{
-  const args=mode==='recover'?[now+115000,now-120000]:[now+115000];
+  const args=mode==='recover'?[now+115000,now-120000,now]:[now+115000];
   const count=(await db.prepare('SELECT COUNT(*) AS n FROM industry_notice_jobs WHERE '+predicate).bind(...args).first())?.n;
   if(!Number.isSafeInteger(count)||count<1)return null;
   const row=await db.prepare('SELECT tenant_id,id FROM industry_notice_jobs WHERE '+predicate+' ORDER BY tenant_id,id LIMIT 1 OFFSET ?').bind(...args,Math.floor(now/720000)%count).first();

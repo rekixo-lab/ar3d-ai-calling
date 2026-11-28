@@ -74,3 +74,30 @@ test('reviewed general notice shares wallet, submits once, handles signed consen
   assert.equal(f.c.db.prepare('SELECT charged_seconds FROM tenant_minute_holds WHERE job_id=?').get(id).charged_seconds,60);
  }finally{f.close()}
 });
+
+import {handleIndustryNoticeJobs} from '../src/industry-notice-routes.mjs';
+import {admin} from './helpers/calling-fixture.mjs';
+const noticeReq=d=>new Request('https://app.example.invalid/v1/human/industry-notice-jobs',{method:'POST',headers:{Origin:'https://app.example.invalid','Content-Type':'application/json'},body:JSON.stringify({tenantId:tid,...d})});
+test('expired unstarted reviews can be retired without a hold or provider access',async()=>{
+ const f=fixture();try{
+  await seed(f);
+  const result=await recoverNoticeJob(f.env,{tenantId:tid,jobId:id,now:now+3600001,fetcher:async()=>assert.fail('expired review must not call provider')});
+  assert.equal(result.state,'revoked');
+  assert.equal(f.r.db.prepare('SELECT state FROM industry_notice_jobs WHERE id=?').get(id).state,'revoked');
+  assert.equal(f.c.db.prepare('SELECT COUNT(*) AS n FROM tenant_minute_holds WHERE job_id=?').get(id).n,0);
+ }finally{f.close()}
+});
+test('provider authorization is checked against the supplied exact review reference before snapshot lookup',async()=>{
+ const f=fixture();try{
+  configureScriptedCampaign(f);
+  f.env.AR3D_NOTICE_CARRIER_APPROVAL_REFERENCE='provider-reviewed';
+  const body={action:'review',snapshotId:snapshot,leadIds:[lead],consentReference:'consent-ref',dndReference:'dnd-ref',providerReference:'provider-reviewed',privateSpeechReference:null,deliveryMode:'general',reviewExpiresAt:now+3600000,confirmReviewedRecipients:true};
+  const response=await handleIndustryNoticeJobs(noticeReq(body),f.env,admin,{now});
+  assert.equal(response.status,409);
+  assert.equal((await response.json()).error,'reviewed_current_announcement_snapshot_required');
+  const denied=await handleIndustryNoticeJobs(noticeReq({...body,providerReference:'wrong-provider-reference'}),f.env,admin,{now});
+  assert.equal(denied.status,409);
+  assert.equal((await denied.json()).error,'notice_provider_or_private_setup_required');
+  assert.equal(f.r.db.prepare('SELECT COUNT(*) AS n FROM industry_notice_jobs').get().n,0);
+ }finally{f.close()}
+});

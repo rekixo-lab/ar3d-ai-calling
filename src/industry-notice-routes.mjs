@@ -45,34 +45,43 @@ export async function handleIndustryNoticeJobs(req,env,user,{now=Date.now()}={})
   if(d.action==='review'){
    if(!admin)return err('independent_super_admin_required',403);
    if(!exact(d,reviewFields)||!uuid(d.snapshotId)||!ids(d.leadIds)||d.confirmReviewedRecipients!==true||!reference(d.consentReference)||!reference(d.dndReference)||!reference(d.providerReference,10)||!['general','verified'].includes(d.deliveryMode)||!Number.isSafeInteger(d.reviewExpiresAt)||d.reviewExpiresAt<=now+120000||d.reviewExpiresAt>now+7*86400000|| (d.deliveryMode==='general'?d.privateSpeechReference!==null:!reference(d.privateSpeechReference,10)))return err('invalid_notice_review');
-   if(!noticeDeliveryAvailable(env,{tenant_id:tid,delivery_mode:d.deliveryMode,private_speech_ref:d.privateSpeechReference}))return err('private_notice_setup_required',409);
+   if(!noticeDeliveryAvailable(env,{tenant_id:tid,delivery_mode:d.deliveryMode,provider_ref:d.providerReference.trim(),private_speech_ref:d.privateSpeechReference?.trim()??null}))return err('notice_provider_or_private_setup_required',409);
    const frozen=await readNoticeSnapshot(c,tid,d.snapshotId,{latest:true});
    if(!frozen||frozen.row.created_by===user.id)return err('reviewed_current_announcement_snapshot_required',409);
+   // One read for the full batch. Each exact row is then guarded by the
+   // immutable insert trigger, which rechecks recipient version and suppression.
+   const found=await db.prepare("SELECT id,mobile_e164,updated_at FROM leads l WHERE tenant_id=? AND id IN(SELECT value FROM json_each(?)) AND consent_status<>'denied' AND dnd_status<>'blocked' AND NOT EXISTS(SELECT 1 FROM lead_opt_out_events o WHERE o.tenant_id=l.tenant_id AND o.lead_id=l.id)").bind(tid,JSON.stringify(d.leadIds)).all();
+   const recipients=new Map(found.results.map(l=>[l.id,l]));
+   if(recipients.size!==d.leadIds.length)return err('recipient_unavailable',409);
    const stamp=clock(),rows=[];
+   if(d.reviewExpiresAt<=stamp+120000)return err('invalid_notice_review',409);
    for(const leadId of d.leadIds){
-    const l=await db.prepare("SELECT mobile_e164,updated_at FROM leads l WHERE tenant_id=? AND id=? AND consent_status<>'denied' AND dnd_status<>'blocked' AND NOT EXISTS(SELECT 1 FROM lead_opt_out_events o WHERE o.tenant_id=l.tenant_id AND o.lead_id=l.id)").bind(tid,leadId).first();
+    const l=recipients.get(leadId);
     if(!l||!phone(l.mobile_e164))return err('recipient_unavailable',409);
     const j={tenant_id:tid,id:crypto.randomUUID(),lead_id:leadId,snapshot_id:d.snapshotId,graph_sha256:frozen.row.graph_sha256,template_id:frozen.row.template_id,language:frozen.language,delivery_mode:d.deliveryMode,destination:l.mobile_e164,lead_updated_at:l.updated_at,consent_ref:d.consentReference.trim(),dnd_ref:d.dndReference.trim(),provider_ref:d.providerReference.trim(),private_speech_ref:d.privateSpeechReference?.trim()??null,reviewed_by:user.id,reviewed_at:stamp,review_expires_at:d.reviewExpiresAt,updated_at:stamp};
     j.review_sha256=await reviewDigest(j);rows.push(j);
    }
    if(!await currentSuperAdminMfa(c,user,clock()))return err('forbidden',403);
-   const results=await db.batch(rows.map(j=>{const keys=Object.keys(j);return db.prepare('INSERT INTO industry_notice_jobs('+keys.join(',')+') VALUES('+keys.map(()=>'?').join(',')+')').bind(...Object.values(j))}));
-   if(results.some(x=>x.meta.changes!==1))throw Error('notice_review_conflict');
+   // All keys are server-constructed. One statement makes the entire batch
+   // atomic and avoids D1's 100-bind and per-invocation statement ceilings.
+   const keys=Object.keys(rows[0]);
+   const saved=await db.prepare('INSERT INTO industry_notice_jobs('+keys.join(',')+') SELECT '+keys.map(k=>"json_extract(value,'$."+k+"')").join(',')+' FROM json_each(?)').bind(JSON.stringify(rows)).run();
+   if(saved.meta.changes!==rows.length)throw Error('notice_review_conflict');
    return reply({reviewed:rows.length,jobIds:rows.map(x=>x.id),callsStarted:0},201);
   }
   if(d.action==='start'){
    if(!exact(d,['tenantId','action','jobIds','confirmDialing'])||!ids(d.jobIds)||d.confirmDialing!==true)return err('invalid_notice_release');
    const ready=await noticeDispatchConfig(env,{now});if(!ready)return err('provider_funding_or_settlement_required',409);
-   const rows=await db.prepare("SELECT * FROM industry_notice_jobs WHERE tenant_id=? AND id IN("+d.jobIds.map(()=>'?').join(',')+")").bind(tid,...d.jobIds).all();
+   const jobIds=JSON.stringify(d.jobIds);
+   const rows=await db.prepare("SELECT * FROM industry_notice_jobs WHERE tenant_id=? AND id IN(SELECT value FROM json_each(?))").bind(tid,jobIds).all();
    const stamp=clock(),end=Math.min(stamp+55*60000,...rows.results.map(j=>j.review_expires_at));
    if(rows.results.length!==d.jobIds.length||end<=stamp+115000||rows.results.some(j=>j.state!=='reviewed'||j.revoked_at!==null||!noticeDeliveryAvailable(env,j)))return err('review_or_setup_changed',409);
    for(const j of rows.results){if(await reviewDigest(j)!==j.review_sha256)return err('review_or_setup_changed',409)}
    if(!await currentIndustryDispatchAuthorizer(c,user,tid,clock()))return err('forbidden',403);
    // A single conditional UPDATE is all-or-none in the serialized shared CRM.
-   const list=d.jobIds.map(()=>'?').join(',');
-   const guard="tenant_id=? AND state='reviewed' AND revoked_at IS NULL AND review_expires_at>=? AND "+noticeEligibility;
-   const result=await db.prepare("UPDATE industry_notice_jobs SET state='authorized',actor_id=?,authorized_at=?,release_expires_at=?,updated_at=? WHERE "+guard+" AND id IN("+list+") AND (SELECT COUNT(*) FROM industry_notice_jobs WHERE "+guard+" AND id IN("+list+"))=?")
-    .bind(user.id,stamp,end,stamp,tid,end,...d.jobIds,tid,end,...d.jobIds,d.jobIds.length).run();
+   const guard="tenant_id=? AND state='reviewed' AND revoked_at IS NULL AND review_expires_at>=? AND "+noticeEligibility+" AND id IN(SELECT value FROM json_each(?))";
+   const result=await db.prepare("UPDATE industry_notice_jobs SET state='authorized',actor_id=?,authorized_at=?,release_expires_at=?,updated_at=? WHERE "+guard+" AND (SELECT COUNT(*) FROM industry_notice_jobs WHERE "+guard+")=?")
+    .bind(user.id,stamp,end,stamp,tid,end,jobIds,tid,end,jobIds,d.jobIds.length).run();
    if(result.meta.changes!==d.jobIds.length)return err('review_or_recipient_changed',409);
    return reply({authorized:d.jobIds.length,maxReservedSeconds:d.jobIds.length*NOTICE_SECONDS,callsStarted:0,releaseExpiresAt:end},202);
   }

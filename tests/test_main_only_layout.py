@@ -21,12 +21,12 @@ class MainOnlyDeploymentLayoutTests(unittest.TestCase):
         for operation in ("preflight", "initialize", "deploy"):
             self.assertIn(" - " + operation, source)
 
-    def test_main_scripts_and_docs_only(self):
+    def test_main_scripts_and_production_only(self):
         scripts = json.loads((ROOT / "package.json").read_text())["scripts"]
         self.assertIn("smoke:main", scripts)
         self.assertIn("test", scripts)
         self.assertTrue((ROOT / "scripts/smoke-main.mjs").is_file())
-        self.assertTrue((ROOT / "docs/MAIN-DEPLOYMENT.md").is_file())
+        self.assertTrue((ROOT / "scripts/main-cloudflare.mjs").is_file())
         self.assertTrue((ROOT / "wrangler.example.jsonc").is_file())
         for path in [
             ".github/workflows/deploy-staging.yml",

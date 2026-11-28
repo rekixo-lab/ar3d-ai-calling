@@ -65,13 +65,19 @@ export async function handleNoticeVoiceCallback(env,config,original,step,arg,p,{
   if(result.ok){text=result.speech;validUntil=result.validUntil}
  }
  const at=clock();
- if(!text||at>=validUntil||!await live('question',at)){
+ if(!text||at>=validUntil||!await live('question',at)||clock()>=validUntil){
   await c.prepare("UPDATE scripted_phone_pilots SET phase='needs_review' WHERE id=? AND phase='question' AND provider_call_id=? AND hangup_at IS NULL").bind(row.id,call).run();
   return end();
  }
  const issued=await c.prepare("UPDATE scripted_phone_pilots SET phase='completed' WHERE id=? AND phase='question' AND provider_call_id=? AND hangup_at IS NULL AND survey_json=?").bind(row.id,call,row.survey_json).run();
  // 'completed' here means XML issued, not evidence that the customer heard
  // it. The signed hangup and independent CDR remain necessary for billing.
- if(issued.meta.changes!==1||clock()>=validUntil||!await live('completed',clock())||clock()>=validUntil)return end();
+ if(issued.meta.changes!==1)return end();
+ if(clock()>=validUntil||!await live('completed',clock())||clock()>=validUntil){
+  // Do not report an announcement as issued if its final permission check
+  // failed. Never overwrite a simultaneous STOP or terminal hangup.
+  await c.prepare("UPDATE scripted_phone_pilots SET phase='needs_review' WHERE id=? AND phase='completed' AND provider_call_id=? AND hangup_at IS NULL").bind(row.id,call).run();
+  return end();
+ }
  return xml(speak(row.language,text)+'<Hangup/>');
 }

@@ -4,7 +4,7 @@ function industryAgentPanel(tenantId,content,role){
  const editable=role==='client_admin';
  const card=div('card',div('row between',title('My AI Agents'),
   node('span',{class:'badge pending',text:'Draft only · No calls'})),
-  node('p',{class:'note',text:'Choose an industry, build your AI instructions and save a draft. None of these agents is connected to live calling, Plivo, CRM outcomes or WhatsApp. Real Estate calling remains unchanged.'}));
+  node('p',{class:'note',text:'Choose an industry, build your AI instructions and save a draft. Reviewed announcement or School versions can be used in the separate production calling panels when their provider, recipient and wallet requirements are met. Saving a draft does not place calls.'}));
  const profileBox=div('card'),listBox=div('card'),editBox=div('card');
  content.append(card,profileBox,listBox,editBox);
  industryCampaignPanel(tenantId,content,{editable});

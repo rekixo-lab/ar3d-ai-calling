@@ -44,7 +44,7 @@ export function exactNoticeSession(j,row){
  if(!j||!row||row.id!==j.session_id||row.job_id!==j.id||row.tenant_id!==j.tenant_id||row.lead_id!==j.lead_id||row.destination!==j.destination||row.lead_updated_at!==j.lead_updated_at||row.actor_id!==j.actor_id||row.language!==j.language||row.rate_slot!==null||row.turn!==0)return false;
  try{
   const d=JSON.parse(row.survey_json),expected=noticeSessionDoc(j);
-  return JSON.stringify(d.notice)===JSON.stringify(expected.notice)&&d.phoneMeta?.mode===NOTICE_MODE&&d.phoneMeta?.dispatchVersion===1&&d.phoneMeta?.engine==='carrier_announcement';
+  return JSON.stringify(d.notice)===JSON.stringify(expected.notice)&&d.phoneMeta?.mode===NOTICE_MODE&&d.phoneMeta?.dispatchVersion===1&&d.phoneMeta?.engine==='carrier_announcement'&&d.phoneMeta?.costMeterVersion===1;
  }catch{return false}
 }
 // Recheck current recipient, active tenant, reviewer and operator role.
