@@ -3,6 +3,7 @@ import {CAMPAIGN_CRON,runScriptedCampaignCron,dispatchSettings} from './scripted
 import {runAutomaticMinuteSettlement,automaticMinuteSettlementApproved} from './plivo-cost-reconcile-routes.mjs';
 import {resolveFundingEnv} from './provider-funding.mjs';
 import {runIndustrySchoolTick} from './industry-school-dispatch.mjs';
+import {runIndustryNoticeTick} from './industry-notice-dispatch.mjs';
 
 export async function handleCallingCron(controller,env,{apiFetch=fetch,cdrFetch=fetch}={}){
  const cron=controller?.cron,now=controller?.scheduledTime??Date.now();
@@ -24,7 +25,9 @@ export async function handleCallingCron(controller,env,{apiFetch=fetch,cdrFetch=
  // recovery even with new School dispatch disabled.
  const industryMinute=Math.floor(now/60000)%2===1;
  if(industryMinute&&settings.queryBudget>=40){
-  const industry=await runIndustrySchoolTick(env,{now,apiFetch,cdrFetch,maxQueries:Math.min(950,settings.queryBudget-5)});
+  const runner=Math.floor(now/60000)%4===1?runIndustrySchoolTick:runIndustryNoticeTick;
+  const lane=runner===runIndustrySchoolTick?['fund','dial','recover'][Math.floor(now/240000)%3]:null;
+  const industry=await runner(env,{now,apiFetch,cdrFetch,maxQueries:Math.min(950,settings.queryBudget-5),lane,rotationIndex:Math.floor(now/720000)});
   if(industry)return {processed:0,dialed:industry.state==='submitted'?1:0,industry};
  }
  // A matched CDR can use ten statements including an idempotent/racing

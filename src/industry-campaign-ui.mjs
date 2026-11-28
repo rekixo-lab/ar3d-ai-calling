@@ -1,6 +1,64 @@
 export const industryCampaignJs=String.raw`
+
+// Separate announcement panel for all four notice templates.
+function industryNoticePanel(tenantId,content,{admin=false,editable=false}={}){
+ const base='/v1/human/industry-notice-jobs',query='?tenantId='+encodeURIComponent(tenantId);
+ const card=div('card',title('Appointment, Finance, Banking & Insurance calls','h3'),
+  node('p',{class:'note',text:'Start independently reviewed, consented notices. Private information requires a current authenticated recipient proof and approved data service. General notices never speak private data.'}));
+ const body=div('stack'),status=node('p',{class:'muted',role:'status'}),jobs=div('stack'),leads=div('stack'),snapshot=node('select',{class:'field','aria-label':'Reviewed announcement version'});
+ const search=input('noticeLeadSearch','search','Find existing CRM contacts'),consent=input('noticeConsentRef','text','Consent evidence reference'),dnd=input('noticeDndRef','text','DND check reference'),provider=input('noticeProviderRef','text','Carrier authorization reference'),privateRef=input('noticePrivateRef','text','Private speech authorization reference');
+ const delivery=node('select',{class:'field','aria-label':'Notice delivery mode'},[node('option',{value:'general',text:'General notice (no private fields)'}),node('option',{value:'verified',text:'Verified customer-specific notice'})]);
+ const expiry=input('noticeExpiry','datetime-local','Review expiry');
+ let offset=0,seq=0,busy=false,ready=false,privateReady=false,selectedLeads=new Set(),selectedJobs=new Set();
+ const work=async fn=>{if(busy)return;busy=true;try{await fn()}catch(e){asError(e)}finally{busy=false}};
+ const load=async()=>{
+  const stamp=++seq;const data=await api(base+query+'&offset='+offset+'&q='+encodeURIComponent(search.value.trim()));if(stamp!==seq||!card.isConnected)return;
+  ready=data.carrierReady;privateReady=data.privateSpeechConfigured;
+  status.textContent=(ready?'Calling provider ready':'Calling setup required')+' · '+(data.carrierApprovalConfigured?'Carrier authorization configured':'Carrier authorization required')+' · '+(privateReady?'Private notice connectors configured (unverified)':'Private notice setup required')+' · '+(data.callingWindowOpen?'Calling hours open':'Calling hours closed');
+  const prior=snapshot.value;
+  snapshot.replaceChildren(node('option',{value:'',text:'Choose reviewed announcement snapshot'}),...(data.snapshots||[]).map(x=>node('option',{value:x.id,text:x.templateId+' · '+x.digest.slice(0,10)})));
+  if((data.snapshots||[]).some(x=>x.id===prior))snapshot.value=prior;
+  selectedLeads=new Set();selectedJobs=new Set();leads.replaceChildren();jobs.replaceChildren(title('Reviewed announcement jobs','h4'));
+  for(const l of data.leads||[]){const check=node('input',{type:'checkbox'});check.addEventListener('change',()=>check.checked?selectedLeads.add(l.id):selectedLeads.delete(l.id));leads.append(node('label',{class:'row'},[check,node('span',{text:(l.name||'CRM contact')+' · ••••'+l.last4})]));}
+  const picks=[];
+  for(const j of data.jobs||[]){
+   const row=div('card',node('p',{text:j.templateId+' · ••••'+j.destinationLast4+' · '+j.state.replaceAll('_',' ')}),node('p',{class:'muted',text:j.deliveryMode+' · '+(j.result||'No final result')+(j.chargedSeconds==null?'':' · billed '+j.chargedSeconds+' sec')}));
+   if((admin||editable)&&j.state==='reviewed'&&!j.revoked&&j.reviewExpiresAt>Date.now()+115000&&(j.deliveryMode==='general'||privateReady)){
+    const pick=node('input',{type:'checkbox'});pick.addEventListener('change',()=>pick.checked?selectedJobs.add(j.id):selectedJobs.delete(j.id));picks.push({pick,id:j.id});row.append(node('label',{class:'row'},[pick,node('span',{text:'Select for calling'})]));
+   }
+   if((admin||editable)&&!j.revoked&&['reviewed','authorized','claiming','funded','claimed','posting','submitted','unknown'].includes(j.state))row.append(btn('Revoke future notice delivery',()=>work(async()=>{if(!confirm('Revoke this notice authorization? Already placed calls may still incur charges.'))return;await api(base,'POST',{tenantId,action:'revoke',jobId:j.id});await load()}),true));
+   jobs.append(row);
+  }
+  if(admin||editable){
+   const start=btn('Start selected announcements',()=>work(async()=>{
+    if(!ready||!selectedJobs.size)throw Error('Select reviewed jobs with ready provider setup.');
+    if(!confirm('Authorize '+selectedJobs.size+' real outbound notices? Up to '+(selectedJobs.size*data.maxSeconds/60)+' wallet minutes may be reserved. Completion depends on capacity and the review window.'))return;
+    const result=await api(base,'POST',{tenantId,action:'start',jobIds:[...selectedJobs],confirmDialing:true});notice(result.authorized+' notices queued.');await load();
+   }));
+   start.disabled=!ready||!picks.length;
+   jobs.append(div('formrow',btn('Select eligible page',()=>{for(const x of picks){x.pick.checked=true;selectedJobs.add(x.id)}},true),btn('Clear selection',()=>{for(const x of picks)x.pick.checked=false;selectedJobs.clear()},true),start));
+  }
+  const prev=btn('Previous',()=>work(async()=>{offset=Math.max(0,offset-50);await load()}),true),next=btn('Next',()=>work(async()=>{offset+=50;await load()}),true);prev.disabled=offset===0;next.disabled=!data.hasMore;jobs.append(div('formrow',prev,next));
+ };
+ if(admin){
+  for(const field of [consent,dnd,provider,privateRef])field.maxLength=160;search.maxLength=80;
+  const date=new Date(Date.now()+86400000);expiry.value=new Date(date.getTime()-date.getTimezoneOffset()*60000).toISOString().slice(0,16);
+  const review=btn('Review selected recipients',()=>work(async()=>{
+   if(!snapshot.value||!selectedLeads.size||!consent.value.trim()||!dnd.value.trim()||provider.value.trim().length<10)throw Error('Select a snapshot, recipients and reviewed evidence references.');
+   if(delivery.value==='verified'&&!privateReady)throw Error('Private notice connectors and approval required.');
+   const time=Date.parse(expiry.value);if(!Number.isFinite(time))throw Error('Enter review expiry.');
+   if(!confirm('Confirm the exact recipients have current purpose-specific consent, DND clearance and provider authorization. This only reviews jobs, not starts calls.'))return;
+   const r=await api(base,'POST',{tenantId,action:'review',snapshotId:snapshot.value,leadIds:[...selectedLeads],consentReference:consent.value.trim(),dndReference:dnd.value.trim(),providerReference:provider.value.trim(),privateSpeechReference:delivery.value==='verified'?privateRef.value.trim():null,deliveryMode:delivery.value,reviewExpiresAt:time,confirmReviewedRecipients:true});notice(r.reviewed+' recipients reviewed.');offset=0;await load();
+  }));
+  body.append(lab('Reviewed announcement version',snapshot),lab('Delivery mode',delivery),lab('Find eligible contacts',search),btn('Search contacts',()=>work(load),true),leads,lab('Consent evidence',consent),lab('DND evidence',dnd),lab('Provider authorization',provider),lab('Private speech authorization (verified mode only)',privateRef),lab('Review expires',expiry),review);
+ }
+ body.append(status,jobs,btn('Refresh announcements',()=>work(load),true));body.hidden=true;
+ card.append(btn('Open announcement calling',()=>work(async()=>{body.hidden=false;await load()}),true),body);content.append(card);
+}
+
 // School preparation and separately authorized production dispatch.
 function industryCampaignPanel(tenantId,content,{admin=false,editable=false}={}){
+ industryNoticePanel(tenantId,content,{admin,editable});
  const card=div('card',title('School production campaigns','h3'),
   node('p',{class:'note',text:'Select a reviewed frozen School agent, add existing CRM contacts, and review each guardian’s permission for School Admission. These records do not start calls or reserve credits.'}));
  content.append(card);

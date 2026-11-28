@@ -1,6 +1,8 @@
 // Shared phone questionnaire with a separately approved internal pilot and customer campaigns.
 import {signalProviderThrottle} from './capacity-signals.mjs';
 import {isSchoolVoiceSession,serveSchoolVoiceAudio,handleSchoolVoiceCallback} from './industry-school-voice-callback.mjs';
+import {isNoticeSession} from './industry-notice-common.mjs';
+import {handleNoticeVoiceCallback} from './industry-notice-voice.mjs';
 import {resolveCrmDb,parseJsonBody,sha256hex} from './core.mjs';
 import {mutationOriginAllowed} from './human-auth.mjs';
 import {beginFixedVoicePreview,advanceFixedVoicePreview,advanceContextualVoice,advanceInternalVoice} from './fixed-voice-turns.mjs';
@@ -886,7 +888,7 @@ export async function handleScriptedPhoneCallback(req,env,{now=Date.now(),fetche
    const row=await control.prepare('SELECT language,tenant_id,job_id,survey_json FROM scripted_phone_pilots WHERE id=? AND expires_at>? AND provider_account_id=? AND hangup_at IS NULL')
     .bind(id,now,config.authId).first();
    if(row?.job_id&&(env.AR3D_SCRIPTED_CAMPAIGNS_ENABLED!=='enabled'||env.AR3D_CAMPAIGN_SARVAM_DISCLOSURE!=='approved'))return error('not_found',404);
-   const audio=row&&!isSchoolVoiceSession(row)?await env.RECORDINGS.get(promptKey(row.language,arg.slice(0,-4),row.job_id?row.tenant_id:null)):null;
+   const audio=row&&!isSchoolVoiceSession(row)&&!isNoticeSession(row)?await env.RECORDINGS.get(promptKey(row.language,arg.slice(0,-4),row.job_id?row.tenant_id:null)):null;
    if(!audio||audio.size<1||audio.size>ANSWER_MAX_BYTES)return error('not_found',404);
    return new Response(audio.body,{headers:{...headers,'Content-Type':'audio/mpeg','Content-Length':String(audio.size)}});
   }
@@ -896,6 +898,10 @@ export async function handleScriptedPhoneCallback(req,env,{now=Date.now(),fetche
   if(!ID.test(call||''))return error('invalid_call_reference',400);
   const row=await control.prepare('SELECT * FROM scripted_phone_pilots WHERE id=?').bind(id).first();
   if(!row||row.provider_account_id!==config.authId||row.caller!==config.caller)return end();
+  if(isNoticeSession(row)){
+   if(row.expires_at<=now&&(step!=='hangup'||now-row.expires_at>86400000))return end();
+   return await handleNoticeVoiceCallback(env,config,row,step,arg,params,{now,end,xml,speak:campaignSpeak,actionUrl:(id,s)=>escapeXml(callback(config,id,s)),finishOptOut:(r,t)=>finishCampaignOptOut(env,r,t)});
+  }
   if(isSchoolVoiceSession(row)){
    if(row.expires_at<=now&&(step!=='hangup'||now-row.expires_at>86400000))return end();
    return await handleSchoolVoiceCallback(env,config,row,step,arg,params,{now,fetcher,finishOptOut:finishCampaignOptOut});

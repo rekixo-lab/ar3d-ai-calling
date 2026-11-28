@@ -139,7 +139,7 @@ export async function runAutomaticMinuteSettlement(env,{now=Date.now(),fetcher=f
  if(!Number.isInteger(maxCalls)||maxCalls<1||maxCalls>3)throw Error('invalid settlement limit');
  env=await resolveFundingEnv(env);
  if(!automaticMinuteSettlementApproved(env))return {attempted:0};
- const eligible=" FROM tenant_minute_holds h JOIN scripted_phone_pilots p ON p.tenant_id=h.tenant_id AND p.job_id=h.job_id WHERE h.state='held' AND p.hangup_at IS NOT NULL AND p.hangup_at<=? AND p.provider_call_id IS NOT NULL AND p.phase IN ('completed','declined','ended','needs_review') AND COALESCE(CASE WHEN json_valid(p.survey_json) THEN json_extract(p.survey_json,'$.phoneMeta.mode') END,'')<>'industry_school_v1'";
+ const eligible=" FROM tenant_minute_holds h JOIN scripted_phone_pilots p ON p.tenant_id=h.tenant_id AND p.job_id=h.job_id WHERE h.state='held' AND p.hangup_at IS NOT NULL AND p.hangup_at<=? AND p.provider_call_id IS NOT NULL AND p.phase IN ('completed','declined','ended','needs_review') AND COALESCE(CASE WHEN json_valid(p.survey_json) THEN json_extract(p.survey_json,'$.phoneMeta.mode') END,'') NOT IN('industry_school_v1','industry_notice_v1')";
  const cutoff=now-60000;
  const count=(await env.CONTROL_DB.prepare('SELECT COUNT(*) AS total'+eligible).bind(cutoff).first())?.total;
  if(!Number.isSafeInteger(count)||count<0)throw Error('invalid settlement queue');

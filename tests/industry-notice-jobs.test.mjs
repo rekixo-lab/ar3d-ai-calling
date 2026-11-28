@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {fixture,tid,lead,now,at} from './helpers/calling-fixture.mjs';
+import {fixture,configureScriptedCampaign,tid,lead,now,at} from './helpers/calling-fixture.mjs';
 import {reviewDigest,noticeSessionDoc,exactNoticeSession} from '../src/industry-notice-common.mjs';
 const id='77777777-7777-4777-8777-777777777777',snapshot='88888888-8888-4888-8888-888888888888';
 async function seed(f,template='finance_due_notice_v1'){
@@ -39,5 +39,100 @@ test('notice claims are one-use and the exact session contains no private record
   assert.equal(exactNoticeSession(row,p),true);
   assert.equal(exactNoticeSession(row,{...p,tenant_id:snapshot}),false);
   assert.ok(!JSON.stringify(doc).includes('amountPaise'));
+ }finally{f.close()}
+});
+
+import {fundNoticeJob,dispatchNoticeJob,recoverNoticeJob} from '../src/industry-notice-dispatch.mjs';
+import {handleScriptedPhoneCallback} from '../src/scripted-phone-pilot.mjs';
+import {createHmac} from 'node:crypto';
+test('reviewed general notice shares wallet, submits once, handles signed consent and settles exact CDR',async()=>{
+ const f=fixture();try{
+  configureScriptedCampaign(f);
+  Object.assign(f.env,{AR3D_AUTO_CDR_SETTLEMENT:'approved',AR3D_NOTICE_CARRIER_APPROVAL_REFERENCE:'provider-reviewed'});
+  await seed(f);
+  f.r.db.prepare("UPDATE industry_notice_jobs SET state='authorized',actor_id='client',authorized_at=?,release_expires_at=?,updated_at=? WHERE id=?").run(now+1,now+1800000,now+1,id);
+  const scope={tenantId:tid,jobId:id,now:now+1000};
+  const funded=await fundNoticeJob(f.env,scope);assert.equal(funded.state,'funded',JSON.stringify(funded));
+  let posts=0;
+  const dial=await dispatchNoticeJob(f.env,{...scope,now:now+2000,fetcher:async()=>{posts++;return Response.json({request_uuid:'synthetic-notice-request'},{status:202})}});
+  assert.equal(dial.state,'submitted',JSON.stringify(dial));assert.equal(posts,1);
+  const j=f.r.db.prepare('SELECT * FROM industry_notice_jobs WHERE id=?').get(id);
+  const call='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+  const signed=(step,extra={})=>{
+   const u=new URL('https://app.example.invalid/v1/provider/plivo/scripted-pilot/'+j.session_id+'/'+step);
+   for(const [k,v] of Object.entries({CallUUID:call,RequestUUID:'synthetic-notice-request',Direction:'outbound',From:'918000000000',To:'919000000001',...extra}))u.searchParams.set(k,v);
+   const nonce='synthetic-notice-nonce',pairs=[...u.searchParams].sort(([a],[b])=>a<b?-1:a>b?1:0);
+   const sig=createHmac('sha256',f.env.PLIVO_AUTH_TOKEN).update(u.origin+u.pathname+'?'+pairs.map(([k,v])=>k+'='+v).join('&')+'.'+nonce).digest('base64');
+   return new Request(u,{headers:{'X-Plivo-Signature-V3':sig,'X-Plivo-Signature-V3-Nonce':nonce}});
+  };
+  const answer=await handleScriptedPhoneCallback(signed('answer'),f.env,{now:now+3000});assert.match(await answer.text(),/GetDigits/);
+  const consent=await handleScriptedPhoneCallback(signed('notice-consent',{Digits:'1'}),f.env,{now:now+4000});assert.match(await consent.text(),/<Speak/);
+  const repeat=await handleScriptedPhoneCallback(signed('notice-consent',{Digits:'1'}),f.env,{now:now+5000});assert.doesNotMatch(await repeat.text(),/<Speak/);
+  const ended=await handleScriptedPhoneCallback(signed('hangup',{Duration:'35'}),f.env,{now:now+40000});assert.equal(ended.status,204);
+  const settled=await recoverNoticeJob(f.env,{...scope,now:now+110000,fetcher:async()=>Response.json({call_uuid:call,call_direction:'outbound',from_number:'918000000000',to_number:'919000000001',billed_duration:60,call_duration:35,total_amount:'0.02'})});
+  assert.equal(settled.state,'settled',JSON.stringify(settled));
+  assert.equal(f.c.db.prepare('SELECT charged_seconds FROM tenant_minute_holds WHERE job_id=?').get(id).charged_seconds,60);
+ }finally{f.close()}
+});
+
+import {handleIndustryNoticeJobs} from '../src/industry-notice-routes.mjs';
+import {admin} from './helpers/calling-fixture.mjs';
+const noticeReq=d=>new Request('https://app.example.invalid/v1/human/industry-notice-jobs',{method:'POST',headers:{Origin:'https://app.example.invalid','Content-Type':'application/json'},body:JSON.stringify({tenantId:tid,...d})});
+test('expired unstarted reviews can be retired without a hold or provider access',async()=>{
+ const f=fixture();try{
+  await seed(f);
+  const result=await recoverNoticeJob(f.env,{tenantId:tid,jobId:id,now:now+3600001,fetcher:async()=>assert.fail('expired review must not call provider')});
+  assert.equal(result.state,'revoked');
+  assert.equal(f.r.db.prepare('SELECT state FROM industry_notice_jobs WHERE id=?').get(id).state,'revoked');
+  assert.equal(f.c.db.prepare('SELECT COUNT(*) AS n FROM tenant_minute_holds WHERE job_id=?').get(id).n,0);
+ }finally{f.close()}
+});
+test('provider authorization is checked against the supplied exact review reference before snapshot lookup',async()=>{
+ const f=fixture();try{
+  configureScriptedCampaign(f);
+  f.env.AR3D_NOTICE_CARRIER_APPROVAL_REFERENCE='provider-reviewed';
+  const body={action:'review',snapshotId:snapshot,leadIds:[lead],consentReference:'consent-ref',dndReference:'dnd-ref',providerReference:'provider-reviewed',privateSpeechReference:null,deliveryMode:'general',reviewExpiresAt:now+3600000,confirmReviewedRecipients:true};
+  const response=await handleIndustryNoticeJobs(noticeReq(body),f.env,admin,{now});
+  assert.equal(response.status,409);
+  assert.equal((await response.json()).error,'reviewed_current_announcement_snapshot_required');
+  const denied=await handleIndustryNoticeJobs(noticeReq({...body,providerReference:'wrong-provider-reference'}),f.env,admin,{now});
+  assert.equal(denied.status,409);
+  assert.equal((await denied.json()).error,'notice_provider_or_private_setup_required');
+  assert.equal(f.r.db.prepare('SELECT COUNT(*) AS n FROM industry_notice_jobs').get().n,0);
+ }finally{f.close()}
+});
+
+import {handleIndustryAgentRequest} from '../src/industry-agent-routes.mjs';
+import {handleIndustryFlowSnapshots} from '../src/industry-flow-snapshots.mjs';
+import {defaultIndustryAgentDraft} from '../src/industry-template-catalog.mjs';
+test('real review and release APIs atomically authorize all 50 reviewed recipients without reserving credits',async()=>{
+ const f=fixture();try{
+  configureScriptedCampaign(f);
+  Object.assign(f.env,{AR3D_AUTO_CDR_SETTLEMENT:'approved',AR3D_NOTICE_CARRIER_APPROVAL_REFERENCE:'provider-reviewed'});
+  const token='b'.repeat(64),actor={id:'client',globalRole:'user',token_hash:token};
+  f.c.db.prepare('INSERT INTO human_sessions(token_hash,user_id,created_at,expires_at) VALUES(?,?,?,?)').run(token,actor.id,at,now+86400000);
+  const post=(path,body)=>new Request('https://app.example.invalid/v1/human/'+path,{method:'POST',headers:{Origin:'https://app.example.invalid','Content-Type':'application/json'},body:JSON.stringify({tenantId:tid,...body})});
+  const config={...defaultIndustryAgentDraft('finance_due_notice_v1'),language:'en'};
+  const created=await handleIndustryAgentRequest(post('ai-flows',{config}),f.env,actor,{now});assert.equal(created.status,201,await created.clone().text());
+  const flowId=(await created.json()).draft.id;
+  const frozen=await handleIndustryFlowSnapshots(post('ai-flow-snapshots',{flowId,baseRevision:1}),f.env,actor,{now});assert.equal(frozen.status,201,await frozen.clone().text());
+  const snapshotId=(await frozen.json()).snapshot.id;
+  const reviewed=await handleIndustryFlowSnapshots(post('ai-flow-snapshots/'+snapshotId+'/review',{decision:'simulation_reviewed',reason:'Synthetic independent review',acknowledgeSimulationOnly:true}),f.env,admin,{now});assert.ok(reviewed.ok,await reviewed.clone().text());
+  const leadIds=[lead];
+  for(let i=2;i<=50;i++){
+   const next=crypto.randomUUID();leadIds.push(next);
+   f.r.db.prepare("INSERT INTO leads(tenant_id,id,name,mobile_e164,source_type,created_at,updated_at) VALUES(?,?,?,?,'excel',?,?)").run(tid,next,'Synthetic recipient '+i,'+919000000'+String(i).padStart(3,'0'),at,at);
+  }
+  const review={action:'review',snapshotId,leadIds,consentReference:'synthetic-consent-reference',dndReference:'synthetic-DND-reference',providerReference:'provider-reviewed',privateSpeechReference:null,deliveryMode:'general',reviewExpiresAt:now+3600000,confirmReviewedRecipients:true};
+  const result=await handleIndustryNoticeJobs(noticeReq(review),f.env,admin,{now});assert.equal(result.status,201,await result.clone().text());
+  const ids=(await result.json()).jobIds;assert.equal(ids.length,50);
+  const start={action:'start',jobIds:ids,confirmDialing:true};
+  const wrong=await handleIndustryNoticeJobs(noticeReq({...start,jobIds:[...ids.slice(0,49),crypto.randomUUID()]}),f.env,actor,{now:now+1000});assert.equal(wrong.status,409);
+  assert.equal(f.r.db.prepare("SELECT COUNT(*) AS n FROM industry_notice_jobs WHERE state='reviewed'").get().n,50);
+  const released=await handleIndustryNoticeJobs(noticeReq(start),f.env,actor,{now:now+2000});assert.equal(released.status,202,await released.clone().text());
+  const body=await released.json();assert.equal(body.authorized,50);assert.equal(body.callsStarted,0);assert.equal(body.maxReservedSeconds,4500);
+  assert.equal(f.r.db.prepare("SELECT COUNT(*) AS n FROM industry_notice_jobs WHERE state='authorized' AND actor_id='client'").get().n,50);
+  assert.equal(f.c.db.prepare('SELECT COUNT(*) AS n FROM tenant_minute_holds').get().n,0);
+  assert.equal((await handleIndustryNoticeJobs(noticeReq(start),f.env,actor,{now:now+3000})).status,409);
  }finally{f.close()}
 });

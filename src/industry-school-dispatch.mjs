@@ -217,7 +217,7 @@ function budgetEnv(env,limit){
  },async batch(steps){take(steps.length);return db.batch(steps.map(s=>s.inner))}});
  return {env:{...env,CRM_DB:wrap(env.CRM_DB),CONTROL_DB:wrap(env.CONTROL_DB)},used:()=>used};
 }
-export async function runIndustrySchoolTick(baseEnv,{now=Date.now(),apiFetch=fetch,cdrFetch=fetch,maxQueries=40,lane=null}={}){
+export async function runIndustrySchoolTick(baseEnv,{now=Date.now(),apiFetch=fetch,cdrFetch=fetch,maxQueries=40,lane=null,rotationIndex=null}={}){
  if(!Number.isSafeInteger(now)||now<0||!Number.isSafeInteger(maxQueries)||maxQueries<20||maxQueries>950)return null;
  const meter=budgetEnv(baseEnv,maxQueries),env=meter.env,db=env.CRM_DB;
  const enabled=industryDispatchEnabled(env),mode=enabled?(lane??['fund','dial','recover'][Math.floor(now/120000)%3]):'recover';
@@ -230,7 +230,7 @@ export async function runIndustrySchoolTick(baseEnv,{now=Date.now(),apiFetch=fet
  const cutoff=iso(now);
  // Each lane runs every third industry tick. Rotate by a full cycle rather
  // than by three, which otherwise starves rows when the queue size is 3k.
- const rotation=Math.floor(now/(enabled?360000:120000));
+ const rotation=Number.isSafeInteger(rotationIndex)&&rotationIndex>=0?rotationIndex:Math.floor(now/(enabled?360000:120000));
  let selected=false;
  try{
   const count=(await db.prepare('SELECT COUNT(*) AS n'+from+predicate).bind(cutoff).first())?.n;

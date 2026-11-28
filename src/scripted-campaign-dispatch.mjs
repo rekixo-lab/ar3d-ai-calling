@@ -1,5 +1,5 @@
 import {resolveCrmDb} from './core.mjs';
-import {sharedCapacityCount,sharedTenantCapacityCount,sharedTenantUnknown,industryOccupied,industryOccupiedFor,industryCapacityState} from './commercial-capacity.mjs';
+import {sharedCapacityCount,sharedTenantCapacityCount,sharedTenantUnknown,industryOccupied,industryOccupiedFor,industryCapacityState,noticeOccupied,noticeCapacityState} from './commercial-capacity.mjs';
 import {campaignDispatchInterlock,dispatchPausePredicate} from './calling-dispatch-pause.mjs';
 import {moneyBudgetConfig,providerBudgetPosition,reserveBudgetedMinutes} from './provider-cost-reservations.mjs';
 import {minutePosition,closeMinuteHold,fundingCap,fundingPosition,affordableCallSeconds,BILLING_PULSE_SECONDS} from './minute-holds.mjs';
@@ -216,7 +216,7 @@ export async function dialNextForTenant(env,db,tid,config,{apiFetch=fetch,now=Da
   WHERE j.tenant_id=? AND j.state='queued' AND j.flow_id=? AND r.state='running'
   AND v.expires_at>? AND v.reviewed_at>=?
   AND v.reviewed_at>COALESCE((SELECT MAX(h.reserved_at) FROM calling_jobs h WHERE h.tenant_id=j.tenant_id AND h.lead_id=j.lead_id),'')
-  AND NOT EXISTS(SELECT 1 FROM industry_funded_admissions a WHERE a.tenant_id=j.tenant_id AND a.lead_id=j.lead_id AND ${industryOccupiedFor('a')})
+  AND NOT EXISTS(SELECT 1 FROM industry_funded_admissions a WHERE a.tenant_id=j.tenant_id AND a.lead_id=j.lead_id AND ${industryOccupiedFor('a')}) AND NOT EXISTS(SELECT 1 FROM industry_notice_jobs WHERE tenant_id=j.tenant_id AND lead_id=j.lead_id AND ${noticeOccupied})
   ORDER BY j.created_at,j.id LIMIT 1`).bind(tid,SCRIPTED_CALLING_POLICY,at,policy.updated_at).first();
  if(!job){
   await db.prepare(`UPDATE calling_runs SET state='completed',updated_at=? WHERE tenant_id=? AND state='running'
@@ -243,7 +243,7 @@ export async function dialNextForTenant(env,db,tid,config,{apiFetch=fetch,now=Da
  // Prepaid minutes and provider ceilings (below) are the only volume limits.
  let reserved;
  try{
-  reserved=await db.prepare("UPDATE calling_jobs SET state='reserved',reserved_at=?,updated_at=?,account_sid=?,caller_id=?,flow_id=?,destination=? WHERE tenant_id=? AND id=? AND state='queued' AND EXISTS(SELECT 1 FROM calling_runs r WHERE r.tenant_id=calling_jobs.tenant_id AND r.id=calling_jobs.run_id AND r.state='running') AND EXISTS(SELECT 1 FROM calling_policies p WHERE p.tenant_id=? AND p.enabled=1 AND p.expires_at>? AND p.updated_at=? AND p.flow_id=?) AND EXISTS(SELECT 1 FROM calling_clearances v JOIN leads l ON l.tenant_id=v.tenant_id AND l.id=v.lead_id WHERE v.tenant_id=? AND v.lead_id=? AND v.purpose=? AND v.expires_at>? AND v.reviewed_at>=? AND v.reviewed_at>COALESCE((SELECT MAX(h.reserved_at) FROM calling_jobs h WHERE h.tenant_id=v.tenant_id AND h.lead_id=v.lead_id),'') AND l.consent_status!='denied' AND l.dnd_status!='blocked' AND l.mobile_e164=? AND l.updated_at=? AND NOT EXISTS(SELECT 1 FROM lead_opt_out_events o WHERE o.tenant_id=l.tenant_id AND o.lead_id=l.id)) AND NOT EXISTS(SELECT 1 FROM industry_funded_admissions a WHERE a.tenant_id=calling_jobs.tenant_id AND a.lead_id=calling_jobs.lead_id AND "+industryOccupiedFor('a')+") AND "+sharedTenantUnknown+" AND "+sharedTenantCapacityCount+"<? AND "+sharedCapacityCount+"<?")
+  reserved=await db.prepare("UPDATE calling_jobs SET state='reserved',reserved_at=?,updated_at=?,account_sid=?,caller_id=?,flow_id=?,destination=? WHERE tenant_id=? AND id=? AND state='queued' AND EXISTS(SELECT 1 FROM calling_runs r WHERE r.tenant_id=calling_jobs.tenant_id AND r.id=calling_jobs.run_id AND r.state='running') AND EXISTS(SELECT 1 FROM calling_policies p WHERE p.tenant_id=? AND p.enabled=1 AND p.expires_at>? AND p.updated_at=? AND p.flow_id=?) AND EXISTS(SELECT 1 FROM calling_clearances v JOIN leads l ON l.tenant_id=v.tenant_id AND l.id=v.lead_id WHERE v.tenant_id=? AND v.lead_id=? AND v.purpose=? AND v.expires_at>? AND v.reviewed_at>=? AND v.reviewed_at>COALESCE((SELECT MAX(h.reserved_at) FROM calling_jobs h WHERE h.tenant_id=v.tenant_id AND h.lead_id=v.lead_id),'') AND l.consent_status!='denied' AND l.dnd_status!='blocked' AND l.mobile_e164=? AND l.updated_at=? AND NOT EXISTS(SELECT 1 FROM lead_opt_out_events o WHERE o.tenant_id=l.tenant_id AND o.lead_id=l.id)) AND NOT EXISTS(SELECT 1 FROM industry_funded_admissions a WHERE a.tenant_id=calling_jobs.tenant_id AND a.lead_id=calling_jobs.lead_id AND "+industryOccupiedFor('a')+") AND NOT EXISTS(SELECT 1 FROM industry_notice_jobs WHERE tenant_id=calling_jobs.tenant_id AND lead_id=calling_jobs.lead_id AND "+noticeOccupied+") AND "+sharedTenantUnknown+" AND "+sharedTenantCapacityCount+"<? AND "+sharedCapacityCount+"<?")
   .bind(at,at,config.authId,config.caller,policy.flow_id,job.destination,tid,job.id,tid,at,policy.updated_at,SCRIPTED_CALLING_POLICY,tid,job.lead_id,job.purpose,at,policy.updated_at,job.destination,job.lead_updated_at,tid,tid,maxPerCompany,maxGlobalConcurrent).run();
  }catch{return {state:'quota_or_concurrent_change'}} // e.g. a legacy one-call-per-company index
  if(Number(reserved.meta?.changes)!==1)return {state:'quota_or_concurrent_change'};
@@ -321,7 +321,7 @@ export async function runScriptedCampaignCron(baseEnv,{now=Date.now(),apiFetch=f
  const active=new Set(((await env.CONTROL_DB.prepare("SELECT id FROM tenants WHERE status='active' AND storage_mode='shared'").all()).results||[]).map(r=>r.id));
  // Reconcile already-submitted shared CRM jobs even when their tenant is suspended.
  const inflight=((await db.prepare(`SELECT tenant_id,id,state,reserved_at,flow_id,lead_id,destination,run_id,'legacy' AS source FROM calling_jobs
-  WHERE state IN('reserved','submitted','unknown') UNION ALL SELECT tenant_id,job_id AS id,${industryCapacityState},claimed_at AS reserved_at,NULL,lead_id,NULL,NULL,'industry' AS source FROM industry_funded_admissions WHERE ${industryOccupied} ORDER BY reserved_at LIMIT 5000`).all()).results||[]);
+  WHERE state IN('reserved','submitted','unknown') UNION ALL SELECT tenant_id,job_id AS id,${industryCapacityState},claimed_at AS reserved_at,NULL,lead_id,NULL,NULL,'industry' AS source FROM industry_funded_admissions WHERE ${industryOccupied} UNION ALL SELECT tenant_id,id,${noticeCapacityState},strftime('%Y-%m-%dT%H:%M:%fZ',claimed_at/1000.0,'unixepoch'),NULL,lead_id,NULL,NULL,'industry' AS source FROM industry_notice_jobs WHERE ${noticeOccupied} ORDER BY reserved_at LIMIT 5000`).all()).results||[]);
  const byTenant=new Map();
  for(const j of inflight){if(j.source==='industry')continue;if(!byTenant.has(j.tenant_id))byTenant.set(j.tenant_id,[]);byTenant.get(j.tenant_id).push(j)}
  // 1. Close finished calls first so their lines are free for new customers.
