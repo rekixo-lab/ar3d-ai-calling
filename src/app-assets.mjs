@@ -1,7 +1,7 @@
 import {propertyWhatsAppJs} from './property-whatsapp-ui.mjs';
 import {industryAgentJs} from './industry-agent-ui.mjs';
 import {industryCampaignJs} from './industry-campaign-ui.mjs';
-export const html=`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#171717"><title>AR3D AI Calling</title><link rel="stylesheet" href="/app/assets/style.css"></head><body><div id="app" role="main"><p>Loading AR3D AI Calling…</p></div><script src="/app/assets/app.js" defer></script></body></html>`;
+export const html=`<!doctype html><html lang="en"><head><meta charset="utf-8"><link rel="icon" type="image/svg+xml" sizes="any" href="/favicon.svg"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#171717"><title>AR3D AI Calling</title><link rel="stylesheet" href="/app/assets/style.css"></head><body><div id="app" role="main"><p>Loading AR3D AI Calling…</p></div><script src="/app/assets/app.js" defer></script></body></html>`;
 export {css} from './dashboard-styles.mjs';
 export const js=String.raw`'use strict';
 const root=document.getElementById('app');
