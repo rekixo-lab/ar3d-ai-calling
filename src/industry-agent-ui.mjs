@@ -213,7 +213,7 @@ function industryAgentPanel(tenantId,content,role){
   if(version!==snapshotSequence||!enabled()||activeDraft?.id!==draftId)return;
   snapshots=out.snapshots||[];
   renderSnapshots(selectId);
-  frozenNotice.textContent=snapshots.length+' immutable simulation version(s). None may make live calls.';
+  frozenNotice.textContent=snapshots.length+' immutable simulation version(s). Snapshots alone cannot make calls; reviewed jobs use the separate production calling panels.';
  }
  frozenChoice.addEventListener('change',()=>{
   frozenRehearsal.disabled=!editable||!frozenChoice.value;
@@ -266,11 +266,11 @@ function industryAgentPanel(tenantId,content,role){
   const contract=noticeContracts.find(x=>x.templateId===c.templateId);
   noticeReadiness.hidden=!contract;noticeReadiness.replaceChildren();
   if(contract)noticeReadiness.append(title('Verified customer-specific notice','h3'),
-   node('p',{class:'note',text:'Typed notice renderer available in code. Live calling and private data access are NOT enabled.'}),
+   node('p',{class:'note',text:'General or verified announcements use the separate calling panel, subject to current review, provider authorization and wallet readiness.'}),
    node('p',{text:'Approved business data source: '+contract.source.replaceAll('_',' ')}),
    node('p',{text:'Supported fields: '+contract.fields.join(', ')}),
    node('p',{text:'Recipient proof: '+contract.recipientProof.replaceAll('_',' ')}),
-   node('p',{text:'Data connector configuration: '+(noticeConnectorStatus?.state==='configured_unverified'?'configured; real service verification and voice integration pending':'trusted identity and business record service setup required')}),
+   node('p',{text:'Data connector configuration: '+(noticeConnectorStatus?.state==='configured_unverified'?'configured; real service verification still required':'trusted identity and business record service setup required')}),
    node('p',{text:'Remaining integration gates: '+contract.blockers.map(x=>x.replaceAll('_',' ')).join('; ')}),
    node('p',{class:'muted',text:'Do not paste account numbers, PINs, OTPs or personal account records in drafts or ordinary CRM imports.'}));
   name.value=c.name;greeting.value=c.greeting;questions.value=c.questions.join('\n');closing.value=c.closing;

@@ -39,8 +39,8 @@ async function readTerminal(env,tid,id,now){
     v.manifest?.tenantId!==tid||v.manifest.snapshotId!==j.snapshot_id||v.manifest.graphSha256!==j.graph_sha256||
     await sha256hex('ar3d:industry-audio-pack:v1:'+JSON.stringify(v.manifest))!==j.manifest_sha256)return null;
  if(m.dispatchVersion===1&&!await env.CRM_DB.prepare("SELECT 1 AS ok FROM industry_dispatch_releases WHERE tenant_id=? AND job_id=? AND session_id=? AND state IN('posting','submitted','unknown')").bind(tid,id,s.id).first())return null;
- const collision=await env.CRM_DB.prepare("SELECT 1 AS found FROM calling_jobs WHERE provider_call_sid=? UNION ALL SELECT 1 AS found FROM verified_provider_call_costs WHERE provider_call_uuid=? LIMIT 1")
-  .bind(s.provider_call_id,s.provider_call_id).first();
+ const collision=await env.CRM_DB.prepare("SELECT 1 AS found FROM calling_jobs WHERE provider_call_sid=? UNION ALL SELECT 1 AS found FROM verified_provider_call_costs WHERE provider_call_uuid=? UNION ALL SELECT 1 AS found FROM industry_notice_jobs WHERE call_uuid=? LIMIT 1")
+  .bind(s.provider_call_id,s.provider_call_id,s.provider_call_id).first();
  if(collision)return null;
  return {sessionId:s.id,requestId:s.provider_request_id,callUuid:s.provider_call_id,accountSid:s.provider_account_id,
   caller:s.caller,destination:s.destination,hangupAt:s.hangup_at,maxSeconds:j.max_seconds,

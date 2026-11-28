@@ -4,8 +4,10 @@ import {verifyFrozen} from './industry-flow-snapshots.mjs';
 import {sha256hex} from './core.mjs';
 import {industryActorPredicate} from './industry-dispatch-authority.mjs';
 import {campaignDispatchInterlock} from './calling-dispatch-pause.mjs';
+import {industryNoticeConnectorStatus} from './industry-notice-connectors.mjs';
 
 export const NOTICE_MODE='industry_notice_v1',NOTICE_SECONDS=90;
+export const noticeDispatchEnabled=env=>env.AR3D_SCRIPTED_CAMPAIGNS_ENABLED==='enabled'&&env.AR3D_CAMPAIGN_SARVAM_DISCLOSURE==='approved'&&(env.AR3D_INDUSTRY_NOTICE_DISPATCH_ENABLED===undefined||env.AR3D_INDUSTRY_NOTICE_DISPATCH_ENABLED==='enabled');
 export const uuid=x=>typeof x==='string'&&/^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i.test(x);
 export const digest=x=>typeof x==='string'&&/^[a-f0-9]{64}$/.test(x);
 export const requestId=x=>typeof x==='string'&&/^[a-zA-Z0-9-]{8,80}$/.test(x);
@@ -15,13 +17,21 @@ export const iso=n=>new Date(n).toISOString();
 export const contractFor=id=>INDUSTRY_NOTICE_CONTRACTS.find(x=>x.templateId===id)||null;
 export const noticeJob=(db,tid,id)=>db.prepare('SELECT * FROM industry_notice_jobs WHERE tenant_id=? AND id=?').bind(tid,id).first();
 export const noticeEligibility="EXISTS(SELECT 1 FROM leads l WHERE l.tenant_id=industry_notice_jobs.tenant_id AND l.id=industry_notice_jobs.lead_id AND l.mobile_e164=industry_notice_jobs.destination AND l.updated_at=industry_notice_jobs.lead_updated_at AND l.consent_status<>'denied' AND l.dnd_status<>'blocked' AND NOT EXISTS(SELECT 1 FROM lead_opt_out_events o WHERE o.tenant_id=l.tenant_id AND o.lead_id=l.id))";
+// Explicit provider authorization for carrier text-to-speech and this purpose.
+// Neither approval nor identity is inferred from a pilot or an import.
+export function noticeDeliveryAvailable(env,j){
+ const approved=env.AR3D_NOTICE_CARRIER_APPROVAL_REFERENCE;
+ if(!reference(approved,10)||j.provider_ref!==approved)return false;
+ if(j.delivery_mode==='general')return j.private_speech_ref===null;
+ return j.delivery_mode==='verified'&&reference(j.private_speech_ref,10)&&j.private_speech_ref===env.AR3D_NOTICE_PRIVATE_SPEECH_APPROVAL_REFERENCE&&industryNoticeConnectorStatus(env,j.tenant_id).state==='configured_unverified';
+}
 export const reviewDigest=j=>sha256hex('ar3d:notice-review:v1:'+JSON.stringify([j.tenant_id,j.id,j.lead_id,j.snapshot_id,j.graph_sha256,j.template_id,j.language,j.delivery_mode,j.destination,j.lead_updated_at,j.consent_ref,j.dnd_ref,j.provider_ref,j.private_speech_ref,j.reviewed_by,j.reviewed_at,j.review_expires_at]));
 export async function readNoticeSnapshot(db,tid,id,{latest=false}={}){
  if(!uuid(tid)||!uuid(id))return null;
- const row=await db.prepare("SELECT v.*,f.revision AS current_revision,f.config_json AS current_config,r.decision FROM ai_flow_snapshots v JOIN ai_flow_definitions f ON f.tenant_id=v.tenant_id AND f.id=v.flow_id JOIN ai_flow_preview_reviews r ON r.tenant_id=v.tenant_id AND r.snapshot_id=v.id WHERE v.tenant_id=? AND v.id=? AND r.decision='simulation_reviewed'").bind(tid,id).first();
+ const row=await db.prepare("SELECT v.*,f.revision AS current_revision,f.config_json AS current_config,r.decision,r.reviewed_by AS snapshot_reviewed_by FROM ai_flow_snapshots v JOIN ai_flow_definitions f ON f.tenant_id=v.tenant_id AND f.id=v.flow_id JOIN ai_flow_preview_reviews r ON r.tenant_id=v.tenant_id AND r.snapshot_id=v.id WHERE v.tenant_id=? AND v.id=? AND r.decision='simulation_reviewed'").bind(tid,id).first();
  if(!row||!contractFor(row.template_id)||latest&&(row.current_revision!==row.source_revision||row.current_config!==row.config_json))return null;
  const {config,graph}=await verifyFrozen(row);
- if(config.mode!=='announcement'||config.questions.length!==0||graph.mode!=='announcement')return null;
+ if(config.mode!=='announcement'||config.questions.length!==0||graph.mode!=='announcement'||row.snapshot_reviewed_by===row.created_by)return null;
  return {row,config,graph,language:config.language==='en'?'en':'hi'};
 }
 export function noticeSessionDoc(j){
@@ -40,7 +50,7 @@ export function exactNoticeSession(j,row){
 // Recheck current recipient, active tenant, reviewer and operator role.
 // Historical billing does not use this live gate.
 export async function currentNotice(env,j,now,{hold=false,session=false}={}){
- if(!j||j.revoked_at!==null||!j.actor_id||!Number.isSafeInteger(now)||j.review_expires_at<=now||j.release_expires_at<=now||await reviewDigest(j)!==j.review_sha256)return false;
+ if(!j||!noticeDispatchEnabled(env)||!noticeDeliveryAvailable(env,j)||j.revoked_at!==null||!j.actor_id||!Number.isSafeInteger(now)||j.review_expires_at<=now||j.release_expires_at<=now||await reviewDigest(j)!==j.review_sha256)return false;
  const live=await env.CRM_DB.prepare("SELECT 1 AS ok FROM industry_notice_jobs WHERE tenant_id=? AND id=? AND state=? AND updated_at=? AND revoked_at IS NULL AND "+noticeEligibility).bind(j.tenant_id,j.id,j.state,j.updated_at).first();
  if(!live)return false;
  const control=env.CONTROL_DB;

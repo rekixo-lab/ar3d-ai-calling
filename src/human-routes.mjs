@@ -30,6 +30,7 @@ import {handleSchoolAudioPreparation} from './industry-school-audio-preparation.
 import {handleIndustryCallQueue} from './industry-call-queue.mjs';
 import {handleIndustryAdmission} from './industry-funded-admission.mjs';
 import {handleIndustryDispatchRelease} from './industry-school-dispatch.mjs';
+import {handleIndustryNoticeJobs} from './industry-notice-routes.mjs';
 import {handleIndustryResult} from './industry-result-routes.mjs';
 import {handleIndustryCampaigns} from './industry-campaigns.mjs';
 import {handleAuditRequest} from './audit-routes.mjs';
@@ -357,6 +358,8 @@ export async function handleHumanRequest(req,env){
     if(campaignResponse)return campaignResponse;
     const visitResponse=await handleVisitStatusRequest(req,env,user);
     if(visitResponse)return visitResponse;
+    const noticeJobs=await handleIndustryNoticeJobs(req,env,user);
+    if(noticeJobs)return noticeJobs;
     const industryRelease=await handleIndustryDispatchRelease(req,env,user);
     if(industryRelease)return industryRelease;
     const industryResult=await handleIndustryResult(req,env,user);

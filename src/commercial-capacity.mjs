@@ -10,7 +10,9 @@ export const industryOccupiedFor=alias=>{
 };
 export const industryOccupied=industryOccupiedFor('industry_funded_admissions');
 export const industryCapacityState="CASE WHEN state='unknown' OR EXISTS(SELECT 1 FROM industry_dispatch_releases d WHERE d.tenant_id=industry_funded_admissions.tenant_id AND d.job_id=industry_funded_admissions.job_id AND d.state='unknown') THEN 'unknown' ELSE 'reserved' END";
-export const commercialCapacityRows="SELECT tenant_id,lead_id,state FROM calling_jobs WHERE state IN('reserved','submitted','unknown') UNION ALL SELECT tenant_id,lead_id,"+industryCapacityState+" AS state FROM industry_funded_admissions WHERE "+industryOccupied;
+export const noticeOccupied="state IN('claiming','funded','claimed','posting','submitted','unknown','no_post','receipt')";
+export const noticeCapacityState="CASE WHEN state='unknown' THEN 'unknown' ELSE 'reserved' END";
+export const commercialCapacityRows="SELECT tenant_id,lead_id,state FROM calling_jobs WHERE state IN('reserved','submitted','unknown') UNION ALL SELECT tenant_id,lead_id,"+industryCapacityState+" AS state FROM industry_funded_admissions WHERE "+industryOccupied+" UNION ALL SELECT tenant_id,lead_id,"+noticeCapacityState+" AS state FROM industry_notice_jobs WHERE "+noticeOccupied;
 export const sharedCapacityCount="(SELECT COUNT(*) FROM ("+commercialCapacityRows+"))";
 export const sharedTenantCapacityCount="(SELECT COUNT(*) FROM ("+commercialCapacityRows+") WHERE tenant_id=?)";
 export const sharedTenantUnknown="NOT EXISTS(SELECT 1 FROM ("+commercialCapacityRows+") WHERE tenant_id=? AND state='unknown')";
