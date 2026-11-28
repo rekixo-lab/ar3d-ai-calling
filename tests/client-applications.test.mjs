@@ -31,12 +31,16 @@ test('public page, signed-out boundary, application receipt, replay and current-
  }finally{f.close()}
 });
 
-test('policy topics and motion controls are published, complaint uses a private receipt with repeat protection',async()=>{
+test('policy topics are published without a motion button, complaint uses a private receipt with repeat protection',async()=>{
  const f=fixture(),writes=new Map();try{
   const env={...f.env,LOGIN_RATE_LIMIT_SECRET:'s'.repeat(32),RECORDINGS:{async put(key,value){if(writes.has(key))return null;writes.set(key,value);return {key}}}};
   const page=await publicLanding(new Request(origin+'/policies'),env);
   const html=await page.text();
-  for(const id of ['privacy','terms','calling','messaging','acceptable-use','billing','retention','cookies','security','copyright','contact','motion-toggle'])assert.ok(html.includes('id="'+id+'"'),id);
+  for(const id of ['privacy','terms','calling','messaging','acceptable-use','billing','retention','cookies','security','copyright','contact'])assert.ok(html.includes('id="'+id+'"'),id);
+  for(const path of ['/','/policies']){
+   const response=await publicLanding(new Request(origin+path),env);
+   assert.doesNotMatch(await response.text(),/motion-toggle|कम ऐनिमेशन/);
+  }
   const data={requestId:Date.now()+'-'+crypto.randomUUID(),purpose:'अनचाही कॉल या संदेश',email:'reader@example.com',message:'Please stop calls.'};
   const post=body=>publicLanding(new Request(origin+'/v1/public/policy-requests',{method:'POST',headers:{Origin:origin,'Content-Type':'application/json','cf-connecting-ip':'192.0.2.3'},body:JSON.stringify(body)}),env);
   assert.equal((await post({...data,message:''})).status,400);
