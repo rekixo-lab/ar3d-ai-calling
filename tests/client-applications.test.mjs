@@ -21,6 +21,7 @@ test('public page, signed-out boundary, application receipt, replay and current-
   const post=(body,from=origin)=>publicLanding(new Request(url,{method:'POST',headers:{'Content-Type':'application/json',Origin:from,'cf-connecting-ip':'192.0.2.1'},body:JSON.stringify(body)}),env);
   assert.equal((await post(data,'https://other.example')).status,403);
   assert.equal((await post({...data,consent:false})).status,400);
+  assert.equal((await post({...data,email:'invalid'})).status,400);
   const first=await post(data);assert.equal(first.status,201);
   const replay=await post(data);assert.equal(replay.status,200);assert.deepEqual(await replay.json(),await first.json());assert.equal(objects.size,1);
   assert.equal((await listClientApplications(request,env,client)).status,403);

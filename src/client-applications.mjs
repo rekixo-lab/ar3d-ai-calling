@@ -25,12 +25,14 @@ export async function publicLanding(req,env){
  let data;
  try{data=JSON.parse(new TextDecoder('utf-8',{fatal:true}).decode(await readBoundedBytes(req,4096)))}catch{return json({error:'invalid application'},400)}
  const match=requestPattern.exec(data?.requestId),now=Date.now();
- const mobile=field(data?.mobile,16)?.replace(/[ -]/g,''),email=field(data?.email,180);
+ const mobile=field(data?.mobile,16)?.replace(/[ -]/g,'');
+ let email;
+ try{email=validEmail(field(data?.email,180))}catch{return json({error:'invalid email'},400)}
  const name=field(data?.name,100),company=field(data?.company,140),city=field(data?.city,100);
- if(!match||Math.abs(Number(match[1])-now)>86400000||!name||!company||!city||!email||!validEmail(email)||
+ if(!match||Math.abs(Number(match[1])-now)>86400000||!name||!company||!city||
     !/^(?:\+91|91)?[6-9]\d{9}$/.test(mobile||'')||!purposes.has(data.purpose)||data.consent!==true)return json({error:'invalid application'},400);
  try{
-  if(!env.LOGIN_RATE_LIMIT_SECRET||!env.RECORDINGS?.put)throw Error('storage unavailable');
+  if(typeof env.LOGIN_RATE_LIMIT_SECRET!=='string'||env.LOGIN_RATE_LIMIT_SECRET.length<32||!env.RECORDINGS?.put)throw Error('storage unavailable');
   const gate=await reserveLoginAttempt(req,{CONTROL_DB:env.CONTROL_DB,LOGIN_RATE_LIMIT_SECRET:env.LOGIN_RATE_LIMIT_SECRET+'/public-application-v1'},now);
   if(!gate.allowed)return json({error:gate.error},gate.status);
   const reference='AR-'+match[2].toUpperCase();
