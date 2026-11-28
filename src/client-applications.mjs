@@ -1,3 +1,5 @@
+import {landingImages} from './landing-images.mjs';
+import {applicationPurposes} from './landing-industries.mjs';
 import {landingHtml,landingCss,landingJs} from './landing-page.mjs';
 import {currentSuperAdminMfa,mutationOriginAllowed,validEmail} from './human-auth.mjs';
 import {reserveLoginAttempt} from './login-guard.mjs';
@@ -7,16 +9,21 @@ const prefix='private/client-applications/v1/';
 const headers={'Cache-Control':'no-store','X-Content-Type-Options':'nosniff','Referrer-Policy':'no-referrer'};
 const json=(value,status=200)=>Response.json(value,{status,headers});
 const assets=new Map([['/',['text/html',landingHtml]],['/landing.css',['text/css',landingCss]],['/landing.js',['text/javascript',landingJs]]]);
-const purposes=new Set(['प्रॉपर्टी पूछताछ','साइट विज़िट फ़ॉलो-अप','अन्य व्यावसायिक उपयोग']);
+const purposes=new Set(applicationPurposes);
 const requestPattern=/^(\d{13})-([a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12})$/;
 function field(value,max){
  return typeof value==='string'&&value.trim().length>0&&value.trim().length<=max&&!/[\u0000-\u001f\u007f]/.test(value)?value.trim():null;
 }
 export async function publicLanding(req,env){
  const path=new URL(req.url).pathname,asset=assets.get(path);
+ if(Object.hasOwn(landingImages,path)){
+  if(!['GET','HEAD'].includes(req.method))return new Response(null,{status:405,headers:{Allow:'GET, HEAD'}});
+  const bytes=req.method==='HEAD'?null:Uint8Array.from(atob(landingImages[path]),c=>c.charCodeAt(0));
+  return new Response(bytes,{headers:{'Content-Type':'image/webp','Cache-Control':'public,max-age=31536000,immutable','X-Content-Type-Options':'nosniff'}});
+ }
  if(asset){
   if(!['GET','HEAD'].includes(req.method))return new Response(null,{status:405,headers:{Allow:'GET, HEAD'}});
-  return new Response(req.method==='HEAD'?null:asset[1],{headers:{...headers,'Content-Type':asset[0]+';charset=utf-8','Content-Security-Policy':"default-src 'none'; style-src 'self'; script-src 'self'; connect-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'"}});
+  return new Response(req.method==='HEAD'?null:asset[1],{headers:{...headers,'Content-Type':asset[0]+';charset=utf-8','Content-Security-Policy':"default-src 'none'; img-src 'self'; style-src 'self'; script-src 'self'; connect-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'"}});
  }
  if(path!=='/v1/public/client-applications')return null;
  if(req.method!=='POST')return json({error:'method not allowed'},405);
