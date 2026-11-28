@@ -797,13 +797,15 @@ test('School feature defaults available without bypassing independent approvals,
  }finally{f.close()}
 });
 
-function clientSession(f,id='client',hash='b'.repeat(64),createdAt=at,expires=now+86400000){
+function clientSession(f,id='client',hash=null,createdAt=at,expires=now+86400000){
+ // Each synthetic login has an independent token; never reuse the seeded reviewer token.
+ hash=hash??(crypto.randomUUID()+crypto.randomUUID()).replaceAll('-','');
  f.c.db.prepare('INSERT INTO human_sessions(token_hash,user_id,created_at,expires_at) VALUES(?,?,?,?)').run(hash,id,createdAt,expires);
  return {id,globalRole:'user',token_hash:hash};
 }
 test('active client admin can queue exact reviewed School jobs and complete funded dispatch without a second admin release',async()=>{
  const f=await releasedDispatchFixture();try{
-  const actor=clientSession(f),viewer=clientSession(f,'viewer','e'.repeat(64));
+  const actor=clientSession(f),viewer=clientSession(f,'viewer');
   assert.equal((await f.release(f.body,viewer)).status,403);
   assert.equal((await f.release({...f.body,tenantId:'99999999-9999-4999-8999-999999999999'},actor)).status,403);
   assert.equal((await f.release({...f.body,jobIds:[f.id,'99999999-9999-4999-8999-999999999999']},actor)).status,409);
@@ -832,7 +834,7 @@ test('active client admin can queue exact reviewed School jobs and complete fund
 test('client session expiry, revocation, disabled membership, viewer or newly enrolled MFA deny batch authorization',async()=>{
  for(const mode of ['expired','revoked','disabled','viewer','account_disabled','mfa','trial']){
   const f=await releasedDispatchFixture();try{
-   const actor=clientSession(f,'client','b'.repeat(64),at,mode==='expired'?now-1:now+86400000);
+   const actor=clientSession(f,'client',null,at,mode==='expired'?now-1:now+86400000);
    if(mode==='revoked')f.c.db.prepare('UPDATE human_sessions SET revoked_at=? WHERE token_hash=?').run(at,actor.token_hash);
    if(mode==='disabled')f.c.db.prepare("UPDATE tenant_memberships SET status='disabled' WHERE tenant_id=? AND user_id='client'").run(tid);
    if(mode==='viewer')f.c.db.prepare("UPDATE tenant_memberships SET role='viewer' WHERE tenant_id=? AND user_id='client'").run(tid);
