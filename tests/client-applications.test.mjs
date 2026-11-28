@@ -30,3 +30,17 @@ test('public page, signed-out boundary, application receipt, replay and current-
   assert.equal((await list.json()).applications[0].mobile,'+919876543210');
  }finally{f.close()}
 });
+
+test('policy topics and motion controls are published, complaint uses a private receipt with repeat protection',async()=>{
+ const f=fixture(),writes=new Map();try{
+  const env={...f.env,LOGIN_RATE_LIMIT_SECRET:'s'.repeat(32),RECORDINGS:{async put(key,value){if(writes.has(key))return null;writes.set(key,value);return {key}}}};
+  const page=await publicLanding(new Request(origin+'/policies'),env);
+  const html=await page.text();
+  for(const id of ['privacy','terms','calling','messaging','acceptable-use','billing','retention','cookies','security','copyright','contact','motion-toggle'])assert.ok(html.includes('id="'+id+'"'),id);
+  const data={requestId:Date.now()+'-'+crypto.randomUUID(),purpose:'अनचाही कॉल या संदेश',email:'reader@example.com',message:'Please stop calls.'};
+  const post=body=>publicLanding(new Request(origin+'/v1/public/policy-requests',{method:'POST',headers:{Origin:origin,'Content-Type':'application/json','cf-connecting-ip':'192.0.2.3'},body:JSON.stringify(body)}),env);
+  assert.equal((await post({...data,message:''})).status,400);
+  const res=await post(data);assert.equal(res.status,201);assert.match((await res.json()).reference,/^REQ-/);assert.equal((await post(data)).status,200);
+  const record=JSON.parse([...writes.values()][0]);assert.equal(record.kind,'policy');assert.equal(record.message,data.message);
+ }finally{f.close()}
+});

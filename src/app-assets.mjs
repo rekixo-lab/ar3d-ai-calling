@@ -1468,7 +1468,7 @@ async function superAdmin(main,chooseCompany){
  });
  panel.insertBefore(node('details',{class:'card'},[node('summary',{text:'Add client'}),f,inviteResult]),panel.children[1]);
  const inboxRows=div('stack');
- const inbox=node('details',{class:'card'},[node('summary',{text:'नए आवेदन · Client applications'}),inboxRows]);
+ const inbox=node('details',{class:'card'},[node('summary',{text:'नए आवेदन · Client applications / Policy requests'}),inboxRows]);
  panel.append(inbox);
  let cursor=null,loading=false;
  async function loadApplications(append=false){
@@ -1478,6 +1478,10 @@ async function superAdmin(main,chooseCompany){
   try{
    const page=await api('/v1/human/client-applications'+(append&&cursor?'?cursor='+encodeURIComponent(cursor):''));
    for(const a of page.applications){
+    if(a.kind==='policy'){
+     inboxRows.append(div('card',node('strong',{text:'नीति अनुरोध · '+a.purpose}),node('p',{text:a.message}),node('p',{text:a.email}),node('small',{text:a.reference+' · '+formatIst(a.submittedAt)})));
+     continue;
+    }
     const invite=btn('Prepare invitation',()=>{
      existing.value='';name.value=a.company;email.value=a.email;mobile.value=a.mobile;
      f.closest('details').open=true;name.focus();
