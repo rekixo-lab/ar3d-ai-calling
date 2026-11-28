@@ -217,15 +217,17 @@ export async function runIndustrySchoolTick(baseEnv,{now=Date.now(),apiFetch=fet
  const predicate=mode==='fund'?"d.state='authorized' AND a.state='released' AND d.expires_at>"+deadline:
   mode==='dial'?"d.state='authorized' AND a.state='funded' AND d.expires_at>"+deadline:
   "a.state='funded' AND (d.state IN('claimed','posting','submitted','unknown','no_post') OR (d.state='authorized' AND d.expires_at<="+deadline+"))";
- const cutoff=at;
+ const cutoff=iso(now);
  // Each lane runs every third industry tick. Rotate by a full cycle rather
  // than by three, which otherwise starves rows when the queue size is 3k.
  const rotation=Math.floor(now/(enabled?360000:120000));
+ let selected=false;
  try{
   const count=(await db.prepare('SELECT COUNT(*) AS n'+from+predicate).bind(cutoff).first())?.n;
   if(!Number.isSafeInteger(count)||count<=0)return null;
   const row=await db.prepare('SELECT d.tenant_id,d.job_id'+from+predicate+' ORDER BY d.tenant_id,d.job_id LIMIT 1 OFFSET ?').bind(cutoff,rotation%count).first();
   if(!row)return null;
+  selected=true;
   const scope={tenantId:row.tenant_id,jobId:row.job_id,now};
   let result;
   if(mode==='fund'){
@@ -238,5 +240,5 @@ export async function runIndustrySchoolTick(baseEnv,{now=Date.now(),apiFetch=fet
   }else if(mode==='dial')result=await dispatchFundedIndustryJob(env,{...scope,fetcher:apiFetch});
   else result=await reconcileIndustryDispatch(env,{...scope,fetcher:cdrFetch});
   return {lane:mode,...result,queriesUsed:meter.used()};
- }catch{return {lane:mode,state:'locked',queriesUsed:meter.used()}}
+ }catch{return selected?{lane:mode,state:'locked',queriesUsed:meter.used()}:null}
 }
