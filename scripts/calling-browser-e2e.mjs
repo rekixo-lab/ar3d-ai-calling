@@ -75,7 +75,7 @@ try{
   await page.getByRole('heading',{name:'Fictional conversation result'}).waitFor();
   await page.getByText('Status: simulated_complete · answers used: 3').waitFor();
   await page.getByRole('button',{name:'Freeze draft for simulation review',exact:true}).click();
-  await page.getByText('1 immutable simulation version(s). None may make live calls.',{exact:true}).waitFor();
+  await page.getByText('1 immutable simulation version(s). Snapshots alone cannot make calls; reviewed jobs use the separate production calling panels.',{exact:true}).waitFor();
   await page.getByRole('button',{name:'Rehearse frozen version (no calls)',exact:true}).click();
   await page.getByRole('heading',{name:'Frozen fictional rehearsal',exact:true}).waitFor();
   await page.getByText('Simulation only · simulated_complete · Draft r2',{exact:true}).waitFor();
@@ -102,6 +102,16 @@ try{
   assert.equal(f.c.db.prepare('SELECT COUNT(*) AS n FROM school_audio_preparations').get().n,0);
 
 
+  // The actual new panel must load on a credential-free Worker without
+  // making calls, allocating wallet credits or claiming a reviewed job.
+  const noticeBefore=f.r.db.prepare('SELECT COUNT(*) AS n FROM industry_notice_jobs').get().n;
+  const holdsBefore=f.c.db.prepare('SELECT COUNT(*) AS n FROM tenant_minute_holds').get().n;
+  await page.getByRole('button',{name:'Open announcement calling',exact:true}).click();
+  await page.getByText('Calling setup required · Carrier authorization required · Private notice setup required · Calling hours closed',{exact:true}).waitFor();
+  await page.getByRole('heading',{name:'Reviewed announcement jobs',exact:true}).waitFor();
+  assert.equal(await page.getByRole('button',{name:'Start selected announcements',exact:true}).isDisabled(),true);
+  assert.equal(f.r.db.prepare('SELECT COUNT(*) AS n FROM industry_notice_jobs').get().n,noticeBefore);
+  assert.equal(f.c.db.prepare('SELECT COUNT(*) AS n FROM tenant_minute_holds').get().n,holdsBefore);
   assert.equal(f.c.db.prepare('SELECT COUNT(*) AS n FROM ai_flow_definitions').get().n,1);
   assert.equal(f.r.db.prepare('SELECT COUNT(*) AS n FROM calling_jobs').get().n,beforeJobs);
   assert.equal(f.r.db.prepare('SELECT COUNT(*) AS n FROM calls').get().n,beforeCalls);

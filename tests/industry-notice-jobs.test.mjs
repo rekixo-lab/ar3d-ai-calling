@@ -101,3 +101,38 @@ test('provider authorization is checked against the supplied exact review refere
   assert.equal(f.r.db.prepare('SELECT COUNT(*) AS n FROM industry_notice_jobs').get().n,0);
  }finally{f.close()}
 });
+
+import {handleIndustryAgentRequest} from '../src/industry-agent-routes.mjs';
+import {handleIndustryFlowSnapshots} from '../src/industry-flow-snapshots.mjs';
+import {defaultIndustryAgentDraft} from '../src/industry-template-catalog.mjs';
+test('real review and release APIs atomically authorize all 50 reviewed recipients without reserving credits',async()=>{
+ const f=fixture();try{
+  configureScriptedCampaign(f);
+  Object.assign(f.env,{AR3D_AUTO_CDR_SETTLEMENT:'approved',AR3D_NOTICE_CARRIER_APPROVAL_REFERENCE:'provider-reviewed'});
+  const token='b'.repeat(64),actor={id:'client',globalRole:'user',token_hash:token};
+  f.c.db.prepare('INSERT INTO human_sessions(token_hash,user_id,created_at,expires_at) VALUES(?,?,?,?)').run(token,actor.id,at,now+86400000);
+  const post=(path,body)=>new Request('https://app.example.invalid/v1/human/'+path,{method:'POST',headers:{Origin:'https://app.example.invalid','Content-Type':'application/json'},body:JSON.stringify({tenantId:tid,...body})});
+  const config={...defaultIndustryAgentDraft('finance_due_notice_v1'),language:'en'};
+  const created=await handleIndustryAgentRequest(post('ai-flows',{config}),f.env,actor,{now});assert.equal(created.status,201,await created.clone().text());
+  const flowId=(await created.json()).draft.id;
+  const frozen=await handleIndustryFlowSnapshots(post('ai-flow-snapshots',{flowId,baseRevision:1}),f.env,actor,{now});assert.equal(frozen.status,201,await frozen.clone().text());
+  const snapshotId=(await frozen.json()).snapshot.id;
+  const reviewed=await handleIndustryFlowSnapshots(post('ai-flow-snapshots/'+snapshotId+'/review',{decision:'simulation_reviewed',reason:'Synthetic independent review',acknowledgeSimulationOnly:true}),f.env,admin,{now});assert.ok(reviewed.ok,await reviewed.clone().text());
+  const leadIds=[lead];
+  for(let i=2;i<=50;i++){
+   const next=crypto.randomUUID();leadIds.push(next);
+   f.r.db.prepare("INSERT INTO leads(tenant_id,id,name,mobile_e164,source_type,created_at,updated_at) VALUES(?,?,?,?,'excel',?,?)").run(tid,next,'Synthetic recipient '+i,'+919000000'+String(i).padStart(3,'0'),at,at);
+  }
+  const review={action:'review',snapshotId,leadIds,consentReference:'synthetic-consent-reference',dndReference:'synthetic-DND-reference',providerReference:'provider-reviewed',privateSpeechReference:null,deliveryMode:'general',reviewExpiresAt:now+3600000,confirmReviewedRecipients:true};
+  const result=await handleIndustryNoticeJobs(noticeReq(review),f.env,admin,{now});assert.equal(result.status,201,await result.clone().text());
+  const ids=(await result.json()).jobIds;assert.equal(ids.length,50);
+  const start={action:'start',jobIds:ids,confirmDialing:true};
+  const wrong=await handleIndustryNoticeJobs(noticeReq({...start,jobIds:[...ids.slice(0,49),crypto.randomUUID()]}),f.env,actor,{now:now+1000});assert.equal(wrong.status,409);
+  assert.equal(f.r.db.prepare("SELECT COUNT(*) AS n FROM industry_notice_jobs WHERE state='reviewed'").get().n,50);
+  const released=await handleIndustryNoticeJobs(noticeReq(start),f.env,actor,{now:now+2000});assert.equal(released.status,202,await released.clone().text());
+  const body=await released.json();assert.equal(body.authorized,50);assert.equal(body.callsStarted,0);assert.equal(body.maxReservedSeconds,4500);
+  assert.equal(f.r.db.prepare("SELECT COUNT(*) AS n FROM industry_notice_jobs WHERE state='authorized' AND actor_id='client'").get().n,50);
+  assert.equal(f.c.db.prepare('SELECT COUNT(*) AS n FROM tenant_minute_holds').get().n,0);
+  assert.equal((await handleIndustryNoticeJobs(noticeReq(start),f.env,actor,{now:now+3000})).status,409);
+ }finally{f.close()}
+});
