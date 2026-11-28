@@ -1,3 +1,4 @@
+import {publicLanding} from '../src/client-applications.mjs';
 /**
  * Real Chromium browser E2E for the *isolated synthetic* Super Admin UI.
  * Local 127.0.0.1 fixture only. No Worker credentials, real user details,
@@ -34,6 +35,10 @@ const server=http.createServer(async(req,res)=>{
   try{
     const path=new URL(req.url,'http://127.0.0.1').pathname;
     const authenticated=(req.headers.cookie||'').includes('sandbox_session='+SESSION);
+    if(path==='/favicon.svg'){
+      const icon=await publicLanding(new Request('http://localhost/favicon.svg'),{});
+      return respond(res,icon.status,await icon.text(),icon.headers.get('Content-Type'));
+    }
     if(req.method==='GET'&&path==='/app')
       return respond(res,200,html,'text/html; charset=utf-8');
     if(req.method==='GET'&&path==='/app/assets/app.js')

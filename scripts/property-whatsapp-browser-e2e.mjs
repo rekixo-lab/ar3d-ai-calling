@@ -1,3 +1,4 @@
+import {publicLanding} from '../src/client-applications.mjs';
 /** Synthetic localhost-only UI checks. No real credentials, messages or provider requests. */
 import assert from 'node:assert/strict';
 import http from 'node:http';
@@ -13,7 +14,11 @@ const reply=(res,status,body,type='application/json')=>{res.writeHead(status,{'C
 const server=http.createServer(async(req,res)=>{
  try{
   const u=new URL(req.url,'http://127.0.0.1'),path=u.pathname,admin=(req.headers.cookie||'').includes('scenario=admin');
-  if(path==='/app')return reply(res,200,html,'text/html');
+  if(path==='/favicon.svg'){
+      const icon=await publicLanding(new Request('http://localhost/favicon.svg'),{});
+      return reply(res,icon.status,await icon.text(),icon.headers.get('Content-Type'));
+    }
+    if(path==='/app')return reply(res,200,html,'text/html');
   if(path==='/app/assets/app.js')return reply(res,200,js,'text/javascript');
   if(path==='/app/assets/style.css')return reply(res,200,css,'text/css');
   if(path==='/favicon.ico')return reply(res,204,'');
