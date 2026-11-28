@@ -1,7 +1,0 @@
-# Independent emergency pause for production commercial dispatch
-
-A current-MFA Super Admin may pause or resume **new** customer campaign calls for every company from Calling Setup. A printable audit reason is required; do not enter customer personal data. Each transition is an immutable, revisioned event in the existing isolated Control D1. Stale/replayed transitions are refused. An empty journal leaves the prior policy unchanged; the migration seeds no data and enables no provider.
-
-The scheduler and provider-submission path use the same interlock, with a final pause predicate in the existing held-credit/tenant recheck. The scheduler retains its existing D1 query count. If the interlock cannot be read, new dispatch fails closed. A pre-POST cancellation releases only proven-unused holds. No provider POST is retried automatically. Existing calls may finish, and signed hangup, opt-out, CDR evidence, reconciliation and wallet settlement are not disabled by this independent pause. Resume removes only the operator block; funding, consent, DND, provider-fault and capacity gates remain. A cross-D1 check cannot atomically recall a carrier request already accepted. This is not a carrier-side hangup API, and it does not pause independently approved internal pilots or WhatsApp.
-
-The additive migration is wired to exact-prior-schema preflight, fresh initialization and post-install trigger/column verification. No staging, real calls, customer messages or manual configuration writes are made by the PR. School dispatch/TTS are still not enabled.
