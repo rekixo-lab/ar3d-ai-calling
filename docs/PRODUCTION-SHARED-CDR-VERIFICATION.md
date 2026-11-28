@@ -1,7 +1,0 @@
-# Shared Plivo CDR verification
-
-Production-only continuation of the shared funded admission. The existing property CDR route and automatic minute settlement now share a bounded, read-only Plivo CDR verifier that can also be reused by a future industry settlement adapter. The verifier requires the configured provider account, an exact outbound call UUID, valid caller/destination identity, integer durations and a decimal amount string. It rejects oversized streamed bodies (including absent Content-Length), invalid UTF-8, redirects and non-JSON media. Currency is still unverified; the verifier does not debit a wallet, alter provider budgets or return raw provider metadata.
-
-Manual CDR reconciliation also uses the canonical current active Super Admin MFA check and rechecks it after the provider GET, before recording or settling evidence. Automatic property settlement remains gated by its existing configuration and unchanged in scope. Its persisted observation and exact signed-ended session are still required for settlement.
-
-School CDR persistence, dispatch authorization, session creation, terminal capacity release, result retention and settlement wiring are not implemented here. No new production route, cron, provider call, paid request, schema migration or staging resource is added. Existing property behavior is covered by regression tests; new tests use only synthetic mocked HTTP responses and local database fixtures. Merge only on exact-head CI success.
