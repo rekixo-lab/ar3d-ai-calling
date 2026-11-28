@@ -127,7 +127,11 @@ export async function dispatchMessage(env,member,db,connection,rules,message,{no
  let currentTemplates;
  try{currentTemplates=await fetchTemplates(connection.messaging_account_id,credentials.accessToken,fetcher);}catch{await setMessageState(db,tid,message.id,'pending_setup','Meta template verification is unavailable; check connection and templates',now);return {sent:false};}
  const cached=JSON.stringify(currentTemplates);
- if(cached!==connection.templates_json){await env.CONTROL_DB.prepare('UPDATE whatsapp_connections SET templates_json=?,updated_at=? WHERE tenant_id=?').bind(cached,iso(now),tid).run();}
+ if(cached!==connection.templates_json){
+  // A concurrent reconnect must not inherit the old account's templates.
+  const saved=await env.CONTROL_DB.prepare('UPDATE whatsapp_connections SET templates_json=?,updated_at=? WHERE tenant_id=? AND revision=? AND phone_number_id=?').bind(cached,iso(now),tid,connection.revision,connection.phone_number_id).run();
+  if(saved.meta.changes!==1){await setMessageState(db,tid,message.id,'pending_setup','WhatsApp connection changed',now);return {sent:false};}
+ }
  const template=selectedTemplate({...connection,templates_json:cached},name,language,{visit:message.kind==='visit_reminder'});
  if(!template){await setMessageState(db,tid,message.id,'pending_setup','Select a compatible approved template',now);return {sent:false};}
  let payload;try{payload=await buildTemplatePayload(env,member,eligible.lead,property,message,template,{now,origin});}catch(e){await setMessageState(db,tid,message.id,'review_required',e.message==='Approved template requires an uploaded property brochure'?e.message:'Property media is not ready for this message',now);return {sent:false};}
@@ -137,7 +141,7 @@ export async function dispatchMessage(env,member,db,connection,rules,message,{no
  try{
   const result=await graphRequest('/'+connection.phone_number_id+'/messages',credentials.accessToken,{fetcher,method:'POST',body:payload.body});
   const providerId=result.messages?.[0]?.id;
-  if(typeof providerId!=='string'||providerId.length>250)throw Error('No provider acknowledgement');
+  if(typeof providerId!=='string'||!providerId.trim()||providerId.length>250)throw Error('No provider acknowledgement');
   await db.prepare("UPDATE whatsapp_messages SET status='submitted',provider_message_id=?,payload_json=?,reason='',updated_at=? WHERE tenant_id=? AND id=? AND status='unknown'").bind(providerId,JSON.stringify(payload.snapshot),iso(now),tid,message.id).run();
   await applyPendingStatusEvents(db,tid,{now,limit:1});
   return {sent:true,id:message.id};
@@ -180,7 +184,7 @@ export async function sendReply(env,member,db,data,user,{now=Date.now(),fetcher=
  }
  try{
   const result=await graphRequest('/'+connection.phone_number_id+'/messages',credentials.accessToken,{fetcher,method:'POST',body:{messaging_product:'whatsapp',recipient_type:'individual',to:e.lead.mobile_e164.replace(/^\+/,''),type:'text',text:{preview_url:false,body:content}}});
-  const providerId=result.messages?.[0]?.id;if(typeof providerId!=='string'||providerId.length>250)throw Error('No provider acknowledgement');
+  const providerId=result.messages?.[0]?.id;if(typeof providerId!=='string'||!providerId.trim()||providerId.length>250)throw Error('No provider acknowledgement');
   await db.prepare("UPDATE whatsapp_messages SET status='submitted',provider_message_id=?,reason='',updated_at=? WHERE tenant_id=? AND id=? AND status='unknown'").bind(providerId,iso(now),tid,id).run();
   await audit(db,tid,user.id,'whatsapp.reply_submitted',id,now).run();return json({saved:true,id,status:'submitted',notice:'Reply submitted to Meta. Delivery will be updated by webhook.'});
  }catch(e){if(e?.definitive)await db.prepare("UPDATE whatsapp_messages SET status='failed',reason=?,updated_at=? WHERE tenant_id=? AND id=? AND status='unknown'").bind('Meta rejected reply (code '+e.providerCode+')',iso(now),tid,id).run();return json({saved:true,id,status:e?.definitive?'failed':'unknown',notice:e?.definitive?'Reply was rejected. Check the error in the message history.':'Delivery outcome is unknown. Do not resend automatically.'},202);}

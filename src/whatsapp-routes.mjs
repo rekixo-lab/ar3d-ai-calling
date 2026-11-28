@@ -33,7 +33,9 @@ async function overview(req,env,user,member,db,tid,{now}){
  const canEdit=member.role==='client_admin';
  return json({tenantId:tid,canEdit,canConnect:user.globalRole==='super_admin',connection:publicConnection(connection),rules:publicRules(rules),templates:templatesFor(connection),messages:messages.results||[],inbox:inbox.results||[],permissions:permissions.results||[],leads:leads.results||[],campaigns:campaigns.results||[],visits:visits.results||[],threads:(threads.results||[]).map(t=>({...t,paused:!!t.paused})),setup:{canConnect:user.globalRole==='super_admin',credentialStorageReady:String(env.MFA_ENCRYPTION_KEY||'').length>=32,webhookUrl:new URL('/v1/provider/whatsapp',req.url).href,requirements:[accountNotice,'Automatic messages use six numbered body parameters. Property: customer, business, property, price, location, details link. Visit: customer, business, property, visit time, location, details link.','Customer permission is recorded from existing forms or CRM evidence. The calling script is unchanged.']}});
 }
-async function connect(req,env,tid,data,{now,fetcher}){
+async function connect(req,env,tid,data,user,{now,fetcher}){
+ const started=Date.now(),clock=()=>now+Math.max(0,Date.now()-started);
+ const prior=await env.CONTROL_DB.prepare('SELECT revision FROM whatsapp_connections WHERE tenant_id=?').bind(tid).first();
  if(!validId(data.messagingAccountId)||!validId(data.phoneNumberId))return fail('invalid Meta account or phone ID');
  const accessToken=String(data.accessToken||''),appSecret=String(data.appSecret||'');
  if(accessToken.length<20||accessToken.length>4096||/\s/.test(accessToken)||!/^[a-fA-F0-9]{32,128}$/.test(appSecret))return fail('invalid Meta token or app secret');
@@ -47,9 +49,12 @@ async function connect(req,env,tid,data,{now,fetcher}){
  if(number.code_verification_status&&number.code_verification_status!=='VERIFIED')return fail('Complete phone ownership verification in Meta first',409);
  const templates=await fetchTemplates(data.messagingAccountId,accessToken,fetcher);
  const encrypted=await encryptCredentials(env,tid,{accessToken,appSecret});
- const date=iso(now),hash=await sha256hex(verifyToken);
- await env.CONTROL_DB.prepare(`INSERT INTO whatsapp_connections(tenant_id,messaging_account_id,phone_number_id,display_phone,verified_name,status,credentials_ciphertext,verify_token_hash,templates_json,connected_at,updated_at,revision)
- VALUES(?,?,?,?,?,'connected',?,?,?,?,?,1) ON CONFLICT(tenant_id) DO UPDATE SET messaging_account_id=excluded.messaging_account_id,phone_number_id=excluded.phone_number_id,display_phone=excluded.display_phone,verified_name=excluded.verified_name,status='connected',credentials_ciphertext=excluded.credentials_ciphertext,verify_token_hash=excluded.verify_token_hash,templates_json=excluded.templates_json,webhook_verified_at=NULL,connected_at=excluded.connected_at,updated_at=excluded.updated_at,revision=whatsapp_connections.revision+1`).bind(tid,data.messagingAccountId,data.phoneNumberId,text(number.display_phone_number,50),text(number.verified_name,160),encrypted,hash,JSON.stringify(templates),date,date).run();
+ const hash=await sha256hex(verifyToken),stamp=clock();
+ if(!await memberFor(env,user,tid,true,{now:stamp}))return fail('forbidden',403);
+ const date=iso(stamp);
+ const saved=await env.CONTROL_DB.prepare(`INSERT INTO whatsapp_connections(tenant_id,messaging_account_id,phone_number_id,display_phone,verified_name,status,credentials_ciphertext,verify_token_hash,templates_json,connected_at,updated_at,revision)
+ SELECT ?,?,?,?,?,'connected',?,?,?,?,?,1 WHERE COALESCE((SELECT revision FROM whatsapp_connections WHERE tenant_id=?),0)=? ON CONFLICT(tenant_id) DO UPDATE SET messaging_account_id=excluded.messaging_account_id,phone_number_id=excluded.phone_number_id,display_phone=excluded.display_phone,verified_name=excluded.verified_name,status='connected',credentials_ciphertext=excluded.credentials_ciphertext,verify_token_hash=excluded.verify_token_hash,templates_json=excluded.templates_json,webhook_verified_at=NULL,connected_at=excluded.connected_at,updated_at=excluded.updated_at,revision=whatsapp_connections.revision+1 WHERE whatsapp_connections.revision=?`).bind(tid,data.messagingAccountId,data.phoneNumberId,text(number.display_phone_number,50),text(number.verified_name,160),encrypted,hash,JSON.stringify(templates),date,date,tid,prior?.revision||0,prior?.revision||0).run();
+ if(saved.meta.changes!==1)return fail('WhatsApp connection changed. Refresh and try again.',409);
  return json({saved:true,verifyToken,webhookUrl:new URL('/v1/provider/whatsapp',req.url).href,webhookVerified:false,notice:accountNotice});
 }
 async function saveRules(env,db,tid,data,user,{now}){
@@ -121,6 +126,7 @@ async function schedule(env,db,tid,data,user,{now}){
 }
 export async function handleWhatsAppRequest(req,env,user,{now=Date.now(),fetcher=fetch}={}){
  const url=new URL(req.url);if(url.pathname!==PATH)return null;
+ const started=Date.now(),clock=()=>now+Math.max(0,Date.now()-started);
  if(!['GET','POST'].includes(req.method))return fail('method not allowed',405);
  if(!mutationOriginAllowed(req))return fail('same-origin request required',403);
  try{
@@ -133,11 +139,14 @@ export async function handleWhatsAppRequest(req,env,user,{now=Date.now(),fetcher
   if(req.method==='GET')return await overview(req,env,user,member,db,tid,{now});
   const action=data.action;
   if(['connect','sync_templates','pause_connection','resume_connection'].includes(action)&&user.globalRole!=='super_admin')return fail('Super Admin connects the Meta account',403);
-  if(action==='connect')return await connect(req,env,tid,data,{now,fetcher});
+  if(action==='connect')return await connect(req,env,tid,data,user,{now,fetcher});
   if(action==='sync_templates'){
    const connection=await env.CONTROL_DB.prepare('SELECT * FROM whatsapp_connections WHERE tenant_id=?').bind(tid).first();if(!connection)return fail('WhatsApp is not connected',409);
    const credentials=await decryptCredentials(env,tid,connection.credentials_ciphertext),templates=await fetchTemplates(connection.messaging_account_id,credentials.accessToken,fetcher);
-   await env.CONTROL_DB.prepare('UPDATE whatsapp_connections SET templates_json=?,updated_at=?,revision=revision+1 WHERE tenant_id=?').bind(JSON.stringify(templates),iso(now),tid).run();return json({saved:true,templates});
+   const stamp=clock();if(!await memberFor(env,user,tid,true,{now:stamp}))return fail('forbidden',403);
+   const saved=await env.CONTROL_DB.prepare('UPDATE whatsapp_connections SET templates_json=?,updated_at=?,revision=revision+1 WHERE tenant_id=? AND revision=?').bind(JSON.stringify(templates),iso(stamp),tid,connection.revision).run();
+   if(saved.meta.changes!==1)return fail('WhatsApp connection changed. Refresh and try again.',409);
+   return json({saved:true,templates});
   }
   if(action==='pause_connection'){await env.CONTROL_DB.prepare("UPDATE whatsapp_connections SET status='paused',updated_at=?,revision=revision+1 WHERE tenant_id=?").bind(iso(now),tid).run();return json({saved:true});}
   if(action==='resume_connection'){
@@ -147,7 +156,10 @@ export async function handleWhatsAppRequest(req,env,user,{now=Date.now(),fetcher
    const number=(numbers.data||[]).find(n=>String(n.id)===connection.phone_number_id);
    if(!number||(number.status&&number.status!=='CONNECTED'))return fail('Verify the number registration in Meta first',409);
    const templates=await fetchTemplates(connection.messaging_account_id,credentials.accessToken,fetcher);
-   await env.CONTROL_DB.prepare("UPDATE whatsapp_connections SET status='connected',templates_json=?,updated_at=?,revision=revision+1 WHERE tenant_id=?").bind(JSON.stringify(templates),iso(now),tid).run();return json({saved:true});
+   const stamp=clock();if(!await memberFor(env,user,tid,true,{now:stamp}))return fail('forbidden',403);
+   const saved=await env.CONTROL_DB.prepare("UPDATE whatsapp_connections SET status='connected',templates_json=?,updated_at=?,revision=revision+1 WHERE tenant_id=? AND revision=?").bind(JSON.stringify(templates),iso(stamp),tid,connection.revision).run();
+   if(saved.meta.changes!==1)return fail('WhatsApp connection changed. Refresh and try again.',409);
+   return json({saved:true});
   }
   if(action==='save_rules')return await saveRules(env,db,tid,data,user,{now});
   if(action==='permission')return await permission(db,tid,data,user,{now});

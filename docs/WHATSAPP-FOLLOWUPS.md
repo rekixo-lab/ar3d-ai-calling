@@ -166,3 +166,7 @@ Automated verification uses synthetic data and stubbed provider responses. It
 does not send a paid message or call a real customer. A live Meta connection and
 an explicitly chosen operator test recipient are required for a later end-to-end
 provider delivery test.
+
+### Integrated release network and authorization hardening
+
+Meta requests now explicitly use manual redirects, validate the intended endpoint/method and JSON response, bound streaming response bytes before decoding, and treat malformed responses and timeouts as ambiguous rather than evidence of a failed paid send. Credential connection, template synchronization and resume recheck current active Super Admin MFA after provider verification and use connection revision compare-and-swap. Scheduler template-cache updates cannot overwrite a reconnected account. Empty acknowledgements are not submissions. Synthetic regression coverage does not establish real Meta account connection, approved template availability or production delivery.

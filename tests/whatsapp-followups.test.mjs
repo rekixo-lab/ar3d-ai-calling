@@ -71,7 +71,7 @@ test('template compatibility rejects unsafe dynamic layouts and never assumes ca
  assert.equal(normalizeTemplate({name:'x',status:'PENDING',category:'MARKETING',components:[]}).supported,false);
  assert.equal(normalizeTemplate({name:'x',status:'APPROVED',category:'MARKETING',components:[{type:'BODY',text:'{{named}}'}]}).supported,false);
 });
-test('HTTP 5xx and transport errors are ambiguous; only 4xx are definite rejections',async()=>{
+test('HTTP 5xx and transport errors are ambiguous; only explicit non-timeout 4xx provider errors are definite rejections',async()=>{
  await assert.rejects(graphRequest('/123456789/messages','secret',{method:'POST',body:{},fetcher:async()=>Response.json({error:{code:1}},{status:500})}),e=>e.definitive===false);
  await assert.rejects(graphRequest('/123456789/messages','secret',{method:'POST',body:{},fetcher:async()=>Response.json({error:{code:190}},{status:401})}),e=>e.definitive===true);
 });
@@ -354,4 +354,71 @@ test('ready WhatsApp messages are not starved by older pending-setup messages',a
  assert.equal(result.whatsapp.submitted,1);assert.equal(posts,1);
  assert.equal(f.db.sqlite.prepare('SELECT status FROM whatsapp_messages WHERE id=?').get(readyMessage.id).status,'submitted');
  assert.equal(f.db.sqlite.prepare('SELECT status FROM whatsapp_messages WHERE id=?').get(older.id).status,'pending_setup');
+});
+
+test('Meta bearer requests reject redirects, oversized streams, invalid UTF-8 and ambiguous error responses',async()=>{
+ const path='/123456789/messages',post={method:'POST',body:{}};
+ let reads=0,cancelled=false;
+ const redirected=await assert.rejects(graphRequest(path,'synthetic-token',{...post,fetcher:async(url,opts)=>{
+  reads++;assert.match(url,/^https:\/\/graph\.facebook\.com\//);assert.equal(opts.redirect,'manual');
+  return new Response(null,{status:302,headers:{Location:'https://untrusted.invalid/'}});
+ }}),e=>!e.definitive);
+ assert.equal(reads,1);
+ const stream=new ReadableStream({start(c){c.enqueue(new Uint8Array(1048576));c.enqueue(new Uint8Array(1));},cancel(){cancelled=true;}});
+ for(const response of [
+  new Response(stream,{headers:{'Content-Type':'application/json'}}),
+  new Response(Uint8Array.of(0x7b,0xff,0x7d),{headers:{'Content-Type':'application/json'}}),
+  new Response('{"messages":[]}',{headers:{'Content-Type':'text/html'}}),
+  Response.json([], {status:200}),Response.json({}, {status:400}),
+  Response.json({error:{code:190}}, {status:408})
+ ]){
+  await assert.rejects(graphRequest(path,'synthetic-token',{...post,fetcher:async()=>response}),e=>!e.definitive);
+ }
+ assert.equal(cancelled,true);
+ for(const bad of ['/123456789/messages#x','/123456789/messages?x=1','/123456789/phone_numbers','/123456789/phone_numbers?x=1#fragment','/123456789/messages?x=1/../phone_numbers']){
+  await assert.rejects(graphRequest(bad,'synthetic-token',{...post,fetcher:async()=>assert.fail('invalid endpoint must not access network')}),/invalid Meta endpoint/);
+ }
+});
+function verifiedAdmin(f){
+ const a={id:'wa-admin',globalRole:'super_admin',token_hash:'a'.repeat(64)};
+ const db=f.control.sqlite;
+ db.prepare("INSERT INTO human_users(id,email,password_salt,password_hash,password_iterations,global_role,created_at,updated_at) VALUES(?,'wa-admin@example.invalid','salt','hash',300000,'super_admin',?,?)").run(a.id,AT,AT);
+ db.prepare('INSERT INTO human_sessions(token_hash,user_id,created_at,expires_at) VALUES(?,?,?,?)').run(a.token_hash,a.id,AT,NOW+86400000);
+ db.prepare('INSERT INTO human_mfa_settings(user_id,secret_ciphertext,secret_iv,enabled_at,created_at,updated_at) VALUES(?,?,?,?,?,?)').run(a.id,'c'.repeat(72),'i'.repeat(24),AT,AT,AT);
+ return a;
+}
+test('WhatsApp credential and template writes recheck admin authorization and connection revision after network reads',async()=>{
+ for(const mode of ['disabled','revoked','reconnected','paused','connect']){
+  const f=fixture(),a=verifiedAdmin(f),connection=await ready(f),db=f.control.sqlite;
+  const action=mode==='connect'?'connect':mode==='paused'?'resume_connection':'sync_templates';
+  if(mode==='disabled')db.prepare("UPDATE human_users SET status='disabled' WHERE id=?").run(a.id);
+  if(mode==='paused')db.prepare("UPDATE whatsapp_connections SET status='paused' WHERE tenant_id=?").run(T);
+  let reads=0;
+  const data={tenantId:T,action,...(action==='connect'?{messagingAccountId:'123456789',phoneNumberId:'987654321',accessToken:'synthetic-token-12345678901234567890',appSecret:'a'.repeat(32)}:{})};
+  const r=await handleWhatsAppRequest(request(data),f.env,a,{now:NOW,fetcher:async(url,opts)=>{
+   reads++;assert.equal(opts.redirect,'manual');
+   if(mode==='revoked')db.prepare('UPDATE human_sessions SET revoked_at=? WHERE user_id=?').run(AT,a.id);
+   if(['reconnected','connect'].includes(mode))db.prepare("UPDATE whatsapp_connections SET revision=revision+1,templates_json='[]' WHERE tenant_id=?").run(T);
+   if(mode==='paused')db.prepare("UPDATE whatsapp_connections SET revision=revision+1,status='paused' WHERE tenant_id=?").run(T);
+   if(url.includes('/phone_numbers'))return Response.json({data:[{id:'987654321',status:'CONNECTED',code_verification_status:'VERIFIED'}]});
+   return templateResponse();
+  }});
+  assert.equal(r.status,['disabled','revoked'].includes(mode)?403:409,mode+': '+await r.clone().text());
+  assert.equal(reads,mode==='disabled'?0:['paused','connect'].includes(mode)?2:1);
+  const saved=db.prepare('SELECT * FROM whatsapp_connections WHERE tenant_id=?').get(T);
+  assert.equal(saved.credentials_ciphertext,connection.credentials_ciphertext);
+  if(['reconnected','connect'].includes(mode))assert.equal(saved.templates_json,'[]');
+  if(mode==='paused')assert.equal(saved.status,'paused');
+ }
+});
+test('a template cache refresh racing a reconnect cannot overwrite the new account or POST',async()=>{
+ const f=fixture(),connection=await ready(f),m=await job(f),rules=publicRules(f.db.sqlite.prepare('SELECT * FROM whatsapp_rules').get());
+ let posts=0;
+ const result=await dispatchMessage(f.env,f.member,f.db,connection,rules,m,{now:NOW,fetcher:async(url,opts)=>{
+  if(opts.method==='POST'){posts++;return Response.json({messages:[{id:'never'}]});}
+  f.control.sqlite.prepare("UPDATE whatsapp_connections SET revision=revision+1,templates_json='[]' WHERE tenant_id=?").run(T);
+  return Response.json({data:[{id:'123',name:'property_details',status:'APPROVED',language:'hi',category:'MARKETING',components:[{type:'BODY',text:'Updated '+template().body}]}]});
+ }});
+ assert.equal(result.sent,false);assert.equal(posts,0);assert.equal(f.control.sqlite.prepare('SELECT templates_json FROM whatsapp_connections WHERE tenant_id=?').get(T).templates_json,'[]');
+ assert.equal(f.db.sqlite.prepare('SELECT status FROM whatsapp_messages WHERE id=?').get(m.id).status,'pending_setup');
 });
