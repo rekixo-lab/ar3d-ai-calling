@@ -73,13 +73,14 @@ function industryCampaignPanel(tenantId,content,{admin=false,editable=false}={})
      node('p',{class:'muted',text:readiness?.callingWindowOpen?'Calling window open.':'Calling window closed; no calls are placed outside approved hours.'}),
      node('p',{class:'muted',text:out.manifestSha256?'Approved audio manifest recorded · '+out.manifestSha256.slice(0,12):'Approved audio pack is required before preparing jobs.'}),controls);
     const releaseSelection=new Set(),releasePicks=[];
+    const canRelease=(admin||editable)&&out.dispatchEnabled&&out.tenantActive&&!archived;
     for(const j of out.jobs){
      const x=r.recipients.find(x=>x.leadId===j.leadId);
      const line=div('card',node('p',{text:(x?.name||'CRM contact '+j.leadId.slice(0,8))+' · '+j.state+(j.terminalState==='settled'?' · settled / capacity released':j.terminalState==='not_submitted'?' · not submitted / unused reserve released':j.state==='prepared'&&!j.current?' · stale / not eligible':'')+' · review v'+j.reviewRevision+' · funding admission '+j.admissionState.replaceAll('_',' ')+' · dispatch '+(j.dispatchState||'not_authorized').replaceAll('_',' ')}));
-     if(admin&&out.dispatchEnabled&&j.current&&j.dispatchState==='not_authorized'&&['not_released','released','funded'].includes(j.admissionState)){
+     if(canRelease&&j.current&&j.dispatchState==='not_authorized'&&['not_released','released','funded'].includes(j.admissionState)){
       const pick=node('input',{type:'checkbox','aria-label':'Select reviewed job for explicit dispatch authorization'});
       pick.addEventListener('change',()=>{if(pick.checked)releaseSelection.add(j.id);else releaseSelection.delete(j.id)});
-      releasePicks.push({id:j.id,pick});
+      releasePicks.push({id:j.id,pick,job:j});
       line.append(lab('Select for dispatch authorization',pick));
      }
      if(j.terminalState==='settled'){
@@ -110,24 +111,30 @@ function industryCampaignPanel(tenantId,content,{admin=false,editable=false}={})
      }
      controls.append(line);
     }
-    if(admin&&out.dispatchEnabled&&!archived){
+    if(canRelease){
      const selectAll=btn('Select all eligible jobs on this page',()=>{for(const x of releasePicks){x.pick.checked=true;releaseSelection.add(x.id)}},true);
      selectAll.disabled=!releasePicks.length;
      const clearSelection=btn('Clear selected jobs',()=>{for(const x of releasePicks)x.pick.checked=false;releaseSelection.clear()},true);
      const ref=input('industryDispatchReference','text','Explicit reviewed calling approval');ref.maxLength=160;
+     if(!admin)ref.value='Client Admin confirmed reviewed School calling batch';
      const seconds=node('select',{class:'field','aria-label':'Maximum call duration'},[90,120,150,180].map(n=>node('option',{value:String(n),text:String(n)+' seconds'})));seconds.value='180';
      const expiry=input('industryDispatchExpiry','datetime-local','Dispatch authorization expires');
-     const release=btn('Authorize selected School calls',async()=>{
+     const limit=Math.min(Date.now()+55*60000,...releasePicks.map(x=>Math.min(Date.parse(x.job.expiresAt),x.job.admissionExpiresAt?Date.parse(x.job.admissionExpiresAt):Infinity)));
+     if(Number.isFinite(limit)&&limit>Date.now()+205000){
+      const local=new Date(limit);expiry.value=new Date(limit-local.getTimezoneOffset()*60000).toISOString().slice(0,16);
+     }
+     const release=btn(admin?'Authorize selected School calls':'Start selected School calls',async()=>{
       if(!active(id,stamp)||!releaseSelection.size||ref.value.trim().length<10||!expiry.value)return asError(Error('Select reviewed jobs and enter the explicit calling approval and expiry.'));
-      if(!confirm('Authorize real outbound calls to '+releaseSelection.size+' reviewed recipients, with shared wallet and provider costs. The scheduler will place calls only within the authorized window. Continue?'))return;
+      const maxMinutes=releaseSelection.size*Number(seconds.value)/60;
+      if(!confirm('Authorize real outbound calls to '+releaseSelection.size+' reviewed recipients? Up to '+maxMinutes+' client wallet minutes may be reserved over the batch, subject to available balance and shared provider limits. Calls are queued within the approved time window; not every job is guaranteed to run before expiry. Continue?'))return;
       release.disabled=true;try{
        const response=await api('/v1/human/industry-dispatch-release','POST',{tenantId,campaignId:id,jobIds:[...releaseSelection],manifestSha256:out.manifestSha256,maxSeconds:Number(seconds.value),expiresAt:new Date(expiry.value).toISOString(),approvalReference:ref.value.trim(),acknowledgeDialing:true});
-       notice(response.authorized+' jobs explicitly authorized. No immediate call; the bounded scheduler will recheck all conditions.');
+       notice(response.authorized+' reviewed jobs queued for calling. The scheduler rechecks consent, audio, permissions, capacity and wallet before each call.');
        if(active(id,stamp))await loadRecipients();
       }catch(e){asError(e)}finally{release.disabled=false}
      });
-     release.disabled=!readiness?.ready;
-     controls.append(div('formrow',selectAll,clearSelection),lab('Calling approval reference',ref),lab('Maximum duration (must match any existing funding approval)',seconds),lab('Dispatch expiry (within one hour)',expiry),release);
+     release.disabled=!readiness?.ready||!releasePicks.length;
+     controls.append(node('p',{class:'note',text:admin?'Authorize the exact reviewed batch.':'Start calls from this client dashboard using your company wallet. Super Admin configuration/audio and recipient clearance reviews remain required; no separate batch funding approval is necessary.'}),div('formrow',selectAll,clearSelection),lab('Calling approval reference',ref),lab('Maximum duration (must match any existing funding approval)',seconds),lab('Dispatch expiry (within one hour)',expiry),release);
     }
     const previousJobs=btn('Previous prepared jobs',()=>{if(!queueLoading){jobOffset=Math.max(0,jobOffset-50);loadJobs().catch(asError)}},true);
     const nextJobs=btn('Next prepared jobs',()=>{if(!queueLoading){jobOffset+=50;loadJobs().catch(asError)}},true);
