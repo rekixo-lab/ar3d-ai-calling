@@ -1,3 +1,4 @@
+import {listClientApplications} from './client-applications.mjs';
 import {teamRoute} from './team-routes.mjs';
 import {handleScriptedPhoneAdmin} from './scripted-phone-pilot.mjs';
 import {handleScriptedCallingRequest} from './scripted-campaign-routes.mjs';
@@ -317,6 +318,7 @@ export async function handleHumanRequest(req,env){
     if(path==='/v1/human/logout'&&method==='POST')return await logout(req,env);
     const user=await getSession(req,env.CONTROL_DB);
     if(!user)return fail('sign in required',401);
+    if(path==='/v1/human/client-applications')return await listClientApplications(req,env,user);
     const properties=await handlePropertyCatalog(req,env,user);
     if(properties)return properties;
     const whatsapp=await handleWhatsAppRequest(req,env,user);

@@ -1,3 +1,4 @@
+import {publicLanding} from './client-applications.mjs';
 import {handleScriptedPhoneCallback} from './scripted-phone-pilot.mjs';
 import {handleUnavailableInboundVoice} from './plivo-inbound-unavailable.mjs';
 import {handleHumanRequest} from './human-routes.mjs';
@@ -169,6 +170,8 @@ async function getAgents(req,env,tenant){
 }
 export default {
   async fetch(req,env){
+    const landing=await publicLanding(req,env);
+    if(landing)return landing;
     const path=new URL(req.url).pathname;
     if(path==='/health'&&isGet(req))return json({service:'AR3D AI Calling',status:'foundation'});
     const propertyMedia=await handlePublicPropertyMedia(req,env);
