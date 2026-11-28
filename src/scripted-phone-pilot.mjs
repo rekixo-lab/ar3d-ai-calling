@@ -21,7 +21,8 @@ const MOBILE=/^\+91[6-9]\d{9}$/;
 const FIELDS=['propertyType','location','area','size','budgetInr','interest','visitDate'];
 const PROMPTS=['opening','closing','review','size-plot','size-home',...FIELDS.filter(key=>key!=='size')];
 // Optional spoken apology before a retry. Never block ordinary scripts when absent.
-const AUDIO_PROMPTS=new Set([...PROMPTS,'repeat']);
+const recordedIntro='direct-intro-v1';
+const AUDIO_PROMPTS=new Set([...PROMPTS,'repeat',recordedIntro]);
 const terminal=new Set(['completed','declined','needs_review','ended','rejected']);
 const duration=180;
 const ttl=10*60000;
@@ -180,11 +181,11 @@ function builtinCampaignPrompt(row,name){
 function directOpening(row){
  // Only a separate explicit pre-call recording disclosure attestation enables this greeting.
  // The separate internal and customer consent paths remain unchanged.
- if(isSarvam(row)&&JSON.parse(row.survey_json).phoneMeta?.priorRecordingNotice===true)return speak(row.language,row.language==='hi'?'नमस्ते! मैं ए आर थ्री डी की ए आई असिस्टेंट हूँ। आपकी पसंद की प्रॉपर्टी ढूँढने में मदद करूँगी।':'Hello! I am the AR3D AI assistant. I am here to help you find a property that suits you.');
+ if(isSarvam(row)&&JSON.parse(row.survey_json).phoneMeta?.priorRecordingNotice===true)return speak(row.language,row.language==='hi'?'नमस्ते! ए आर थ्री डी से ए आई कॉल है।':'Hello! I am the AR3D AI assistant. I am here to help you find a property that suits you.');
  return speak(row.language,row.language==='hi'?'नमस्कार, मैं ए आर थ्री डी की ए आई असिस्टेंट हूँ। यह बातचीत रिकॉर्ड होती है।':'Hello, I am the AR3D AI assistant. This conversation is recorded.');
 }
 
-function responseFor(config,row,{repeatCue=false,directOpeningCue=false}={}){
+function responseFor(config,row,{repeatCue=false,directOpeningCue=false,combinedIntro=false}={}){
  const builtin=row.job_id&&JSON.parse(row.survey_json).phoneMeta?.promptMode==='builtin';
  const audio=name=>builtin?(builtinCampaignPrompt(row,name)||'<Hangup/>'):play(callback(config,row.id,'audio/'+name+'.mp3'));
  if(row.phase==='consent'){
@@ -204,7 +205,7 @@ function responseFor(config,row,{repeatCue=false,directOpeningCue=false}={}){
   const pending=(internalDirect(row)||isSarvam(row))&&state.phoneMeta?.pendingQuantity;
   const clarification=pending&&pending.turn===state.turns&&pending.field===field?
    speak(row.language,field==='size'?(row.language==='hi'?'कृपया बताइए, यह वर्ग फुट है या वर्ग गज?':'Is that in square feet or square yards?'):(row.language==='hi'?'कृपया बताइए, हजार, लाख या करोड़?':'Is that thousands, lakhs or crores?')):null;
-  const prefix=(directOpeningCue?directOpening(row):'')+(clarification||retry+audio(prompt));
+  const prefix=combinedIntro?audio(recordedIntro):(directOpeningCue?directOpening(row):'')+(clarification||retry+audio(prompt));
   // Bounded recording windows for the single speech provider.
   const quick=internalDirect(row)||isSarvam(row);
   // Explicitly selected internal timing experiment only. Longer replies keep
@@ -225,9 +226,15 @@ function responseFor(config,row,{repeatCue=false,directOpeningCue=false}={}){
 // Look up a reviewed optional cue only on an actual retry. A missing object,
 // out-of-range object or R2 metadata failure must not break the phone survey.
 async function responseForPhoneQuestion(config,env,row,{directOpeningCue=false}={}){
- let repeatCue=false;
+ let repeatCue=false,combinedIntro=false;
  if(row.phase==='question'){
   const state=JSON.parse(row.survey_json);
+  if(directOpeningCue&&internalDirect(row)&&row.language==='hi'&&state.index===0&&state.phoneMeta?.priorRecordingNotice===true){
+   try{
+    const clip=await env.RECORDINGS.head(promptKey('hi',recordedIntro));
+    combinedIntro=!!clip&&clip.size>0&&clip.size<=ANSWER_MAX_BYTES;
+   }catch{combinedIntro=false}
+  }
   if(state.attempts>0&&row.job_id&&state.phoneMeta?.promptMode==='builtin')repeatCue=true;
   else if(state.attempts>0){
    try{
@@ -237,7 +244,7 @@ async function responseForPhoneQuestion(config,env,row,{directOpeningCue=false}=
    }catch{repeatCue=false}
   }
  }
- return responseFor(config,row,{repeatCue,directOpeningCue});
+ return responseFor(config,row,{repeatCue,directOpeningCue,combinedIntro});
 }
 
 // All internal attempts share one gate, including after a configuration change.

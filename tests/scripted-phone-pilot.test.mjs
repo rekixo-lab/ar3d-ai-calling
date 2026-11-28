@@ -801,7 +801,7 @@ test('consented Sarvam internal call uses one STT per turn, direct parser and no
   assert.equal((await start('CALL_ONE_INTERNAL_SARVAM_WITH_PRIOR_RECORDING_NOTICE',true)).status,202);assert.equal(dials,1);
   const cb=(step,params)=>handleScriptedPhoneCallback(signed(hook+'/'+step,{CallUUID:callId,...params}),env,{now,fetcher});
   const opening=await (await cb('answer',{ALegRequestUUID:requestId,From:'918000000000',To:'919000000001',Direction:'outbound'})).text();
-  assert.match(opening,/नमस्ते.*आपकी पसंद की प्रॉपर्टी/);assert.doesNotMatch(opening,/यह बातचीत रिकॉर्ड होती है/);assert.match(opening,/maxLength="12".*timeout="2"/);
+  assert.match(opening,/direct-intro-v1\.mp3<\/Play><Record /);assert.doesNotMatch(opening,/propertyType\.mp3|<Speak/);assert.doesNotMatch(opening,/यह बातचीत रिकॉर्ड होती है/);assert.match(opening,/maxLength="12".*timeout="2"/);
   for(let i=0;i<5;i++){const res=await cb('turn/'+i,{RecordingID:'record-id-0'+i,RecordingDurationMs:'2500'});assert.equal(res.status,200);const xml=await res.text();assert.match(xml,i===4?/timeout="2"/:/timeout="3"/);}
   const row=f.c.db.prepare('SELECT survey_json FROM scripted_phone_pilots').get(),s=JSON.parse(row.survey_json);
   assert.equal(s.answers.budgetInr,2000000);assert.equal(s.phoneMeta.engine,'sarvam');assert.equal(s.phoneMeta.llmRequests,0);assert.equal(s.phoneMeta.sttAudioMs,12500);assert.equal(stt,5);
