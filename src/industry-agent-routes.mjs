@@ -1,6 +1,7 @@
 // Client-only, purpose-unapproved Multi-Industry AI Agent drafts.
 // Do not wire to calling_scripts, caller policy, campaigns, Plivo or WhatsApp.
 import {requireMembership} from './human-auth.mjs';
+import {INDUSTRY_NOTICE_CONTRACTS} from './industry-verified-notice.mjs';
 import {INDUSTRY_CODES,INDUSTRY_DRAFT_VERSION,INDUSTRY_TEMPLATES,getIndustryTemplate,
  defaultIndustryAgentDraft,validateIndustryAgentDraft,draftOnlyPreview} from './industry-template-catalog.mjs';
 
@@ -53,6 +54,7 @@ export async function handleIndustryAgentRequest(req,env,user,{now=Date.now()}={
   if(isTemplates)return reply({
    version:INDUSTRY_DRAFT_VERSION,
    templates:INDUSTRY_TEMPLATES,
+   noticeContracts:INDUSTRY_NOTICE_CONTRACTS,
    modes:['announcement','interactive','hybrid'],
    notice:'Draft setup only. These templates cannot place calls, publish agents or change existing Real Estate calling.'
   });

@@ -31,8 +31,16 @@ export async function handleCallingCron(controller,env,{apiFetch=fetch,cdrFetch=
  // settlement, plus up to three queue reads. Free-tier ticks settle one call
  // so their remaining budget can still dispatch one new customer call.
  const maxCalls=settings.queryBudget>=80?3:1;
- const reserve=(automatic?3+10*maxCalls:0)+(maintenance?4:0)+4+4+(industryMinute&&settings.queryBudget>=40?2:0);
+
+ // After industry inspection, reserve budget for actual CDR attempts rather
+ // than hypothetical work. Empty recovery queues must not starve property calls.
+ const inspected=industryMinute&&settings.queryBudget>=40;
+ let settlement;
+ if(automatic&&inspected)settlement=await runAutomaticMinuteSettlement(env,{now,maxCalls,fetcher:cdrFetch});
+ const attempted=settlement?.attempted;
+ const count=Number.isSafeInteger(attempted)&&attempted>=0&&attempted<=maxCalls?attempted:maxCalls;
+ const reserve=(automatic?3+10*count:0)+(maintenance?4:0)+4+4+(inspected?2:0);
  const campaign=await runScriptedCampaignCron(env,{now,apiFetch,settings:{...settings,queryBudget:Math.max(10,settings.queryBudget-reserve)}});
- const settlement=automatic?await runAutomaticMinuteSettlement(env,{now,maxCalls,fetcher:cdrFetch}):undefined;
+ if(automatic&&!inspected)settlement=await runAutomaticMinuteSettlement(env,{now,maxCalls,fetcher:cdrFetch});
  return {...campaign,maintenance,...(settlement?{settlement}:{})};
 }
