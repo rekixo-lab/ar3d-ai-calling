@@ -8,7 +8,7 @@ function industryAgentPanel(tenantId,content,role){
  const profileBox=div('card'),listBox=div('card'),editBox=div('card');
  content.append(card,profileBox,listBox,editBox);
  industryCampaignPanel(tenantId,content,{editable});
- let templates=[],noticeContracts=[],drafts=[],activeId='',activeDraft=null,profileRevision=0,sequence=0;
+ let templates=[],noticeContracts=[],noticeConnectorStatus=null,drafts=[],activeId='',activeDraft=null,profileRevision=0,sequence=0;
  let snapshots=[],snapshotSequence=0;
  let launchSequence=0;
  const enabled=()=>card.isConnected&&content.isConnected;
@@ -270,6 +270,7 @@ function industryAgentPanel(tenantId,content,role){
    node('p',{text:'Approved business data source: '+contract.source.replaceAll('_',' ')}),
    node('p',{text:'Supported fields: '+contract.fields.join(', ')}),
    node('p',{text:'Recipient proof: '+contract.recipientProof.replaceAll('_',' ')}),
+   node('p',{text:'Data connector configuration: '+(noticeConnectorStatus?.state==='configured_unverified'?'configured; real service verification and voice integration pending':'trusted identity and business record service setup required')}),
    node('p',{text:'Remaining integration gates: '+contract.blockers.map(x=>x.replaceAll('_',' ')).join('; ')}),
    node('p',{class:'muted',text:'Do not paste account numbers, PINs, OTPs or personal account records in drafts or ordinary CRM imports.'}));
   name.value=c.name;greeting.value=c.greeting;questions.value=c.questions.join('\n');closing.value=c.closing;
@@ -298,7 +299,7 @@ function industryAgentPanel(tenantId,content,role){
    api('/v1/human/ai-flows'+query)
   ]);
   if(version!==sequence||!enabled())return;
-  templates=catalog.templates||[];noticeContracts=catalog.noticeContracts||[];drafts=list.drafts||[];
+  templates=catalog.templates||[];noticeContracts=catalog.noticeContracts||[];noticeConnectorStatus=catalog.noticeConnectorStatus||null;drafts=list.drafts||[];
   profileRevision=profile.profile?.revision||0;
   business.replaceChildren(...(profile.availableIndustries||[]).map(v=>node('option',{value:v,text:v.replaceAll('_',' ')})));
   if(profile.profile)business.value=profile.profile.industryCode;
