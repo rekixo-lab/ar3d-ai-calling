@@ -16,6 +16,7 @@ import {commercialCapacityRows} from '../src/commercial-capacity.mjs';
 import {settleIndustryCallCdr,closeSettledIndustryCapacity} from '../src/industry-cdr-settlement.mjs';
 import {handleIndustryDispatchRelease,dispatchFundedIndustryJob,reconcileIndustryDispatch,runIndustrySchoolTick} from '../src/industry-school-dispatch.mjs';
 import {handleIndustryResult} from '../src/industry-result-routes.mjs';
+import {industryDispatchEnabled,inspectSchoolDispatchReadiness} from '../src/industry-dispatch-policy.mjs';
 import {runScriptedCampaignCron} from '../src/scripted-campaign-dispatch.mjs';
 import {setup as setupProperty,route as callingRoute} from './helpers/calling-fixture.mjs';
 const version='abababab-abab-4bab-8bab-abababababab',flow='cdcdcdcd-cdcd-4dcd-8dcd-cdcdcdcdcdcd';
@@ -769,5 +770,29 @@ test('a signed early answer before the carrier HTTP response binds only the exac
   assert.equal(outcome.state,'submitted',JSON.stringify(outcome));assert.equal(n,1);
   const s=f.c.db.prepare('SELECT * FROM scripted_phone_pilots WHERE id=?').get(f.read().session_id);
   assert.equal(s.provider_request_id,request);assert.equal(s.provider_call_id,call);assert.equal(s.phase,'consent');
+ }finally{f.close()}
+});
+
+test('School feature defaults available without bypassing independent approvals, readiness or per-job authorization',async()=>{
+ const f=await releasedDispatchFixture();try{
+  delete f.env.AR3D_INDUSTRY_SCHOOL_DISPATCH_ENABLED;
+  assert.equal(industryDispatchEnabled(f.env),true);
+  const status=await inspectSchoolDispatchReadiness(f.env,{now});assert.equal(status.ready,true,JSON.stringify(status));
+  const queue=await (await f.queue()).json();assert.equal(queue.dispatchEnabled,true);assert.equal(queue.dispatchReadiness.ready,true);
+  assert.equal((await f.dispatch()).state,'release_unavailable');
+  assert.equal((await f.authorize()).status,201);
+  assert.equal((await f.dispatch()).state,'release_unavailable');assert.equal(f.hold(),undefined);
+  const key='AR3D_CAMPAIGN_SARVAM_DISCLOSURE',old=f.env[key];delete f.env[key];
+  assert.equal(industryDispatchEnabled(f.env),false);assert.equal((await f.release()).status,409);
+  assert.ok((await inspectSchoolDispatchReadiness(f.env,{now})).blockers.includes('sarvam_disclosure_approval_required'));
+  f.env[key]=old;f.env.AR3D_INDUSTRY_SCHOOL_DISPATCH_ENABLED='disabled';
+  assert.equal(industryDispatchEnabled(f.env),false);assert.equal((await f.release()).status,409);
+  f.env.AR3D_INDUSTRY_SCHOOL_DISPATCH_ENABLED='enabled';
+  f.c.db.prepare("INSERT INTO calling_dispatch_pause_events(revision,paused,reason,actor,created_at) VALUES(1,1,'Synthetic pause','admin',?)").run(at);
+  const blocked=await inspectSchoolDispatchReadiness(f.env,{now});
+  assert.equal(blocked.available,true);assert.equal(blocked.ready,false);assert.ok(blocked.blockers.includes('emergency_pause_active'));
+  const denied=await f.release();assert.equal(denied.status,409);assert.ok((await denied.json()).blockers.includes('emergency_pause_active'));
+  assert.equal(f.r.db.prepare('SELECT COUNT(*) AS n FROM industry_dispatch_releases').get().n,0);
+  assert.equal(f.hold(),undefined);
  }finally{f.close()}
 });

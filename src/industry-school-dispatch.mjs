@@ -13,6 +13,8 @@ import {closeMinuteHold} from './minute-holds.mjs';
 import {sharedTenantUnknown,sharedTenantCapacityCount,sharedCapacityCount} from './commercial-capacity.mjs';
 import {automaticMinuteSettlementApproved} from './plivo-cost-reconcile-routes.mjs';
 import {settleIndustryCallCdr,closeSettledIndustryCapacity} from './industry-cdr-settlement.mjs';
+import {industryDispatchEnabled,inspectSchoolDispatchReadiness} from './industry-dispatch-policy.mjs';
+export {industryDispatchEnabled} from './industry-dispatch-policy.mjs';
 
 const uuid=x=>typeof x==='string'&&/^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i.test(x);
 const digest=x=>typeof x==='string'&&/^[a-f0-9]{64}$/.test(x);
@@ -24,7 +26,6 @@ const reply=(d,status=200)=>Response.json(d,{status,headers:{'Cache-Control':'no
 const err=(error,status=400)=>reply({error},status);
 const state=s=>({state:s});
 const clockFrom=now=>{const start=Date.now();return ()=>now+Math.max(0,Date.now()-start)};
-export const industryDispatchEnabled=env=>env.AR3D_INDUSTRY_SCHOOL_DISPATCH_ENABLED==='enabled'&&env.AR3D_INDUSTRY_SCHOOL_FUNDED_ADMISSION==='approved'&&env.AR3D_INDUSTRY_SCHOOL_VOICE_ENABLED==='enabled'&&env.AR3D_SCRIPTED_CAMPAIGNS_ENABLED==='enabled'&&env.AR3D_CAMPAIGN_SARVAM_DISCLOSURE==='approved';
 const localEligibility="j.state='prepared' AND j.purpose='school_admission' AND c.archived_at IS NULL AND c.snapshot_id=j.snapshot_id AND c.graph_sha256=j.graph_sha256 AND v.decision='cleared' AND v.expires_at=j.review_expires_at AND v.revision=(SELECT MAX(r.revision) FROM industry_recipient_reviews r WHERE r.tenant_id=v.tenant_id AND r.campaign_id=v.campaign_id AND r.lead_id=v.lead_id) AND v.destination=l.mobile_e164 AND v.lead_updated_at=l.updated_at AND l.mobile_e164 GLOB '+91[6-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]' AND l.consent_status<>'denied' AND l.dnd_status<>'blocked' AND NOT EXISTS(SELECT 1 FROM lead_opt_out_events o WHERE o.tenant_id=l.tenant_id AND o.lead_id=l.id)";
 const joins=" FROM industry_call_jobs j JOIN industry_campaigns c ON c.tenant_id=j.tenant_id AND c.id=j.campaign_id JOIN industry_recipient_reviews v ON v.tenant_id=j.tenant_id AND v.campaign_id=j.campaign_id AND v.lead_id=j.lead_id AND v.revision=j.review_revision JOIN leads l ON l.tenant_id=j.tenant_id AND l.id=j.lead_id";
 const audit=(db,tid,actor,action,id,at)=>db.prepare("INSERT INTO crm_audit_events(tenant_id,id,actor,action,target_id,created_at) SELECT ?,?,?,?,?,? WHERE changes()>0").bind(tid,crypto.randomUUID(),actor,action,id,at);
@@ -48,6 +49,8 @@ export async function handleIndustryDispatchRelease(req,env,user,{now=Date.now()
    !reference(d.approvalReference)||!(time(d.expiresAt)>now+(d.maxSeconds+25)*1000)||time(d.expiresAt)>now+3600000)
    return err('invalid_dispatch_release');
   const clock=clockFrom(now),tid=d.tenantId,db=env.CRM_DB;
+  const readiness=await inspectSchoolDispatchReadiness(env,{now});
+  if(!readiness.ready)return reply({error:'industry_dispatch_prerequisites_required',blockers:readiness.blockers},409);
   const campaign=await db.prepare("SELECT * FROM industry_campaigns WHERE tenant_id=? AND id=? AND archived_at IS NULL AND purpose='school_admission'").bind(tid,d.campaignId).first();
   if(!campaign)return err('dispatch_scope_unavailable',409);
   const ready=await env.CONTROL_DB.prepare("SELECT 1 AS ok FROM school_audio_preparations p JOIN industry_launch_requests r ON r.tenant_id=p.tenant_id AND r.id=p.launch_id JOIN tenants t ON t.id=p.tenant_id WHERE t.id=? AND t.status='active' AND t.storage_mode='shared' AND p.launch_id=? AND p.snapshot_id=? AND p.graph_sha256=? AND p.manifest_sha256=? AND p.state='approved' AND r.state='configuration_reviewed' AND r.purpose='school_admission' AND r.snapshot_id=p.snapshot_id AND r.graph_sha256=p.graph_sha256")

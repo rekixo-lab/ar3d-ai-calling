@@ -66,15 +66,20 @@ function industryCampaignPanel(tenantId,content,{admin=false,editable=false}={})
     const baseQueue='/v1/human/industry-queue/'+encodeURIComponent(id),out=await api(baseQueue+query+'&offset='+jobOffset);
     if(!active(id,stamp))return;
     const controls=div('stack'),eligible=r.recipients.filter(x=>x.status==='review_current'&&!x.preparationBlocked&&!out.jobs.some(j=>j.leadId===x.leadId&&(j.state==='prepared'||j.reviewRevision===x.revision)));
-    queueBox.replaceChildren(title('Prepared calling jobs','h3'),node('p',{class:'note',text:out.dispatchEnabled?'Only explicitly authorized jobs enter the funded calling scheduler. Review every selected recipient.':'Preparation only. Production dispatch is disabled; no prepared or funding-only job will dial.'}),
+    const readiness=out.dispatchReadiness;
+    const blockerText={school_dispatch_operator_disabled:'School dispatch was explicitly switched off by an operator.',school_funding_approval_required:'School funding approval is required.',school_voice_approval_required:'School voice approval is required.',campaign_approval_required:'Existing campaign calling approval is required.',sarvam_disclosure_approval_required:'Approved Sarvam disclosure is required.',plivo_sarvam_acceptance_required:'Existing Plivo/Sarvam acceptance evidence or configuration is missing.',shared_provider_funding_required:'Sync provider balances or check shared funding settings.',automatic_cdr_settlement_required:'Automatic CDR settlement approval is required.',emergency_pause_active:'The shared emergency calling pause is active.',provider_fault_review_required:'Review the provider fault in Super Admin.',readiness_check_unavailable:'Readiness check is temporarily unavailable.',active_company_required:'The company must be active.',campaign_archived:'This campaign is archived.',approved_audio_required:'Approve the School audio pack first.'};
+    const readinessText=readiness?.ready?'Calling controls available. Only explicitly authorized reviewed jobs can enter the funded scheduler.':'Calling controls require the following setup: '+(readiness?.blockers||[]).map(x=>blockerText[x]||x.replaceAll('_',' ')).join(' ');
+    queueBox.replaceChildren(title('Prepared calling jobs','h3'),node('p',{class:'note',text:readinessText}),
+     node('p',{class:'muted',text:readiness?.callingWindowOpen?'Calling window open.':'Calling window closed; no calls are placed outside approved hours.'}),
      node('p',{class:'muted',text:out.manifestSha256?'Approved audio manifest recorded · '+out.manifestSha256.slice(0,12):'Approved audio pack is required before preparing jobs.'}),controls);
-    const releaseSelection=new Set();
+    const releaseSelection=new Set(),releasePicks=[];
     for(const j of out.jobs){
      const x=r.recipients.find(x=>x.leadId===j.leadId);
      const line=div('card',node('p',{text:(x?.name||'CRM contact '+j.leadId.slice(0,8))+' · '+j.state+(j.terminalState==='settled'?' · settled / capacity released':j.terminalState==='not_submitted'?' · not submitted / unused reserve released':j.state==='prepared'&&!j.current?' · stale / not eligible':'')+' · review v'+j.reviewRevision+' · funding admission '+j.admissionState.replaceAll('_',' ')+' · dispatch '+(j.dispatchState||'not_authorized').replaceAll('_',' ')}));
      if(admin&&out.dispatchEnabled&&j.current&&j.dispatchState==='not_authorized'&&['not_released','released','funded'].includes(j.admissionState)){
       const pick=node('input',{type:'checkbox','aria-label':'Select reviewed job for explicit dispatch authorization'});
       pick.addEventListener('change',()=>{if(pick.checked)releaseSelection.add(j.id);else releaseSelection.delete(j.id)});
+      releasePicks.push({id:j.id,pick});
       line.append(lab('Select for dispatch authorization',pick));
      }
      if(j.terminalState==='settled'){
@@ -106,6 +111,9 @@ function industryCampaignPanel(tenantId,content,{admin=false,editable=false}={})
      controls.append(line);
     }
     if(admin&&out.dispatchEnabled&&!archived){
+     const selectAll=btn('Select all eligible jobs on this page',()=>{for(const x of releasePicks){x.pick.checked=true;releaseSelection.add(x.id)}},true);
+     selectAll.disabled=!releasePicks.length;
+     const clearSelection=btn('Clear selected jobs',()=>{for(const x of releasePicks)x.pick.checked=false;releaseSelection.clear()},true);
      const ref=input('industryDispatchReference','text','Explicit reviewed calling approval');ref.maxLength=160;
      const seconds=node('select',{class:'field','aria-label':'Maximum call duration'},[90,120,150,180].map(n=>node('option',{value:String(n),text:String(n)+' seconds'})));seconds.value='180';
      const expiry=input('industryDispatchExpiry','datetime-local','Dispatch authorization expires');
@@ -118,7 +126,8 @@ function industryCampaignPanel(tenantId,content,{admin=false,editable=false}={})
        if(active(id,stamp))await loadRecipients();
       }catch(e){asError(e)}finally{release.disabled=false}
      });
-     controls.append(lab('Calling approval reference',ref),lab('Maximum duration (must match any existing funding approval)',seconds),lab('Dispatch expiry (within one hour)',expiry),release);
+     release.disabled=!readiness?.ready;
+     controls.append(div('formrow',selectAll,clearSelection),lab('Calling approval reference',ref),lab('Maximum duration (must match any existing funding approval)',seconds),lab('Dispatch expiry (within one hour)',expiry),release);
     }
     const previousJobs=btn('Previous prepared jobs',()=>{if(!queueLoading){jobOffset=Math.max(0,jobOffset-50);loadJobs().catch(asError)}},true);
     const nextJobs=btn('Next prepared jobs',()=>{if(!queueLoading){jobOffset+=50;loadJobs().catch(asError)}},true);

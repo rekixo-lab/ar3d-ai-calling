@@ -89,7 +89,7 @@ const env = {
 };
 const template = {
   name:'ar3d-ai-calling', main:'./src/index.mjs', workers_dev:false,
-  vars:{AR3D_PLIVO_CALLER_NUMBER:'+918065491333'},
+  vars:{AR3D_PLIVO_CALLER_NUMBER:'+918065491333',AR3D_INDUSTRY_SCHOOL_DISPATCH_ENABLED:'enabled'},
   routes:[{pattern:'aicalling.ar3dstudio.in',custom_domain:true}],
   triggers:{crons:['* * * * *']},
   queues:{producers:[{binding:'WHATSAPP_TICKS',queue:'ar3d-calling-whatsapp'}],
@@ -115,7 +115,7 @@ test('config binds only main Calling resources and exact approved custom domain'
   assert.equal(config.r2_buckets[0].bucket_name,'ar3d-calling-recordings');
   assert.deepEqual(config.routes,[{pattern:'aicalling.ar3dstudio.in',custom_domain:true}]);
   assert.deepEqual(config.triggers,{crons:['* * * * *']});
-  assert.deepEqual(config.vars,{AR3D_PLIVO_CALLER_NUMBER:'+918065491333'});
+  assert.deepEqual(config.vars,{AR3D_PLIVO_CALLER_NUMBER:'+918065491333',AR3D_INDUSTRY_SCHOOL_DISPATCH_ENABLED:'enabled'});
   assert.equal(config.vars.AR3D_SCRIPTED_CAMPAIGNS_ENABLED,undefined);
 });
 test('rejects existing production Cloudflare routes and wrong database/bucket names', () => {
@@ -127,6 +127,8 @@ test('rejects existing production Cloudflare routes and wrong database/bucket na
   assert.throws(() => makeMainConfig({...template,vars:{AR3D_PLIVO_CALLER_NUMBER:'+912269833332'}},getCredentials(env)), /Unsafe/);
   assert.throws(() => makeMainConfig({...template,vars:{...template.vars,AR3D_SCRIPTED_CAMPAIGNS_ENABLED:'enabled'}},getCredentials(env)), /Unsafe/);
   assert.throws(() => makeMainConfig({...template,vars:{}},getCredentials(env)), /Unsafe/);
+  assert.throws(() => makeMainConfig({...template,vars:{...template.vars,AR3D_INDUSTRY_SCHOOL_DISPATCH_ENABLED:'disabled'}},getCredentials(env)), /Unsafe/);
+  assert.throws(() => makeMainConfig({...template,vars:{AR3D_PLIVO_CALLER_NUMBER:'+918065491333'}},getCredentials(env)), /Unsafe/);
   assert.throws(() => makeMainConfig({...template,triggers:{crons:['0 */6 * * *']}},getCredentials(env)), /Unsafe/);
   assert.throws(() => makeMainConfig({...template,triggers:{crons:['0 */6 * * *','* * * * *','*/2 * * * *']}},getCredentials(env)), /Unsafe/);
   assert.throws(() => makeMainConfig({...template,triggers:{crons:['* * * * *'],queues:['other']}},getCredentials(env)), /Unsafe/);

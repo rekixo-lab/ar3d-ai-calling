@@ -148,13 +148,14 @@ export function makeMainConfig(template, credentials) {
     domainRoutes[0]?.pattern === 'aicalling.ar3dstudio.in' &&
     domainRoutes[0]?.custom_domain === true &&
     Object.keys(domainRoutes[0]).length === 2;
-  // The approved Bengaluru 080 landline is the sole configured AR3D outbound
-  // caller. This non-secret identifier NEVER permits promotional calling,
-  // initiates a call, or changes any independently gated campaign flags.
-  // A wrong or additional template var fails before a remote write.
+  // Enable the deployed School product switch per owner direction.
+  // This does not supply carrier, funding or recipient authorization.
+  // The shared persistent emergency pause remains effective.
+  // Reject any other variable before a remote write.
   const onlyApprovedCaller = template?.vars &&
-    Object.keys(template.vars).length === 1 &&
-    template.vars.AR3D_PLIVO_CALLER_NUMBER === '+918065491333';
+    Object.keys(template.vars).length === 2 &&
+    template.vars.AR3D_PLIVO_CALLER_NUMBER === '+918065491333' &&
+    template.vars.AR3D_INDUSTRY_SCHOOL_DISPATCH_ENABLED === 'enabled';
   // Reuse the existing minute schedule. WhatsApp runs through one dedicated
   // queue consumer, keeping its D1 budget separate without another cron slot.
   const onlyCallingCrons = template?.triggers &&
